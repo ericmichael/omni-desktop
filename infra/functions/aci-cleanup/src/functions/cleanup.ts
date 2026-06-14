@@ -17,11 +17,12 @@
  *                            DefaultAzureCredential picks the right MI)
  */
 
-import { app, InvocationContext, Timer } from '@azure/functions';
 import { ContainerInstanceManagementClient } from '@azure/arm-containerinstance';
+import type { InvocationContext, Timer } from '@azure/functions';
+import { app } from '@azure/functions';
 import { DefaultAzureCredential } from '@azure/identity';
 
-import { selectVictims, type GroupSummary } from '../cleanup.js';
+import { type GroupSummary, selectVictims } from '../cleanup.js';
 
 export async function aciCleanup(myTimer: Timer, ctx: InvocationContext): Promise<void> {
   const subscriptionId = mustEnv('AZURE_SUBSCRIPTION_ID');
@@ -34,14 +35,14 @@ export async function aciCleanup(myTimer: Timer, ctx: InvocationContext): Promis
 
   const groups: GroupSummary[] = [];
   for await (const g of client.containerGroups.listByResourceGroup(resourceGroup)) {
-    if (!g.name) continue;
+    if (!g.name) {
+      continue;
+    }
     groups.push({ name: g.name, tags: g.tags ?? null });
   }
 
   const result = selectVictims(groups, { launcherTag, maxAgeHours });
-  ctx.log(
-    `[aci-cleanup] total=${result.total} stale=${result.deleted.length} skipped=${result.skipped.length}`,
-  );
+  ctx.log(`[aci-cleanup] total=${result.total} stale=${result.deleted.length} skipped=${result.skipped.length}`);
 
   // Delete in parallel. Catch per-group so one stuck delete doesn't block the
   // rest. ``beginDeleteAndWait`` polls until the operation actually completes,
@@ -51,7 +52,7 @@ export async function aciCleanup(myTimer: Timer, ctx: InvocationContext): Promis
     result.deleted.map(async (name) => {
       ctx.log(`[aci-cleanup] deleting ${name}`);
       await client.containerGroups.beginDeleteAndWait(resourceGroup, name);
-    }),
+    })
   );
   const failures = outcomes
     .map((o, i) => ({ outcome: o, name: result.deleted[i] }))
@@ -59,14 +60,14 @@ export async function aciCleanup(myTimer: Timer, ctx: InvocationContext): Promis
   for (const f of failures) {
     ctx.error(`[aci-cleanup] delete failed for ${f.name}: ${String(f.outcome.reason)}`);
   }
-  ctx.log(
-    `[aci-cleanup] done deleted=${result.deleted.length - failures.length}/${result.deleted.length}`,
-  );
+  ctx.log(`[aci-cleanup] done deleted=${result.deleted.length - failures.length}/${result.deleted.length}`);
 }
 
 function mustEnv(name: string): string {
   const v = process.env[name];
-  if (!v) throw new Error(`[aci-cleanup] required env var ${name} is not set`);
+  if (!v) {
+    throw new Error(`[aci-cleanup] required env var ${name} is not set`);
+  }
   return v;
 }
 

@@ -901,7 +901,7 @@ const PROJECT_GUIDANCE = [
   '',
   '- Ticket resolution (`completed` / `wont_do` / `duplicate` / `cancelled`) is UI-only; there is no client tool for it.',
   '- `start_ticket` can fail with `WIP_LIMIT:` if too many tickets are already active. Tell the user and suggest a running ticket to stop.',
-  "- Pipelines are stored on the Omni project. They are visible through `get_pipeline` but not configurable via tools.",
+  '- Pipelines are stored on the Omni project. They are visible through `get_pipeline` but not configurable via tools.',
   '',
   '## Visible to the human',
   '',

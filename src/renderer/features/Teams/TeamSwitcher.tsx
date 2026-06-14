@@ -18,7 +18,9 @@ export const TeamSwitcher = memo(function TeamSwitcher() {
   const handleSwitch = useCallback((id: string) => () => switchTeam(id), []);
 
   const multi = teams.length > 1 || teams.some((t) => t.kind === 'shared');
-  if (!multi) return null;
+  if (!multi) {
+    return null;
+  }
 
   const active = teams.find((t) => t.id === activeTeamId);
 

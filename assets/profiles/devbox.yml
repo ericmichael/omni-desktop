@@ -10,7 +10,7 @@ version: 1
 # this works whether the image names the user ``ubuntu`` (current
 # published image at uid 1000) or ``user`` (newer entrypoint that
 # renames the existing user).
-run_as: "1000:1000"
+run_as: '1000:1000'
 
 # Launcher-bundled "devbox" profile. Loaded by `omni serve --profile` when
 # the user's defaultProfileName is "devbox" and no override exists at
@@ -35,14 +35,14 @@ client:
   # `set -e` and reports success regardless). The non-privileged user
   # the agent runs as still can't manipulate iptables, since per-task
   # capability checks block it independent of seccomp.
-  cap_add: ["NET_ADMIN"]
-  security_opt: ["seccomp=unconfined"]
+  cap_add: ['NET_ADMIN']
+  security_opt: ['seccomp=unconfined']
   # Override the image's default USER. The SDK's own bookkeeping (PTY
   # pid-path chown, archive writes, manifest materialization) runs as
   # the container's default user and needs root. The agent's *tools*
   # still execute as the non-privileged uid 1000 — that's controlled by
   # ``run_as`` above.
-  user: "root"
+  user: 'root'
 
 options:
   image: ghcr.io/ericmichael/omni-code-sandbox-work:latest
@@ -58,7 +58,7 @@ init:
   # and is owned by root (the container's default user we overrode
   # above). The agent's tools run as run_as (uid 1000), so chown the
   # workspace tree to that uid before services or the agent start.
-  - "chown -R 1000:1000 /workspace"
+  - 'chown -R 1000:1000 /workspace'
   # Ticket artifacts (PR writeup, notes, deliverables) live inside the
   # workspace at /workspace/.omni-artifacts/<ticketId> — a dot-dir sibling of
   # the source mounts, so it rides the snapshot like the sources but the
@@ -107,13 +107,13 @@ init:
 
 services:
   code_server:
-    command: "code-server --bind-addr 0.0.0.0:8080 --auth none /workspace"
+    command: 'code-server --bind-addr 0.0.0.0:8080 --auth none /workspace'
     port: 8080
-    user: "1000:1000"
+    user: '1000:1000'
   vnc:
-    command: "bash /usr/local/bin/start-vnc.sh"
+    command: 'bash /usr/local/bin/start-vnc.sh'
     port: 6080
-    user: "1000:1000"
+    user: '1000:1000'
 
 # Defaults for the launcher's Terminal app. The shell runs inside the
 # container as uid 1000 (matching `run_as`) so file ownership is
@@ -121,6 +121,6 @@ services:
 # root — single-source projects land at /workspace/<mountName> via the
 # layout established by the init: block above.
 terminal:
-  command: "bash -i"
-  user: "1000:1000"
-  cwd: "/workspace"
+  command: 'bash -i'
+  user: '1000:1000'
+  cwd: '/workspace'

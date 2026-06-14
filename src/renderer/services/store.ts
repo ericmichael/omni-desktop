@@ -32,6 +32,7 @@ const getDefaults = (): StoreData => ({
   layoutMode: 'chat',
   theme: 'omni',
   onboardingComplete: false,
+  cliCardDismissed: false,
   cloudMode: null,
   projects: [],
   milestones: [],

@@ -1,4 +1,4 @@
-import { makeStyles, mergeClasses, shorthands,tokens } from '@fluentui/react-components';
+import { makeStyles, mergeClasses, shorthands, tokens } from '@fluentui/react-components';
 import {
   Add16Regular,
   Archive20Regular,
@@ -17,7 +17,21 @@ import {
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useMemo, useState } from 'react';
 
-import { Badge, Caption1, ConfirmDialog, IconButton, Menu, MenuDivider, MenuItem, MenuList, MenuPopover, MenuTrigger, SectionLabel, SegmentedControl, Subtitle2 } from '@/renderer/ds';
+import {
+  Badge,
+  Caption1,
+  ConfirmDialog,
+  IconButton,
+  Menu,
+  MenuDivider,
+  MenuItem,
+  MenuList,
+  MenuPopover,
+  MenuTrigger,
+  SectionLabel,
+  SegmentedControl,
+  Subtitle2,
+} from '@/renderer/ds';
 import { $milestones } from '@/renderer/features/Initiatives/state';
 import { openTicketInCode } from '@/renderer/services/navigation';
 import { isActivePhase } from '@/shared/ticket-phase';
@@ -237,179 +251,190 @@ const useStyles = makeStyles({
   },
 });
 
-const TicketRow = memo(({ ticket, selected, hovered, unresolvedBlockers, milestoneTitle, projectMilestones, columnLabel, columnBadgeColor, onSelect, onHoverChange, onRequestDelete }: TicketRowProps) => {
-  const styles = useStyles();
-  const phase = ticket.phase;
-  const isRunning = phase !== undefined && phase !== null && isActivePhase(phase);
+const TicketRow = memo(
+  ({
+    ticket,
+    selected,
+    hovered,
+    unresolvedBlockers,
+    milestoneTitle,
+    projectMilestones,
+    columnLabel,
+    columnBadgeColor,
+    onSelect,
+    onHoverChange,
+    onRequestDelete,
+  }: TicketRowProps) => {
+    const styles = useStyles();
+    const phase = ticket.phase;
+    const isRunning = phase !== undefined && phase !== null && isActivePhase(phase);
 
-  const handleClick = useCallback(() => {
-    onSelect(ticket.id);
-  }, [onSelect, ticket.id]);
+    const handleClick = useCallback(() => {
+      onSelect(ticket.id);
+    }, [onSelect, ticket.id]);
 
-  const handleMouseEnter = useCallback(() => {
-    onHoverChange(ticket.id);
-  }, [onHoverChange, ticket.id]);
+    const handleMouseEnter = useCallback(() => {
+      onHoverChange(ticket.id);
+    }, [onHoverChange, ticket.id]);
 
-  const handleMouseLeave = useCallback(() => {
-    onHoverChange(null);
-  }, [onHoverChange]);
+    const handleMouseLeave = useCallback(() => {
+      onHoverChange(null);
+    }, [onHoverChange]);
 
-  const handleOpenInCode = useCallback(() => {
-    void openTicketInCode(ticket.id);
-  }, [ticket.id]);
+    const handleOpenInCode = useCallback(() => {
+      void openTicketInCode(ticket.id);
+    }, [ticket.id]);
 
-  const handleAutopilot = useCallback(() => {
-    ticketApi.requestStartSupervisor(ticket.id);
-  }, [ticket.id]);
+    const handleAutopilot = useCallback(() => {
+      ticketApi.requestStartSupervisor(ticket.id);
+    }, [ticket.id]);
 
-  const handleStopPropagation = useCallback((e: React.MouseEvent) => {
-    e.stopPropagation();
-  }, []);
+    const handleStopPropagation = useCallback((e: React.MouseEvent) => {
+      e.stopPropagation();
+    }, []);
 
-  const handleDelete = useCallback(() => {
-    onRequestDelete(ticket);
-  }, [onRequestDelete, ticket]);
+    const handleDelete = useCallback(() => {
+      onRequestDelete(ticket);
+    }, [onRequestDelete, ticket]);
 
-  const handleToggleArchive = useCallback(() => {
-    if (ticket.archivedAt) {
-      void ticketApi.unarchiveTicket(ticket.id);
-    } else {
-      void ticketApi.archiveTicket(ticket.id);
-    }
-  }, [ticket.id, ticket.archivedAt]);
-
-  const handleMoveToMilestone = useCallback(
-    (milestoneId: MilestoneId | undefined) => {
-      void ticketApi.moveTicketToMilestone(ticket.id, milestoneId);
-    },
-    [ticket.id]
-  );
-
-  const truncatedBranch = ticket.branch && ticket.branch.length > 18 ? `${ticket.branch.slice(0, 17)}…` : ticket.branch;
-
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
-        e.preventDefault();
-        onSelect(ticket.id);
+    const handleToggleArchive = useCallback(() => {
+      if (ticket.archivedAt) {
+        void ticketApi.unarchiveTicket(ticket.id);
+      } else {
+        void ticketApi.archiveTicket(ticket.id);
       }
-    },
-    [onSelect, ticket.id]
-  );
+    }, [ticket.id, ticket.archivedAt]);
 
-  return (
-    // div+role rather than <button>: the row hosts real buttons (actions,
-    // overflow menu), and nesting them inside a button is invalid markup.
-    <div
-      role="button"
-      tabIndex={0}
-      className={`${styles.row} ${selected ? styles.rowSelected : ''} ${ticket.resolution ? styles.rowResolved : ''}`}
-      onClick={handleClick}
-      onKeyDown={handleKeyDown}
-      onMouseEnter={handleMouseEnter}
-      onMouseLeave={handleMouseLeave}
-    >
-      <span
-        className={styles.priorityDot}
-        style={{ backgroundColor: PRIORITY_DOT_COLORS[ticket.priority] ?? tokens.colorNeutralForeground3 }}
-        title={TICKET_PRIORITY_LABELS[ticket.priority]}
-      />
-      <span className={styles.title}>{ticket.title}</span>
-      {unresolvedBlockers > 0 && (
+    const handleMoveToMilestone = useCallback(
+      (milestoneId: MilestoneId | undefined) => {
+        void ticketApi.moveTicketToMilestone(ticket.id, milestoneId);
+      },
+      [ticket.id]
+    );
+
+    const truncatedBranch =
+      ticket.branch && ticket.branch.length > 18 ? `${ticket.branch.slice(0, 17)}…` : ticket.branch;
+
+    const handleKeyDown = useCallback(
+      (e: React.KeyboardEvent) => {
+        if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
+          e.preventDefault();
+          onSelect(ticket.id);
+        }
+      },
+      [onSelect, ticket.id]
+    );
+
+    return (
+      // div+role rather than <button>: the row hosts real buttons (actions,
+      // overflow menu), and nesting them inside a button is invalid markup.
+      <div
+        role="button"
+        tabIndex={0}
+        className={`${styles.row} ${selected ? styles.rowSelected : ''} ${ticket.resolution ? styles.rowResolved : ''}`}
+        onClick={handleClick}
+        onKeyDown={handleKeyDown}
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
+      >
         <span
-          className={styles.blockedBadge}
-          title={`Blocked by ${unresolvedBlockers} ticket${unresolvedBlockers === 1 ? '' : 's'}`}
-          aria-label={`Blocked by ${unresolvedBlockers}`}
-        >
-          <LockClosed16Regular />
-          {unresolvedBlockers}
-        </span>
-      )}
-      {ticket.branch && (
-        <span className={styles.branchBadge} title={ticket.branch}>
-          <BranchFork16Regular />
-          {truncatedBranch}
-        </span>
-      )}
-      {/* Column badge only while the ticket is open — on resolved rows it
+          className={styles.priorityDot}
+          style={{ backgroundColor: PRIORITY_DOT_COLORS[ticket.priority] ?? tokens.colorNeutralForeground3 }}
+          title={TICKET_PRIORITY_LABELS[ticket.priority]}
+        />
+        <span className={styles.title}>{ticket.title}</span>
+        {unresolvedBlockers > 0 && (
+          <span
+            className={styles.blockedBadge}
+            title={`Blocked by ${unresolvedBlockers} ticket${unresolvedBlockers === 1 ? '' : 's'}`}
+            aria-label={`Blocked by ${unresolvedBlockers}`}
+          >
+            <LockClosed16Regular />
+            {unresolvedBlockers}
+          </span>
+        )}
+        {ticket.branch && (
+          <span className={styles.branchBadge} title={ticket.branch}>
+            <BranchFork16Regular />
+            {truncatedBranch}
+          </span>
+        )}
+        {/* Column badge only while the ticket is open — on resolved rows it
           repeats "Completed" down the whole list and the dimmed row already
           says done. */}
-      {!ticket.resolution && (
-        <span className={styles.cellColumn}>
-          <Badge color={columnBadgeColor}>{columnLabel}</Badge>
-        </span>
-      )}
-      {milestoneTitle && (
-        <span className={styles.cellMilestone}>
-          <Badge color="purple" truncate maxWidth={160}>{milestoneTitle}</Badge>
-        </span>
-      )}
-      {phase && phase !== 'idle' && !ticket.resolution && (
-        <span className={styles.cellPhase}>
-          <Badge color={PHASE_COLORS[phase] ?? 'default'}>
-            {isRunning && <ArrowSync20Regular style={{ width: 12, height: 12 }} />}
-            {PHASE_LABELS[phase]}
-          </Badge>
-        </span>
-      )}
-      {hovered && !ticket.resolution && !isRunning && (
-        <span className={styles.cellActions} style={{ opacity: 1 }} onClick={handleStopPropagation}>
-          <IconButton icon={<Open20Regular />} size="sm" aria-label="Open in Code" onClick={handleOpenInCode} />
-          <IconButton icon={<Play20Filled />} size="sm" aria-label="Autopilot" onClick={handleAutopilot} />
-        </span>
-      )}
-      <span
-        className={mergeClasses(styles.cellMenu, hovered && styles.cellMenuVisible)}
-        onClick={handleStopPropagation}
-      >
-        <Menu positioning={{ position: 'below', align: 'end' }}>
-          <MenuTrigger disableButtonEnhancement>
-            <IconButton icon={<MoreHorizontal20Regular />} size="sm" aria-label="Ticket actions" />
-          </MenuTrigger>
-          <MenuPopover>
-            <MenuList>
-              <Menu positioning={{ position: 'before', align: 'top' }}>
-                <MenuTrigger disableButtonEnhancement>
-                  <MenuItem>Move to milestone…</MenuItem>
-                </MenuTrigger>
-                <MenuPopover>
-                  <MenuList>
-                    <MenuItem onClick={() => handleMoveToMilestone(undefined)}>
-                      <span className={styles.checkmarkSlot}>
-                        {!ticket.milestoneId && <Checkmark16Regular />}
-                      </span>
-                      No milestone
-                    </MenuItem>
-                    {projectMilestones.length > 0 && <MenuDivider />}
-                    {projectMilestones.map((m) => (
-                      <MenuItem key={m.id} onClick={() => handleMoveToMilestone(m.id)}>
-                        <span className={styles.checkmarkSlot}>
-                          {ticket.milestoneId === m.id && <Checkmark16Regular />}
-                        </span>
-                        {m.title || 'Untitled milestone'}
+        {!ticket.resolution && (
+          <span className={styles.cellColumn}>
+            <Badge color={columnBadgeColor}>{columnLabel}</Badge>
+          </span>
+        )}
+        {milestoneTitle && (
+          <span className={styles.cellMilestone}>
+            <Badge color="purple" truncate maxWidth={160}>
+              {milestoneTitle}
+            </Badge>
+          </span>
+        )}
+        {phase && phase !== 'idle' && !ticket.resolution && (
+          <span className={styles.cellPhase}>
+            <Badge color={PHASE_COLORS[phase] ?? 'default'}>
+              {isRunning && <ArrowSync20Regular style={{ width: 12, height: 12 }} />}
+              {PHASE_LABELS[phase]}
+            </Badge>
+          </span>
+        )}
+        {hovered && !ticket.resolution && !isRunning && (
+          <span className={styles.cellActions} style={{ opacity: 1 }} onClick={handleStopPropagation}>
+            <IconButton icon={<Open20Regular />} size="sm" aria-label="Open in Code" onClick={handleOpenInCode} />
+            <IconButton icon={<Play20Filled />} size="sm" aria-label="Autopilot" onClick={handleAutopilot} />
+          </span>
+        )}
+        <span
+          className={mergeClasses(styles.cellMenu, hovered && styles.cellMenuVisible)}
+          onClick={handleStopPropagation}
+        >
+          <Menu positioning={{ position: 'below', align: 'end' }}>
+            <MenuTrigger disableButtonEnhancement>
+              <IconButton icon={<MoreHorizontal20Regular />} size="sm" aria-label="Ticket actions" />
+            </MenuTrigger>
+            <MenuPopover>
+              <MenuList>
+                <Menu positioning={{ position: 'before', align: 'top' }}>
+                  <MenuTrigger disableButtonEnhancement>
+                    <MenuItem>Move to milestone…</MenuItem>
+                  </MenuTrigger>
+                  <MenuPopover>
+                    <MenuList>
+                      <MenuItem onClick={() => handleMoveToMilestone(undefined)}>
+                        <span className={styles.checkmarkSlot}>{!ticket.milestoneId && <Checkmark16Regular />}</span>
+                        No milestone
                       </MenuItem>
-                    ))}
-                  </MenuList>
-                </MenuPopover>
-              </Menu>
-              <MenuItem icon={<Archive20Regular />} onClick={handleToggleArchive}>
-                {ticket.archivedAt ? 'Unarchive' : 'Archive'}
-              </MenuItem>
-              <MenuDivider />
-              <MenuItem
-                icon={<Delete20Regular />}
-                onClick={handleDelete}
-                className={styles.dangerMenuItem}
-              >
-                Delete
-              </MenuItem>
-            </MenuList>
-          </MenuPopover>
-        </Menu>
-      </span>
-    </div>
-  );
-});
+                      {projectMilestones.length > 0 && <MenuDivider />}
+                      {projectMilestones.map((m) => (
+                        <MenuItem key={m.id} onClick={() => handleMoveToMilestone(m.id)}>
+                          <span className={styles.checkmarkSlot}>
+                            {ticket.milestoneId === m.id && <Checkmark16Regular />}
+                          </span>
+                          {m.title || 'Untitled milestone'}
+                        </MenuItem>
+                      ))}
+                    </MenuList>
+                  </MenuPopover>
+                </Menu>
+                <MenuItem icon={<Archive20Regular />} onClick={handleToggleArchive}>
+                  {ticket.archivedAt ? 'Unarchive' : 'Archive'}
+                </MenuItem>
+                <MenuDivider />
+                <MenuItem icon={<Delete20Regular />} onClick={handleDelete} className={styles.dangerMenuItem}>
+                  Delete
+                </MenuItem>
+              </MenuList>
+            </MenuPopover>
+          </Menu>
+        </span>
+      </div>
+    );
+  }
+);
 TicketRow.displayName = 'TicketRow';
 
 type WorkItemsListProps = {
@@ -427,210 +452,217 @@ type WorkItemsListProps = {
   hideChrome?: boolean;
 };
 
-export const WorkItemsList = memo(({ projectId, selectedTicketId, onSelectTicket, title = 'Items', contextLabel, onBack, rightActions, hideChrome }: WorkItemsListProps) => {
-  const styles = useStyles();
-  const ticketMap = useStore($tickets);
-  const pipeline = useStore($pipeline);
-  const milestones = useStore($milestones);
-  const activeMilestoneId = useStore($activeMilestoneId);
-  const [viewMode, setViewMode] = useState<ViewMode>('list');
-  const [visibilityFilter, setVisibilityFilter] = useState<VisibilityFilter>('active');
-  const [hoveredId, setHoveredId] = useState<TicketId | null>(null);
-  const [pendingDelete, setPendingDelete] = useState<Ticket | null>(null);
+export const WorkItemsList = memo(
+  ({
+    projectId,
+    selectedTicketId,
+    onSelectTicket,
+    title = 'Items',
+    contextLabel,
+    onBack,
+    rightActions,
+    hideChrome,
+  }: WorkItemsListProps) => {
+    const styles = useStyles();
+    const ticketMap = useStore($tickets);
+    const pipeline = useStore($pipeline);
+    const milestones = useStore($milestones);
+    const activeMilestoneId = useStore($activeMilestoneId);
+    const [viewMode, setViewMode] = useState<ViewMode>('list');
+    const [visibilityFilter, setVisibilityFilter] = useState<VisibilityFilter>('active');
+    const [hoveredId, setHoveredId] = useState<TicketId | null>(null);
+    const [pendingDelete, setPendingDelete] = useState<Ticket | null>(null);
 
-  const handleRequestDelete = useCallback((ticket: Ticket) => {
-    setPendingDelete(ticket);
-  }, []);
+    const handleRequestDelete = useCallback((ticket: Ticket) => {
+      setPendingDelete(ticket);
+    }, []);
 
-  const handleCancelDelete = useCallback(() => {
-    setPendingDelete(null);
-  }, []);
+    const handleCancelDelete = useCallback(() => {
+      setPendingDelete(null);
+    }, []);
 
-  const handleConfirmDelete = useCallback(() => {
-    if (pendingDelete) {
-      ticketApi.removeTicket(pendingDelete.id);
-    }
-  }, [pendingDelete]);
-
-  const pendingIsUntitled = !pendingDelete?.title || pendingDelete.title === 'Untitled';
-  const deleteTitle = pendingIsUntitled
-    ? 'Delete this untitled ticket?'
-    : `Delete ticket "${pendingDelete?.title}"?`;
-
-  const projectMilestones = useMemo(
-    () => Object.values(milestones).filter((m) => m.projectId === projectId),
-    [milestones, projectId]
-  );
-
-  const columnLabels = useMemo(() => {
-    const map: Record<string, string> = {};
-    if (pipeline) {
-      for (const col of pipeline.columns) {
-        map[col.id] = col.label;
+    const handleConfirmDelete = useCallback(() => {
+      if (pendingDelete) {
+        ticketApi.removeTicket(pendingDelete.id);
       }
-    }
-    return map;
-  }, [pipeline]);
+    }, [pendingDelete]);
 
-  const scopedTickets = useMemo(
-    () =>
-      Object.values(ticketMap).filter(
-        (t) => t.projectId === projectId && (activeMilestoneId === 'all' || t.milestoneId === activeMilestoneId)
-      ),
-    [ticketMap, projectId, activeMilestoneId]
-  );
+    const pendingIsUntitled = !pendingDelete?.title || pendingDelete.title === 'Untitled';
+    const deleteTitle = pendingIsUntitled ? 'Delete this untitled ticket?' : `Delete ticket "${pendingDelete?.title}"?`;
 
-  const archivedCount = useMemo(() => scopedTickets.filter((t) => t.archivedAt).length, [scopedTickets]);
+    const projectMilestones = useMemo(
+      () => Object.values(milestones).filter((m) => m.projectId === projectId),
+      [milestones, projectId]
+    );
 
-  const sortedTickets = useMemo(() => {
-    const all = scopedTickets.filter((t) => {
-      if (visibilityFilter === 'active') {
-        return !t.archivedAt;
+    const columnLabels = useMemo(() => {
+      const map: Record<string, string> = {};
+      if (pipeline) {
+        for (const col of pipeline.columns) {
+          map[col.id] = col.label;
+        }
       }
-      if (visibilityFilter === 'archived') {
-        return !!t.archivedAt;
+      return map;
+    }, [pipeline]);
+
+    const scopedTickets = useMemo(
+      () =>
+        Object.values(ticketMap).filter(
+          (t) => t.projectId === projectId && (activeMilestoneId === 'all' || t.milestoneId === activeMilestoneId)
+        ),
+      [ticketMap, projectId, activeMilestoneId]
+    );
+
+    const archivedCount = useMemo(() => scopedTickets.filter((t) => t.archivedAt).length, [scopedTickets]);
+
+    const sortedTickets = useMemo(() => {
+      const all = scopedTickets.filter((t) => {
+        if (visibilityFilter === 'active') {
+          return !t.archivedAt;
+        }
+        if (visibilityFilter === 'archived') {
+          return !!t.archivedAt;
+        }
+        return true;
+      });
+      return all.sort((a, b) => a.createdAt - b.createdAt);
+    }, [scopedTickets, visibilityFilter]);
+
+    const handleNewTicket = useCallback(async () => {
+      const ticket = await ticketApi.addTicket({
+        projectId,
+        milestoneId: activeMilestoneId !== 'all' ? activeMilestoneId : undefined,
+        title: 'Untitled',
+        description: '',
+        priority: 'medium',
+        blockedBy: [],
+      });
+      ticketApi.goToTicket(ticket.id);
+    }, [projectId, activeMilestoneId]);
+
+    const handleTicketClick = useCallback(
+      (ticketId: TicketId) => {
+        if (onSelectTicket) {
+          onSelectTicket(ticketId);
+        } else {
+          ticketApi.goToTicket(ticketId);
+        }
+      },
+      [onSelectTicket]
+    );
+
+    const toggleView = useCallback(() => {
+      setViewMode((m) => (m === 'list' ? 'board' : 'list'));
+    }, []);
+
+    const getColumnBadgeColor = (ticket: Ticket): 'blue' | 'green' | 'default' => {
+      if (!pipeline) {
+        return 'default';
       }
-      return true;
-    });
-    return all.sort((a, b) => a.createdAt - b.createdAt);
-  }, [scopedTickets, visibilityFilter]);
-
-  const handleNewTicket = useCallback(async () => {
-    const ticket = await ticketApi.addTicket({
-      projectId,
-      milestoneId: activeMilestoneId !== 'all' ? activeMilestoneId : undefined,
-      title: 'Untitled',
-      description: '',
-      priority: 'medium',
-      blockedBy: [],
-    });
-    ticketApi.goToTicket(ticket.id);
-  }, [projectId, activeMilestoneId]);
-
-  const handleTicketClick = useCallback(
-    (ticketId: TicketId) => {
-      if (onSelectTicket) {
-        onSelectTicket(ticketId);
-      } else {
-        ticketApi.goToTicket(ticketId);
+      const lastCol = pipeline.columns[pipeline.columns.length - 1];
+      if (ticket.columnId === lastCol?.id) {
+        return 'green';
       }
-    },
-    [onSelectTicket]
-  );
+      const firstCol = pipeline.columns[0];
+      if (ticket.columnId === firstCol?.id || !ticket.columnId) {
+        return 'default';
+      }
+      return 'blue';
+    };
 
-  const toggleView = useCallback(() => {
-    setViewMode((m) => (m === 'list' ? 'board' : 'list'));
-  }, []);
-
-  const getColumnBadgeColor = (ticket: Ticket): 'blue' | 'green' | 'default' => {
-    if (!pipeline) {
-      return 'default';
-    }
-    const lastCol = pipeline.columns[pipeline.columns.length - 1];
-    if (ticket.columnId === lastCol?.id) {
-      return 'green';
-    }
-    const firstCol = pipeline.columns[0];
-    if (ticket.columnId === firstCol?.id || !ticket.columnId) {
-      return 'default';
-    }
-    return 'blue';
-  };
-
-  const filterControl = (
-    <SegmentedControl
-      value={visibilityFilter}
-      options={[
-        { value: 'active', label: 'Active', badge: scopedTickets.length - archivedCount },
-        { value: 'archived', label: 'Archived', badge: archivedCount },
-        { value: 'all', label: 'All' },
-      ]}
-      onChange={setVisibilityFilter}
-    />
-  );
-
-  return (
-    <div className={styles.root}>
-      <div className={styles.header}>
-        {!hideChrome && onBack ? (
-          <IconButton aria-label="Back" icon={<ArrowLeft20Regular />} size="sm" onClick={onBack} />
-        ) : null}
-        {!hideChrome &&
-          (contextLabel || title !== 'Items' ? (
-            <div className={styles.headerTitle}>
-              {contextLabel ? <Caption1>{contextLabel}</Caption1> : null}
-              <Subtitle2>{title}</Subtitle2>
-            </div>
-          ) : (
-            <SectionLabel>{title}</SectionLabel>
-          ))}
-        {/* Mobile: the filter is the header's main content, so it leads. */}
-        {hideChrome && filterControl}
-        <div className={styles.flex1} />
-        <div className={styles.controls}>
-          {!hideChrome && filterControl}
-          <IconButton
-            aria-label={viewMode === 'list' ? 'Board view' : 'List view'}
-            icon={viewMode === 'list' ? <Board20Regular /> : <List20Regular />}
-            size="sm"
-            onClick={toggleView}
-          />
-          {rightActions}
-        </div>
-      </div>
-
-      {viewMode === 'list' ? (
-        <div className={styles.list}>
-          {sortedTickets.length === 0 && (
-            <p className={styles.emptyHint}>No items yet</p>
-          )}
-          {sortedTickets.map((ticket) => {
-            const isHovered = hoveredId === ticket.id;
-            const milestone = ticket.milestoneId ? milestones[ticket.milestoneId] : undefined;
-            const unresolvedBlockers = ticket.blockedBy.filter((id) => {
-              const b = ticketMap[id];
-              return b && !b.resolution;
-            }).length;
-
-            return (
-              <TicketRow
-                key={ticket.id}
-                ticket={ticket}
-                selected={selectedTicketId === ticket.id}
-                hovered={isHovered}
-                unresolvedBlockers={unresolvedBlockers}
-                milestoneTitle={milestone?.title}
-                projectMilestones={projectMilestones}
-                columnLabel={columnLabels[ticket.columnId] ?? 'Backlog'}
-                columnBadgeColor={getColumnBadgeColor(ticket)}
-                onSelect={handleTicketClick}
-                onHoverChange={setHoveredId}
-                onRequestDelete={handleRequestDelete}
-              />
-            );
-          })}
-
-          {/* + New at bottom */}
-          <button type="button" className={styles.newBtn} onClick={handleNewTicket}>
-            <Add16Regular />
-            New
-          </button>
-        </div>
-      ) : (
-        <div className={styles.boardWrap}>
-          <KanbanBoard projectId={projectId} visibilityFilter={visibilityFilter} />
-        </div>
-      )}
-      <ConfirmDialog
-        open={pendingDelete !== null}
-        onClose={handleCancelDelete}
-        onConfirm={handleConfirmDelete}
-        title={deleteTitle}
-        description="This action cannot be undone."
-        confirmLabel="Delete"
-        destructive
+    const filterControl = (
+      <SegmentedControl
+        value={visibilityFilter}
+        options={[
+          { value: 'active', label: 'Active', badge: scopedTickets.length - archivedCount },
+          { value: 'archived', label: 'Archived', badge: archivedCount },
+          { value: 'all', label: 'All' },
+        ]}
+        onChange={setVisibilityFilter}
       />
-    </div>
-  );
-});
+    );
+
+    return (
+      <div className={styles.root}>
+        <div className={styles.header}>
+          {!hideChrome && onBack ? (
+            <IconButton aria-label="Back" icon={<ArrowLeft20Regular />} size="sm" onClick={onBack} />
+          ) : null}
+          {!hideChrome &&
+            (contextLabel || title !== 'Items' ? (
+              <div className={styles.headerTitle}>
+                {contextLabel ? <Caption1>{contextLabel}</Caption1> : null}
+                <Subtitle2>{title}</Subtitle2>
+              </div>
+            ) : (
+              <SectionLabel>{title}</SectionLabel>
+            ))}
+          {/* Mobile: the filter is the header's main content, so it leads. */}
+          {hideChrome && filterControl}
+          <div className={styles.flex1} />
+          <div className={styles.controls}>
+            {!hideChrome && filterControl}
+            <IconButton
+              aria-label={viewMode === 'list' ? 'Board view' : 'List view'}
+              icon={viewMode === 'list' ? <Board20Regular /> : <List20Regular />}
+              size="sm"
+              onClick={toggleView}
+            />
+            {rightActions}
+          </div>
+        </div>
+
+        {viewMode === 'list' ? (
+          <div className={styles.list}>
+            {sortedTickets.length === 0 && <p className={styles.emptyHint}>No items yet</p>}
+            {sortedTickets.map((ticket) => {
+              const isHovered = hoveredId === ticket.id;
+              const milestone = ticket.milestoneId ? milestones[ticket.milestoneId] : undefined;
+              const unresolvedBlockers = ticket.blockedBy.filter((id) => {
+                const b = ticketMap[id];
+                return b && !b.resolution;
+              }).length;
+
+              return (
+                <TicketRow
+                  key={ticket.id}
+                  ticket={ticket}
+                  selected={selectedTicketId === ticket.id}
+                  hovered={isHovered}
+                  unresolvedBlockers={unresolvedBlockers}
+                  milestoneTitle={milestone?.title}
+                  projectMilestones={projectMilestones}
+                  columnLabel={columnLabels[ticket.columnId] ?? 'Backlog'}
+                  columnBadgeColor={getColumnBadgeColor(ticket)}
+                  onSelect={handleTicketClick}
+                  onHoverChange={setHoveredId}
+                  onRequestDelete={handleRequestDelete}
+                />
+              );
+            })}
+
+            {/* + New at bottom */}
+            <button type="button" className={styles.newBtn} onClick={handleNewTicket}>
+              <Add16Regular />
+              New
+            </button>
+          </div>
+        ) : (
+          <div className={styles.boardWrap}>
+            <KanbanBoard projectId={projectId} visibilityFilter={visibilityFilter} />
+          </div>
+        )}
+        <ConfirmDialog
+          open={pendingDelete !== null}
+          onClose={handleCancelDelete}
+          onConfirm={handleConfirmDelete}
+          title={deleteTitle}
+          description="This action cannot be undone."
+          confirmLabel="Delete"
+          destructive
+        />
+      </div>
+    );
+  }
+);
 WorkItemsList.displayName = 'WorkItemsList';

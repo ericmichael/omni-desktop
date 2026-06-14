@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { CustomAppEntry } from '@/shared/app-registry';
-import { buildAppRegistry,BUILTIN_APPS } from '@/shared/app-registry';
+import { buildAppRegistry, BUILTIN_APPS } from '@/shared/app-registry';
 
 describe('buildAppRegistry', () => {
   it('returns builtin apps when no custom apps provided', () => {
@@ -10,10 +10,17 @@ describe('buildAppRegistry', () => {
   });
 
   it('appends custom apps after builtins when order is higher', () => {
-    const custom: CustomAppEntry[] = [{ id: 'teams', label: 'Teams', icon: 'People20Regular', url: 'https://teams.microsoft.com', order: 50 }];
+    const custom: CustomAppEntry[] = [
+      { id: 'teams', label: 'Teams', icon: 'People20Regular', url: 'https://teams.microsoft.com', order: 50 },
+    ];
     const registry = buildAppRegistry(custom);
     expect(registry).toHaveLength(BUILTIN_APPS.length + 1);
-    expect(registry[registry.length - 1]).toMatchObject({ id: 'teams', kind: 'webview', scope: 'always', builtin: false });
+    expect(registry[registry.length - 1]).toMatchObject({
+      id: 'teams',
+      kind: 'webview',
+      scope: 'always',
+      builtin: false,
+    });
   });
 
   it('sorts custom apps by order among builtins', () => {
@@ -30,8 +37,8 @@ describe('buildAppRegistry', () => {
     const custom: CustomAppEntry[] = [{ id: 'x', label: 'X', icon: 'Star20Regular', url: 'https://x.com', order: 0 }];
     const registry = buildAppRegistry(custom);
     // chat (order 0) comes before x (order 0) because builtins are first in the spread
-    expect(registry[0].id).toBe('chat');
-    expect(registry[1].id).toBe('x');
+    expect(registry[0]!.id).toBe('chat');
+    expect(registry[1]!.id).toBe('x');
   });
 
   it('defaults custom apps to columnScoped=false and respects opt-in', () => {

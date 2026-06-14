@@ -1,6 +1,6 @@
 import '@xterm/xterm/css/xterm.css';
 
-import { makeStyles, shorthands,tokens } from '@fluentui/react-components';
+import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
 import { ChevronDown20Regular } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
 import { FitAddon } from '@xterm/addon-fit';

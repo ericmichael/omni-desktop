@@ -33,11 +33,18 @@ describe('migrateAgentConfigFromFiles', () => {
   it('imports on-disk files, stripping the managed MCP entry, and sets the guard', () => {
     writeFileSync(
       join(dir, 'models.json'),
-      JSON.stringify({ version: 3, default: null, voice_default: null, providers: { openai: { type: 'openai', models: {} } } })
+      JSON.stringify({
+        version: 3,
+        default: null,
+        voice_default: null,
+        providers: { openai: { type: 'openai', models: {} } },
+      })
     );
     writeFileSync(
       join(dir, 'mcp.json'),
-      JSON.stringify({ mcpServers: { mine: { type: 'stdio', command: 'x' }, [MCP_ENTRY_NAME]: { type: 'stdio', command: 'managed' } } })
+      JSON.stringify({
+        mcpServers: { mine: { type: 'stdio', command: 'x' }, [MCP_ENTRY_NAME]: { type: 'stdio', command: 'managed' } },
+      })
     );
     writeFileSync(join(dir, '.env'), 'FOO=bar\n');
 

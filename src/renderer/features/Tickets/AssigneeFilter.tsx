@@ -23,7 +23,9 @@ export const AssigneeFilter = memo(function AssigneeFilter() {
   const setMember = useCallback((id: string) => () => $assigneeFilter.set(id), []);
 
   // No teams → nothing to filter by.
-  if (members.length === 0) return null;
+  if (members.length === 0) {
+    return null;
+  }
 
   const label =
     filter === 'all'

@@ -18,7 +18,9 @@ const SPECTRUM = '#0a84ff, #32ade6, #5e5ce6, #bf5af2, #ff375f, #ff9f0a, #0a84ff'
 // custom properties don't interpolate in animations without @property.
 let angleRegistered = false;
 function ensureAngleProperty(): void {
-  if (angleRegistered) return;
+  if (angleRegistered) {
+    return;
+  }
   angleRegistered = true;
   try {
     (CSS as unknown as { registerProperty?: (d: object) => void }).registerProperty?.({

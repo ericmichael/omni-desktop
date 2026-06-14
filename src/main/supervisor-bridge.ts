@@ -1,5 +1,11 @@
 import type { IIpcListener } from '@/shared/ipc-listener';
-import type { IpcRendererEvents, RunOverrides, SupervisorBridgeEvent, SupervisorBridgeRequest, TicketId } from '@/shared/types';
+import type {
+  IpcRendererEvents,
+  RunOverrides,
+  SupervisorBridgeEvent,
+  SupervisorBridgeRequest,
+  TicketId,
+} from '@/shared/types';
 
 // Inlined instead of imported from @/lib/project-manager-deps to avoid a type-level
 // cycle (deps → bridge → deps). Matches the exported type there exactly.

@@ -67,27 +67,27 @@ export default defineConfig(({ mode }) => {
           },
         },
       }),
-    // Plugin to shim Electron-only imports to empty modules in browser builds
-    {
-      name: 'electron-shim',
-      resolveId(id) {
-        if (id === '@electron-toolkit/typed-ipc/renderer' || id === '@electron-toolkit/preload') {
-          return '\0electron-shim';
-        }
-        return null;
-      },
-      load(id) {
-        if (id === '\0electron-shim') {
-          // Export stub classes that will never be instantiated in browser mode
-          return `
+      // Plugin to shim Electron-only imports to empty modules in browser builds
+      {
+        name: 'electron-shim',
+        resolveId(id) {
+          if (id === '@electron-toolkit/typed-ipc/renderer' || id === '@electron-toolkit/preload') {
+            return '\0electron-shim';
+          }
+          return null;
+        },
+        load(id) {
+          if (id === '\0electron-shim') {
+            // Export stub classes that will never be instantiated in browser mode
+            return `
             export class IpcEmitter { invoke() {} send() {} }
             export class IpcListener { on() { return () => {} } once() { return () => {} } }
             export default {};
           `;
-        }
-        return null;
+          }
+          return null;
+        },
       },
-    },
     ],
     root: '.',
     build: {

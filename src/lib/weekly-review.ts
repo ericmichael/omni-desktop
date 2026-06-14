@@ -19,19 +19,15 @@ export const dayName = (day: number): string => DAY_NAMES[day] ?? 'Friday';
  *
  * The 5-day buffer prevents nagging if you already did it today or recently.
  */
-export const isReviewDue = (
-  reviewDay: number,
-  lastReviewAt: number | null,
-  now: number = Date.now()
-): boolean => {
+export const isReviewDue = (reviewDay: number, lastReviewAt: number | null, now: number = Date.now()): boolean => {
   const today = new Date(now).getDay();
   if (today !== reviewDay) {
-return false;
-}
+    return false;
+  }
 
   if (lastReviewAt == null) {
-return true;
-}
+    return true;
+  }
 
   const daysSinceLastReview = (now - lastReviewAt) / (24 * 60 * 60 * 1000);
   return daysSinceLastReview >= 5;

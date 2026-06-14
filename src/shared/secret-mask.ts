@@ -42,7 +42,9 @@ export function maskMcpConfig(config: McpConfig): McpConfig {
 
 function maskValues(rec: Record<string, string>): Record<string, string> {
   const out: Record<string, string> = {};
-  for (const k of Object.keys(rec)) out[k] = SECRET_SENTINEL;
+  for (const k of Object.keys(rec)) {
+    out[k] = SECRET_SENTINEL;
+  }
   return out;
 }
 
@@ -58,8 +60,7 @@ export function restoreMaskedModels(incoming: ModelsConfig, stored: ModelsConfig
     const models: typeof prov.models = {};
     for (const [id, m] of Object.entries(prov.models)) {
       const storedKey = storedProv?.models[id]?.api_key;
-      models[id] =
-        m.api_key === SECRET_SENTINEL ? { ...m, api_key: storedKey } : m;
+      models[id] = m.api_key === SECRET_SENTINEL ? { ...m, api_key: storedKey } : m;
     }
     const provKey = prov.api_key === SECRET_SENTINEL ? storedProv?.api_key : prov.api_key;
     providers[name] = { ...prov, models, ...(provKey !== undefined ? { api_key: provKey } : {}) };

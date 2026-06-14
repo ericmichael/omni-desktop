@@ -1,99 +1,96 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 
 export type BashJobSummary = {
-  job_id: string
-  pid: number
-  command: string
-  running: boolean
-  exit_code: number | null
-  wall_time_ms: number
-  started_at?: number
-  log_path?: string
-  cwd?: string
-}
+  job_id: string;
+  pid: number;
+  command: string;
+  running: boolean;
+  exit_code: number | null;
+  wall_time_ms: number;
+  started_at?: number;
+  log_path?: string;
+  cwd?: string;
+};
 
 export type BashJobsTailResult = {
-  ok: boolean
-  text?: string
-  total_lines?: number
-  job?: BashJobSummary
-  error?: string
-  message?: string
-}
+  ok: boolean;
+  text?: string;
+  total_lines?: number;
+  job?: BashJobSummary;
+  error?: string;
+  message?: string;
+};
 
 export type BashJobsKillResult = {
-  ok: boolean
-  signal_sent?: 'none' | 'SIGTERM' | 'SIGKILL'
-  job?: BashJobSummary
-  snapshot?: BashJobSummary[]
-  error?: string
-}
+  ok: boolean;
+  signal_sent?: 'none' | 'SIGTERM' | 'SIGKILL';
+  job?: BashJobSummary;
+  snapshot?: BashJobSummary[];
+  error?: string;
+};
 
-const MAX_VISIBLE = 5
-const COMMAND_TRUNCATE = 80
-const TAIL_DEFAULT_LINES = 200
+const MAX_VISIBLE = 5;
+const COMMAND_TRUNCATE = 80;
+const TAIL_DEFAULT_LINES = 200;
 
 function shortCommand(command: string): string {
-  const oneLine = command.replace(/\s+/g, ' ').trim()
+  const oneLine = command.replace(/\s+/g, ' ').trim();
   if (oneLine.length <= COMMAND_TRUNCATE) {
-return oneLine
-}
-  return `${oneLine.slice(0, COMMAND_TRUNCATE - 1)  }…`
+    return oneLine;
+  }
+  return `${oneLine.slice(0, COMMAND_TRUNCATE - 1)}…`;
 }
 
 function formatElapsed(ms: number): string {
   if (ms < 1000) {
-return `${ms}ms`
-}
-  const seconds = ms / 1000
+    return `${ms}ms`;
+  }
+  const seconds = ms / 1000;
   if (seconds < 60) {
-return `${seconds.toFixed(1)}s`
-}
-  const minutes = Math.floor(seconds / 60)
-  const rem = Math.floor(seconds - minutes * 60)
-  return `${minutes}m${rem.toString().padStart(2, '0')}s`
+    return `${seconds.toFixed(1)}s`;
+  }
+  const minutes = Math.floor(seconds / 60);
+  const rem = Math.floor(seconds - minutes * 60);
+  return `${minutes}m${rem.toString().padStart(2, '0')}s`;
 }
 
 function liveElapsedMs(job: BashJobSummary, nowMs: number): number {
   if (!job.running || !job.started_at) {
-return job.wall_time_ms
-}
-  const elapsed = nowMs - job.started_at * 1000
-  return Math.max(elapsed, job.wall_time_ms)
+    return job.wall_time_ms;
+  }
+  const elapsed = nowMs - job.started_at * 1000;
+  return Math.max(elapsed, job.wall_time_ms);
 }
 
 function dotClass(job: BashJobSummary): string {
   if (job.running) {
-return 'bg-primary animate-pulse'
-}
-  return job.exit_code === 0 ? 'bg-successGreen' : 'bg-errorRed'
+    return 'bg-primary animate-pulse';
+  }
+  return job.exit_code === 0 ? 'bg-successGreen' : 'bg-errorRed';
 }
 
 const stopPropagation: React.MouseEventHandler = (e) => {
-  e.stopPropagation()
-}
+  e.stopPropagation();
+};
 
 type BashJobRowProps = {
-  job: BashJobSummary
-  nowMs: number
-  isKilling: boolean
-  onShowLogs?: (jobId: string) => void
-  onKill?: (jobId: string) => void
-  onDismiss?: (jobId: string) => void
-}
+  job: BashJobSummary;
+  nowMs: number;
+  isKilling: boolean;
+  onShowLogs?: (jobId: string) => void;
+  onKill?: (jobId: string) => void;
+  onDismiss?: (jobId: string) => void;
+};
 
 // One row of the docked panel. Pulled out of the parent map so the per-row
 // callbacks can use `.bind(null, jobId)` instead of inline arrows — keeps
 // `react/jsx-no-bind` satisfied without growing the parent component.
 function BashJobRow({ job, nowMs, isKilling, onShowLogs, onKill, onDismiss }: BashJobRowProps) {
-  const elapsed = formatElapsed(liveElapsedMs(job, nowMs))
-  const tail = job.running ? elapsed : `exit ${job.exit_code} · ${elapsed}`
+  const elapsed = formatElapsed(liveElapsedMs(job, nowMs));
+  const tail = job.running ? elapsed : `exit ${job.exit_code} · ${elapsed}`;
   return (
     <li className="flex items-center gap-2 text-xs leading-5">
-      <span
-        className={['inline-block w-1.5 h-1.5 rounded-full flex-shrink-0', dotClass(job)].join(' ')}
-        aria-hidden
-      />
+      <span className={['inline-block w-1.5 h-1.5 rounded-full flex-shrink-0', dotClass(job)].join(' ')} aria-hidden />
       <span className="text-textSubtle font-mono">{job.job_id}</span>
       <span
         className={[
@@ -139,104 +136,104 @@ function BashJobRow({ job, nowMs, isKilling, onShowLogs, onKill, onDismiss }: Ba
         </button>
       ) : null}
     </li>
-  )
+  );
 }
 
 type Props = {
-  jobs: BashJobSummary[]
-  onKill?: (job_id: string) => Promise<BashJobsKillResult>
-  onTail?: (job_id: string, lines?: number) => Promise<BashJobsTailResult>
-  onDismiss?: (job_id: string) => void
+  jobs: BashJobSummary[];
+  onKill?: (job_id: string) => Promise<BashJobsKillResult>;
+  onTail?: (job_id: string, lines?: number) => Promise<BashJobsTailResult>;
+  onDismiss?: (job_id: string) => void;
   // Optional: fired once on mount when at least one job is running, so the
   // server-side sweeper has a chance to capture a service handle and start
   // pushing ``ui.bash_jobs.update`` broadcasts on natural exits.
-  onWarmup?: () => Promise<unknown>
-}
+  onWarmup?: () => Promise<unknown>;
+};
 
 export function BashJobs({ jobs, onKill, onTail, onWarmup, onDismiss }: Props) {
   // 1Hz tick while at least one job is running so elapsed time updates.
-  const [, setNowTick] = useState(0)
-  const anyRunning = jobs.some(j => j.running)
+  const [, setNowTick] = useState(0);
+  const anyRunning = jobs.some((j) => j.running);
   useEffect(() => {
     if (!anyRunning) {
-return
-}
-    const id = window.setInterval(() => setNowTick(n => n + 1), 1000)
-    return () => window.clearInterval(id)
-  }, [anyRunning])
+      return;
+    }
+    const id = window.setInterval(() => setNowTick((n) => n + 1), 1000);
+    return () => window.clearInterval(id);
+  }, [anyRunning]);
 
   // One-shot warmup: when running jobs first appear (mount or after spawn),
   // fire onWarmup so the server-side sweeper captures a service handle.
-  const warmedUpRef = useRef(false)
+  const warmedUpRef = useRef(false);
   useEffect(() => {
     if (!anyRunning) {
-      warmedUpRef.current = false
-      return
+      warmedUpRef.current = false;
+      return;
     }
     if (warmedUpRef.current || !onWarmup) {
-return
-}
-    warmedUpRef.current = true
-    onWarmup().catch(() => {
-      warmedUpRef.current = false
-    })
-  }, [anyRunning, onWarmup])
-
-  const [killing, setKilling] = useState<Set<string>>(new Set())
-  const [logsModalJobId, setLogsModalJobId] = useState<string | null>(null)
-  const [killError, setKillError] = useState<string | null>(null)
-
-  const handleKill = useCallback(async (job_id: string) => {
-    if (!onKill) {
-return
-}
-    if (!window.confirm(`Terminate background job ${job_id}?`)) {
-return
-}
-    setKillError(null)
-    setKilling(prev => {
-      const next = new Set(prev)
-      next.add(job_id)
-      return next
-    })
-    try {
-      const res = await onKill(job_id)
-      if (!res.ok) {
-        setKillError(`Failed to kill ${job_id}: ${res.error ?? 'unknown error'}`)
-      }
-    } catch (e) {
-      setKillError(`Failed to kill ${job_id}: ${(e as Error).message ?? String(e)}`)
-    } finally {
-      setKilling(prev => {
-        const next = new Set(prev)
-        next.delete(job_id)
-        return next
-      })
+      return;
     }
-  }, [onKill])
+    warmedUpRef.current = true;
+    onWarmup().catch(() => {
+      warmedUpRef.current = false;
+    });
+  }, [anyRunning, onWarmup]);
 
-  const handleShowLogs = useCallback((jobId: string) => setLogsModalJobId(jobId), [])
-  const handleCloseLogs = useCallback(() => setLogsModalJobId(null), [])
+  const [killing, setKilling] = useState<Set<string>>(new Set());
+  const [logsModalJobId, setLogsModalJobId] = useState<string | null>(null);
+  const [killError, setKillError] = useState<string | null>(null);
+
+  const handleKill = useCallback(
+    async (job_id: string) => {
+      if (!onKill) {
+        return;
+      }
+      if (!window.confirm(`Terminate background job ${job_id}?`)) {
+        return;
+      }
+      setKillError(null);
+      setKilling((prev) => {
+        const next = new Set(prev);
+        next.add(job_id);
+        return next;
+      });
+      try {
+        const res = await onKill(job_id);
+        if (!res.ok) {
+          setKillError(`Failed to kill ${job_id}: ${res.error ?? 'unknown error'}`);
+        }
+      } catch (e) {
+        setKillError(`Failed to kill ${job_id}: ${(e as Error).message ?? String(e)}`);
+      } finally {
+        setKilling((prev) => {
+          const next = new Set(prev);
+          next.delete(job_id);
+          return next;
+        });
+      }
+    },
+    [onKill]
+  );
+
+  const handleShowLogs = useCallback((jobId: string) => setLogsModalJobId(jobId), []);
+  const handleCloseLogs = useCallback(() => setLogsModalJobId(null), []);
 
   if (!jobs || jobs.length === 0) {
-return null
-}
+    return null;
+  }
 
-  const running = jobs.filter(j => j.running)
-  const exited = jobs.filter(j => !j.running)
-  const failed = exited.filter(j => (j.exit_code ?? 0) !== 0)
-  const succeeded = exited.length - failed.length
+  const running = jobs.filter((j) => j.running);
+  const exited = jobs.filter((j) => !j.running);
+  const failed = exited.filter((j) => (j.exit_code ?? 0) !== 0);
+  const succeeded = exited.length - failed.length;
 
-  const ordered = [
-    ...running,
-    ...exited.slice().sort((a, b) => (b.started_at ?? 0) - (a.started_at ?? 0)),
-  ]
-  const visible = ordered.slice(0, MAX_VISIBLE)
-  const overflow = ordered.length - visible.length
-  const nowMs = Date.now()
+  const ordered = [...running, ...exited.slice().sort((a, b) => (b.started_at ?? 0) - (a.started_at ?? 0))];
+  const visible = ordered.slice(0, MAX_VISIBLE);
+  const overflow = ordered.length - visible.length;
+  const nowMs = Date.now();
 
-  const rowShowLogs = onTail ? handleShowLogs : undefined
-  const rowKill = onKill ? handleKill : undefined
+  const rowShowLogs = onTail ? handleShowLogs : undefined;
+  const rowKill = onKill ? handleKill : undefined;
 
   return (
     <div className="px-3 pt-2">
@@ -244,18 +241,22 @@ return null
         <div className="flex items-center gap-2 text-xs text-textSubtle">
           <span className="font-medium text-textPrimary">Bash jobs</span>
           <span aria-hidden>·</span>
-          <span><span className="text-brand">{running.length}</span> running</span>
+          <span>
+            <span className="text-brand">{running.length}</span> running
+          </span>
           <span aria-hidden>·</span>
-          <span><span className="text-successGreen">{succeeded}</span> done</span>
+          <span>
+            <span className="text-successGreen">{succeeded}</span> done
+          </span>
           <span aria-hidden>·</span>
-          <span><span className="text-errorRed">{failed.length}</span> failed</span>
+          <span>
+            <span className="text-errorRed">{failed.length}</span> failed
+          </span>
         </div>
-        {killError ? (
-          <div className="mt-1 text-[11px] text-errorRed">{killError}</div>
-        ) : null}
+        {killError ? <div className="mt-1 text-[11px] text-errorRed">{killError}</div> : null}
         {visible.length > 0 ? (
           <ul className="mt-1.5 space-y-1">
-            {visible.map(j => (
+            {visible.map((j) => (
               <BashJobRow
                 key={j.job_id}
                 job={j}
@@ -268,70 +269,64 @@ return null
             ))}
           </ul>
         ) : null}
-        {overflow > 0 ? (
-          <div className="mt-1 text-[11px] text-textSubtle">… +{overflow} more</div>
-        ) : null}
+        {overflow > 0 ? <div className="mt-1 text-[11px] text-textSubtle">… +{overflow} more</div> : null}
       </div>
 
       {logsModalJobId && onTail ? (
-        <BashJobLogsModal
-          jobId={logsModalJobId}
-          onClose={handleCloseLogs}
-          onTail={onTail}
-        />
+        <BashJobLogsModal jobId={logsModalJobId} onClose={handleCloseLogs} onTail={onTail} />
       ) : null}
     </div>
-  )
+  );
 }
 
 type ModalProps = {
-  jobId: string
-  onClose: () => void
-  onTail: (job_id: string, lines?: number) => Promise<BashJobsTailResult>
-}
+  jobId: string;
+  onClose: () => void;
+  onTail: (job_id: string, lines?: number) => Promise<BashJobsTailResult>;
+};
 
 function BashJobLogsModal({ jobId, onClose, onTail }: ModalProps) {
-  const [text, setText] = useState<string>('')
-  const [meta, setMeta] = useState<BashJobsTailResult | null>(null)
-  const [loading, setLoading] = useState<boolean>(true)
-  const [error, setError] = useState<string | null>(null)
+  const [text, setText] = useState<string>('');
+  const [meta, setMeta] = useState<BashJobsTailResult | null>(null);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    setLoading(true)
-    setError(null)
+    setLoading(true);
+    setError(null);
     try {
-      const res = await onTail(jobId, TAIL_DEFAULT_LINES)
-      setMeta(res)
+      const res = await onTail(jobId, TAIL_DEFAULT_LINES);
+      setMeta(res);
       if (!res.ok) {
-        setError(res.message ?? res.error ?? 'Failed to read logs')
-        setText('')
+        setError(res.message ?? res.error ?? 'Failed to read logs');
+        setText('');
       } else {
-        setText(res.text ?? '')
+        setText(res.text ?? '');
       }
     } catch (e) {
-      setError((e as Error).message ?? String(e))
+      setError((e as Error).message ?? String(e));
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }, [jobId, onTail])
+  }, [jobId, onTail]);
 
   useEffect(() => {
-    load()
-  }, [load])
+    load();
+  }, [load]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-onClose()
-}
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
 
-  const job = meta?.job
-  const total = meta?.total_lines ?? 0
-  const shown = text ? text.split('\n').length : 0
+  const job = meta?.job;
+  const total = meta?.total_lines ?? 0;
+  const shown = text ? text.split('\n').length : 0;
 
   return (
     <div
@@ -390,5 +385,5 @@ onClose()
         ) : null}
       </div>
     </div>
-  )
+  );
 }

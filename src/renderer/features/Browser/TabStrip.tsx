@@ -211,15 +211,7 @@ const TabItem = memo(({ tab, active, onSelect, onClose, onPinToggle, onDuplicate
 TabItem.displayName = 'TabItem';
 
 export const TabStrip = memo(
-  ({
-    tabset,
-    isGlass,
-    onNewTab,
-  }: {
-    tabset: BrowserTabset;
-    isGlass?: boolean;
-    onNewTab: () => void;
-  }) => {
+  ({ tabset, isGlass, onNewTab }: { tabset: BrowserTabset; isGlass?: boolean; onNewTab: () => void }) => {
     const styles = useStyles();
     const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
@@ -263,14 +255,14 @@ export const TabStrip = memo(
       (event: DragEndEvent) => {
         const { active, over } = event;
         if (!over || active.id === over.id) {
-return;
-}
+          return;
+        }
         const ids = orderedTabs.map((t) => t.id);
         const oldIndex = ids.indexOf(String(active.id));
         const newIndex = ids.indexOf(String(over.id));
         if (oldIndex < 0 || newIndex < 0) {
-return;
-}
+          return;
+        }
         const next = arrayMove(ids, oldIndex, newIndex);
         void browserApi.reorderTabs(tabset.id, next);
       },
@@ -294,7 +286,13 @@ return;
             ))}
           </SortableContext>
         </DndContext>
-        <button type="button" className={styles.newTab} aria-label="New tab" title="New tab (Ctrl+T)" onClick={onNewTab}>
+        <button
+          type="button"
+          className={styles.newTab}
+          aria-label="New tab"
+          title="New tab (Ctrl+T)"
+          onClick={onNewTab}
+        >
           <Add20Regular style={{ width: 14, height: 14 }} />
         </button>
       </div>

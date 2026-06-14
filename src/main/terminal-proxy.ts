@@ -19,10 +19,7 @@ import type { IpcRendererEvents } from '@/shared/types';
  * no explicit `terminal.close` RPC needed.
  */
 
-type WindowSender = <T extends keyof IpcRendererEvents>(
-  channel: T,
-  ...args: IpcRendererEvents[T]
-) => void;
+type WindowSender = <T extends keyof IpcRendererEvents>(channel: T, ...args: IpcRendererEvents[T]) => void;
 
 export type ConsoleErrorKind =
   | 'process_not_ready'
@@ -83,15 +80,8 @@ export class TerminalProxy {
 
   async create(tabId: string): Promise<string> {
     const status = this.deps.processManager.getStatus(tabId);
-    if (
-      (status.type !== 'running' && status.type !== 'connecting') ||
-      !('data' in status) ||
-      !status.data.wsUrl
-    ) {
-      throw new ConsoleError(
-        'process_not_ready',
-        'Open a code session before launching a terminal.'
-      );
+    if ((status.type !== 'running' && status.type !== 'connecting') || !('data' in status) || !status.data.wsUrl) {
+      throw new ConsoleError('process_not_ready', 'Open a code session before launching a terminal.');
     }
     const wsUrl = status.data.wsUrl;
 
@@ -153,8 +143,12 @@ export class TerminalProxy {
 
   write(id: string, data: string): void {
     const entry = this.terminals.get(id);
-    if (!entry || entry.disposing) return;
-    if (entry.ioSocket.readyState !== WebSocket.OPEN) return;
+    if (!entry || entry.disposing) {
+      return;
+    }
+    if (entry.ioSocket.readyState !== WebSocket.OPEN) {
+      return;
+    }
     entry.ioSocket.send(
       JSON.stringify({
         type: 'input',
@@ -165,14 +159,20 @@ export class TerminalProxy {
 
   resize(id: string, cols: number, rows: number): void {
     const entry = this.terminals.get(id);
-    if (!entry || entry.disposing) return;
-    if (entry.ioSocket.readyState !== WebSocket.OPEN) return;
+    if (!entry || entry.disposing) {
+      return;
+    }
+    if (entry.ioSocket.readyState !== WebSocket.OPEN) {
+      return;
+    }
     entry.ioSocket.send(JSON.stringify({ type: 'resize', cols, rows }));
   }
 
   async dispose(id: string): Promise<void> {
     const entry = this.terminals.get(id);
-    if (!entry) return;
+    if (!entry) {
+      return;
+    }
     entry.disposing = true;
     try {
       if (entry.ioSocket.readyState === WebSocket.OPEN) {
@@ -190,9 +190,7 @@ export class TerminalProxy {
   }
 
   async disposeAllForTab(tabId: string): Promise<void> {
-    const ids = [...this.terminals.values()]
-      .filter((t) => t.tabId === tabId)
-      .map((t) => t.id);
+    const ids = [...this.terminals.values()].filter((t) => t.tabId === tabId).map((t) => t.id);
     await Promise.allSettled(ids.map((id) => this.dispose(id)));
     const rpc = this.tabRpc.get(tabId);
     if (rpc) {
@@ -212,7 +210,9 @@ export class TerminalProxy {
     const tabIds = [...this.tabRpc.keys()];
     for (const tabId of tabIds) {
       const rpc = this.tabRpc.get(tabId);
-      if (!rpc) continue;
+      if (!rpc) {
+        continue;
+      }
       this.tabRpc.delete(tabId);
       this.failPendingRpc(rpc, new ConsoleError('rpc_failed', 'shutting down'));
       try {
@@ -236,11 +236,15 @@ export class TerminalProxy {
     } catch {
       return;
     }
-    if (!isObject(msg)) return;
+    if (!isObject(msg)) {
+      return;
+    }
     const type = msg['type'];
     if (type === 'output') {
       const data = String(msg['data'] ?? '');
-      if (!data) return;
+      if (!data) {
+        return;
+      }
       const decoded = Buffer.from(data, 'base64').toString('utf-8');
       this.deps.sendToWindow('terminal:output', entry.tabId, entry.id, decoded);
       return;
@@ -263,7 +267,9 @@ export class TerminalProxy {
     const existing = this.tabRpc.get(tabId);
     if (existing) {
       await existing.ready;
-      if (existing.socket.readyState === WebSocket.OPEN) return existing;
+      if (existing.socket.readyState === WebSocket.OPEN) {
+        return existing;
+      }
       this.tabRpc.delete(tabId);
     }
 
@@ -283,7 +289,9 @@ export class TerminalProxy {
     socket.on('message', (raw) => this.handleRpcMessage(rpc, raw));
     socket.on('close', () => {
       this.failPendingRpc(rpc, new ConsoleError('rpc_failed', '/ws connection closed'));
-      if (this.tabRpc.get(tabId) === rpc) this.tabRpc.delete(tabId);
+      if (this.tabRpc.get(tabId) === rpc) {
+        this.tabRpc.delete(tabId);
+      }
     });
     socket.on('error', () => {
       // Errors are surfaced via the per-call rejection; the close handler
@@ -295,17 +303,18 @@ export class TerminalProxy {
       await rpc.ready;
     } catch (err) {
       this.tabRpc.delete(tabId);
-      throw new ConsoleError(
-        'rpc_failed',
-        `failed to open /ws to omni serve: ${(err as Error).message ?? err}`
-      );
+      throw new ConsoleError('rpc_failed', `failed to open /ws to omni serve: ${(err as Error).message ?? err}`);
     }
     return rpc;
   }
 
   private async ensureSession(rpc: TabRpc): Promise<string> {
-    if (rpc.sessionId) return rpc.sessionId;
-    if (rpc.sessionReady) return rpc.sessionReady;
+    if (rpc.sessionId) {
+      return rpc.sessionId;
+    }
+    if (rpc.sessionReady) {
+      return rpc.sessionReady;
+    }
     rpc.sessionReady = (async () => {
       const res = await this.rpcCall(rpc, 'server_call', {
         function: 'session.ensure',
@@ -324,11 +333,7 @@ export class TerminalProxy {
     return rpc.sessionReady;
   }
 
-  private rpcCall(
-    rpc: TabRpc,
-    method: string,
-    params: Record<string, unknown>
-  ): Promise<unknown> {
+  private rpcCall(rpc: TabRpc, method: string, params: Record<string, unknown>): Promise<unknown> {
     const id = rpc.nextId++;
     const payload = JSON.stringify({ jsonrpc: '2.0', id, method, params });
     return new Promise<unknown>((resolve, reject) => {
@@ -342,12 +347,7 @@ export class TerminalProxy {
       } catch (err) {
         clearTimeout(timer);
         rpc.pending.delete(id);
-        reject(
-          new ConsoleError(
-            'rpc_failed',
-            `${method} send failed: ${(err as Error).message ?? err}`
-          )
-        );
+        reject(new ConsoleError('rpc_failed', `${method} send failed: ${(err as Error).message ?? err}`));
       }
     });
   }
@@ -359,11 +359,17 @@ export class TerminalProxy {
     } catch {
       return;
     }
-    if (!isObject(msg)) return;
+    if (!isObject(msg)) {
+      return;
+    }
     const id = msg['id'];
-    if (typeof id !== 'number') return;
+    if (typeof id !== 'number') {
+      return;
+    }
     const pending = rpc.pending.get(id);
-    if (!pending) return;
+    if (!pending) {
+      return;
+    }
     rpc.pending.delete(id);
     clearTimeout(pending.timer);
     if ('error' in msg && isObject(msg['error'])) {
@@ -382,11 +388,7 @@ export class TerminalProxy {
     rpc.pending.clear();
   }
 
-  private buildTerminalUrl(
-    rpcWsUrl: string,
-    path: string,
-    params: Record<string, string>
-  ): string {
+  private buildTerminalUrl(rpcWsUrl: string, path: string, params: Record<string, string>): string {
     // rpcWsUrl is like `ws://host:port/ws?token=...`; we keep host, port,
     // and the token query param (the /ws/terminal route validates the
     // same token).
@@ -397,7 +399,9 @@ export class TerminalProxy {
     for (const [k, v] of Object.entries(params)) {
       u.searchParams.set(k, v);
     }
-    if (tokenParam) u.searchParams.set('token', tokenParam);
+    if (tokenParam) {
+      u.searchParams.set('token', tokenParam);
+    }
     return u.toString();
   }
 }

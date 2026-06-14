@@ -1,8 +1,8 @@
-import { CodeIcon, FileTextIcon, GlobeIcon,ImageIcon } from 'lucide-react'
-import React, { useMemo } from 'react'
+import { CodeIcon, FileTextIcon, GlobeIcon, ImageIcon } from 'lucide-react';
+import React, { useMemo } from 'react';
 
-import type { ArtifactItem } from '@/shared/chat-types'
-export type { ArtifactItem } from '@/shared/chat-types'
+import type { ArtifactItem } from '@/shared/chat-types';
+export type { ArtifactItem } from '@/shared/chat-types';
 
 const MODE_ICON: Record<string, React.ComponentType<{ className?: string }>> = {
   markdown: FileTextIcon,
@@ -10,10 +10,10 @@ const MODE_ICON: Record<string, React.ComponentType<{ className?: string }>> = {
   image: ImageIcon,
   pdf: FileTextIcon,
   code: CodeIcon,
-}
+};
 
 function ArtifactRow({ item, onScrollTo }: { item: ArtifactItem; onScrollTo?: (artifactId: string) => void }) {
-  const Icon = MODE_ICON[item.mode || 'markdown'] || FileTextIcon
+  const Icon = MODE_ICON[item.mode || 'markdown'] || FileTextIcon;
   return (
     <button
       className="w-full text-left flex items-center gap-2.5 rounded-md px-3 py-2 text-sm hover:bg-accent transition-colors group"
@@ -22,7 +22,7 @@ function ArtifactRow({ item, onScrollTo }: { item: ArtifactItem; onScrollTo?: (a
       <Icon className="size-4 shrink-0 text-muted-foreground group-hover:text-foreground" />
       <span className="truncate text-foreground">{item.title || 'Artifact'}</span>
     </button>
-  )
+  );
 }
 
 export function ArtifactsPanel({
@@ -31,20 +31,20 @@ export function ArtifactsPanel({
   onScrollTo,
   asOverlay = false,
 }: {
-  artifacts: ArtifactItem[]
-  onClose?: () => void
-  onScrollTo?: (artifactId: string) => void
-  asOverlay?: boolean
+  artifacts: ArtifactItem[];
+  onClose?: () => void;
+  onScrollTo?: (artifactId: string) => void;
+  asOverlay?: boolean;
 }) {
   const items = useMemo(() => {
-    const copy = artifacts.slice()
-    copy.sort((a, b) => (b.updated_at || 0) - (a.updated_at || 0))
-    return copy
-  }, [artifacts])
+    const copy = artifacts.slice();
+    copy.sort((a, b) => (b.updated_at || 0) - (a.updated_at || 0));
+    return copy;
+  }, [artifacts]);
 
   if (!items.length) {
-return null
-}
+    return null;
+  }
 
   const list = (
     <div className="flex-1 overflow-y-auto p-2 space-y-0.5">
@@ -52,7 +52,7 @@ return null
         <ArtifactRow key={a.artifact_id || idx} item={a} onScrollTo={onScrollTo} />
       ))}
     </div>
-  )
+  );
 
   if (asOverlay) {
     return (
@@ -72,7 +72,7 @@ return null
           {list}
         </div>
       </div>
-    )
+    );
   }
 
   return (
@@ -89,5 +89,5 @@ return null
       </div>
       {list}
     </div>
-  )
+  );
 }

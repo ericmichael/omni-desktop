@@ -879,11 +879,11 @@ Completed increments (each commit ships regression-green with `npm test`):
   `project:set-auto-dispatch` IPC handler. Five test sites that
   stubbed `pm.startSupervisor` migrated to stub
   `orch(pm).startSupervisor`; sixteen `internals(pm).validateDispatchPreflight`
-  + five `internals(pm).autoDispatchTick` references migrated to
-  `orch(pm).*`. The `internals()` cast type shrank from 4 methods to
-  2 (kept: `handleClientToolCall`, `ensureSupervisorInfra`).
-  `project-manager.ts` dropped 2102 → 1923 lines (-179). Test count:
-  833 (no behavior change — move only).
+  - five `internals(pm).autoDispatchTick` references migrated to
+    `orch(pm).*`. The `internals()` cast type shrank from 4 methods to
+    2 (kept: `handleClientToolCall`, `ensureSupervisorInfra`).
+    `project-manager.ts` dropped 2102 → 1923 lines (-179). Test count:
+    833 (no behavior change — move only).
 - **C2c.6 — Task map + persistence + boot recovery:** Moved the
   `tasks` Map, `persistTask` / `removePersistedTask` / `getPersistedTasks`
   / `setPersistedTasks` helpers, `restorePersistedTasks` (public),

@@ -35,7 +35,8 @@ export const DEFAULT_COLUMNS: ColumnDef[] = [
         'Ticket is ready to start or intentionally parked.',
         'Ticket has enough title and description for a human to understand the request.',
       ],
-      agentInstructions: 'Do not edit source code in this column. If auto-dispatch starts here, move to the first active non-terminal column before working.',
+      agentInstructions:
+        'Do not edit source code in this column. If auto-dispatch starts here, move to the first active non-terminal column before working.',
       recommendedSkills: [],
     },
   },
@@ -45,17 +46,15 @@ export const DEFAULT_COLUMNS: ColumnDef[] = [
     description: 'Understand the request and produce a decision-complete implementation plan.',
     workflow: {
       purpose: 'Understand the request and produce a decision-complete implementation plan.',
-      entryCriteria: [
-        'Ticket has a title and project assignment.',
-        'Any blocker tickets have been checked.',
-      ],
+      entryCriteria: ['Ticket has a title and project assignment.', 'Any blocker tickets have been checked.'],
       definitionOfDone: [
         'Ticket, project pages, milestone brief, and relevant comments have been read.',
         'Relevant source files and existing patterns have been inspected.',
         'A plan page exists with scope, implementation approach, test strategy, risks, and out-of-scope items.',
         'No source edits were made unless explicitly required to investigate a failing reproduction.',
       ],
-      agentInstructions: 'Activate software-planning for feature, refactor, or spec work. Activate debug if this is a failure investigation and the root cause is not localized. Do not move to Implementation until the plan is decision-complete.',
+      agentInstructions:
+        'Activate software-planning for feature, refactor, or spec work. Activate debug if this is a failure investigation and the root cause is not localized. Do not move to Implementation until the plan is decision-complete.',
       recommendedSkills: ['software-planning', 'debug'],
     },
   },
@@ -76,7 +75,8 @@ export const DEFAULT_COLUMNS: ColumnDef[] = [
         'PR title/body artifacts are current.',
         'No debug prints, stale TODOs, or commented-out code remain.',
       ],
-      agentInstructions: 'Follow AGENTS.md in every source touched. Use worker agents only for independent subtasks with explicit file ownership and acceptance criteria. For bug fixes, prefer red-before-green testing when practical.',
+      agentInstructions:
+        'Follow AGENTS.md in every source touched. Use worker agents only for independent subtasks with explicit file ownership and acceptance criteria. For bug fixes, prefer red-before-green testing when practical.',
       recommendedSkills: ['debug', 'software-planning'],
     },
   },
@@ -91,7 +91,8 @@ export const DEFAULT_COLUMNS: ColumnDef[] = [
         'Human has reviewed the changes, artifacts, and test evidence.',
         'Human decides whether to advance, request changes, or stop.',
       ],
-      agentInstructions: 'This is a gate. Move tickets into this column when ready for human review, then stop. Never advance past this column automatically. Add a ticket comment summarizing completed work, test evidence, known risks, and next recommended action.',
+      agentInstructions:
+        'This is a gate. Move tickets into this column when ready for human review, then stop. Never advance past this column automatically. Add a ticket comment summarizing completed work, test evidence, known risks, and next recommended action.',
       recommendedSkills: [],
     },
   },
@@ -111,7 +112,8 @@ export const DEFAULT_COLUMNS: ColumnDef[] = [
         'CI or local validation status is recorded.',
         'Merge readiness is clear, or blockers are documented.',
       ],
-      agentInstructions: 'Use push/PR-related skills only when explicitly asked or when the project workflow expects PR preparation. Do not merge unless the user or project policy explicitly allows it.',
+      agentInstructions:
+        'Use push/PR-related skills only when explicitly asked or when the project workflow expects PR preparation. Do not merge unless the user or project policy explicitly allows it.',
       recommendedSkills: ['push', 'pull', 'land'],
     },
   },
@@ -125,7 +127,8 @@ export const DEFAULT_COLUMNS: ColumnDef[] = [
         'Work is complete and accepted.',
         'Cleanup has run or been explicitly deferred because worktree changes remain.',
       ],
-      agentInstructions: 'Do not start autopilot in this column. Entering this column stops supervision and cleans up workspace state when safe.',
+      agentInstructions:
+        'Do not start autopilot in this column. Entering this column stops supervision and cleans up workspace state when safe.',
       recommendedSkills: [],
     },
   },
@@ -149,7 +152,9 @@ export const SIMPLE_COLUMNS: ColumnDef[] = [
     gate: true,
     workflow: {
       purpose: 'Human review or approval.',
-      definitionOfDone: ['Human has decided whether the item is complete, needs more detail, or should become source-backed work.'],
+      definitionOfDone: [
+        'Human has decided whether the item is complete, needs more detail, or should become source-backed work.',
+      ],
       recommendedSkills: [],
     },
   },

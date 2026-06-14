@@ -12,7 +12,11 @@ type ProviderOption = {
 
 const PROVIDER_OPTIONS: ProviderOption[] = [
   { value: 'openai', label: 'OpenAI', description: 'GPT-4o, GPT-5, o3 and other OpenAI models' },
-  { value: 'openai-compatible', label: 'OpenAI-Compatible', description: 'Any provider with an OpenAI-compatible API (Ollama, vLLM, etc.)' },
+  {
+    value: 'openai-compatible',
+    label: 'OpenAI-Compatible',
+    description: 'Any provider with an OpenAI-compatible API (Ollama, vLLM, etc.)',
+  },
   { value: 'litellm', label: 'LiteLLM', description: 'Anthropic, Google, Mistral and 100+ providers via LiteLLM' },
 ];
 
@@ -37,13 +41,12 @@ export const OnboardingProviderTypeStep = memo(({ selected, onSelect, onNext, on
     <div className={styles.root}>
       <div className={styles.header}>
         <Body1Strong>Choose a provider</Body1Strong>
-        <Caption1>Omni works with any major model API. Pick where your models live — keys stay on this machine.</Caption1>
+        <Caption1>
+          Omni works with any major model API. Pick where your models live — keys stay on this machine.
+        </Caption1>
       </div>
 
-      <RadioGroup
-        value={selected ?? ''}
-        onChange={(_e, data) => onSelect(data.value as ProviderEntry['type'])}
-      >
+      <RadioGroup value={selected ?? ''} onChange={(_e, data) => onSelect(data.value as ProviderEntry['type'])}>
         {PROVIDER_OPTIONS.map((option) => (
           <Radio
             key={option.value}

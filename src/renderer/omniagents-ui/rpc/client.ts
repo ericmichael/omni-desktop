@@ -8,123 +8,122 @@ import {
   rpcClientMachine,
 } from '@/shared/machines/rpc-client.machine';
 
-type JSONRPCId = number | string
+type JSONRPCId = number | string;
 
 type JSONRPCRequest = {
-  jsonrpc: '2.0'
-  id: JSONRPCId
-  method: string
-  params?: Record<string, unknown>
-}
+  jsonrpc: '2.0';
+  id: JSONRPCId;
+  method: string;
+  params?: Record<string, unknown>;
+};
 
 type JSONRPCResponse = {
-  jsonrpc: '2.0'
-  id: JSONRPCId
-  result?: unknown
-  error?: { code?: number; message: string; data?: unknown }
-}
+  jsonrpc: '2.0';
+  id: JSONRPCId;
+  result?: unknown;
+  error?: { code?: number; message: string; data?: unknown };
+};
 
 type JSONRPCNotification = {
-  jsonrpc: '2.0'
-  method: string
-  params?: Record<string, unknown>
-}
+  jsonrpc: '2.0';
+  method: string;
+  params?: Record<string, unknown>;
+};
 
-export type ServerEvent = JSONRPCNotification
+export type ServerEvent = JSONRPCNotification;
 
-type Listener = (payload: any) => void
+type Listener = (payload: any) => void;
 
 type PendingEntry = {
-  resolve: (v: any) => void
-  reject: (e: Error) => void
-  timer: ReturnType<typeof setTimeout>
-  method: string
-  startedAt: number
-  reqBytes: number
-}
+  resolve: (v: any) => void;
+  reject: (e: Error) => void;
+  timer: ReturnType<typeof setTimeout>;
+  method: string;
+  startedAt: number;
+  reqBytes: number;
+};
 
 function profileEnabled(): boolean {
   try {
-    return typeof localStorage !== 'undefined' && localStorage.getItem('debug:profile') === '1'
+    return typeof localStorage !== 'undefined' && localStorage.getItem('debug:profile') === '1';
   } catch {
-    return false
+    return false;
   }
 }
 
 function profileLog(msg: string): void {
   if (profileEnabled()) {
-
-    console.log(`[profile] ${msg}`)
+    console.log(`[profile] ${msg}`);
   }
 }
 
 export class RPCClient {
-  private ws: WebSocket | null = null
-  private url: string
-  private token?: string
-  private nextId = 0
-  private pending = new Map<JSONRPCId, PendingEntry>()
-  private listeners = new Map<string, Set<Listener>>()
-  private disposed = false
-  private reconnectSub: { unsubscribe(): void } | null = null
-  private connectInFlight: Promise<void> | null = null
-  readonly actor: RPCClientActor
+  private ws: WebSocket | null = null;
+  private url: string;
+  private token?: string;
+  private nextId = 0;
+  private pending = new Map<JSONRPCId, PendingEntry>();
+  private listeners = new Map<string, Set<Listener>>();
+  private disposed = false;
+  private reconnectSub: { unsubscribe(): void } | null = null;
+  private connectInFlight: Promise<void> | null = null;
+  readonly actor: RPCClientActor;
 
   constructor(url: string, token?: string) {
-    this.url = url
-    this.token = token
+    this.url = url;
+    this.token = token;
     this.actor = createActor(rpcClientMachine, {
       input: { url, token },
       inspect: createMachineLogger('rpc', { tags: { url } }),
-    })
-    this.actor.start()
+    });
+    this.actor.start();
 
     // Wire up automatic reconnection: when the machine transitions to
     // `connecting` from `reconnecting`, open a new WebSocket.
     // The machine handles backoff timing — we just need to create the socket.
     this.reconnectSub = this.actor.subscribe((snap) => {
       if (snap.value === 'connecting' && snap.context.reconnectAttempt > 0 && !this.disposed) {
-        this.connect().catch(() => {})
+        this.connect().catch(() => {});
       }
-    })
+    });
   }
 
   /** Send event to the machine only if not disposed. */
   private send(event: import('@/shared/machines/rpc-client.machine').RPCClientEvent): void {
     if (this.disposed) {
-return
-}
-    this.actor.send(event)
+      return;
+    }
+    this.actor.send(event);
   }
 
   /** Current connection state from the machine. */
   get connectionState(): 'disconnected' | 'connecting' | 'connected' | 'reconnecting' {
     if (this.disposed) {
-return 'disconnected'
-}
-    return this.actor.getSnapshot().value as any
+      return 'disconnected';
+    }
+    return this.actor.getSnapshot().value as any;
   }
 
   /** True when the WebSocket is open and ready for calls. */
   get isConnected(): boolean {
-    return this.connectionState === 'connected'
+    return this.connectionState === 'connected';
   }
 
   async connect(): Promise<void> {
     if (this.disposed) {
-throw new Error('RPCClient is disposed')
-}
+      throw new Error('RPCClient is disposed');
+    }
 
     if (this.connectInFlight) {
-      return this.connectInFlight
+      return this.connectInFlight;
     }
 
     // If already connected, noop
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-return
-}
+      return;
+    }
     if (this.ws && this.ws.readyState === WebSocket.CONNECTING) {
-      return
+      return;
     }
 
     // Emit CONNECT only when we're actually leaving `disconnected`. When
@@ -133,11 +132,11 @@ return
     // into `connecting`, so re-emitting CONNECT would land in a state
     // that doesn't list it and the dropped-event detector would warn.
     if (this.actor.getSnapshot().value === 'disconnected') {
-      this.send({ type: 'CONNECT' })
+      this.send({ type: 'CONNECT' });
     }
 
-    const connectPromise = this.connectImpl()
-    this.connectInFlight = connectPromise
+    const connectPromise = this.connectImpl();
+    this.connectInFlight = connectPromise;
     // Swallow the rejection on this bookkeeping chain — without the catch,
     // the promise derived by .finally() is unhandled and every benign
     // "WebSocket replaced" rejection surfaces as a console error even when
@@ -146,160 +145,162 @@ return
       .catch(() => {})
       .finally(() => {
         if (this.connectInFlight === connectPromise) {
-          this.connectInFlight = null
+          this.connectInFlight = null;
         }
-      })
-    return connectPromise
+      });
+    return connectPromise;
   }
 
   private async connectImpl(): Promise<void> {
     if (this.disposed) {
-throw new Error('RPCClient is disposed')
-}
+      throw new Error('RPCClient is disposed');
+    }
 
     // Clean up any previous WebSocket that isn't open (e.g. CLOSING, CLOSED,
     // or still CONNECTING from a previous failed attempt) to avoid leaking
     // sockets through the proxy on each reconnection attempt.
     if (this.ws) {
-      this.ws.onmessage = null
-      this.ws.onclose = null
-      this.ws.onerror = null
+      this.ws.onmessage = null;
+      this.ws.onclose = null;
+      this.ws.onerror = null;
       try {
- this.ws.close()
-} catch {}
-      this.ws = null
+        this.ws.close();
+      } catch {}
+      this.ws = null;
     }
 
-    const wsUrl = this.token ? `${this.url}?token=${encodeURIComponent(this.token)}` : this.url
-    const ws = new WebSocket(wsUrl)
-    this.ws = ws
+    const wsUrl = this.token ? `${this.url}?token=${encodeURIComponent(this.token)}` : this.url;
+    const ws = new WebSocket(wsUrl);
+    this.ws = ws;
 
     await new Promise<void>((resolve, reject) => {
       // Guard: ignore events from stale WebSocket instances (e.g. after disconnect()
       // closes this WS while a new connect() has already started with a different one).
-      const isStale = () => this.ws !== ws
+      const isStale = () => this.ws !== ws;
       const onOpen = () => {
-        cleanup()
+        cleanup();
         if (isStale()) {
-return
-}
-        this.send({ type: 'WS_OPEN' })
-        resolve()
-      }
+          return;
+        }
+        this.send({ type: 'WS_OPEN' });
+        resolve();
+      };
       const onError = () => {
-        cleanup()
+        cleanup();
         if (isStale()) {
- reject(new Error('WebSocket replaced')); return 
-}
-        this.send({ type: 'WS_ERROR', error: 'WebSocket connection error' })
-        reject(new Error('WebSocket error'))
-      }
+          reject(new Error('WebSocket replaced'));
+          return;
+        }
+        this.send({ type: 'WS_ERROR', error: 'WebSocket connection error' });
+        reject(new Error('WebSocket error'));
+      };
       const onClose = () => {
-        cleanup()
+        cleanup();
         if (isStale()) {
- reject(new Error('WebSocket replaced')); return 
-}
-        this.send({ type: 'WS_CLOSE' })
-        reject(new Error('WebSocket closed during connect'))
-      }
+          reject(new Error('WebSocket replaced'));
+          return;
+        }
+        this.send({ type: 'WS_CLOSE' });
+        reject(new Error('WebSocket closed during connect'));
+      };
       const cleanup = () => {
-        ws.removeEventListener('open', onOpen)
-        ws.removeEventListener('error', onError)
-        ws.removeEventListener('close', onClose)
-      }
-      ws.addEventListener('open', onOpen)
-      ws.addEventListener('error', onError)
-      ws.addEventListener('close', onClose)
-    })
+        ws.removeEventListener('open', onOpen);
+        ws.removeEventListener('error', onError);
+        ws.removeEventListener('close', onClose);
+      };
+      ws.addEventListener('open', onOpen);
+      ws.addEventListener('error', onError);
+      ws.addEventListener('close', onClose);
+    });
 
     if (!this.ws) {
-throw new Error('WebSocket disconnected')
-}
+      throw new Error('WebSocket disconnected');
+    }
 
     // Capture the socket reference for stale-check guards on long-lived
     // handlers. If another connect() replaces `this.ws` before these fire,
     // they're events from an abandoned socket and must not be dispatched
     // to the machine — otherwise we end up sending WS_CLOSE to a machine
     // that's already connected via the replacement socket.
-    const attachedWs = this.ws
+    const attachedWs = this.ws;
 
     // Wire up ongoing message handling
     this.ws.onmessage = (ev) => {
       if (this.ws !== attachedWs) {
-return
-}
-      const profile = profileEnabled()
-      const t0 = profile ? performance.now() : 0
-      const rawData = ev.data as string
-      const respBytes = profile && typeof rawData === 'string' ? rawData.length : -1
+        return;
+      }
+      const profile = profileEnabled();
+      const t0 = profile ? performance.now() : 0;
+      const rawData = ev.data as string;
+      const respBytes = profile && typeof rawData === 'string' ? rawData.length : -1;
       try {
-        const msg = JSON.parse(rawData) as JSONRPCResponse | JSONRPCNotification
-        const tParsed = profile ? performance.now() : 0
+        const msg = JSON.parse(rawData) as JSONRPCResponse | JSONRPCNotification;
+        const tParsed = profile ? performance.now() : 0;
         if ('id' in msg) {
-          const pending = this.pending.get(msg.id)
+          const pending = this.pending.get(msg.id);
           if (pending) {
-            clearTimeout(pending.timer)
-            this.pending.delete(msg.id)
-            this.send({ type: 'CALL_SETTLED' })
+            clearTimeout(pending.timer);
+            this.pending.delete(msg.id);
+            this.send({ type: 'CALL_SETTLED' });
             if (profile) {
-              const totalMs = performance.now() - pending.startedAt
+              const totalMs = performance.now() - pending.startedAt;
               profileLog(
                 `rpc.call method=${pending.method} id=${msg.id} ms=${totalMs.toFixed(1)} ` +
-                  `req_bytes=${pending.reqBytes} resp_bytes=${respBytes} parse_ms=${(tParsed - t0).toFixed(1)}`,
-              )
+                  `req_bytes=${pending.reqBytes} resp_bytes=${respBytes} parse_ms=${(tParsed - t0).toFixed(1)}`
+              );
             }
             if ((msg as JSONRPCResponse).error) {
-              pending.reject(new Error((msg as JSONRPCResponse).error!.message))
+              pending.reject(new Error((msg as JSONRPCResponse).error!.message));
             } else {
-              pending.resolve((msg as JSONRPCResponse).result)
+              pending.resolve((msg as JSONRPCResponse).result);
             }
             if (profile) {
-              profileLog(`rpc.settle method=${pending.method} dispatch_ms=${(performance.now() - tParsed).toFixed(1)}`)
+              profileLog(`rpc.settle method=${pending.method} dispatch_ms=${(performance.now() - tParsed).toFixed(1)}`);
             }
           }
         } else {
-          const evt = msg as JSONRPCNotification
-          this.emitEvent(evt.method, evt.params)
+          const evt = msg as JSONRPCNotification;
+          this.emitEvent(evt.method, evt.params);
           if (profile) {
             profileLog(
               `rpc.event method=${evt.method} resp_bytes=${respBytes} ` +
-                `parse_ms=${(tParsed - t0).toFixed(1)} dispatch_ms=${(performance.now() - tParsed).toFixed(1)}`,
-            )
+                `parse_ms=${(tParsed - t0).toFixed(1)} dispatch_ms=${(performance.now() - tParsed).toFixed(1)}`
+            );
           }
         }
       } catch (e) {
-        console.error('RPC parse error', e)
+        console.error('RPC parse error', e);
       }
-    }
+    };
 
     // Handle unexpected close — reject all pending, notify machine.
     // Guard against stale sockets from a prior connect() still firing.
     this.ws.onclose = () => {
       if (this.ws !== attachedWs) {
-return
-}
-      this.rejectAllPending('WebSocket connection closed')
-      this.ws = null
-      this.send({ type: 'WS_CLOSE' })
-    }
+        return;
+      }
+      this.rejectAllPending('WebSocket connection closed');
+      this.ws = null;
+      this.send({ type: 'WS_CLOSE' });
+    };
 
     this.ws.onerror = () => {
       // onclose will fire after onerror
-    }
+    };
   }
 
   disconnect(): void {
-    this.rejectAllPending('Client disconnected')
-    this.connectInFlight = null
+    this.rejectAllPending('Client disconnected');
+    this.connectInFlight = null;
     if (this.ws) {
       // Clear handlers before close to prevent stale onclose from firing
-      this.ws.onmessage = null
-      this.ws.onclose = null
-      this.ws.onerror = null
-      this.ws.close()
-      this.ws = null
+      this.ws.onmessage = null;
+      this.ws.onclose = null;
+      this.ws.onerror = null;
+      this.ws.close();
+      this.ws = null;
     }
-    this.send({ type: 'DISCONNECT' })
+    this.send({ type: 'DISCONNECT' });
   }
 
   /**
@@ -309,89 +310,89 @@ return
    */
   async connectAndWait(timeoutMs = 60_000): Promise<void> {
     if (this.disposed) {
-throw new Error('RPCClient is disposed')
-}
+      throw new Error('RPCClient is disposed');
+    }
     if (this.isConnected) {
-return
-}
+      return;
+    }
 
     // Kick off the initial connection attempt
-    this.connect().catch(() => {})
+    this.connect().catch(() => {});
 
     return new Promise<void>((resolve, reject) => {
       const timeout = setTimeout(() => {
-        sub.unsubscribe()
-        reject(new Error('Connection timed out'))
-      }, timeoutMs)
+        sub.unsubscribe();
+        reject(new Error('Connection timed out'));
+      }, timeoutMs);
 
       const sub = this.actor.subscribe((snap) => {
         if (snap.value === 'connected') {
-          clearTimeout(timeout)
-          sub.unsubscribe()
-          resolve()
+          clearTimeout(timeout);
+          sub.unsubscribe();
+          resolve();
         } else if (snap.value === 'disconnected' && snap.context.error) {
           // Machine gave up (max reconnect attempts reached)
-          clearTimeout(timeout)
-          sub.unsubscribe()
-          reject(new Error(snap.context.error))
+          clearTimeout(timeout);
+          sub.unsubscribe();
+          reject(new Error(snap.context.error));
         }
-      })
-    })
+      });
+    });
   }
 
   /** Stop the state machine actor. Call when disposing the client permanently. */
   dispose(): void {
-    this.disposed = true
-    this.reconnectSub?.unsubscribe()
-    this.reconnectSub = null
-    this.connectInFlight = null
-    this.disconnect()
-    this.actor.stop()
+    this.disposed = true;
+    this.reconnectSub?.unsubscribe();
+    this.reconnectSub = null;
+    this.connectInFlight = null;
+    this.disconnect();
+    this.actor.stop();
   }
 
   on(event: string, handler: Listener): () => void {
     if (!this.listeners.has(event)) {
-this.listeners.set(event, new Set())
-}
-    const set = this.listeners.get(event)!
-    set.add(handler)
-    return () => set.delete(handler)
+      this.listeners.set(event, new Set());
+    }
+    const set = this.listeners.get(event)!;
+    set.add(handler);
+    return () => set.delete(handler);
   }
 
   private emitEvent(event: string, payload: any): void {
-    const set = this.listeners.get(event)
+    const set = this.listeners.get(event);
     if (!set) {
-return
-}
+      return;
+    }
     for (const fn of set) {
       try {
- fn(payload) 
-} catch {}
+        fn(payload);
+      } catch {}
     }
   }
 
   private async call<T = any>(method: string, params?: Record<string, unknown>): Promise<T> {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      throw new Error('WebSocket not connected')
+      throw new Error('WebSocket not connected');
     }
     if (this.pending.size >= MAX_PENDING_CALLS) {
-      throw new Error(`RPC pending queue full (max ${MAX_PENDING_CALLS})`)
+      throw new Error(`RPC pending queue full (max ${MAX_PENDING_CALLS})`);
     }
 
-    const id = ++this.nextId
-    const req: JSONRPCRequest = { jsonrpc: '2.0', id, method, params }
-    const serialized = JSON.stringify(req)
-    const startedAt = performance.now()
+    const id = ++this.nextId;
+    const req: JSONRPCRequest = { jsonrpc: '2.0', id, method, params };
+    const serialized = JSON.stringify(req);
+    const startedAt = performance.now();
 
     const p = new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
         if (this.pending.has(id)) {
-          this.pending.delete(id)
-          this.send({ type: 'CALL_SETTLED' })
-          profileLog(`rpc.timeout method=${method} id=${id} ms=${RPC_CALL_TIMEOUT_MS}`)
-          reject(new Error(`RPC call '${method}' timed out after ${RPC_CALL_TIMEOUT_MS}ms`))
+          this.pending.delete(id);
+          this.send({ type: 'CALL_SETTLED' });
+          profileLog(`rpc.timeout method=${method} id=${id} ms=${RPC_CALL_TIMEOUT_MS}`);
+          reject(new Error(`RPC call '${method}' timed out after ${RPC_CALL_TIMEOUT_MS}ms`));
         }
-      }, RPC_CALL_TIMEOUT_MS)
+      }, RPC_CALL_TIMEOUT_MS);
 
       this.pending.set(id, {
         resolve: resolve as any,
@@ -400,26 +401,26 @@ return
         method,
         startedAt,
         reqBytes: serialized.length,
-      })
-      this.send({ type: 'CALL_STARTED' })
-    })
+      });
+      this.send({ type: 'CALL_STARTED' });
+    });
 
-    this.ws.send(serialized)
-    return p
+    this.ws.send(serialized);
+    return p;
   }
 
   private rejectAllPending(reason: string): void {
     for (const [id, entry] of this.pending) {
-      clearTimeout(entry.timer)
-      entry.reject(new Error(reason))
+      clearTimeout(entry.timer);
+      entry.reject(new Error(reason));
     }
-    this.pending.clear()
+    this.pending.clear();
     // Reset pending count in machine
-    const snapshot = this.actor.getSnapshot()
+    const snapshot = this.actor.getSnapshot();
     if (snapshot.context.pendingCount > 0) {
       // Send enough CALL_SETTLED events to zero it out
       for (let i = 0; i < snapshot.context.pendingCount; i++) {
-        this.send({ type: 'CALL_SETTLED' })
+        this.send({ type: 'CALL_SETTLED' });
       }
     }
   }
@@ -428,52 +429,71 @@ return
   // RPC methods — unchanged public API
   // -----------------------------------------------------------------------
 
-  async startRun(prompt: string, sessionId?: string, variables?: Record<string, unknown>, content?: unknown): Promise<{ run_id: string; session_id: string }> {
-    const params: Record<string, unknown> = { prompt }
+  async startRun(
+    prompt: string,
+    sessionId?: string,
+    variables?: Record<string, unknown>,
+    content?: unknown
+  ): Promise<{ run_id: string; session_id: string }> {
+    const params: Record<string, unknown> = { prompt };
     if (sessionId) {
-params.session_id = sessionId
-}
+      params.session_id = sessionId;
+    }
     if (variables) {
       // Extract safe_tool_overrides — it's a top-level start_run param, not a variable
-      const { safe_tool_overrides, ...rest } = variables
+      const { safe_tool_overrides, ...rest } = variables;
       if (Object.keys(rest).length > 0) {
-params.variables = rest
-}
+        params.variables = rest;
+      }
       if (safe_tool_overrides) {
-params.safe_tool_overrides = safe_tool_overrides
-}
+        params.safe_tool_overrides = safe_tool_overrides;
+      }
     }
     if (content != null) {
-params.content = content
-}
-    return this.call('start_run', params)
+      params.content = content;
+    }
+    return this.call('start_run', params);
   }
 
   async stopRun(runId: string): Promise<void> {
-    await this.call('stop_run', { run_id: runId })
+    await this.call('stop_run', { run_id: runId });
   }
 
   async getSessionHistory(sessionId: string): Promise<Array<{ role: string; content: unknown; timestamp: string }>> {
-    return this.call('get_session_history', { session_id: sessionId })
+    return this.call('get_session_history', { session_id: sessionId });
   }
 
-  async listSessions(): Promise<Array<{ id: string; created_at: string; archived: boolean; message_count: number; first_message?: unknown; last_message?: unknown }>> {
-    return this.call('list_sessions', {})
+  async listSessions(): Promise<
+    Array<{
+      id: string;
+      created_at: string;
+      archived: boolean;
+      message_count: number;
+      first_message?: unknown;
+      last_message?: unknown;
+    }>
+  > {
+    return this.call('list_sessions', {});
   }
 
   async deleteSession(sessionId: string): Promise<boolean> {
-    return this.call('delete_session', { session_id: sessionId })
+    return this.call('delete_session', { session_id: sessionId });
   }
 
-  async clientResponse(requestId: string, ok: boolean, result?: Record<string, unknown>, error?: Record<string, unknown>): Promise<void> {
-    const params: Record<string, unknown> = { request_id: requestId, ok }
+  async clientResponse(
+    requestId: string,
+    ok: boolean,
+    result?: Record<string, unknown>,
+    error?: Record<string, unknown>
+  ): Promise<void> {
+    const params: Record<string, unknown> = { request_id: requestId, ok };
     if (result) {
-params.result = result
-}
+      params.result = result;
+    }
     if (error) {
-params.error = error
-}
-    await this.call('client_response', params)
+      params.error = error;
+    }
+    await this.call('client_response', params);
   }
 
   /**
@@ -487,16 +507,16 @@ params.error = error
     callId: string,
     decision: 'approve' | 'reject',
     alwaysApprove: boolean = false,
-    rejectionMessage?: string,
+    rejectionMessage?: string
   ): Promise<boolean> {
-    const params: Record<string, unknown> = { call_id: callId, decision }
+    const params: Record<string, unknown> = { call_id: callId, decision };
     if (alwaysApprove) {
-params.always_approve = true
-}
+      params.always_approve = true;
+    }
     if (rejectionMessage) {
-params.rejection_message = rejectionMessage
-}
-    return this.call<boolean>('tool_approval_response', params)
+      params.rejection_message = rejectionMessage;
+    }
+    return this.call<boolean>('tool_approval_response', params);
   }
 
   /**
@@ -508,28 +528,35 @@ params.rejection_message = rejectionMessage
   async mcpApprovalResponse(
     requestId: string,
     decision: 'approve' | 'reject',
-    rejectionMessage?: string,
+    rejectionMessage?: string
   ): Promise<boolean> {
-    const params: Record<string, unknown> = { request_id: requestId, decision }
+    const params: Record<string, unknown> = { request_id: requestId, decision };
     if (rejectionMessage) {
-params.rejection_message = rejectionMessage
-}
-    return this.call<boolean>('mcp_approval_response', params)
+      params.rejection_message = rejectionMessage;
+    }
+    return this.call<boolean>('mcp_approval_response', params);
   }
 
-  async listServerFunctions(): Promise<Array<{ name: string; description?: string; params_schema?: Record<string, unknown>; result_schema?: Record<string, unknown> }>> {
-    return this.call('list_server_functions', {})
+  async listServerFunctions(): Promise<
+    Array<{
+      name: string;
+      description?: string;
+      params_schema?: Record<string, unknown>;
+      result_schema?: Record<string, unknown>;
+    }>
+  > {
+    return this.call('list_server_functions', {});
   }
 
   async serverCall(func: string, args?: Record<string, unknown>, sessionId?: string): Promise<Record<string, unknown>> {
-    const params: Record<string, unknown> = { function: func }
+    const params: Record<string, unknown> = { function: func };
     if (args) {
-params.args = args
-}
+      params.args = args;
+    }
     if (sessionId) {
-params.session_id = sessionId
-}
-    return this.call('server_call', params)
+      params.session_id = sessionId;
+    }
+    return this.call('server_call', params);
   }
 
   // MCP Apps host helpers. These hit omniagents' ``mcp.*`` server
@@ -537,7 +564,10 @@ params.session_id = sessionId
   // (see MessageList.tsx) to fetch tool metadata, read UI resources,
   // and route postMessage actions back to the originating server.
 
-  async mcpListTools(serverName: string, sessionId?: string): Promise<{
+  async mcpListTools(
+    serverName: string,
+    sessionId?: string
+  ): Promise<{
     server_name: string;
     tools: Array<Record<string, unknown>>;
     next_cursor?: string;
@@ -546,7 +576,11 @@ params.session_id = sessionId
     return res as { server_name: string; tools: Array<Record<string, unknown>>; next_cursor?: string };
   }
 
-  async mcpReadResource(serverName: string, uri: string, sessionId?: string): Promise<{
+  async mcpReadResource(
+    serverName: string,
+    uri: string,
+    sessionId?: string
+  ): Promise<{
     server_name: string;
     uri: string;
     contents: Array<Record<string, unknown>>;
@@ -564,22 +598,29 @@ params.session_id = sessionId
     serverName: string,
     toolName: string,
     args?: Record<string, unknown>,
-    sessionId?: string,
+    sessionId?: string
   ): Promise<{ server_name: string; tool_name: string; result: Record<string, unknown> }> {
     const res = await this.serverCall(
       'mcp.call_tool',
       { server_name: serverName, tool_name: toolName, arguments: args ?? {} },
-      sessionId,
+      sessionId
     );
     return res as { server_name: string; tool_name: string; result: Record<string, unknown> };
   }
 
   async clientFunctions(version: number, functions: Array<{ name: string; description?: string }>): Promise<void> {
-    await this.call('client_functions', { version, functions })
+    await this.call('client_functions', { version, functions });
   }
 
-  async getAgentInfo(): Promise<{ name?: string; header_title?: string; page_title?: string; welcome_text?: string; page_title_suffix?: string; theme_color?: string }> {
-    return this.call('get_agent_info', {})
+  async getAgentInfo(): Promise<{
+    name?: string;
+    header_title?: string;
+    page_title?: string;
+    welcome_text?: string;
+    page_title_suffix?: string;
+    theme_color?: string;
+  }> {
+    return this.call('get_agent_info', {});
   }
 
   // ---------------------------------------------------------------------
@@ -596,43 +637,43 @@ params.session_id = sessionId
     sessionId: string,
     content: string,
     opts?: {
-      role?: string
-      triggerRun?: boolean
-      variables?: Record<string, unknown>
-      safeToolOverrides?: Record<string, unknown>
-      source?: string
-    },
+      role?: string;
+      triggerRun?: boolean;
+      variables?: Record<string, unknown>;
+      safeToolOverrides?: Record<string, unknown>;
+      source?: string;
+    }
   ): Promise<{ ok: boolean; id?: string; depth?: number; reason?: string; session_id?: string; enqueued_at?: number }> {
-    const params: Record<string, unknown> = { session_id: sessionId, content }
+    const params: Record<string, unknown> = { session_id: sessionId, content };
     if (opts?.role) {
-params.role = opts.role
-}
+      params.role = opts.role;
+    }
     if (opts?.triggerRun) {
-params.trigger_run = true
-}
+      params.trigger_run = true;
+    }
     if (opts?.variables) {
-params.variables = opts.variables
-}
+      params.variables = opts.variables;
+    }
     if (opts?.safeToolOverrides) {
-params.safe_tool_overrides = opts.safeToolOverrides
-}
+      params.safe_tool_overrides = opts.safeToolOverrides;
+    }
     if (opts?.source) {
-params.source = opts.source
-}
-    return this.call('enqueue_message', params)
+      params.source = opts.source;
+    }
+    return this.call('enqueue_message', params);
   }
 
   /** Snapshot of the queue. Used to seed local state on session-switch / reconnect. */
   async listQueue(sessionId: string): Promise<{ session_id: string; depth: number; items: QueuedMessage[] }> {
-    return this.call('list_queue', { session_id: sessionId })
+    return this.call('list_queue', { session_id: sessionId });
   }
 
   /** Remove an item by id. Returns ``not_found`` if it has already been popped. */
   async cancelQueuedMessage(
     sessionId: string,
-    itemId: string,
+    itemId: string
   ): Promise<{ ok: boolean; id?: string; depth?: number; reason?: string }> {
-    return this.call('cancel_queued_message', { session_id: sessionId, item_id: itemId })
+    return this.call('cancel_queued_message', { session_id: sessionId, item_id: itemId });
   }
 }
 
@@ -641,19 +682,19 @@ params.source = opts.source
  * notification — matches ``QueuedItem.to_dict()`` on the server.
  */
 export type QueuedMessage = {
-  id: string
-  content: string
-  role: string
-  trigger_run: boolean
-  variables: Record<string, unknown> | null
-  safe_tool_overrides: Record<string, unknown> | null
-  source: string | null
-  enqueued_at: number
-}
+  id: string;
+  content: string;
+  role: string;
+  trigger_run: boolean;
+  variables: Record<string, unknown> | null;
+  safe_tool_overrides: Record<string, unknown> | null;
+  source: string | null;
+  enqueued_at: number;
+};
 
 /** Payload of the ``queue_changed`` server notification. */
 export type QueueChangedPayload = {
-  session_id: string
-  depth: number
-  items: QueuedMessage[]
-}
+  session_id: string;
+  depth: number;
+  items: QueuedMessage[];
+};

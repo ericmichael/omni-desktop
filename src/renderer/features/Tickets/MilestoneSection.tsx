@@ -1,4 +1,4 @@
-import { makeStyles, shorthands,tokens } from '@fluentui/react-components';
+import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
 import {
   Add20Regular,
   ArchiveRegular,
@@ -215,9 +215,7 @@ const MilestoneRow = memo(({ milestone, isSelected, isExpanded, progress, onSele
         </span>
         <div className={styles.titleArea}>
           <span className={styles.titleText}>{milestone.title}</span>
-          {!isExpanded && milestone.description && (
-            <span className={styles.descText}>{milestone.description}</span>
-          )}
+          {!isExpanded && milestone.description && <span className={styles.descText}>{milestone.description}</span>}
         </div>
         {milestone.branch && (
           <span className={styles.branchBadge}>
@@ -285,8 +283,8 @@ export const MilestoneSection = memo(({ projectId }: { projectId: ProjectId }) =
           const order = { active: 0, completed: 1, archived: 2 };
           const diff = order[a.status] - order[b.status];
           if (diff !== 0) {
-return diff;
-}
+            return diff;
+          }
           return a.createdAt - b.createdAt;
         }),
     [milestones, projectId]
@@ -310,12 +308,9 @@ return diff;
     [activeMilestoneId]
   );
 
-  const handleToggle = useCallback(
-    (id: MilestoneId) => {
-      setExpandedId((prev) => (prev === id ? null : id));
-    },
-    []
-  );
+  const handleToggle = useCallback((id: MilestoneId) => {
+    setExpandedId((prev) => (prev === id ? null : id));
+  }, []);
 
   const handleCreate = useCallback(async () => {
     const title = newTitle.trim();
@@ -359,12 +354,7 @@ return diff;
             Show all
           </Button>
         )}
-        <IconButton
-          aria-label="New milestone"
-          icon={<Add20Regular />}
-          size="sm"
-          onClick={() => setCreating(true)}
-        />
+        <IconButton aria-label="New milestone" icon={<Add20Regular />} size="sm" onClick={() => setCreating(true)} />
       </div>
 
       {creating && (

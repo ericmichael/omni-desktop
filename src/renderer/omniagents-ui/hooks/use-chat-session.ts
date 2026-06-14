@@ -7,16 +7,11 @@
 import { useActorRef, useSelector } from '@xstate/react';
 import { useCallback, useEffect } from 'react';
 
-import { uuidv4 } from '@/lib/uuid';
-
 import { rehydrateHistory } from '@/lib/rehydrate-history';
+import { uuidv4 } from '@/lib/uuid';
 import type { RPCClient } from '@/renderer/omniagents-ui/rpc/client';
 import type { Attachment, MessageItem } from '@/shared/chat-types';
-import {
-  chatSessionMachine,
-  type ChatSessionPhase,
-  isThinking,
-} from '@/shared/machines/chat-session.machine';
+import { chatSessionMachine, type ChatSessionPhase, isThinking } from '@/shared/machines/chat-session.machine';
 import { createMachineLogger } from '@/shared/machines/machine-logger';
 
 // Tools whose user-visible side-effect is painted entirely by client-
@@ -60,8 +55,8 @@ export function useChatSession(client: RPCClient) {
       client.on('message_output', (p: any) => {
         const content = String(p?.content ?? '');
         if (!content) {
-return;
-}
+          return;
+        }
         actor.send({
           type: 'MESSAGE_OUTPUT',
           content,
@@ -214,8 +209,8 @@ return;
       client.on('tool_approval_requested', (p: any) => {
         const call_id = String(p?.call_id ?? '');
         if (!call_id) {
-return;
-}
+          return;
+        }
         actor.send({
           type: 'REQUEST_APPROVAL',
           request_id: call_id,
@@ -241,8 +236,8 @@ return;
       client.on('mcp_approval_requested', (p: any) => {
         const request_id = String(p?.request_id ?? '');
         if (!request_id) {
-return;
-}
+          return;
+        }
         actor.send({
           type: 'REQUEST_APPROVAL',
           request_id,
@@ -290,14 +285,10 @@ return;
    * to the session via the prior loadSession() call.
    */
   const submit = useCallback(
-    (
-      text: string,
-      attachments?: Attachment[],
-      stagedContext?: ReadonlyArray<{ source: string; text: string }>,
-    ) => {
+    (text: string, attachments?: Attachment[], stagedContext?: ReadonlyArray<{ source: string; text: string }>) => {
       actor.send({ type: 'SUBMIT', text, attachments, stagedContext });
     },
-    [actor],
+    [actor]
   );
 
   /** Report that client.startRun() failed. */
@@ -305,7 +296,7 @@ return;
     (error: string) => {
       actor.send({ type: 'SUBMIT_ERROR', error });
     },
-    [actor],
+    [actor]
   );
 
   /** Send STOP to the machine. Caller is responsible for calling client.stopRun(). */
@@ -318,7 +309,7 @@ return;
     (id: string) => {
       actor.send({ type: 'SELECT_SESSION', id });
     },
-    [actor],
+    [actor]
   );
 
   /** Report that history was loaded for the selected session. */
@@ -326,7 +317,7 @@ return;
     (items: any[]) => {
       actor.send({ type: 'HISTORY_LOADED', items });
     },
-    [actor],
+    [actor]
   );
 
   /** Report that history loading failed. */
@@ -334,7 +325,7 @@ return;
     (error: string) => {
       actor.send({ type: 'HISTORY_ERROR', error });
     },
-    [actor],
+    [actor]
   );
 
   /** Start a new session (clears state, sets new sessionId). */
@@ -342,7 +333,7 @@ return;
     (sessionId: string) => {
       actor.send({ type: 'NEW_SESSION', sessionId });
     },
-    [actor],
+    [actor]
   );
 
   /** Respond to a tool approval request. Caller is responsible for calling client.clientResponse(). */
@@ -350,16 +341,15 @@ return;
     (request_id: string, value: 'yes' | 'always' | 'no') => {
       actor.send({ type: 'APPROVAL_DECIDED', request_id, value });
     },
-    [actor],
+    [actor]
   );
-
 
   /** Append an assistant response message (e.g. slash command result). */
   const appendResponse = useCallback(
     (content: string) => {
       actor.send({ type: 'APPEND_RESPONSE', content });
     },
-    [actor],
+    [actor]
   );
 
   /** Add or update an inline artifact in the conversation stream. */
@@ -367,7 +357,7 @@ return;
     (args: { artifact_id?: string; title: string; content: string; mode?: string; session_id?: string }) => {
       actor.send({ type: 'ADD_ARTIFACT', ...args });
     },
-    [actor],
+    [actor]
   );
 
   /** Set session ID without resetting state (e.g. external session assignment). */
@@ -375,7 +365,7 @@ return;
     (sessionId: string) => {
       actor.send({ type: 'SET_SESSION_ID', sessionId });
     },
-    [actor],
+    [actor]
   );
 
   /**
@@ -388,7 +378,7 @@ return;
     (source: string, text: string) => {
       actor.send({ type: 'STAGE_CONTEXT', source, text });
     },
-    [actor],
+    [actor]
   );
 
   /** Drop all staged context entries. Called automatically on submit. */
@@ -420,8 +410,7 @@ return;
         return newId;
       }
       actor.send({ type: 'SELECT_SESSION', id });
-      const profile =
-        typeof localStorage !== 'undefined' && localStorage.getItem('debug:profile') === '1';
+      const profile = typeof localStorage !== 'undefined' && localStorage.getItem('debug:profile') === '1';
       try {
         const t0 = profile ? performance.now() : 0;
         const raw = await client.getSessionHistory(id);
@@ -434,7 +423,7 @@ return;
           console.log(
             `[profile] loadSession session=${id} fetch_ms=${(tFetched - t0).toFixed(1)} ` +
               `rehydrate_ms=${(tEnd - tFetched).toFixed(1)} total_ms=${(tEnd - t0).toFixed(1)} ` +
-              `raw_items=${rawLen} rehydrated_items=${msgs.length}`,
+              `raw_items=${rawLen} rehydrated_items=${msgs.length}`
           );
         }
         actor.send({ type: 'HISTORY_LOADED', items: msgs });
@@ -443,7 +432,7 @@ return;
       }
       return id;
     },
-    [actor, client],
+    [actor, client]
   );
 
   return {

@@ -1,12 +1,12 @@
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react';
 
-import { useRPCClient } from '@/renderer/omniagents-ui/rpc-context'
+import { useRPCClient } from '@/renderer/omniagents-ui/rpc-context';
 
 type DirEntry = {
-  name: string
-  path: string
-  is_dir: boolean
-}
+  name: string;
+  path: string;
+  is_dir: boolean;
+};
 
 export function WorkspacePicker({
   sessionId,
@@ -14,47 +14,54 @@ export function WorkspacePicker({
   onSelect,
   onClose,
 }: {
-  sessionId?: string
-  initialPath?: string
-  onSelect: (path: string) => void
-  onClose: () => void
+  sessionId?: string;
+  initialPath?: string;
+  onSelect: (path: string) => void;
+  onClose: () => void;
 }) {
-  const client = useRPCClient()
-  const [currentPath, setCurrentPath] = useState<string | null>(null)
-  const [parentPath, setParentPath] = useState<string | null>(null)
-  const [entries, setEntries] = useState<DirEntry[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [manualInput, setManualInput] = useState('')
-  const [editingPath, setEditingPath] = useState(false)
+  const client = useRPCClient();
+  const [currentPath, setCurrentPath] = useState<string | null>(null);
+  const [parentPath, setParentPath] = useState<string | null>(null);
+  const [entries, setEntries] = useState<DirEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [manualInput, setManualInput] = useState('');
+  const [editingPath, setEditingPath] = useState(false);
 
-  const load = useCallback(async (path?: string | null) => {
-    setLoading(true)
-    setError(null)
-    try {
-      const res = await client.serverCall('fs_list_dir', {
-        path: path || undefined,
-        include_files: false,
-        ignore_hidden: true,
-      }, sessionId) as any
-      setCurrentPath(res.path || null)
-      setParentPath(res.parent || null)
-      setManualInput(res.path || '')
-      const list: DirEntry[] = []
-      if (Array.isArray(res.entries)) {
-        for (const e of res.entries) {
-          if (e && typeof e === 'object') {
-            list.push({ name: e.name, path: e.path, is_dir: !!e.is_dir })
+  const load = useCallback(
+    async (path?: string | null) => {
+      setLoading(true);
+      setError(null);
+      try {
+        const res = (await client.serverCall(
+          'fs_list_dir',
+          {
+            path: path || undefined,
+            include_files: false,
+            ignore_hidden: true,
+          },
+          sessionId
+        )) as any;
+        setCurrentPath(res.path || null);
+        setParentPath(res.parent || null);
+        setManualInput(res.path || '');
+        const list: DirEntry[] = [];
+        if (Array.isArray(res.entries)) {
+          for (const e of res.entries) {
+            if (e && typeof e === 'object') {
+              list.push({ name: e.name, path: e.path, is_dir: !!e.is_dir });
+            }
           }
         }
+        setEntries(list);
+      } catch (e) {
+        setError(String((e as Error)?.message || e));
+      } finally {
+        setLoading(false);
       }
-      setEntries(list)
-    } catch (e) {
-      setError(String((e as Error)?.message || e))
-    } finally {
-      setLoading(false)
-    }
-  }, [client, sessionId])
+    },
+    [client, sessionId]
+  );
 
   useEffect(() => {
     (async () => {
@@ -63,31 +70,31 @@ export function WorkspacePicker({
       // server. This is authoritative over ``initialPath``, which may carry a
       // host project path (store.workspaceDir) that doesn't exist inside a
       // container and would make the (sandbox-aware) lister fail.
-      let start: string | undefined
+      let start: string | undefined;
       try {
-        const res = await client.serverCall('fs_get_workspace_root', {}, sessionId) as any
-        start = res?.path
+        const res = (await client.serverCall('fs_get_workspace_root', {}, sessionId)) as any;
+        start = res?.path;
       } catch {}
       if (!start) {
-        start = initialPath
+        start = initialPath;
       }
       if (!start) {
         try {
-          const res = await client.serverCall('fs_get_home', {}, sessionId) as any
-          start = res?.path
+          const res = (await client.serverCall('fs_get_home', {}, sessionId)) as any;
+          start = res?.path;
         } catch {}
       }
-      await load(start)
-    })()
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+      await load(start);
+    })();
+  }, []);
 
   const handleManualGo = useCallback(() => {
-    const trimmed = manualInput.trim()
+    const trimmed = manualInput.trim();
     if (trimmed) {
-      load(trimmed)
-      setEditingPath(false)
+      load(trimmed);
+      setEditingPath(false);
     }
-  }, [manualInput, load])
+  }, [manualInput, load]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/70" onClick={onClose}>
@@ -99,12 +106,16 @@ export function WorkspacePicker({
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-bgCardAlt">
           <h2 className="text-sm font-semibold text-textHeading">Choose Workspace</h2>
-          <button
-            onClick={onClose}
-            className="text-textSubtle hover:text-textHeading p-1 rounded"
-            aria-label="Close"
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+          <button onClick={onClose} className="text-textSubtle hover:text-textHeading p-1 rounded" aria-label="Close">
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+            >
               <path d="M18 6L6 18M6 6l12 12" />
             </svg>
           </button>
@@ -119,24 +130,41 @@ export function WorkspacePicker({
             aria-label="Go up"
             title="Parent directory"
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+            >
               <path d="M12 19V5M5 12l7-7 7 7" />
             </svg>
           </button>
           <button
             onClick={async () => {
               try {
-                const res = await client.serverCall('fs_get_home', {}, sessionId) as any
+                const res = (await client.serverCall('fs_get_home', {}, sessionId)) as any;
                 if (res?.path) {
-load(res.path)
-}
+                  load(res.path);
+                }
               } catch {}
             }}
             className="flex-shrink-0 text-textSubtle hover:text-textHeading p-1 rounded"
             aria-label="Home"
             title="Home directory"
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
               <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
               <polyline points="9 22 9 12 15 12 15 22" />
             </svg>
@@ -145,8 +173,9 @@ load(res.path)
             <form
               className="flex-1 flex items-center gap-1"
               onSubmit={(e) => {
- e.preventDefault(); handleManualGo() 
-}}
+                e.preventDefault();
+                handleManualGo();
+              }}
             >
               <input
                 type="text"
@@ -154,10 +183,10 @@ load(res.path)
                 onChange={(e) => setManualInput(e.target.value)}
                 onBlur={() => setEditingPath(false)}
                 onKeyDown={(e) => {
- if (e.key === 'Escape') {
-setEditingPath(false)
-} 
-}}
+                  if (e.key === 'Escape') {
+                    setEditingPath(false);
+                  }
+                }}
                 autoFocus
                 className="flex-1 bg-bgCard text-textHeading text-xs rounded px-2 py-1 border border-bgCardAlt outline-none focus:border-brand"
               />
@@ -191,7 +220,13 @@ setEditingPath(false)
                   onClick={() => load(entry.path)}
                   className="w-full flex items-center gap-3 px-4 py-2 text-left hover:bg-bgCard/50 transition-colors"
                 >
-                  <svg width="16" height="16" viewBox="0 0 24 24" className="flex-shrink-0 text-brand" fill="currentColor">
+                  <svg
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    className="flex-shrink-0 text-brand"
+                    fill="currentColor"
+                  >
                     <path d="M2 6a2 2 0 012-2h5l2 2h9a2 2 0 012 2v10a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" />
                   </svg>
                   <span className="text-sm text-textHeading truncate">{entry.name}</span>
@@ -219,5 +254,5 @@ setEditingPath(false)
         </div>
       </div>
     </div>
-  )
+  );
 }

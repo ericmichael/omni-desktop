@@ -63,14 +63,23 @@ export function parseFrontmatter(content: string): SkillFrontmatter | null {
   return {
     name,
     description,
-    version: typeof values.version === 'string' ? values.version : typeof values.version === 'number' ? String(values.version) : undefined,
+    version:
+      typeof values.version === 'string'
+        ? values.version
+        : typeof values.version === 'number'
+          ? String(values.version)
+          : undefined,
     author: typeof values.author === 'string' ? values.author : undefined,
     license: typeof values.license === 'string' ? values.license : undefined,
     compatibility: typeof values.compatibility === 'string' ? values.compatibility : undefined,
   };
 }
 
-async function scanSkillsIn(dir: string, enabled: boolean, sourceMap: Record<string, SkillSource>): Promise<SkillEntry[]> {
+async function scanSkillsIn(
+  dir: string,
+  enabled: boolean,
+  sourceMap: Record<string, SkillSource>
+): Promise<SkillEntry[]> {
   let dirs: string[];
   try {
     dirs = await readdir(dir);

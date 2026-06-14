@@ -438,7 +438,6 @@ const PageTreeItem = memo(
     );
 
     const actionButtons = (
-      // eslint-disable-next-line jsx-a11y/no-static-element-interactions
       <span
         className={`action-buttons ${styles.actionButtons}`}
         onMouseDown={(e) => e.stopPropagation()}
@@ -499,7 +498,6 @@ const PageTreeItem = memo(
           onDoubleClick={() => onStartRename(page.id, page.title)}
         >
           {isRenaming ? (
-            // eslint-disable-next-line jsx-a11y/no-static-element-interactions
             <span onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
               <Input
                 value={renameValue}
@@ -546,7 +544,6 @@ PageTreeItem.displayName = 'PageTreeItem';
 const TicketTreeItem = memo(
   ({
     ticket,
-    onSelect,
     onItemClick,
   }: {
     ticket: Ticket;
@@ -559,7 +556,6 @@ const TicketTreeItem = memo(
     const value = `ticket:${ticket.id}`;
 
     const actionButtons = (
-      // eslint-disable-next-line jsx-a11y/no-static-element-interactions
       <span
         className={`action-buttons ${styles.actionButtons}`}
         onMouseDown={(e) => e.stopPropagation()}
@@ -797,7 +793,6 @@ export const SidebarTree = memo(
             </span>
           ) : null;
           const projectActions = (
-            // eslint-disable-next-line jsx-a11y/no-static-element-interactions
             <span
               className={`action-buttons ${styles.actionButtons}`}
               onMouseDown={(e) => e.stopPropagation()}
@@ -1023,7 +1018,6 @@ export const SidebarTree = memo(
                       ) : null;
 
                       const milestoneActions = (
-                        // eslint-disable-next-line jsx-a11y/no-static-element-interactions
                         <span
                           className={`action-buttons ${styles.actionButtons}`}
                           onMouseDown={(e) => e.stopPropagation()}

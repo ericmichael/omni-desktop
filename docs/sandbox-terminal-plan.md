@@ -143,7 +143,7 @@ exists without a process.
   reuses them. The actual PTY lives in `omni serve`; its lifecycle is bound
   to the session id (`omni serve --session-id <uuid>`). On reconnect
   (launcher restart), the launcher dials `terminal.attach({ session_id,
-  terminal_id, token })` — a new server function that returns `{ ws_path }`
+terminal_id, token })` — a new server function that returns `{ ws_path }`
   without creating a new PTY. **Decision:** `terminal.attach` replaces
   today's behavior where `terminal.create` always allocates. The renderer
   hands the main process its persisted `{ terminalId, token }` if any; main
@@ -202,12 +202,12 @@ repository boundaries — see "what breaks if landed alone" notes.
   `entry = self._pty_processes[process_id]`;
   `primary_fd = entry.primary_fd`;
   `fcntl.ioctl(primary_fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows,
-  cols, 0, 0))`. Wrapped in `run_in_executor`.
+cols, 0, 0))`. Wrapped in `run_in_executor`.
 - `pty_stream_output(process_id) -> AsyncIterator[bytes]`: takes a fresh
   consumer that taps `entry.output_chunks` / `entry.output_notify`. The
   existing `_collect_pty_output` polls; we instead
   `while True: await entry.output_notify.wait(); entry.output_notify.clear();
-  drain entry.output_chunks; yield each chunk;` until
+drain entry.output_chunks; yield each chunk;` until
   `entry.output_closed.is_set()`. We add a per-consumer `asyncio.Queue`
   registered on the entry (`entry.stream_consumers: list[Queue]`) so the
   existing `_pump_pty_primary_fd` fans out to consumers in addition to
@@ -221,9 +221,9 @@ repository boundaries — see "what breaks if landed alone" notes.
 **Implementation detail — `docker`:**
 
 - `pty_resize(process_id, cols, rows)`: `entry =
-  self._pty_processes[process_id]; await loop.run_in_executor(
-  _DOCKER_EXECUTOR, lambda: api.exec_resize(entry.exec_id, height=rows,
-  width=cols))`. `exec_resize` is in `docker/api/exec_api.py:99` — verified
+self._pty_processes[process_id]; await loop.run_in_executor(
+_DOCKER_EXECUTOR, lambda: api.exec_resize(entry.exec_id, height=rows,
+width=cols))`. `exec_resize` is in `docker/api/exec_api.py:99` — verified
   present.
 - `pty_stream_output`: docker pumps via `_pump_pty_socket` in a daemon
   thread that already calls `_append_pty_output_chunks`. Extend the entry
@@ -232,17 +232,17 @@ repository boundaries — see "what breaks if landed alone" notes.
   entry's `output_closed` is set or the iterator is cancelled.
 - Sized `pty_exec_start`: pass through `cols`/`rows`, and immediately after
   `exec_create` returns, call `api.exec_resize(exec_id, height=rows,
-  width=cols)` (no SDK kwarg for initial size).
+width=cols)` (no SDK kwarg for initial size).
 
 **Public API:**
 
 - `ExtendedUnixLocalSandboxSession.pty_stream_output(process_id: int) ->
-  AsyncIterator[bytes]`
+AsyncIterator[bytes]`
 - `ExtendedUnixLocalSandboxSession.pty_resize(process_id: int, *, cols: int,
-  rows: int) -> None`
+rows: int) -> None`
 - Same signatures on `ExtendedDockerSandboxSession`
 - `pty_exec_start(*, cols: int | None = None, rows: int | None = None,
-  **other)` on both
+**other)` on both
 
 **Tests:**
 
@@ -299,19 +299,19 @@ tests.
 **`SessionPtyBackend(session, *, profile_terminal)`:**
 
 - `start`: calls `session._inner.pty_exec_start(shell, shell=True, tty=True,
-  user=user, cols=cols, rows=rows, yield_time_s=0.0)`. Captures
+user=user, cols=cols, rows=rows, yield_time_s=0.0)`. Captures
   `process_id`. Returns a handle `{ session_process_id: int, cols, rows,
-  _stream_task, _output_queue }`.
+_stream_task, _output_queue }`.
 - `write`: `await session._inner.pty_write_stdin(
-  session_id=handle.session_process_id, chars=data.decode("utf-8",
-  "surrogateescape"), yield_time_s=0.0)`. **Note:** SDK's `pty_write_stdin`
+session_id=handle.session_process_id, chars=data.decode("utf-8",
+"surrogateescape"), yield_time_s=0.0)`. **Note:** SDK's `pty_write_stdin`
   returns up to 250 ms of accumulated output as a side effect; we discard it
   here because the streaming path already delivers it. (The agent's PTY
-  tool is the only caller that *wants* that read-after-write batch.)
+  tool is the only caller that _wants_ that read-after-write batch.)
 - `resize`: `await session._inner.pty_resize(handle.session_process_id,
-  cols=cols, rows=rows)`.
+cols=cols, rows=rows)`.
 - `stream`: `async for chunk in
-  session._inner.pty_stream_output(handle.session_process_id): yield chunk`.
+session._inner.pty_stream_output(handle.session_process_id): yield chunk`.
 - `close`: there's no per-pty terminate in the SDK; we send Ctrl-C
   (`pty_write_stdin chars="\x03"`) and then ctrl-D (`"\x04"`) over the input
   channel, then rely on `_finalize_pty_update` to clear the entry when the
@@ -325,12 +325,12 @@ tests.
 **`TerminalManager` changes:**
 
 - `__init__(self, backend: PtyBackend, *, default_shell: str | None = None,
-  default_cwd: str | None = None)`. Public surface (`create_terminal`,
+default_cwd: str | None = None)`. Public surface (`create_terminal`,
   `authorize`, `write_input`, `resize`, `read_output`, `close_terminal`,
   `cleanup_session`, `encode_output`, `decode_input`) unchanged — they
   delegate to the backend.
 - `_reader_loop` removed; replaced by an `async for chunk in
-  backend.stream(handle)` task feeding the existing `output_queue`. Same
+backend.stream(handle)` task feeding the existing `output_queue`. Same
   `Optional[bytes]`-None sentinel for exit.
 - Resize coalescing (the 16 ms guard described above) lives in
   `TerminalManager.resize`, not the backend.
@@ -374,33 +374,29 @@ public API is preserved.
   through and the unix_local backend's environment supplies `SHELL`).
 - Edit: `/home/emm/Omni/Workspace/launcher/assets/profiles/devbox.yml` —
   append `terminal: { command: "bash -i", user: "1000:1000", cwd:
-  "/workspace" }`.
+"/workspace" }`.
 - Edit: `/home/emm/Omni/Workspace/omni-code/omni_code/serve_cli.py` — after
   `build_app(...)`:
   1. Get `service = app.state.agent_service`.
   2. Import omniagents `TerminalManager`, `SessionPtyBackend`.
   3. Construct `service.terminal_manager =
-     TerminalManager(backend=SessionPtyBackend(session, profile.terminal))`.
-  4. Register four server functions on `service`:
-     - `terminal.create({ cols, rows, cwd? })` → `{ session_id,
-       terminal_id, terminal_token, path: "/ws/terminal", cwd }` — calls
-       `service.terminal_manager.create_terminal(rpc_session_id,
-       shell=profile.terminal.command, cwd=<resolved>, cols=cols,
-       rows=rows)`. `rpc_session_id` is the JSON-RPC's `session_id` (passed
-       via `server_call` 3rd arg).
-     - `terminal.attach({ terminal_id, terminal_token })` → `{ path:
-       "/ws/terminal" }` — validates the `(session_id, terminal_id, token)`
-       tuple via `service.terminal_manager.authorize`-without-consuming.
-       **New method on TerminalManager:** `peek(session_id, terminal_id,
-       token) -> bool` that runs the same validation as `authorize` but
-       doesn't flip `consumer_attached`. Existing `authorize` stays as the
-       single point that does the attach-once gate.
-     - `terminal.resize({ terminal_id, terminal_token, cols, rows })` →
-       out-of-band resize over RPC for clients that don't want to keep the
-       `/ws/terminal` socket open during a UI-only resize (e.g. minimized
-       terminal panel). Optional but cheap.
-     - `terminal.close({ terminal_id, terminal_token })` → `{}` — calls
-       `close_terminal`.
+TerminalManager(backend=SessionPtyBackend(session, profile.terminal))`.
+  4. Register four server functions on `service`: - `terminal.create({ cols, rows, cwd? })` → `{ session_id,
+terminal_id, terminal_token, path: "/ws/terminal", cwd }` — calls
+     `service.terminal_manager.create_terminal(rpc_session_id,
+shell=profile.terminal.command, cwd=<resolved>, cols=cols,
+rows=rows)`. `rpc_session_id` is the JSON-RPC's `session_id` (passed
+     via `server_call` 3rd arg). - `terminal.attach({ terminal_id, terminal_token })` → `{ path:
+"/ws/terminal" }` — validates the `(session_id, terminal_id, token)`
+     tuple via `service.terminal_manager.authorize`-without-consuming.
+     **New method on TerminalManager:** `peek(session_id, terminal_id,
+token) -> bool` that runs the same validation as `authorize` but
+     doesn't flip `consumer_attached`. Existing `authorize` stays as the
+     single point that does the attach-once gate. - `terminal.resize({ terminal_id, terminal_token, cols, rows })` →
+     out-of-band resize over RPC for clients that don't want to keep the
+     `/ws/terminal` socket open during a UI-only resize (e.g. minimized
+     terminal panel). Optional but cheap. - `terminal.close({ terminal_id, terminal_token })` → `{}` — calls
+     `close_terminal`.
 
   Registration uses the existing `register_server_function` pattern
   (`omniagents/core/agents/service.py:944`). Names with dots are valid keys
@@ -503,14 +499,14 @@ export class ConsoleManager {
 2. Open a fresh `JsonRpcClient`-style request over a short-lived WS to
    `wsUrl` (or reuse a per-tab connection; see below). Call
    `terminal.create` with `{ cols, rows, cwd }`. Get back `{ session_id,
-   terminal_id, terminal_token, path }`.
+terminal_id, terminal_token, path }`.
 3. Dial `${wsUrlBase}${path}?session_id=...&terminal_id=...&terminal_token=
-   ...&token=<auth>` (auth token extracted from `wsUrl`'s query if
+...&token=<auth>` (auth token extracted from `wsUrl`'s query if
    present).
 4. Wire `ws.onmessage` → parse JSON → if `type === 'output'`,
    `sendToWindow('terminal:output', tabId, terminal_id, atob(data))`; if
    `type === 'exit'`, `sendToWindow('terminal:exited', tabId, terminal_id,
-   code)`.
+code)`.
 5. Cache the entry. Return `Result.ok(terminal_id)`.
 
 **Connection topology decision:** **one terminal RPC WS per tab, shared by
@@ -539,10 +535,10 @@ back whenever entries change.
 **IPC changes in `src/shared/types.ts`:**
 
 - `terminal.create` signature changes: `create: (tabId: string, opts?: {
-  cwd?: string; cols?: number; rows?: number }) => Result<string, { kind:
-  ConsoleErrorKind; message: string }>`.
+cwd?: string; cols?: number; rows?: number }) => Result<string, { kind:
+ConsoleErrorKind; message: string }>`.
 - Add `'terminal:status': [string, string, 'connecting' | 'open' |
-  'closed']` to renderer events for the renderer to show a spinner while
+'closed']` to renderer events for the renderer to show a spinner while
   the WS handshake completes.
 - No other channel changes.
 
@@ -576,7 +572,7 @@ Step 5.**
 - Edit:
   `/home/emm/Omni/Workspace/launcher/src/renderer/features/Console/ConsoleXterm.tsx`
   — `terminal:resize` IPC signature is unchanged (still `(id, cols, rows)
-  => void`).
+=> void`).
 
 **Tests:**
 

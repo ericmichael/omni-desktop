@@ -59,7 +59,9 @@ export type SessionStatusBannerProps = {
 export const SessionStatusBanner = memo(({ status }: SessionStatusBannerProps) => {
   const styles = useStyles();
   const handleOpenAiSettings = useCallback(() => openSettingsTab('AI'), []);
-  if (!status) return null;
+  if (!status) {
+    return null;
+  }
   // Computer-as-sandbox: the laptop hosting a `local:<machineId>` session is
   // offline, but the agent keeps RUNNING in the cloud (chat + history stay up).
   // Overlay a non-destructive banner over the still-mounted session rather than
@@ -71,14 +73,14 @@ export const SessionStatusBanner = memo(({ status }: SessionStatusBannerProps) =
         <Warning20Filled />
         <div className={styles.body}>
           <strong>{status.data.hostOfflineMachineLabel ?? 'Your computer'} is offline.</strong>{' '}
-          <Caption1 as="span">
-            The agent can&apos;t run tools until it reconnects — it resumes automatically.
-          </Caption1>
+          <Caption1 as="span">The agent can&apos;t run tools until it reconnects — it resumes automatically.</Caption1>
         </div>
       </div>
     );
   }
-  if (status.type !== 'error') return null;
+  if (status.type !== 'error') {
+    return null;
+  }
   const { kind, machineLabel, message, maxSessions, currentSessions } = status.error;
   if (kind === 'host-offline') {
     return (
@@ -86,9 +88,7 @@ export const SessionStatusBanner = memo(({ status }: SessionStatusBannerProps) =
         <Warning20Filled />
         <div className={styles.body}>
           <strong>{machineLabel ?? 'Your computer'} is offline.</strong>{' '}
-          <Caption1 as="span">
-            The session will resume when it reconnects.
-          </Caption1>
+          <Caption1 as="span">The session will resume when it reconnects.</Caption1>
         </div>
       </div>
     );

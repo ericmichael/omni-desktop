@@ -208,14 +208,7 @@ const EnvEntryRow = memo(
 
     return (
       <div className={styles.entryRow}>
-        <Input
-          type="text"
-          value={line.key}
-          onChange={onChangeKey}
-          placeholder="KEY"
-          mono
-          className={styles.flex1}
-        />
+        <Input type="text" value={line.key} onChange={onChangeKey} placeholder="KEY" mono className={styles.flex1} />
         <span className={styles.equals}>=</span>
         <Input
           size="sm"

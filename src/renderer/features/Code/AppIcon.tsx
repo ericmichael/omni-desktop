@@ -83,10 +83,7 @@ function sanitizeSvg(input: string, size: number): string | null {
  * - Anything else → falls back to Globe icon
  */
 export const AppIcon = memo(({ icon, size = 20, className }: { icon: string; size?: number; className?: string }) => {
-  const sanitized = useMemo(
-    () => (icon.trimStart().startsWith('<svg') ? sanitizeSvg(icon, size) : null),
-    [icon, size]
-  );
+  const sanitized = useMemo(() => (icon.trimStart().startsWith('<svg') ? sanitizeSvg(icon, size) : null), [icon, size]);
 
   if (sanitized) {
     return (

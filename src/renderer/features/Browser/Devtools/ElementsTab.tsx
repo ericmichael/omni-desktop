@@ -125,9 +125,7 @@ export const ElementsTab = memo(({ handleId }: { handleId: AppHandleId }) => {
   return (
     <div className={styles.root}>
       <div className={styles.toolbar}>
-        <span style={{ color: tokens.colorNeutralForeground3, fontSize: '11px' }}>
-          Accessibility tree (snapshot)
-        </span>
+        <span style={{ color: tokens.colorNeutralForeground3, fontSize: '11px' }}>Accessibility tree (snapshot)</span>
         <div className={styles.spacer} />
         <button type="button" className={styles.iconBtn} onClick={() => void refresh()} title="Re-snapshot">
           <ArrowClockwise16Regular />

@@ -69,11 +69,7 @@ describe('computePagesToDelete', () => {
   });
 
   it('does not touch the root page when deleting a mid-tree branch', () => {
-    const pages = [
-      makePage('root', null, { isRoot: true }),
-      makePage('a', 'root'),
-      makePage('a-1', 'a'),
-    ];
+    const pages = [makePage('root', null, { isRoot: true }), makePage('a', 'root'), makePage('a-1', 'a')];
     const result = computePagesToDelete(pages, 'a');
     expect(result.has('root')).toBe(false);
   });
@@ -102,11 +98,7 @@ describe('computePagesToDelete', () => {
   });
 
   it('does not mutate the input array', () => {
-    const pages = [
-      makePage('root', null, { isRoot: true }),
-      makePage('a', 'root'),
-      makePage('a-1', 'a'),
-    ];
+    const pages = [makePage('root', null, { isRoot: true }), makePage('a', 'root'), makePage('a-1', 'a')];
     const snapshot = JSON.stringify(pages);
     computePagesToDelete(pages, 'a');
     expect(JSON.stringify(pages)).toBe(snapshot);

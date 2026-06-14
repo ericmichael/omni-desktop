@@ -51,7 +51,9 @@ describe('encryptFile / decryptFile', () => {
   it('round-trips binary content (all 256 byte values)', () => {
     const key = makeKey();
     const plaintext = Buffer.alloc(256);
-    for (let i = 0; i < 256; i++) plaintext[i] = i;
+    for (let i = 0; i < 256; i++) {
+      plaintext[i] = i;
+    }
     const encrypted = encryptFile(plaintext, key);
     const decrypted = decryptFile(encrypted, key);
 
@@ -98,7 +100,7 @@ describe('tamper detection', () => {
     const encrypted = encryptFile(plaintext, key);
 
     const tampered = Buffer.from(encrypted);
-    tampered[30] ^= 0xff;
+    tampered[30]! ^= 0xff;
 
     expect(() => decryptFile(tampered, key)).toThrow();
   });
@@ -108,7 +110,7 @@ describe('tamper detection', () => {
     const encrypted = encryptFile(Buffer.from('secret'), key);
 
     const tampered = Buffer.from(encrypted);
-    tampered[15] ^= 0xff;
+    tampered[15]! ^= 0xff;
 
     expect(() => decryptFile(tampered, key)).toThrow();
   });

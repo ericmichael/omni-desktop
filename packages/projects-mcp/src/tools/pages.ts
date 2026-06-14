@@ -3,7 +3,10 @@ import { type IProjectsRepo, nowTimestamp, pageId } from 'omni-projects-db';
 import { z } from 'zod';
 
 const json = (data: unknown) => ({ content: [{ type: 'text' as const, text: JSON.stringify(data) }] });
-const err = (message: string) => ({ content: [{ type: 'text' as const, text: JSON.stringify({ error: message }) }], isError: true as const });
+const err = (message: string) => ({
+  content: [{ type: 'text' as const, text: JSON.stringify({ error: message }) }],
+  isError: true as const,
+});
 
 export function registerPageTools(server: McpServer, repo: IProjectsRepo): void {
   server.tool(
@@ -12,7 +15,9 @@ export function registerPageTools(server: McpServer, repo: IProjectsRepo): void 
     { project_id: z.string().describe('The omni-projects project ID (proj_*). NOT a filesystem path.') },
     async ({ project_id }) => {
       const exists = await repo.getProject(project_id);
-      if (!exists) return err(`Project not found: ${project_id}`);
+      if (!exists) {
+        return err(`Project not found: ${project_id}`);
+      }
 
       const pages = await repo.listPagesByProject(project_id);
 
@@ -35,8 +40,12 @@ export function registerPageTools(server: McpServer, repo: IProjectsRepo): void 
 
   server.tool(
     'read_page',
-    "Read an omni-projects documentation page (markdown note/spec/plan tied to a project) by its page_id (pg_*). NOT for filesystem files — use read_file with a path like AGENTS.md or src/foo.py for workspace source.",
-    { page_id: z.string().describe('The omni-projects page ID (pg_*), as returned by list_pages or create_page. NOT a filesystem path.') },
+    'Read an omni-projects documentation page (markdown note/spec/plan tied to a project) by its page_id (pg_*). NOT for filesystem files — use read_file with a path like AGENTS.md or src/foo.py for workspace source.',
+    {
+      page_id: z
+        .string()
+        .describe('The omni-projects page ID (pg_*), as returned by list_pages or create_page. NOT a filesystem path.'),
+    },
     async ({ page_id }) => {
       // Path-shaped inputs (start with / or contain a /) are almost
       // always agents reaching for the wrong tool — surface the right
@@ -49,7 +58,9 @@ export function registerPageTools(server: McpServer, repo: IProjectsRepo): void 
         );
       }
       const page = await repo.getPage(page_id);
-      if (!page) return err(`Page not found: ${page_id}`);
+      if (!page) {
+        return err(`Page not found: ${page_id}`);
+      }
 
       const content = await repo.getPageContent(page.id);
 
@@ -78,7 +89,9 @@ export function registerPageTools(server: McpServer, repo: IProjectsRepo): void 
     },
     async ({ project_id, title, parent_id, content, icon }) => {
       const project = await repo.getProject(project_id);
-      if (!project) return err(`Project not found: ${project_id}`);
+      if (!project) {
+        return err(`Project not found: ${project_id}`);
+      }
 
       const id = pageId();
       const now = nowTimestamp();
@@ -112,12 +125,18 @@ export function registerPageTools(server: McpServer, repo: IProjectsRepo): void 
     },
     async ({ page_id, title, content, icon }) => {
       const page = await repo.getPage(page_id);
-      if (!page) return err(`Page not found: ${page_id}`);
+      if (!page) {
+        return err(`Page not found: ${page_id}`);
+      }
 
       if (title !== undefined || icon !== undefined) {
         const next = { ...page };
-        if (title !== undefined) next.title = title;
-        if (icon !== undefined) next.icon = icon || null;
+        if (title !== undefined) {
+          next.title = title;
+        }
+        if (icon !== undefined) {
+          next.icon = icon || null;
+        }
         next.updated_at = nowTimestamp();
         await repo.upsertPage(next);
       }

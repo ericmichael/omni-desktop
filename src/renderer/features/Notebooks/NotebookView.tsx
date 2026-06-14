@@ -82,14 +82,14 @@ export const NotebookView = memo(({ pageId }: { pageId: PageId }) => {
   // before the webview ever loaded.
   useEffect(() => {
     if (!paths) {
-return;
-}
+      return;
+    }
     if (status.state !== 'running') {
-return;
-}
+      return;
+    }
     if (lastAppliedGlassRef.current === isGlass) {
-return;
-}
+      return;
+    }
 
     // First time we observe the running state for this paths value, just
     // record the current isGlass without reloading — prepare-notebook already
@@ -122,8 +122,8 @@ return;
     void (async () => {
       const result = await emitter.invoke('page:get-notebook-paths', pageId);
       if (!cancelled) {
-setPaths(result);
-}
+        setPaths(result);
+      }
     })();
     return () => {
       cancelled = true;
@@ -137,8 +137,8 @@ setPaths(result);
       const list = await emitter.invoke('extension:list-descriptors');
       const marimo = list.find((d) => d.id === MARIMO_EXTENSION_ID);
       if (!cancelled) {
-setEnabled(marimo?.enabled ?? false);
-}
+        setEnabled(marimo?.enabled ?? false);
+      }
     })();
     return () => {
       cancelled = true;
@@ -159,8 +159,8 @@ setEnabled(marimo?.enabled ?? false);
   // Subscribe to live status updates for this instance.
   useEffect(() => {
     if (!paths) {
-return;
-}
+      return;
+    }
     const cwd = paths.projectDir;
     const off = ipc.on('extension:status-changed', (id, eventCwd, next) => {
       if (id === MARIMO_EXTENSION_ID && eventCwd === cwd) {
@@ -173,8 +173,8 @@ return;
   // Ensure the instance once we know the cwd and marimo is enabled.
   useEffect(() => {
     if (!paths || !enabled) {
-return;
-}
+      return;
+    }
     const cwd = paths.projectDir;
     cwdRef.current = cwd;
     let cancelled = false;
@@ -207,8 +207,8 @@ return;
     return () => {
       cancelled = true;
       if (released) {
-return;
-}
+        return;
+      }
       released = true;
       void emitter.invoke('extension:release-instance', MARIMO_EXTENSION_ID, cwd);
     };
@@ -217,15 +217,15 @@ return;
   const onRetry = useCallback(() => {
     const cwd = cwdRef.current;
     if (!cwd) {
-return;
-}
+      return;
+    }
     void emitter.invoke('extension:ensure-instance', MARIMO_EXTENSION_ID, cwd);
   }, []);
 
   const webviewSrc = useMemo(() => {
     if (status.state !== 'running' || !paths) {
-return undefined;
-}
+      return undefined;
+    }
     return `${status.url}/?file=${encodeURIComponent(paths.filePath)}`;
   }, [status, paths]);
 

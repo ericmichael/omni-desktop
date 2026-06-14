@@ -62,7 +62,7 @@ describe('resolveArtifactPath', () => {
   it('rejects sibling directory prefix bypass (e.g. rootDir-evil)', () => {
     // If rootDir is /tmp/abcXYZ, a path that resolves to /tmp/abcXYZ-evil/secret
     // should NOT pass, even though it starts with the rootDir string.
-    const siblingPath = rootDir + '-evil';
+    const siblingPath = `${rootDir}-evil`;
     mkdirSync(siblingPath, { recursive: true });
     try {
       expect(() => resolveArtifactPath(rootDir, `../${siblingPath.split('/').pop()}/secret.txt`)).toThrow(

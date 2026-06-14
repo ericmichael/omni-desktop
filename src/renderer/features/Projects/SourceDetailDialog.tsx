@@ -100,117 +100,131 @@ type SourceDetailDialogProps = {
 const sourceLocation = (source: ProjectSource): string =>
   source.kind === 'local' ? source.workspaceDir : source.repoUrl;
 
-export const SourceDetailDialog = memo(({ open, onClose, project, source, tickets, onEdit, onRemove }: SourceDetailDialogProps) => {
-  const styles = useStyles();
-  const relatedTickets = useMemo(
-    () => tickets.filter((ticket) => ticket.projectId === project.id && ticket.pullRequests?.some((pr) => pr.sourceId === source.id)),
-    [project.id, source.id, tickets]
-  );
-  const pullRequests = useMemo(() => {
-    const byUrl = new Map<string, PullRequestLink>();
-    for (const ticket of tickets) {
-      if (ticket.projectId !== project.id) {
-        continue;
-      }
-      for (const pr of ticket.pullRequests ?? []) {
-        if (pr.sourceId === source.id) {
-          byUrl.set(pr.url, pr);
+export const SourceDetailDialog = memo(
+  ({ open, onClose, project, source, tickets, onEdit, onRemove }: SourceDetailDialogProps) => {
+    const styles = useStyles();
+    const relatedTickets = useMemo(
+      () =>
+        tickets.filter(
+          (ticket) => ticket.projectId === project.id && ticket.pullRequests?.some((pr) => pr.sourceId === source.id)
+        ),
+      [project.id, source.id, tickets]
+    );
+    const pullRequests = useMemo(() => {
+      const byUrl = new Map<string, PullRequestLink>();
+      for (const ticket of tickets) {
+        if (ticket.projectId !== project.id) {
+          continue;
+        }
+        for (const pr of ticket.pullRequests ?? []) {
+          if (pr.sourceId === source.id) {
+            byUrl.set(pr.url, pr);
+          }
         }
       }
-    }
-    return [...byUrl.values()].sort((a, b) => b.lastSeenAt - a.lastSeenAt);
-  }, [project.id, source.id, tickets]);
+      return [...byUrl.values()].sort((a, b) => b.lastSeenAt - a.lastSeenAt);
+    }, [project.id, source.id, tickets]);
 
-  const handleOpenPullRequest = useCallback((url: string) => requestPreviewOpen(url), []);
-  const handleOpenTicket = useCallback((ticketId: string) => ticketApi.goToTicket(ticketId), []);
+    const handleOpenPullRequest = useCallback((url: string) => requestPreviewOpen(url), []);
+    const handleOpenTicket = useCallback((ticketId: string) => ticketApi.goToTicket(ticketId), []);
 
-  return (
-    <AnimatedDialog open={open} onClose={onClose}>
-      <DialogContent className="sm:max-w-xl">
-        <DialogHeader>{source.mountName}</DialogHeader>
-        <DialogBody className={styles.body}>
-          <div className={styles.section}>
-            <span className={styles.sectionTitle}>Source</span>
-            <div className={styles.panel}>
-              <div className={styles.row}>
-                <span className={styles.key}>Kind</span>
-                <span className={styles.value}>{source.kind}</span>
-              </div>
-              <div className={styles.row}>
-                <span className={styles.key}>Location</span>
-                <span className={styles.value}>{sourceLocation(source)}</span>
-              </div>
-              <div className={styles.row}>
-                <span className={styles.key}>Mount</span>
-                <span className={styles.value}>/workspace/{source.mountName}</span>
-              </div>
-              {source.kind === 'git-remote' && source.defaultBranch && (
+    return (
+      <AnimatedDialog open={open} onClose={onClose}>
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader>{source.mountName}</DialogHeader>
+          <DialogBody className={styles.body}>
+            <div className={styles.section}>
+              <span className={styles.sectionTitle}>Source</span>
+              <div className={styles.panel}>
                 <div className={styles.row}>
-                  <span className={styles.key}>Branch</span>
-                  <span className={styles.value}>{source.defaultBranch}</span>
+                  <span className={styles.key}>Kind</span>
+                  <span className={styles.value}>{source.kind}</span>
                 </div>
-              )}
+                <div className={styles.row}>
+                  <span className={styles.key}>Location</span>
+                  <span className={styles.value}>{sourceLocation(source)}</span>
+                </div>
+                <div className={styles.row}>
+                  <span className={styles.key}>Mount</span>
+                  <span className={styles.value}>/workspace/{source.mountName}</span>
+                </div>
+                {source.kind === 'git-remote' && source.defaultBranch && (
+                  <div className={styles.row}>
+                    <span className={styles.key}>Branch</span>
+                    <span className={styles.value}>{source.defaultBranch}</span>
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
 
-          <div className={styles.section}>
-            <span className={styles.sectionTitle}>Pull Requests</span>
-            <div className={styles.panel}>
-              {pullRequests.length === 0 ? (
-                <span className={styles.empty}>No pull requests linked to this source yet.</span>
-              ) : (
-                pullRequests.map((pr) => (
-                  <PullRequestRow key={pr.url} pullRequest={pr} onOpen={handleOpenPullRequest} />
-                ))
-              )}
+            <div className={styles.section}>
+              <span className={styles.sectionTitle}>Pull Requests</span>
+              <div className={styles.panel}>
+                {pullRequests.length === 0 ? (
+                  <span className={styles.empty}>No pull requests linked to this source yet.</span>
+                ) : (
+                  pullRequests.map((pr) => (
+                    <PullRequestRow key={pr.url} pullRequest={pr} onOpen={handleOpenPullRequest} />
+                  ))
+                )}
+              </div>
             </div>
-          </div>
 
-          <div className={styles.section}>
-            <span className={styles.sectionTitle}>Linked Tickets</span>
-            <div className={styles.panel}>
-              {relatedTickets.length === 0 ? (
-                <span className={styles.empty}>No tickets have linked PRs for this source.</span>
-              ) : (
-                relatedTickets.map((ticket) => (
-                  <TicketRow key={ticket.id} ticket={ticket} onOpen={handleOpenTicket} />
-                ))
-              )}
+            <div className={styles.section}>
+              <span className={styles.sectionTitle}>Linked Tickets</span>
+              <div className={styles.panel}>
+                {relatedTickets.length === 0 ? (
+                  <span className={styles.empty}>No tickets have linked PRs for this source.</span>
+                ) : (
+                  relatedTickets.map((ticket) => (
+                    <TicketRow key={ticket.id} ticket={ticket} onOpen={handleOpenTicket} />
+                  ))
+                )}
+              </div>
             </div>
-          </div>
-        </DialogBody>
-        <DialogFooter className={styles.footer}>
-          <Button variant="ghost" onClick={onClose}>Close</Button>
-          <div className={styles.footerGroup}>
-            <Button variant="ghost" onClick={onEdit}>Edit</Button>
-            <Button variant="destructive" onClick={onRemove}>Remove</Button>
-          </div>
-        </DialogFooter>
-      </DialogContent>
-    </AnimatedDialog>
-  );
-});
+          </DialogBody>
+          <DialogFooter className={styles.footer}>
+            <Button variant="ghost" onClick={onClose}>
+              Close
+            </Button>
+            <div className={styles.footerGroup}>
+              <Button variant="ghost" onClick={onEdit}>
+                Edit
+              </Button>
+              <Button variant="destructive" onClick={onRemove}>
+                Remove
+              </Button>
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </AnimatedDialog>
+    );
+  }
+);
 SourceDetailDialog.displayName = 'SourceDetailDialog';
 
-const PullRequestRow = memo(({ pullRequest, onOpen }: { pullRequest: PullRequestLink; onOpen: (url: string) => void }) => {
-  const styles = useStyles();
-  const handleOpen = useCallback(() => onOpen(pullRequest.url), [onOpen, pullRequest.url]);
-  return (
-    <div className={styles.item}>
-      <div className={styles.itemText}>
-        <span className={styles.itemTitle}>{pullRequest.title || `PR #${pullRequest.number}`}</span>
-        <span className={styles.itemMeta}>
-          PR #{pullRequest.number}{pullRequest.branch ? ` · ${pullRequest.branch}` : ''}
-          {pullRequest.sessionId ? ` · session ${pullRequest.sessionId.slice(0, 8)}` : ''} · seen{' '}
-          {new Date(pullRequest.lastSeenAt).toLocaleString()}
-        </span>
+const PullRequestRow = memo(
+  ({ pullRequest, onOpen }: { pullRequest: PullRequestLink; onOpen: (url: string) => void }) => {
+    const styles = useStyles();
+    const handleOpen = useCallback(() => onOpen(pullRequest.url), [onOpen, pullRequest.url]);
+    return (
+      <div className={styles.item}>
+        <div className={styles.itemText}>
+          <span className={styles.itemTitle}>{pullRequest.title || `PR #${pullRequest.number}`}</span>
+          <span className={styles.itemMeta}>
+            PR #{pullRequest.number}
+            {pullRequest.branch ? ` · ${pullRequest.branch}` : ''}
+            {pullRequest.sessionId ? ` · session ${pullRequest.sessionId.slice(0, 8)}` : ''} · seen{' '}
+            {new Date(pullRequest.lastSeenAt).toLocaleString()}
+          </span>
+        </div>
+        <Button size="sm" variant="ghost" leftIcon={<Open16Regular />} onClick={handleOpen}>
+          Open
+        </Button>
       </div>
-      <Button size="sm" variant="ghost" leftIcon={<Open16Regular />} onClick={handleOpen}>
-        Open
-      </Button>
-    </div>
-  );
-});
+    );
+  }
+);
 PullRequestRow.displayName = 'PullRequestRow';
 
 const TicketRow = memo(({ ticket, onOpen }: { ticket: Ticket; onOpen: (ticketId: string) => void }) => {

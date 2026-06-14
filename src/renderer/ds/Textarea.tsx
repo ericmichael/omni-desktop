@@ -16,6 +16,7 @@ type TextareaProps = {
   onFocus?: React.FocusEventHandler<HTMLTextAreaElement>;
   onBlur?: React.FocusEventHandler<HTMLTextAreaElement>;
   onKeyDown?: React.KeyboardEventHandler<HTMLTextAreaElement>;
+  autoFocus?: boolean;
   'aria-label'?: string;
 };
 
@@ -38,8 +39,8 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
     useEffect(() => {
       const el = internalRef.current;
       if (!el) {
-return;
-}
+        return;
+      }
       el.style.height = 'auto';
       el.style.height = `${Math.min(el.scrollHeight, maxHeight)}px`;
     }, [value, maxHeight]);
@@ -47,7 +48,7 @@ return;
     return (
       <FluentTextarea
         ref={setRef}
-        appearance="underline"
+        appearance="outline"
         resize="none"
         value={value}
         onChange={onChange}
@@ -60,6 +61,7 @@ return;
         readOnly={props.readOnly}
         id={props.id}
         name={props.name}
+        autoFocus={props.autoFocus}
         aria-label={props['aria-label']}
       />
     );

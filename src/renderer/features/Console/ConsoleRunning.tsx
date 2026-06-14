@@ -1,4 +1,4 @@
-import { makeStyles, mergeClasses, shorthands,tokens } from '@fluentui/react-components';
+import { makeStyles, mergeClasses, shorthands, tokens } from '@fluentui/react-components';
 import { Add20Regular, Dismiss12Regular } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useMemo } from 'react';
@@ -145,35 +145,28 @@ type TerminalTabButtonProps = {
   closeClassName: string;
 };
 
-const TerminalTabButton = memo(
-  ({ tabId, terminalId, label, className, closeClassName }: TerminalTabButtonProps) => {
-    const handleActivate = useCallback(() => {
-      setActiveTerminal(tabId, terminalId);
-    }, [tabId, terminalId]);
+const TerminalTabButton = memo(({ tabId, terminalId, label, className, closeClassName }: TerminalTabButtonProps) => {
+  const handleActivate = useCallback(() => {
+    setActiveTerminal(tabId, terminalId);
+  }, [tabId, terminalId]);
 
-    const handleClose = useCallback(
-      (e: React.MouseEvent) => {
-        e.stopPropagation();
-        void destroyTerminal(tabId, terminalId);
-      },
-      [tabId, terminalId]
-    );
+  const handleClose = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      void destroyTerminal(tabId, terminalId);
+    },
+    [tabId, terminalId]
+  );
 
-    return (
-      <button type="button" className={className} onClick={handleActivate}>
-        <span>{label}</span>
-        <button
-          type="button"
-          className={closeClassName}
-          onClick={handleClose}
-          aria-label={`Close ${label}`}
-        >
-          <Dismiss12Regular />
-        </button>
+  return (
+    <button type="button" className={className} onClick={handleActivate}>
+      <span>{label}</span>
+      <button type="button" className={closeClassName} onClick={handleClose} aria-label={`Close ${label}`}>
+        <Dismiss12Regular />
       </button>
-    );
-  }
-);
+    </button>
+  );
+});
 TerminalTabButton.displayName = 'TerminalTabButton';
 
 type XtermPaneProps = {
@@ -227,12 +220,18 @@ export const ConsoleStarted = memo(({ tabId }: ConsoleStartedProps) => {
               className={mergeClasses(
                 styles.tab,
                 t.id === activeId && styles.tabActive,
-                !t.isRunning && styles.tabDead,
+                !t.isRunning && styles.tabDead
               )}
               closeClassName={styles.tabClose}
             />
           ))}
-          <button type="button" className={styles.addBtn} onClick={handleNewTab} aria-label="New terminal" title="New terminal">
+          <button
+            type="button"
+            className={styles.addBtn}
+            onClick={handleNewTab}
+            aria-label="New terminal"
+            title="New terminal"
+          >
             <Add20Regular style={{ width: 14, height: 14 }} />
           </button>
         </div>

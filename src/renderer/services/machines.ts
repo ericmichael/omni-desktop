@@ -77,7 +77,9 @@ export const initMachines = async (): Promise<void> => {
 
 const registerOnce = async (): Promise<void> => {
   const id = $machineIdentity.get();
-  if (!id) return;
+  if (!id) {
+    return;
+  }
   try {
     await emitter.invoke('machine:register', id);
   } catch (err) {
@@ -85,7 +87,9 @@ const registerOnce = async (): Promise<void> => {
     // and again on transport reconnect (the WS transport itself has its own
     // reconnect; we just re-register so the cloud refreshes its binding).
     console.warn('[machines] register failed, will retry:', err);
-    if (pollTimer) clearTimeout(pollTimer);
+    if (pollTimer) {
+      clearTimeout(pollTimer);
+    }
     pollTimer = setTimeout(() => {
       pollTimer = null;
       void registerOnce();

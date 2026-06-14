@@ -108,12 +108,7 @@ export class InboxManager {
   // Mutations
   // ---------------------------------------------------------------------------
 
-  add(input: {
-    title: string;
-    note?: string;
-    projectId?: ProjectId | null;
-    attachments?: string[];
-  }): InboxItem {
+  add(input: { title: string; note?: string; projectId?: ProjectId | null; attachments?: string[] }): InboxItem {
     const now = this.deps.now();
     const item: InboxItem = {
       id: this.deps.newId(),
@@ -124,35 +119,32 @@ export class InboxManager {
       updatedAt: now,
     };
     if (input.note && input.note.trim()) {
-item.note = input.note.trim();
-}
+      item.note = input.note.trim();
+    }
     if (input.attachments && input.attachments.length > 0) {
-item.attachments = input.attachments;
-}
+      item.attachments = input.attachments;
+    }
 
     const items = [...this.deps.store.getInboxItems(), item];
     this.deps.store.setInboxItems(items);
     return item;
   }
 
-  update(
-    id: InboxItemId,
-    patch: Partial<Pick<InboxItem, 'title' | 'note' | 'projectId' | 'attachments'>>
-  ): void {
+  update(id: InboxItemId, patch: Partial<Pick<InboxItem, 'title' | 'note' | 'projectId' | 'attachments'>>): void {
     this.patchItem(id, (item) => {
       const next: InboxItem = { ...item, updatedAt: this.deps.now() };
       if (patch.title !== undefined) {
-next.title = patch.title.trim() || 'Untitled';
-}
+        next.title = patch.title.trim() || 'Untitled';
+      }
       if (patch.note !== undefined) {
-next.note = patch.note.trim() || undefined;
-}
+        next.note = patch.note.trim() || undefined;
+      }
       if (patch.projectId !== undefined) {
-next.projectId = patch.projectId;
-}
+        next.projectId = patch.projectId;
+      }
       if (patch.attachments !== undefined) {
-next.attachments = patch.attachments;
-}
+        next.attachments = patch.attachments;
+      }
       return next;
     });
   }
@@ -161,8 +153,8 @@ next.attachments = patch.attachments;
     const items = this.deps.store.getInboxItems();
     const filtered = items.filter((i) => i.id !== id);
     if (filtered.length === items.length) {
-throw new InboxItemNotFoundError(id);
-}
+      throw new InboxItemNotFoundError(id);
+    }
     this.deps.store.setInboxItems(filtered);
   }
 
@@ -170,8 +162,8 @@ throw new InboxItemNotFoundError(id);
   defer(id: InboxItemId): void {
     this.patchItem(id, (item) => {
       if (item.promotedTo) {
-throw new InboxPromotionError(`Cannot defer promoted item ${id}`);
-}
+        throw new InboxPromotionError(`Cannot defer promoted item ${id}`);
+      }
       const now = this.deps.now();
       return { ...item, status: 'later', laterAt: now, updatedAt: now };
     });
@@ -181,8 +173,8 @@ throw new InboxPromotionError(`Cannot defer promoted item ${id}`);
   reactivate(id: InboxItemId): void {
     this.patchItem(id, (item) => {
       if (item.promotedTo) {
-throw new InboxPromotionError(`Cannot reactivate promoted item ${id}`);
-}
+        throw new InboxPromotionError(`Cannot reactivate promoted item ${id}`);
+      }
       const next: InboxItem = { ...item, status: 'new', updatedAt: this.deps.now() };
       delete next.laterAt;
       return next;
@@ -287,12 +279,12 @@ throw new InboxPromotionError(`Cannot reactivate promoted item ${id}`);
     let changed = 0;
     for (let i = 0; i < items.length; i++) {
       if (swept[i] !== items[i]) {
-changed++;
-}
+        changed++;
+      }
     }
     if (changed > 0) {
-this.deps.store.setInboxItems(swept);
-}
+      this.deps.store.setInboxItems(swept);
+    }
     return changed;
   }
 
@@ -300,13 +292,11 @@ this.deps.store.setInboxItems(swept);
   gcPromoted(): number {
     const now = this.deps.now();
     const items = this.deps.store.getInboxItems();
-    const kept = items.filter(
-      (i) => !i.promotedTo || now - i.promotedTo.at < PROMOTED_TOMBSTONE_TTL_MS
-    );
+    const kept = items.filter((i) => !i.promotedTo || now - i.promotedTo.at < PROMOTED_TOMBSTONE_TTL_MS);
     const removed = items.length - kept.length;
     if (removed > 0) {
-this.deps.store.setInboxItems(kept);
-}
+      this.deps.store.setInboxItems(kept);
+    }
     return removed;
   }
 
@@ -317,8 +307,8 @@ this.deps.store.setInboxItems(kept);
   private requireItem(id: InboxItemId): InboxItem {
     const item = this.deps.store.getInboxItems().find((i) => i.id === id);
     if (!item) {
-throw new InboxItemNotFoundError(id);
-}
+      throw new InboxItemNotFoundError(id);
+    }
     return item;
   }
 
@@ -327,21 +317,18 @@ throw new InboxItemNotFoundError(id);
     let found = false;
     const next = items.map((item) => {
       if (item.id !== id) {
-return item;
-}
+        return item;
+      }
       found = true;
       return fn(item);
     });
     if (!found) {
-throw new InboxItemNotFoundError(id);
-}
+      throw new InboxItemNotFoundError(id);
+    }
     this.deps.store.setInboxItems(next);
   }
 
-  private stampPromotion(
-    id: InboxItemId,
-    promotion: NonNullable<InboxItem['promotedTo']>
-  ): void {
+  private stampPromotion(id: InboxItemId, promotion: NonNullable<InboxItem['promotedTo']>): void {
     this.patchItem(id, (item) => ({ ...item, promotedTo: promotion, updatedAt: promotion.at }));
   }
 }

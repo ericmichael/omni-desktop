@@ -36,7 +36,7 @@ right auth + base_url," mirroring the existing Azure dummy-key pattern.
 - Settings → Models: a "Sign in with ChatGPT" card. **Signing in is all the user
   does** — on success (`applyCodexSignIn`) the launcher auto-registers the
   built-in `codex` provider in the store (empty models — the runtime discovers
-  them) and, *only when no other provider is configured*, sets a discovered
+  them) and, _only when no other provider is configured_, sets a discovered
   Codex model (preferring `gpt-5.5`) as the default. With other providers
   present it leaves the default alone; Codex is still selectable via the picker
   or `/model`. No manual provider/model setup is ever required.
@@ -81,7 +81,7 @@ requirements that the provider relies on:
 1. **Provider-builder registry** (`run_options.py`): `build_model_provider`
    didn't know `openai-oauth` and fell back to a keyless `MultiProvider`
    (→ "Missing credentials" crash). Added `register_model_provider_builder(type,
-   builder)`; `codex.register_codex_provider()` injects a builder that returns
+builder)`; `codex.register_codex_provider()` injects a builder that returns
    `OpenAIProvider(openai_client=build_codex_openai_client())`.
 2. **Streaming requirement** (`patches/disable_token_streaming.py`): the Codex
    backend rejects `stream=false` ("Stream must be set to true"). That patch

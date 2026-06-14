@@ -31,5 +31,6 @@ cargo test --lib heap
 ## Scope
 
 This skill is specific to `cs-homework-dsa`. It knows:
+
 - The project uses `cargo test --lib` (not `cargo test` — the `bench` binary is excluded from the test target).
 - Heap tests live in `src/heap.rs`; priority queue tests will live in `src/priority_queue.rs` once implemented.

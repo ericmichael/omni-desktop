@@ -227,7 +227,8 @@ export function parseAzurePullRequestListAll(stdout: string): ContainerPullReque
   }
   const out: ContainerPullRequest[] = [];
   for (const item of arr as AzurePrListItem[]) {
-    const state = item?.status === 'active' ? ('OPEN' as const) : item?.status === 'completed' ? ('MERGED' as const) : null;
+    const state =
+      item?.status === 'active' ? ('OPEN' as const) : item?.status === 'completed' ? ('MERGED' as const) : null;
     if (state === null) {
       continue;
     }
@@ -275,10 +276,7 @@ async function containerCurrentBranch(containerId: string, mountName: string): P
 }
 
 /** Resolve which PR provider (if any) backs a source's origin remote. */
-async function resolveProvider(
-  containerId: string,
-  mountName: string
-): Promise<'github' | 'azure' | null> {
+async function resolveProvider(containerId: string, mountName: string): Promise<'github' | 'azure' | null> {
   const remoteUrl = await containerRemoteUrl(containerId, mountName);
   if (!remoteUrl) {
     return null;
@@ -362,7 +360,11 @@ async function detectAzurePullRequestList(containerId: string, mountName: string
       'json',
       ...(branch ? ['--source-branch', branch] : []),
     ]);
-    return parseAzurePullRequestListAll(out).map((pr) => ({ ...pr, provider: 'azure' as const, ...(branch ? { branch } : {}) }));
+    return parseAzurePullRequestListAll(out).map((pr) => ({
+      ...pr,
+      provider: 'azure' as const,
+      ...(branch ? { branch } : {}),
+    }));
   } catch {
     return [];
   }

@@ -152,14 +152,14 @@ function formatTime(ts: number): string {
   const now = Date.now();
   const diff = now - ts;
   if (diff < 60_000) {
-return 'just now';
-}
+    return 'just now';
+  }
   if (diff < 3_600_000) {
-return `${Math.round(diff / 60_000)}m ago`;
-}
+    return `${Math.round(diff / 60_000)}m ago`;
+  }
   if (diff < 86_400_000) {
-return `${Math.round(diff / 3_600_000)}h ago`;
-}
+    return `${Math.round(diff / 3_600_000)}h ago`;
+  }
   return new Date(ts).toLocaleDateString();
 }
 
@@ -188,8 +188,8 @@ export const HistoryPanel = memo(
           ...(profileId ? { profileId } : {}),
         });
         if (seq === seqRef.current) {
-setEntries(out);
-}
+          setEntries(out);
+        }
       },
       [profileId]
     );
@@ -240,8 +240,8 @@ setEntries(out);
         className={styles.backdrop}
         onClick={(e) => {
           if (e.target === e.currentTarget) {
-onClose();
-}
+            onClose();
+          }
         }}
       >
         <div className={styles.panel} role="dialog" aria-label="History">

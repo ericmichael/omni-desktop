@@ -15,7 +15,9 @@ export function normalizeGitRemoteUrl(repoUrl: string): string {
   try {
     const parsed = new URL(parseTarget);
     const host = parsed.hostname.toLowerCase();
-    const pathname = trimTrailingSlashes(decodeURIComponent(parsed.pathname)).replace(/^\/+/, '').replace(/\.git$/i, '');
+    const pathname = trimTrailingSlashes(decodeURIComponent(parsed.pathname))
+      .replace(/^\/+/, '')
+      .replace(/\.git$/i, '');
     return `${host}/${pathname.toLowerCase()}`;
   } catch {
     return trimmed.toLowerCase();

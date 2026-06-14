@@ -7,7 +7,7 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 
-import { type IMigrationStore, type MigrationDeps,runMigrations } from '@/lib/project-migrations';
+import { type IMigrationStore, type MigrationDeps, runMigrations } from '@/lib/project-migrations';
 
 // ---------------------------------------------------------------------------
 // In-memory migration store
@@ -154,9 +154,7 @@ describe('runMigrations', () => {
     it('renames the initiatives key, strips isDefault, and renames ticket.initiativeId → milestoneId', () => {
       const store = makeStore({
         schemaVersion: 7,
-        initiatives: [
-          { id: 'i1', projectId: 'p1', isDefault: true, title: 'General' },
-        ],
+        initiatives: [{ id: 'i1', projectId: 'p1', isDefault: true, title: 'General' }],
         milestones: [],
         tickets: [{ id: 't1', initiativeId: 'i1' }],
       });
@@ -620,9 +618,9 @@ describe('runMigrations', () => {
       const tabs = store.get('codeTabs', []) as Array<Record<string, unknown>>;
       const byId = (id: string) => tabs.find((t) => t.id === id)!;
       expect(byId('t1').profileName).toBe('devbox'); // inherited
-      expect(byId('t2').profileName).toBe('host');   // project's profile is null → default
-      expect(byId('t3').profileName).toBe('host');   // no project profile → default
-      expect(byId('t4').profileName).toBe('host');   // no project at all → default
+      expect(byId('t2').profileName).toBe('host'); // project's profile is null → default
+      expect(byId('t3').profileName).toBe('host'); // no project profile → default
+      expect(byId('t4').profileName).toBe('host'); // no project at all → default
     });
 
     it('v22 → v23 leaves an already-set codeTab.profileName untouched', () => {
@@ -631,9 +629,7 @@ describe('runMigrations', () => {
         defaultProfileName: 'host',
         tickets: [],
         projects: [{ id: 'p1', label: 'A', sandboxProfile: 'devbox' }],
-        codeTabs: [
-          { id: 't1', projectId: 'p1', profileName: 'platform', createdAt: 1 },
-        ],
+        codeTabs: [{ id: 't1', projectId: 'p1', profileName: 'platform', createdAt: 1 }],
       });
       runMigrations(store, makeDeps());
       const tabs = store.get('codeTabs', []) as Array<Record<string, unknown>>;
@@ -669,9 +665,7 @@ describe('runMigrations', () => {
         tickets: [],
         projects: [],
         chatSessionId: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
-        codeTabs: [
-          { id: 't1', projectId: null, sessionId: 'ffffffff-0000-4111-8222-333333333333', createdAt: 1 },
-        ],
+        codeTabs: [{ id: 't1', projectId: null, sessionId: 'ffffffff-0000-4111-8222-333333333333', createdAt: 1 }],
       });
       runMigrations(store, makeDeps({ newSessionId: () => 'SHOULD-NOT-BE-USED' }));
 
@@ -768,9 +762,7 @@ describe('runMigrations', () => {
 
       const tickets = store.get('tickets') as Array<Record<string, unknown>>;
       const t1 = tickets.find((t) => t.id === 't1')!;
-      expect(t1.description).toBe(
-        'Existing body.\n\n**Done when:** redirect works\n**Out of scope:** password reset'
-      );
+      expect(t1.description).toBe('Existing body.\n\n**Done when:** redirect works\n**Out of scope:** password reset');
       expect('shaping' in t1).toBe(false);
       expect(tickets.find((t) => t.id === 't2')!.description).toBe('Untouched.');
       expect(store.get('schemaVersion')).toBe(26);

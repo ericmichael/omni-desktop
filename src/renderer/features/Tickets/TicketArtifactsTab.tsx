@@ -1,4 +1,4 @@
-import { makeStyles, mergeClasses, shorthands,tokens } from '@fluentui/react-components';
+import { makeStyles, mergeClasses, shorthands, tokens } from '@fluentui/react-components';
 import { ArrowSync20Regular, FolderOpen20Regular } from '@fluentui/react-icons';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 
@@ -114,31 +114,28 @@ export const TicketArtifactsTab = memo(({ ticketId }: TicketArtifactsTabProps) =
     }
   }, []);
 
-  const handleDividerMouseDown = useCallback(
-    (e: React.MouseEvent) => {
-      e.preventDefault();
-      setIsDragging(true);
+  const handleDividerMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
 
-      const handleMouseMove = (ev: MouseEvent) => {
-        const rect = splitRef.current?.getBoundingClientRect();
-        if (!rect) {
-          return;
-        }
-        const pct = ((ev.clientX - rect.left) / rect.width) * 100;
-        setTreeWidthPercent(Math.min(MAX_TREE_PERCENT, Math.max(MIN_TREE_PERCENT, pct)));
-      };
+    const handleMouseMove = (ev: MouseEvent) => {
+      const rect = splitRef.current?.getBoundingClientRect();
+      if (!rect) {
+        return;
+      }
+      const pct = ((ev.clientX - rect.left) / rect.width) * 100;
+      setTreeWidthPercent(Math.min(MAX_TREE_PERCENT, Math.max(MIN_TREE_PERCENT, pct)));
+    };
 
-      const handleMouseUp = () => {
-        setIsDragging(false);
-        document.removeEventListener('mousemove', handleMouseMove);
-        document.removeEventListener('mouseup', handleMouseUp);
-      };
+    const handleMouseUp = () => {
+      setIsDragging(false);
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
 
-      document.addEventListener('mousemove', handleMouseMove);
-      document.addEventListener('mouseup', handleMouseUp);
-    },
-    []
-  );
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+  }, []);
 
   if (entries.length === 0) {
     return (
@@ -146,12 +143,7 @@ export const TicketArtifactsTab = memo(({ ticketId }: TicketArtifactsTabProps) =
         <FolderOpen20Regular style={{ width: 32, height: 32 }} className={styles.emptyIcon} />
         <p className={styles.emptyText}>No artifacts yet</p>
         <p className={styles.emptySubText}>Agent-produced files will appear here</p>
-        <IconButton
-          aria-label="Refresh"
-          icon={<ArrowSync20Regular />}
-          size="sm"
-          onClick={fetchEntries}
-        />
+        <IconButton aria-label="Refresh" icon={<ArrowSync20Regular />} size="sm" onClick={fetchEntries} />
       </div>
     );
   }
@@ -164,12 +156,7 @@ export const TicketArtifactsTab = memo(({ ticketId }: TicketArtifactsTabProps) =
       <div className={styles.treePane} style={{ width: `${treeWidthPercent}%` }}>
         <div className={styles.treeHeader}>
           <span className={styles.treeLabel}>Files</span>
-          <IconButton
-            aria-label="Refresh"
-            icon={<ArrowSync20Regular />}
-            size="sm"
-            onClick={fetchEntries}
-          />
+          <IconButton aria-label="Refresh" icon={<ArrowSync20Regular />} size="sm" onClick={fetchEntries} />
         </div>
         <ArtifactFileTree
           entries={entries}
@@ -180,10 +167,7 @@ export const TicketArtifactsTab = memo(({ ticketId }: TicketArtifactsTabProps) =
       </div>
 
       {/* Draggable divider */}
-      <div
-        className={styles.divider}
-        onMouseDown={handleDividerMouseDown}
-      />
+      <div className={styles.divider} onMouseDown={handleDividerMouseDown} />
 
       {/* Preview pane */}
       <div className={styles.previewPane}>

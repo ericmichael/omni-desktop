@@ -1,35 +1,43 @@
-import React from 'react'
+import React from 'react';
 
 // Server payload from omni-code's /goal autopilot loop (server_functions/goal.py).
 // snapshot=null means no goal is set on this session (panel renders nothing).
 // "paused" is a non-terminal hold state — the periodic tick is off but
 // the goal can be resumed via /goal.resume.
 export type GoalSnapshot = {
-  goal: string
-  turn: number
-  max_turns: number
-  tick_interval?: number
-  last_reason: string | null
-  status: 'active' | 'completed' | 'cancelled' | 'paused'
-  started_at: number
-  completion_reason: string | null
+  goal: string;
+  turn: number;
+  max_turns: number;
+  tick_interval?: number;
+  last_reason: string | null;
+  status: 'active' | 'completed' | 'cancelled' | 'paused';
+  started_at: number;
+  completion_reason: string | null;
   // Auditable artifact attached on terminal states (achieved/blocked).
-  evidence?: string | null
-}
+  evidence?: string | null;
+};
 
-const GOAL_TRUNCATE = 100
+const GOAL_TRUNCATE = 100;
 
 function shortGoal(goal: string, max: number): string {
-  const oneLine = goal.replace(/\s+/g, ' ').trim()
-  if (oneLine.length <= max) return oneLine
-  return oneLine.slice(0, max - 1) + '…'
+  const oneLine = goal.replace(/\s+/g, ' ').trim();
+  if (oneLine.length <= max) {
+    return oneLine;
+  }
+  return `${oneLine.slice(0, max - 1)}…`;
 }
 
 function dotClass(status: GoalSnapshot['status']): string {
-  if (status === 'active') return 'bg-primary animate-pulse'
-  if (status === 'completed') return 'bg-successGreen'
-  if (status === 'paused') return 'bg-warningOrange'
-  return 'bg-errorRed'
+  if (status === 'active') {
+    return 'bg-primary animate-pulse';
+  }
+  if (status === 'completed') {
+    return 'bg-successGreen';
+  }
+  if (status === 'paused') {
+    return 'bg-warningOrange';
+  }
+  return 'bg-errorRed';
 }
 
 // Compact single-line docked panel for the /goal autopilot loop. Mirrors
@@ -38,8 +46,10 @@ function dotClass(status: GoalSnapshot['status']): string {
 //   Completed: ● goal · <text> · completed
 //   Cancelled: ● goal · <text> · cancelled
 export function GoalPanel({ snapshot, onDismiss }: { snapshot: GoalSnapshot | null; onDismiss?: () => void }) {
-  if (!snapshot) return null
-  const terminal = snapshot.status === 'completed' || snapshot.status === 'cancelled'
+  if (!snapshot) {
+    return null;
+  }
+  const terminal = snapshot.status === 'completed' || snapshot.status === 'cancelled';
   return (
     <div className="px-3 pt-2">
       <div className="rounded-md border border-bgCardAlt bg-bgCardAlt/60 px-2.5 py-1.5">
@@ -81,5 +91,5 @@ export function GoalPanel({ snapshot, onDismiss }: { snapshot: GoalSnapshot | nu
         </div>
       </div>
     </div>
-  )
+  );
 }

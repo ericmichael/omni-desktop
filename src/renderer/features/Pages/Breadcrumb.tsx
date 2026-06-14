@@ -81,8 +81,8 @@ export const PageBreadcrumb = memo(({ projectId, pageId }: BreadcrumbProps) => {
   );
 
   if (!project) {
-return null;
-}
+    return null;
+  }
 
   return (
     <nav className={styles.root}>

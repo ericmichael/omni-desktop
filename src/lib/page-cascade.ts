@@ -16,8 +16,8 @@ import type { Page, PageId } from '@/shared/types';
 export function computePagesToDelete(pages: readonly Page[], targetId: PageId): Set<PageId> {
   const target = pages.find((p) => p.id === targetId);
   if (!target || target.isRoot) {
-return new Set();
-}
+    return new Set();
+  }
 
   const toDelete = new Set<PageId>([targetId]);
   // Fixed-point expansion. Bounded by page count so always terminates.

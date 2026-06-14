@@ -27,9 +27,7 @@ export async function requireRole(
 ): Promise<TeamRole> {
   const role = await controlPlane.getMembershipRole(teamId, principal);
   if (!role || RANK[role] < RANK[min]) {
-    throw new TeamAuthorizationError(
-      `requires '${min}' in team ${teamId} (caller is '${role ?? 'non-member'}')`
-    );
+    throw new TeamAuthorizationError(`requires '${min}' in team ${teamId} (caller is '${role ?? 'non-member'}')`);
   }
   return role;
 }

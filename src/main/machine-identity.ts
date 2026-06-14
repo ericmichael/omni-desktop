@@ -22,6 +22,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { hostname, platform as osPlatform } from 'node:os';
 import { join } from 'node:path';
 
+import { uuidv4 } from '@/lib/uuid';
+
 export type MachineIdentity = {
   machineId: string;
   label: string;
@@ -40,12 +42,14 @@ const cleanHostname = (raw: string): string => {
 const generateId = (): string => {
   // Crypto.randomUUID is available in every supported Node + Electron version.
   // Bare uuid v4 — opaque, no embedded info.
-  return crypto.randomUUID();
+  return uuidv4();
 };
 
 const readFile = (configDir: string): Partial<MachineIdentity> | null => {
   const path = join(configDir, FILENAME);
-  if (!existsSync(path)) return null;
+  if (!existsSync(path)) {
+    return null;
+  }
   try {
     const raw = readFileSync(path, 'utf-8');
     const parsed = JSON.parse(raw) as Partial<MachineIdentity>;

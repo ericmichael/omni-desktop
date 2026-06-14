@@ -8,13 +8,6 @@ export const SettingsModalOpenButton = memo(({ className }: { className?: string
   const onClick = useCallback(() => {
     persistedStoreApi.setKey('layoutMode', 'settings');
   }, []);
-  return (
-    <IconButton
-      aria-label="Settings"
-      onClick={onClick}
-      icon={<Settings20Filled />}
-      className={className}
-    />
-  );
+  return <IconButton aria-label="Settings" onClick={onClick} icon={<Settings20Filled />} className={className} />;
 });
 SettingsModalOpenButton.displayName = 'SettingsModalOpenButton';

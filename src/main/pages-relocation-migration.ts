@@ -113,34 +113,31 @@ export function migrateLegacyPagesToConfigDir(repo: ProjectsRepo): PagesRelocati
         const entries = readdirSync(legacyPerProjectPagesDir, { withFileTypes: true });
         for (const entry of entries) {
           if (!entry.isFile()) {
-continue;
-}
+            continue;
+          }
           // Files are named `<pageId>.md` or `<pageId>.py`. Only copy if
           // the page row actually exists — orphan files on disk are left
           // in place for the user to deal with.
           const dotIdx = entry.name.lastIndexOf('.');
           if (dotIdx <= 0) {
-continue;
-}
+            continue;
+          }
           const id = entry.name.slice(0, dotIdx);
           if (!pageById.has(id)) {
-continue;
-}
+            continue;
+          }
 
           const src = join(legacyPerProjectPagesDir, entry.name);
           const dst = join(newDir, entry.name);
           const result = copyIfNew(src, dst);
           if (result === 'copied') {
-summary.perProjectPagesCopied++;
-} else if (result === 'skipped') {
-summary.skippedAlreadyMigrated++;
-}
+            summary.perProjectPagesCopied++;
+          } else if (result === 'skipped') {
+            summary.skippedAlreadyMigrated++;
+          }
         }
       } catch (err) {
-        console.warn(
-          `[pages-migration] failed to scan ${legacyPerProjectPagesDir}:`,
-          err
-        );
+        console.warn(`[pages-migration] failed to scan ${legacyPerProjectPagesDir}:`, err);
       }
     }
 
@@ -155,10 +152,10 @@ summary.skippedAlreadyMigrated++;
       const dst = join(newDir, `${rootPage.id}.md`);
       const result = copyIfNew(legacyContextPath, dst);
       if (result === 'copied') {
-summary.rootPagesFromContextMd++;
-} else if (result === 'skipped') {
-summary.skippedAlreadyMigrated++;
-}
+        summary.rootPagesFromContextMd++;
+      } else if (result === 'skipped') {
+        summary.skippedAlreadyMigrated++;
+      }
     }
 
     // 3. MCP legacy pages: `<config>/projects/<slug>/pages/<id>.md`.
@@ -173,21 +170,21 @@ summary.skippedAlreadyMigrated++;
         const entries = readdirSync(legacyMcpDir, { withFileTypes: true });
         for (const entry of entries) {
           if (!entry.isFile() || !entry.name.endsWith('.md')) {
-continue;
-}
+            continue;
+          }
           const id = entry.name.slice(0, -3);
           if (!pageById.has(id)) {
-continue;
-}
+            continue;
+          }
 
           const src = join(legacyMcpDir, entry.name);
           const dst = join(newDir, entry.name);
           const result = copyIfNew(src, dst);
           if (result === 'copied') {
-summary.mcpPagesCopied++;
-} else if (result === 'skipped') {
-summary.skippedAlreadyMigrated++;
-}
+            summary.mcpPagesCopied++;
+          } else if (result === 'skipped') {
+            summary.skippedAlreadyMigrated++;
+          }
         }
       } catch (err) {
         console.warn(`[pages-migration] failed to scan ${legacyMcpDir}:`, err);

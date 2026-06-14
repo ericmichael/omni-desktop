@@ -21,11 +21,11 @@ import type { InboxItem, InboxItemStatus } from '@/shared/types';
 /** Map legacy InboxItemStatus to new InboxItemStatus. Returns null for statuses that should be dropped. */
 export function mapLegacyStatus(raw: unknown): InboxItemStatus | null {
   if (raw === 'done') {
-return null;
-} // dropped — terminal completion without a promotion target
+    return null;
+  } // dropped — terminal completion without a promotion target
   if (raw === 'deferred' || raw === 'iceboxed') {
-return 'later';
-}
+    return 'later';
+  }
   return 'new'; // default for 'open' and anything unrecognized
 }
 
@@ -37,8 +37,8 @@ return 'later';
  */
 export function legacyShapingToNoteText(rawShaping: unknown): string | undefined {
   if (!rawShaping || typeof rawShaping !== 'object') {
-return undefined;
-}
+    return undefined;
+  }
   const s = rawShaping as Record<string, unknown>;
   const lines: string[] = [];
   if (typeof s.doneLooksLike === 'string' && s.doneLooksLike.trim()) {
@@ -63,18 +63,15 @@ export function upgradeLegacyInboxItem(
 ): InboxItem | null {
   const status = mapLegacyStatus(raw.status);
   if (status === null) {
-return null;
-}
+    return null;
+  }
 
-  const title =
-    typeof raw.title === 'string' && raw.title.trim() ? raw.title.trim() : 'Untitled';
-  const description = typeof raw.description === 'string' && raw.description.trim()
-    ? raw.description.trim()
-    : undefined;
+  const title = typeof raw.title === 'string' && raw.title.trim() ? raw.title.trim() : 'Untitled';
+  const description =
+    typeof raw.description === 'string' && raw.description.trim() ? raw.description.trim() : undefined;
   const shapingText = legacyShapingToNoteText(raw.shaping);
   const note = [description, shapingText].filter(Boolean).join('\n\n') || undefined;
-  const projectId =
-    typeof raw.projectId === 'string' && raw.projectId.length > 0 ? raw.projectId : null;
+  const projectId = typeof raw.projectId === 'string' && raw.projectId.length > 0 ? raw.projectId : null;
   const createdAt = typeof raw.createdAt === 'number' ? raw.createdAt : now;
   const updatedAt = typeof raw.updatedAt === 'number' ? raw.updatedAt : now;
 
@@ -87,8 +84,8 @@ return null;
     updatedAt,
   };
   if (note) {
-item.note = note;
-}
+    item.note = note;
+  }
   if (status === 'later') {
     item.laterAt = updatedAt;
   }
@@ -111,8 +108,8 @@ export function upgradeLegacyInbox(
   for (const raw of rawItems) {
     const item = upgradeLegacyInboxItem(raw, now, idGen);
     if (item) {
-upgraded.push(item);
-}
+      upgraded.push(item);
+    }
   }
   return upgraded;
 }

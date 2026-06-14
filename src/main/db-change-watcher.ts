@@ -25,7 +25,9 @@ export class DbChangeWatcher {
 
   /** Start polling for external changes. */
   start(): void {
-    if (this.timer) return;
+    if (this.timer) {
+      return;
+    }
     this.timer = setInterval(() => {
       try {
         const currentSeq = this.repo.getChangeSeq();

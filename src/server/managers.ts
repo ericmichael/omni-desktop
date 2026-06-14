@@ -15,13 +15,27 @@ import {
 import { join } from 'path';
 
 import { emptyMcpConfig, emptyModelsConfig, emptyNetworkConfig, parseEnvVars } from '@/lib/agent-config';
+import { uuidv4 } from '@/lib/uuid';
 import { ACI_DESKTOP_PROFILE_NAME, ACI_PROFILE_NAME, writeAciProfile } from '@/main/aci-profile';
+import { listRepos as azureListRepos } from '@/main/azure-repos';
 import { type BrowserContext, buildBrowserContext, registerBrowserHandlers } from '@/main/browser-manager';
+import {
+  type CodexTokens,
+  ensureFreshTokens as codexEnsureFresh,
+  getStatus as codexStatus,
+  loginWithDeviceFlow as codexDeviceLogin,
+  logout as codexLogout,
+} from '@/main/codex-auth';
 import { migrateAgentConfigFromFiles } from '@/main/config-files-migration';
 import { collectSecretEnv, materializeAgentConfig } from '@/main/config-materializer';
 import { createConsoleManager } from '@/main/console-manager';
 import { PROJECT_KEYS } from '@/main/db-store-bridge';
 import { ExtensionManager, registerExtensionHandlers } from '@/main/extension-manager';
+import {
+  linkWithDeviceFlow as githubLink,
+  listOrgs as githubListOrgs,
+  searchRepos as githubSearchRepos,
+} from '@/main/github-auth';
 import { registerInboxHandlers } from '@/main/inbox-handlers';
 import { getMcpBinPath } from '@/main/mcp-config-manager';
 import { registerMigrationHandlers } from '@/main/migration-handlers';
@@ -32,43 +46,31 @@ import { migrateLegacyPagesToConfigDir } from '@/main/pages-relocation-migration
 import { PlatformClient } from '@/main/platform-client';
 import { createPlatformClient, isEnterpriseBuild, PLATFORM_URL } from '@/main/platform-mode';
 import { ProcessManager, registerProcessHandlers } from '@/main/process-manager';
-import { HostBridgePreparer } from '@/server/host-bridge-preparer';
 import { backfillProjectConfigs } from '@/main/project-config-backfill';
 import { closeProjectDb, getDb, openProjectDb } from '@/main/project-db';
 import { registerProjectHandlers } from '@/main/project-handlers';
 import { ProjectManager } from '@/main/project-manager';
-import { listRepos as azureListRepos } from '@/main/azure-repos';
-import {
-  type CodexTokens,
-  ensureFreshTokens as codexEnsureFresh,
-  getStatus as codexStatus,
-  loginWithDeviceFlow as codexDeviceLogin,
-  logout as codexLogout,
-} from '@/main/codex-auth';
-import {
-  linkWithDeviceFlow as githubLink,
-  listOrgs as githubListOrgs,
-  searchRepos as githubSearchRepos,
-} from '@/main/github-auth';
 import { registerSnapshotHandlers } from '@/main/snapshot-manager';
 import { registerSupervisorHandlers } from '@/main/supervisor-handlers';
 import { getOmniConfigDir } from '@/main/util';
 import { WorkspaceSyncManager } from '@/main/workspace-sync-manager';
 import { requireRole } from '@/server/authz';
 import { AzureFilesArtifactStore } from '@/server/azure-artifact-store';
+import { CODEX_REFRESH_PATH } from '@/server/codex-refresh-http';
+import { CompositeSettingsStore } from '@/server/composite-settings-store';
+import { HostBridgePreparer } from '@/server/host-bridge-preparer';
 import { ServerIpcAdapter } from '@/server/ipc-adapter';
 import { MachineRegistry } from '@/server/machine-registry';
 import { MCP_PROJECTS_PATH } from '@/server/mcp-http';
-import { CODEX_REFRESH_PATH } from '@/server/codex-refresh-http';
-import { CompositeSettingsStore } from '@/server/composite-settings-store';
 import { assertNonBypassingRole, ensureAppRole, ensureSessionsDb, grantAppPrivileges } from '@/server/pg-bootstrap';
 import { PgSecretStore } from '@/server/pg-secret-store';
 import { resolveRuntimeTokenSecret, signRuntimeToken } from '@/server/runtime-token';
-import { registerTeamHandlers } from '@/server/team-handlers';
 import { ServerSecretStore } from '@/server/secret-store';
 import type { ServerStore } from '@/server/store';
+import { registerTeamHandlers } from '@/server/team-handlers';
 import type { HandlerContext, WsHandler } from '@/server/ws-handler';
 import { DEFAULT_TENANT } from '@/server/ws-handler';
+import { tokenLast4 } from '@/shared/git-credentials';
 import {
   registerConfigHandlers,
   registerGitCredentialHandlers,
@@ -77,7 +79,6 @@ import {
   registerUtilHandlers,
   type SettingsConfigStore,
 } from '@/shared/ipc-handlers';
-import { tokenLast4 } from '@/shared/git-credentials';
 import { buildHttpMcpEntry, buildStdioMcpEntry } from '@/shared/mcp-entry';
 import { maskMcpConfig, maskModelsConfig, restoreMaskedModels } from '@/shared/secret-mask';
 import { classify } from '@/shared/settings-layers';
@@ -275,7 +276,7 @@ export const wireGlobalHandlers = async (arg: {
 
   // This replica's id — tagged onto Postgres change-notifications so we ignore
   // our own writes and re-hydrate only on writes from other replicas / the MCP.
-  const replicaId = crypto.randomUUID();
+  const replicaId = uuidv4();
 
   // Azure sandboxing is host-runs-agent: `omni serve` runs here and drives a
   // serverless ACI container via the `aci` sandbox profile (omniagents
@@ -314,7 +315,9 @@ export const wireGlobalHandlers = async (arg: {
   // can call into it without knowing about WsHandler. Also nudges the store
   // snapshot so the sandbox picker reflects the new machine immediately.
   const broadcastMachines = async (principal: string): Promise<void> => {
-    if (!machineRegistry) return;
+    if (!machineRegistry) {
+      return;
+    }
     try {
       const summaries = await machineRegistry.listForPrincipal(principal);
       // Renderer cares about *its* view; isSelf is recomputed there since the
@@ -327,7 +330,9 @@ export const wireGlobalHandlers = async (arg: {
       // Replay store snapshot so availableSandboxProfiles + picker refresh.
       // Iterate every tenant instance for the principal (across teams).
       for (const [key] of tenants) {
-        if (!key.endsWith(`::${principal}`) && key !== principal) continue;
+        if (!key.endsWith(`::${principal}`) && key !== principal) {
+          continue;
+        }
         const sep = key.indexOf('::');
         const teamId = sep >= 0 ? key.slice(0, sep) : key;
         sendSnapshot(teamId, principal);
@@ -345,7 +350,9 @@ export const wireGlobalHandlers = async (arg: {
    * longer knows about, push an error so the renderer can prompt restart.
    */
   const adoptSessionsOnReconnect = async (machineId: string, principal: string): Promise<void> => {
-    if (!machineRegistry) return;
+    if (!machineRegistry) {
+      return;
+    }
     // host_bridge model: the agent runs in the CLOUD (it survived the laptop's
     // disconnect) — only the sandbox exec channel to the laptop broke. On
     // reconnect, rebuild each local session anchored to this machine so the
@@ -356,7 +363,9 @@ export const wireGlobalHandlers = async (arg: {
     // this machine (the registry's anchors are dropped while a machine is
     // offline; the ProcessManager's map persists).
     for (const [key, t] of tenants) {
-      if (!key.endsWith(`::${principal}`) && key !== principal) continue;
+      if (!key.endsWith(`::${principal}`) && key !== principal) {
+        continue;
+      }
       try {
         await t.processManager.resumeOnReconnect(machineId);
       } catch (err) {
@@ -370,7 +379,9 @@ export const wireGlobalHandlers = async (arg: {
   // this only flips the renderer banner. Iterates the principal's tenant(s).
   const broadcastHostOfflineForPrincipal = (machineId: string, principal: string): void => {
     for (const [key, t] of tenants) {
-      if (!key.endsWith(`::${principal}`) && key !== principal) continue;
+      if (!key.endsWith(`::${principal}`) && key !== principal) {
+        continue;
+      }
       try {
         t.processManager.broadcastHostOffline(machineId);
       } catch (err) {
@@ -443,7 +454,9 @@ export const wireGlobalHandlers = async (arg: {
         ? async () => {
             const codexRefreshUrl = (() => {
               const dataApi = process.env['OMNI_DATA_API_URL'];
-              if (!dataApi) return undefined;
+              if (!dataApi) {
+                return undefined;
+              }
               try {
                 const u = new URL(dataApi);
                 u.pathname = CODEX_REFRESH_PATH;
@@ -503,7 +516,7 @@ export const wireGlobalHandlers = async (arg: {
               OMNI_RUNTIME_TOKEN: signRuntimeToken(runtimeTokenSecret, {
                 tenantId: teamId,
                 principalId,
-                sessionId: crypto.randomUUID(),
+                sessionId: uuidv4(),
               }),
               // Codex token-refresh callback. The runtime POSTs refreshed
               // OAuth tokens here so PgSecretStore stays current across spawns.
@@ -700,21 +713,34 @@ export const wireGlobalHandlers = async (arg: {
   };
 
   const sandboxProfileLabel = (name: string): string => {
-    if (name === 'host') return 'This computer (no sandbox)';
-    if (name === 'devbox') return 'Devbox (Docker)';
-    if (name === 'platform') return 'Cloud (managed)';
-    if (name === ACI_PROFILE_NAME) return 'Cloud · Fast';
-    if (name === ACI_DESKTOP_PROFILE_NAME) return 'Cloud · Desktop (IDE + VNC)';
-    if (name.startsWith('local:')) return `Local · ${name.slice('local:'.length, 'local:'.length + 8)}`;
+    if (name === 'host') {
+      return 'This computer (no sandbox)';
+    }
+    if (name === 'devbox') {
+      return 'Devbox (Docker)';
+    }
+    if (name === 'platform') {
+      return 'Cloud (managed)';
+    }
+    if (name === ACI_PROFILE_NAME) {
+      return 'Cloud · Fast';
+    }
+    if (name === ACI_DESKTOP_PROFILE_NAME) {
+      return 'Cloud · Desktop (IDE + VNC)';
+    }
+    if (name.startsWith('local:')) {
+      return `Local · ${name.slice('local:'.length, 'local:'.length + 8)}`;
+    }
     return name.length > 0 ? name[0]!.toUpperCase() + name.slice(1) : name;
   };
 
   const getMcpContext = (tenantId: string, principalId: string = tenantId) => ({
     listSandboxProfiles: async () => {
       const snapshot = getStoreSnapshot(tenantId, principalId);
-      const names = snapshot.availableSandboxProfiles && snapshot.availableSandboxProfiles.length > 0
-        ? snapshot.availableSandboxProfiles
-        : ['host', 'devbox'];
+      const names =
+        snapshot.availableSandboxProfiles && snapshot.availableSandboxProfiles.length > 0
+          ? snapshot.availableSandboxProfiles
+          : ['host', 'devbox'];
       return names.map((name) => ({
         name,
         label: sandboxProfileLabel(name),
@@ -723,7 +749,9 @@ export const wireGlobalHandlers = async (arg: {
       }));
     },
     listTeamMembers: async () => {
-      if (!teamsEnabled || !controlPlane) return [];
+      if (!teamsEnabled || !controlPlane) {
+        return [];
+      }
       const rows = await controlPlane.listMembers(tenantId);
       return rows.map((m) => ({
         user_id: m.user_id,
@@ -769,10 +797,14 @@ export const wireGlobalHandlers = async (arg: {
    * (no re-onboarding). Idempotent: skipped once the users row exists. PG only.
    */
   const ensureUserBootstrapped = async (principal: string, claims: PrincipalClaims = {}): Promise<void> => {
-    if (!controlPlane || !pgPool) return;
+    if (!controlPlane || !pgPool) {
+      return;
+    }
     const existing = await controlPlane.getUser(principal);
     await controlPlane.ensureUser(principal, claims);
-    if (existing) return; // already bootstrapped
+    if (existing) {
+      return;
+    } // already bootstrapped
     const label = claims.displayName ? `${claims.displayName}'s Team` : 'Personal';
     await controlPlane.createTeam({ id: principal, label, kind: 'personal', ownerId: principal });
     // Bifurcate any legacy settings blob (keyed by principal == personal team id).
@@ -784,9 +816,13 @@ export const wireGlobalHandlers = async (arg: {
         const userByTeam: Record<string, unknown> = {};
         for (const [k, v] of Object.entries(legacy)) {
           const cls = classify(k as keyof StoreData);
-          if (cls.layer === 'team') teamData[k] = v;
-          else if (cls.scope === 'team') userByTeam[k] = v;
-          else userTop[k] = v; // global / identity / infra
+          if (cls.layer === 'team') {
+            teamData[k] = v;
+          } else if (cls.scope === 'team') {
+            userByTeam[k] = v;
+          } else {
+            userTop[k] = v;
+          } // global / identity / infra
         }
         await saveTeamSettings(pgPool, principal, teamData, replicaId);
         await saveUserSettings(pgPool, principal, { ...userTop, byTeam: { [principal]: userByTeam } }, replicaId);
@@ -802,7 +838,9 @@ export const wireGlobalHandlers = async (arg: {
    * belong to (caller rejects the connection); the personal team otherwise.
    */
   const resolveActiveTeam = async (principal: string, requested?: string): Promise<string | null> => {
-    if (!controlPlane) return principal; // no teams → data scope is the principal
+    if (!controlPlane) {
+      return principal;
+    } // no teams → data scope is the principal
     const teams = await controlPlane.listTeamsForPrincipal(principal);
     if (requested) {
       return teams.some((t) => t.id === requested) ? requested : null;
@@ -910,8 +948,12 @@ export const wireGlobalHandlers = async (arg: {
         if (o === replicaId) {
           return; // our own write — cache is already current
         }
-        if (t) pendingTeams.add(t);
-        if (u) pendingPrincipals.add(u);
+        if (t) {
+          pendingTeams.add(t);
+        }
+        if (u) {
+          pendingPrincipals.add(u);
+        }
         if ((t || u) && !refreshTimer) {
           refreshTimer = setTimeout(flushRefresh, 50);
         }
@@ -1272,12 +1314,16 @@ export const wireGlobalHandlers = async (arg: {
   });
   ipc.handle('machine:list', async (e: unknown) => {
     const c = e as HandlerContext;
-    if (!machineRegistry) return [];
+    if (!machineRegistry) {
+      return [];
+    }
     return machineRegistry.listForPrincipal(c.principalId);
   });
   ipc.handle('machine:rename', async (e: unknown, machineId: unknown, label: unknown) => {
     const c = e as HandlerContext;
-    if (!machineRegistry) return [];
+    if (!machineRegistry) {
+      return [];
+    }
     const id = String(machineId);
     const next = String(label ?? '').trim() || 'Unnamed machine';
     await machineRegistry.rename(c.principalId, id, next);
@@ -1285,7 +1331,9 @@ export const wireGlobalHandlers = async (arg: {
   });
   ipc.handle('machine:remove', async (e: unknown, machineId: unknown) => {
     const c = e as HandlerContext;
-    if (!machineRegistry) return [];
+    if (!machineRegistry) {
+      return [];
+    }
     await machineRegistry.remove(c.principalId, String(machineId));
     return machineRegistry.listForPrincipal(c.principalId);
   });
@@ -1303,7 +1351,9 @@ export const wireGlobalHandlers = async (arg: {
       : { hasModels: false, hasMcp: false, hasEnv: false, hasNetwork: false };
   const refreshTeamMembers = (teamId: string): void => {
     for (const [key, t] of tenants) {
-      if (!key.startsWith(`${teamId}::`)) continue;
+      if (!key.startsWith(`${teamId}::`)) {
+        continue;
+      }
       const principalId = key.slice(teamId.length + 2);
       if (t.settings instanceof CompositeSettingsStore) {
         void t.settings.reloadTeam().then(() => {
@@ -1318,7 +1368,9 @@ export const wireGlobalHandlers = async (arg: {
   ipc.handle('team:whoami', (e) => (teamsEnabled ? (e as HandlerContext).principalId : null));
 
   const teamSummariesFor = async (principal: string): Promise<import('@/shared/types').TeamSummary[]> => {
-    if (!controlPlane) return [];
+    if (!controlPlane) {
+      return [];
+    }
     return (await controlPlane.listTeamsForPrincipal(principal)).map((r) => ({
       id: r.id,
       label: r.label,
@@ -1330,7 +1382,9 @@ export const wireGlobalHandlers = async (arg: {
   // --- Self-service membership ---
   ipc.handle('team:leave', async (e) => {
     const c = e as HandlerContext;
-    if (!controlPlane) return [];
+    if (!controlPlane) {
+      return [];
+    }
     const role = await controlPlane.getMembershipRole(c.tenantId, c.principalId);
     if (role === 'owner') {
       throw new Error('Transfer ownership before leaving the team.');
@@ -1340,14 +1394,18 @@ export const wireGlobalHandlers = async (arg: {
   });
   ipc.handle('team:rename', async (e, label) => {
     const c = e as HandlerContext;
-    if (!controlPlane) return [];
+    if (!controlPlane) {
+      return [];
+    }
     await requireRole(controlPlane, c.tenantId, c.principalId, 'admin');
     await controlPlane.renameTeam(c.tenantId, String(label).trim() || 'Team');
     return teamSummariesFor(c.principalId);
   });
   ipc.handle('team:delete', async (e) => {
     const c = e as HandlerContext;
-    if (!controlPlane) return [];
+    if (!controlPlane) {
+      return [];
+    }
     await requireRole(controlPlane, c.tenantId, c.principalId, 'owner');
     const team = await controlPlane.getTeam(c.tenantId);
     if (team?.kind === 'personal') {
@@ -1364,7 +1422,9 @@ export const wireGlobalHandlers = async (arg: {
   });
   ipc.handle('team:transfer-ownership', async (e, userId) => {
     const c = e as HandlerContext;
-    if (!controlPlane) return [];
+    if (!controlPlane) {
+      return [];
+    }
     await requireRole(controlPlane, c.tenantId, c.principalId, 'owner');
     const target = String(userId);
     await controlPlane.setRole(c.tenantId, target, 'owner');
@@ -1383,7 +1443,9 @@ export const wireGlobalHandlers = async (arg: {
   });
   ipc.handle('team-settings:publish-from-mine', async (e) => {
     const c = e as HandlerContext;
-    if (controlPlane) await requireRole(controlPlane, c.tenantId, c.principalId, 'admin');
+    if (controlPlane) {
+      await requireRole(controlPlane, c.tenantId, c.principalId, 'admin');
+    }
     const s = getSettings(c.tenantId, c.principalId);
     if (s instanceof CompositeSettingsStore) {
       // Adopt the caller's effective (merged) config as the team default.
@@ -1398,7 +1460,9 @@ export const wireGlobalHandlers = async (arg: {
   });
   ipc.handle('team-settings:clear', async (e) => {
     const c = e as HandlerContext;
-    if (controlPlane) await requireRole(controlPlane, c.tenantId, c.principalId, 'admin');
+    if (controlPlane) {
+      await requireRole(controlPlane, c.tenantId, c.principalId, 'admin');
+    }
     const s = getSettings(c.tenantId, c.principalId);
     if (s instanceof CompositeSettingsStore) {
       s.setTeamBase('modelsConfig', emptyModelsConfig());
@@ -1479,7 +1543,9 @@ export const wireGlobalHandlers = async (arg: {
     void (async () => {
       const maxAttempts = Math.floor(deviceCode.expires_in / deviceCode.interval);
       for (let i = 0; i < maxAttempts; i++) {
-        await new Promise<void>((r) => setTimeout(r, deviceCode.interval * 1000));
+        await new Promise<void>((r) => {
+          setTimeout(r, deviceCode.interval * 1000);
+        });
         try {
           const result = await PlatformClient.pollForToken(PLATFORM_URL, deviceCode.device_code, globalThis.fetch);
           if (result.status === 'authenticated' && result.access_token && result.refresh_token) {

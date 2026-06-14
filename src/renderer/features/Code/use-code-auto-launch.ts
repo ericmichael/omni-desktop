@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 
-import { type AutoLaunchPhase,useAutoLaunch } from '@/renderer/hooks/use-auto-launch';
+import { type AutoLaunchPhase, useAutoLaunch } from '@/renderer/hooks/use-auto-launch';
 import type { CodeTabId } from '@/shared/types';
 
 import { $codeTabErrors, $codeTabPhases } from './state';
@@ -26,7 +26,7 @@ export const useCodeAutoLaunch = (
     containerId?: string;
   }
 ) => {
-  const { phase, error, retry, launch, actor } = useAutoLaunch({
+  const { phase, retry, launch, actor } = useAutoLaunch({
     processId: tabId,
     workspaceDir,
     ...(opts?.projectId ? { projectId: opts.projectId } : {}),

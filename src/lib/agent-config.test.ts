@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { containsEnvRef, emptyMcpConfig, emptyModelsConfig, emptyNetworkConfig, parseEnvVars } from '@/lib/agent-config';
+import {
+  containsEnvRef,
+  emptyMcpConfig,
+  emptyModelsConfig,
+  emptyNetworkConfig,
+  parseEnvVars,
+} from '@/lib/agent-config';
 
 describe('parseEnvVars', () => {
   it('parses KEY=value, skipping comments and blanks', () => {

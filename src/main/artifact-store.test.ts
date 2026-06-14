@@ -8,7 +8,7 @@ import { HostFsArtifactStore, parseDockerFindOutput } from '@/main/artifact-stor
 
 describe('parseDockerFindOutput', () => {
   it('maps find rows to entries, sorted dirs-first then name', () => {
-    const out = `${['f\t12\t1700000000.5\tz.txt', 'd\t4096\t1700000001\tsub', 'f\t3\t1700000002\ta.md'].join('\n')  }\n`;
+    const out = `${['f\t12\t1700000000.5\tz.txt', 'd\t4096\t1700000001\tsub', 'f\t3\t1700000002\ta.md'].join('\n')}\n`;
     const entries = parseDockerFindOutput(out);
     expect(entries.map((e) => e.name)).toEqual(['sub', 'a.md', 'z.txt']);
     expect(entries[0]).toMatchObject({ name: 'sub', isDirectory: true });

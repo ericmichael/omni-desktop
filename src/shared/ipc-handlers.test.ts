@@ -40,7 +40,6 @@ describe('registerUtilHandlers — path validation', () => {
   const buildIpc = (): StubIpc => {
     const ipc = new StubIpc();
     registerUtilHandlers(ipc, {
-      // eslint-disable-next-line @typescript-eslint/require-await
       fetchFn: (async () => new Response()) as unknown as typeof globalThis.fetch,
       launcherVersion: 'test',
     });
@@ -74,7 +73,7 @@ describe('registerUtilHandlers — path validation', () => {
 
   it('util:ensure-directory rejects excessively deep paths', async () => {
     const ipc = buildIpc();
-    const tooDeep = '/' + 'a/'.repeat(MAX_USER_PATH_DEPTH + 5) + 'leaf';
+    const tooDeep = `/${'a/'.repeat(MAX_USER_PATH_DEPTH + 5)}leaf`;
     await expect(ipc.invoke('util:ensure-directory', tooDeep)).rejects.toThrow(/maximum depth/);
   });
 
@@ -82,7 +81,7 @@ describe('registerUtilHandlers — path validation', () => {
     const ipc = buildIpc();
     // Read-only operations are not constrained by depth — just by null byte.
     // Using a non-existent deep path so the readdir try/catch returns [].
-    const deep = '/' + 'a/'.repeat(MAX_USER_PATH_DEPTH + 5) + 'leaf';
+    const deep = `/${'a/'.repeat(MAX_USER_PATH_DEPTH + 5)}leaf`;
     await expect(ipc.invoke('util:list-directory', deep)).resolves.toEqual([]);
   });
 

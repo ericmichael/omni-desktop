@@ -49,15 +49,15 @@ export function computeShippedDigest(input: ShippedInput): ShippedDigest {
 
   for (const ticket of tickets) {
     if (ticket.resolution === undefined) {
-continue;
-}
+      continue;
+    }
     const at = ticket.resolvedAt;
     if (at === undefined) {
-continue;
-}
+      continue;
+    }
     if (at < startOfWeek) {
-continue;
-}
+      continue;
+    }
 
     const item: ShippedItem = { kind: 'ticket', ticket, at };
     week.push(item);
@@ -70,21 +70,21 @@ continue;
 
   for (const milestone of milestones) {
     if (milestone.status !== 'completed') {
-continue;
-}
+      continue;
+    }
     const at = milestone.completedAt;
     if (at === undefined) {
-continue;
-}
+      continue;
+    }
     if (at < startOfWeek) {
-continue;
-}
+      continue;
+    }
 
     const item: ShippedItem = { kind: 'milestone', milestone, at };
     week.push(item);
     if (at >= startOfToday) {
-today.push(item);
-}
+      today.push(item);
+    }
   }
 
   // Newest first.

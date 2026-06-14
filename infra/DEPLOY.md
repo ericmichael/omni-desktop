@@ -21,11 +21,11 @@ The runbook for the cloud deployment (ACI host-runs-agent model). Two workflows:
 
 ## The three images (all in `$ACR_NAME` = omnilauncheracr)
 
-| Image | Built by | Contents |
-|---|---|---|
-| `omni-launcher:latest` | `scripts/build-launcher-image.sh` | the server (control plane); bakes `omni-code` + `omniagents` |
-| `omni-launcher-devbox-min:latest` | `npm run build:devbox-min` | thin sandbox (fast `aci` profile, ~166 MB) |
-| `omni-launcher-devbox:latest` | `npm run build:devbox` | full sandbox (`aci-desktop`: IDE + VNC, ~3.3 GB) |
+| Image                             | Built by                          | Contents                                                     |
+| --------------------------------- | --------------------------------- | ------------------------------------------------------------ |
+| `omni-launcher:latest`            | `scripts/build-launcher-image.sh` | the server (control plane); bakes `omni-code` + `omniagents` |
+| `omni-launcher-devbox-min:latest` | `npm run build:devbox-min`        | thin sandbox (fast `aci` profile, ~166 MB)                   |
+| `omni-launcher-devbox:latest`     | `npm run build:devbox`            | full sandbox (`aci-desktop`: IDE + VNC, ~3.3 GB)             |
 
 The launcher image version is pinned in **one** place — `src/lib/omni-version.ts`
 (`OMNI_CODE_VERSION`); the build script reads it, and `omni-code` pins
@@ -35,11 +35,13 @@ The launcher image version is pinned in **one** place — `src/lib/omni-version.
 
 > **ACR is private** (public access off), so a push from outside the VNet is
 > blocked. For a dev push, briefly toggle public access around the push:
+>
 > ```bash
 > az acr update -n "$ACR_NAME" --public-network-enabled true
 > # … build + push …
 > az acr update -n "$ACR_NAME" --public-network-enabled false
 > ```
+>
 > (A production pipeline would build from inside the VNet / an ACR agent pool
 > instead of toggling.)
 
@@ -68,11 +70,13 @@ curl -s -o /dev/null -w "%{http_code}\n" "https://$SITE_NAME.azurewebsites.net/"
 ```
 
 Sandbox-image change? Rebuild + push the relevant devbox image instead, e.g.:
+
 ```bash
 az acr login -n "$ACR_NAME"
 docker build -f sandbox-image/Dockerfile.min -t "$ACR_NAME.azurecr.io/omni-launcher-devbox-min:latest" sandbox-image
 docker push "$ACR_NAME.azurecr.io/omni-launcher-devbox-min:latest"
 ```
+
 ACI pulls the devbox image fresh per sandbox, so no digest pin/restart needed.
 
 ## B. Provision / change infrastructure
@@ -101,15 +105,15 @@ to seed from another registry.
 
 ## App settings worth knowing (set by bicep)
 
-| Setting | Meaning |
-|---|---|
-| `OMNI_CLI_PATH=/usr/local/bin/omni` | use the image-baked CLI (no runtime venv install) |
-| `OMNI_AZURE_IMAGE` | fast/default sandbox image (`-devbox-min`) |
-| `OMNI_AZURE_DESKTOP_IMAGE` | desktop sandbox image (`-devbox`) |
-| `OMNI_AZURE_SUBNET_ID` | delegated subnet → ACI gets private IPs (desktop profile) |
-| `OMNI_DATABASE_URL`, `OMNI_RUNTIME_TOKEN_SECRET` | secrets (also in `deploy.env`) |
-| `OMNIAGENTS_HISTORY_URL` | omniagents session DB (Postgres, `omni_sessions`) — chat history durability |
-| `OMNI_AZURE_SNAPSHOT_CONTAINER` / `OMNI_AZURE_AUDIO_CONTAINER` | blob containers for sandbox snapshot tars + realtime audio chunks |
+| Setting                                                         | Meaning                                                                                              |
+| --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `OMNI_CLI_PATH=/usr/local/bin/omni`                             | use the image-baked CLI (no runtime venv install)                                                    |
+| `OMNI_AZURE_IMAGE`                                              | fast/default sandbox image (`-devbox-min`)                                                           |
+| `OMNI_AZURE_DESKTOP_IMAGE`                                      | desktop sandbox image (`-devbox`)                                                                    |
+| `OMNI_AZURE_SUBNET_ID`                                          | delegated subnet → ACI gets private IPs (desktop profile)                                            |
+| `OMNI_DATABASE_URL`, `OMNI_RUNTIME_TOKEN_SECRET`                | secrets (also in `deploy.env`)                                                                       |
+| `OMNIAGENTS_HISTORY_URL`                                        | omniagents session DB (Postgres, `omni_sessions`) — chat history durability                          |
+| `OMNI_AZURE_SNAPSHOT_CONTAINER` / `OMNI_AZURE_AUDIO_CONTAINER`  | blob containers for sandbox snapshot tars + realtime audio chunks                                    |
 | `OMNI_AAD_TENANT_ID` / `OMNI_AAD_CLIENT_ID` / `OMNI_CLOUD_NAME` | published by `/.well-known/omni-cloud` so Electron clients can self-configure for cloud-link sign-in |
 
 ## Cloud-link from the Electron desktop app
@@ -128,8 +132,8 @@ serves the desktop's device-code flow. **One-time portal toggle**:
 az ad app update --id "$OMNI_AAD_CLIENT_ID" --is-fallback-public-client true
 ```
 
-Equivalent UI path: *App registrations → <app> → Authentication → Advanced
-settings → "Allow public client flows" = Yes*. Without this AAD rejects the
+Equivalent UI path: _App registrations → <app> → Authentication → Advanced
+settings → "Allow public client flows" = Yes_. Without this AAD rejects the
 device-code request with `unauthorized_client`.
 
 ### `/.well-known/omni-cloud` must be reachable
@@ -137,7 +141,7 @@ device-code request with `unauthorized_client`.
 The Electron client GETs `https://<launcher>/.well-known/omni-cloud` (public,
 no auth) to discover the tenant + client id. The bicep sets the three env
 vars (`OMNI_AAD_TENANT_ID`, `OMNI_AAD_CLIENT_ID`, `OMNI_CLOUD_NAME`) so this
-endpoint just works. If it returns 503 *Cloud sign-in not configured*, those
+endpoint just works. If it returns 503 _Cloud sign-in not configured_, those
 three settings need to be present on the App Service.
 
 ### EasyAuth + Bearer tokens
@@ -153,14 +157,14 @@ a valid Bearer is honoured.
 
 Everything except the launcher's public front door is VNet-only:
 
-| Resource | Access |
-|---|---|
-| App Service (launcher) | public + EasyAuth (the only ingress) |
-| Postgres | private (VNet-integrated, public off) |
-| Key Vault | private endpoint, public off |
-| Storage / Azure Files | private endpoint (`file`), public off |
-| ACR | public, **admin user off** — launcher + sandboxes pull via managed-identity AcrPull (ACI can't pull from a private-endpoint-only ACR) |
-| Sandboxes (ACI) | VNet-joined (private IPs); `omni-aci-nsg` denies sandbox→DB / →launcher / →peer |
+| Resource               | Access                                                                                                                                |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| App Service (launcher) | public + EasyAuth (the only ingress)                                                                                                  |
+| Postgres               | private (VNet-integrated, public off)                                                                                                 |
+| Key Vault              | private endpoint, public off                                                                                                          |
+| Storage / Azure Files  | private endpoint (`file`), public off                                                                                                 |
+| ACR                    | public, **admin user off** — launcher + sandboxes pull via managed-identity AcrPull (ACI can't pull from a private-endpoint-only ACR) |
+| Sandboxes (ACI)        | VNet-joined (private IPs); `omni-aci-nsg` denies sandbox→DB / →launcher / →peer                                                       |
 
 Implications: **all** sandbox launches now pay the VNet NIC-provisioning time
 (the fast profile no longer skips it); private DNS zones (`postgres`,

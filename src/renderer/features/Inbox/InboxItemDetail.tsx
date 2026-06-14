@@ -429,7 +429,6 @@ export const InboxItemDetail = memo(({ item, onBack, hideHeader = false }: Inbox
             ))}
           </select>
         </div>
-
       </div>
 
       {/* Actions */}

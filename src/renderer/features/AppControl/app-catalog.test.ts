@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import { buildAppCatalog, type CatalogInput } from '@/renderer/features/AppControl/app-catalog-core';
-import { makeAppHandleId } from '@/shared/app-control-types';
 import type { LiveAppSnapshot } from '@/shared/app-control-types';
+import { makeAppHandleId } from '@/shared/app-control-types';
 import { buildAppRegistry } from '@/shared/app-registry';
 import type { CodeTab } from '@/shared/types';
 

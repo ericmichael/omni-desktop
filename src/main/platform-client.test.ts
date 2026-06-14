@@ -37,7 +37,14 @@ const jsonResponse = (body: unknown, status = 200): Response =>
 describe('PlatformClient static methods', () => {
   it('initiateDeviceCode sends POST to /api/v1/auth/device_code', async () => {
     const fetchFn = vi.fn(async () =>
-      jsonResponse({ device_code: 'dc-1', user_code: 'ABCD', verification_uri: 'https://auth', expires_in: 300, interval: 5, message: 'Go' })
+      jsonResponse({
+        device_code: 'dc-1',
+        user_code: 'ABCD',
+        verification_uri: 'https://auth',
+        expires_in: 300,
+        interval: 5,
+        message: 'Go',
+      })
     );
     const result = await PlatformClient.initiateDeviceCode(BASE_URL, fetchFn as unknown as typeof fetch);
     expect(fetchFn).toHaveBeenCalledWith(`${BASE_URL}/api/v1/auth/device_code`, { method: 'POST' });
@@ -46,7 +53,9 @@ describe('PlatformClient static methods', () => {
 
   it('initiateDeviceCode throws on non-ok response', async () => {
     const fetchFn = vi.fn(async () => new Response(null, { status: 500 }));
-    await expect(PlatformClient.initiateDeviceCode(BASE_URL, fetchFn as unknown as typeof fetch)).rejects.toThrow('500');
+    await expect(PlatformClient.initiateDeviceCode(BASE_URL, fetchFn as unknown as typeof fetch)).rejects.toThrow(
+      '500'
+    );
   });
 
   it('pollForToken sends POST with device_code', async () => {
@@ -118,16 +127,14 @@ describe('PlatformClient instance', () => {
   it('getPolicy includes domain param when provided', async () => {
     fetchFn.mockResolvedValueOnce(jsonResponse({ sandbox_profiles: [] }));
     await client.getPolicy('omni-code', 'acme');
-    const url = (fetchFn.mock.calls[0]![0] as string);
+    const url = fetchFn.mock.calls[0]![0] as string;
     expect(url).toContain('domain=acme');
   });
 
   // --- startSession ---
 
   it('startSession sends POST with agent and optional git repo', async () => {
-    fetchFn.mockResolvedValueOnce(
-      jsonResponse({ session_id: 's1', runtime_token: 'rt1', status: 'pending' })
-    );
+    fetchFn.mockResolvedValueOnce(jsonResponse({ session_id: 's1', runtime_token: 'rt1', status: 'pending' }));
     const result = await client.startSession('omni-code', 'acme', { url: 'https://github.com/repo', branch: 'main' });
     expect(result.sessionId).toBe('s1');
     const body = JSON.parse(fetchFn.mock.calls[0]![1]!.body as string);
@@ -189,9 +196,7 @@ describe('PlatformClient instance', () => {
   // --- execInSession ---
 
   it('execInSession maps response fields', async () => {
-    fetchFn.mockResolvedValueOnce(
-      jsonResponse({ success: true, exit_code: 0, stdout: 'ok', stderr: '' })
-    );
+    fetchFn.mockResolvedValueOnce(jsonResponse({ success: true, exit_code: 0, stdout: 'ok', stderr: '' }));
     const result = await client.execInSession('s1', 'ls');
     expect(result).toEqual({ success: true, exitCode: 0, stdout: 'ok', stderr: '' });
   });
@@ -199,9 +204,7 @@ describe('PlatformClient instance', () => {
   // --- workspace ops ---
 
   it('getProjectWorkspace maps response fields', async () => {
-    fetchFn.mockResolvedValueOnce(
-      jsonResponse({ sas_url: 'https://sas', share_name: 'share1', expires_at: 9999 })
-    );
+    fetchFn.mockResolvedValueOnce(jsonResponse({ sas_url: 'https://sas', share_name: 'share1', expires_at: 9999 }));
     const result = await client.getProjectWorkspace('proj-1');
     expect(result).toEqual({ sasUrl: 'https://sas', shareName: 'share1', expiresAt: 9999 });
   });

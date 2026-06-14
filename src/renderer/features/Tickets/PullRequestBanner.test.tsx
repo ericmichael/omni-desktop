@@ -39,8 +39,7 @@ vi.mock('./preview-bridge', () => ({
   requestPreviewOpen: vi.fn(),
 }));
 
-(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT =
-  true;
+(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const pullRequest: ContainerPullRequest = {
   number: 42,
@@ -70,9 +69,7 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-async function renderBanner(
-  scope: { kind: 'chat' } | { kind: 'code-tab'; tabId: string }
-): Promise<HTMLSpanElement> {
+async function renderBanner(scope: { kind: 'chat' } | { kind: 'code-tab'; tabId: string }): Promise<HTMLSpanElement> {
   await act(async () => {
     root.render(<PullRequestBanner scope={scope} />);
     await Promise.resolve();

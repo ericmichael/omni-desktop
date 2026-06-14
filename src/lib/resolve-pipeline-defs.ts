@@ -20,9 +20,7 @@ export interface ResolvePipelineDefsInput {
   hasExisting: boolean;
 }
 
-export const resolvePipelineDefs = (
-  input: ResolvePipelineDefsInput
-): ColumnSyncInput[] | null => {
+export const resolvePipelineDefs = (input: ResolvePipelineDefsInput): ColumnSyncInput[] | null => {
   if (input.hasExisting) {
     return null;
   }

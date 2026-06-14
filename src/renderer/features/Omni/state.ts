@@ -4,11 +4,7 @@ import { atom } from 'nanostores';
 
 import { DEFAULT_XTERM_OPTIONS, STATUS_POLL_INTERVAL_MS } from '@/renderer/constants';
 import { emitter, ipc } from '@/renderer/services/ipc';
-import type {
-  OmniInstallProcessStatus,
-  OmniRuntimeInfo,
-  WithTimestamp,
-} from '@/shared/types';
+import type { OmniInstallProcessStatus, OmniRuntimeInfo, WithTimestamp } from '@/shared/types';
 
 export const $omniRuntimeInfo = atom<OmniRuntimeInfo>({ isInstalled: false });
 
@@ -35,8 +31,8 @@ let installUnsub: (() => void) | null = null;
 export const ensureRuntimeReady = () => {
   const current = $omniRuntimeReadiness.get();
   if (current.status === 'checking' || current.status === 'installing' || current.status === 'ready') {
-return;
-}
+    return;
+  }
 
   $omniRuntimeReadiness.set({ status: 'checking' });
 

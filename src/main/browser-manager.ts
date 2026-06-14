@@ -235,7 +235,9 @@ export class BrowserManager {
       if (closed.url && closed.url !== BROWSER_START_URL) {
         const stack = this.recentlyClosed.get(tabsetId) ?? [];
         stack.push(closed);
-        while (stack.length > RECENTLY_CLOSED_CAP) stack.shift();
+        while (stack.length > RECENTLY_CLOSED_CAP) {
+          stack.shift();
+        }
         this.recentlyClosed.set(tabsetId, stack);
       }
       const tabs = ts.tabs.filter((t) => t.id !== tabId);
@@ -267,7 +269,9 @@ export class BrowserManager {
   reopenTab(tabsetId: BrowserTabsetId): BrowserTab | null {
     const stack = this.recentlyClosed.get(tabsetId) ?? [];
     const restored = stack.pop();
-    if (!restored) return null;
+    if (!restored) {
+      return null;
+    }
     this.recentlyClosed.set(tabsetId, stack);
     return this.mutateTabset(tabsetId, (ts) => {
       const now = this.deps.now();
@@ -668,7 +672,9 @@ export function registerBrowserHandlers(ipc: IIpcListener, resolve: (event: unkn
   });
   h('browser:tab-reopen', ({ manager, broadcast }, tabsetId) => {
     const t = manager.reopenTab(tabsetId);
-    if (t) broadcast();
+    if (t) {
+      broadcast();
+    }
     return t;
   });
 

@@ -491,7 +491,7 @@ export const BrowserView = memo(
         }
 
         const key = event.key.toLowerCase();
-        if (key === 't') {
+        if (key === 't' && !event.shiftKey) {
           event.preventDefault();
           handleNewTab();
         } else if (key === 'w') {

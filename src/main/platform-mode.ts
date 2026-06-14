@@ -39,8 +39,8 @@ export function createPlatformClient(
   fetchFn?: typeof globalThis.fetch
 ): PlatformClient | null {
   if (!isEnterpriseBuild() || !platform?.accessToken) {
-return null;
-}
+    return null;
+  }
 
   return new PlatformClient(
     {

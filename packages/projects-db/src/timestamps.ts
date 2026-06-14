@@ -24,6 +24,6 @@ export function nowTimestamp(): string {
 export function fromIso(iso: string): number {
   // SQLite's datetime() produces "YYYY-MM-DD HH:MM:SS" (no Z).
   // If there's no timezone indicator, treat as UTC.
-  const normalized = iso.includes('T') || iso.endsWith('Z') ? iso : iso + 'Z';
+  const normalized = iso.includes('T') || iso.endsWith('Z') ? iso : `${iso}Z`;
   return new Date(normalized).getTime();
 }

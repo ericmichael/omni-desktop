@@ -1,5 +1,6 @@
 import type { WebSocket } from 'ws';
 
+import { uuidv4 } from '@/lib/uuid';
 import type { IpcRendererEvents } from '@/shared/types';
 
 type InvokeMessage = {
@@ -277,7 +278,7 @@ export class WsHandler {
       console.log(`[ws-handler] Session ${existingSession.sessionId} reattached (tenant ${tenantId})`);
     } else {
       // New session
-      const id = sessionId ?? crypto.randomUUID();
+      const id = sessionId ?? uuidv4();
       const session: PersistentSession = {
         sessionId: id,
         tenantId,
@@ -421,10 +422,14 @@ export class WsHandler {
     // Client→cloud responses to a previously-sent reverse-invoke. Route to the
     // pending map and resolve / reject the awaiter.
     if (msg.type === 'reverse-response') {
-      if (typeof msg.id !== 'number') return;
+      if (typeof msg.id !== 'number') {
+        return;
+      }
       const map = this.pendingReverse.get(ws);
       const pending = map?.get(msg.id);
-      if (!pending) return; // late / unknown id — drop silently
+      if (!pending) {
+        return;
+      } // late / unknown id — drop silently
       map!.delete(msg.id);
       pending.cancel();
       if (msg.error) {

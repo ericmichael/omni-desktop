@@ -1,4 +1,4 @@
-import { mkdir,mkdtemp, rm, unlink, writeFile } from 'fs/promises';
+import { mkdir, mkdtemp, rm, unlink, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -64,10 +64,10 @@ function createCollector() {
       return new Promise((resolve, reject) => {
         setTimeout(() => {
           if (changes.length === startCount) {
-resolve();
-} else {
-reject(new Error(`expected no change events, got ${changes.length - startCount}`));
-}
+            resolve();
+          } else {
+            reject(new Error(`expected no change events, got ${changes.length - startCount}`));
+          }
         }, ms);
       });
     },

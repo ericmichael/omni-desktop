@@ -5,7 +5,10 @@ import { z } from 'zod';
 import { seedProject, slugify } from '../seed.js';
 
 const json = (data: unknown) => ({ content: [{ type: 'text' as const, text: JSON.stringify(data) }] });
-const err = (message: string) => ({ content: [{ type: 'text' as const, text: JSON.stringify({ error: message }) }], isError: true as const });
+const err = (message: string) => ({
+  content: [{ type: 'text' as const, text: JSON.stringify({ error: message }) }],
+  isError: true as const,
+});
 
 function serializeItem(item: InboxRow) {
   return {
@@ -26,15 +29,20 @@ export function registerInboxTools(server: McpServer, repo: IProjectsRepo): void
     'list_inbox',
     'List inbox items, optionally filtered by status. Default: active items (new, excluding promoted).',
     {
-      status: z.enum(['new', 'later']).optional().describe(
-        'Filter by status. Omit to list default inbox (new, excluding promoted).'
-      ),
+      status: z
+        .enum(['new', 'later'])
+        .optional()
+        .describe('Filter by status. Omit to list default inbox (new, excluding promoted).'),
     },
     async ({ status }) => {
       const all = await repo.listAllInboxItems();
       const items = all.filter((it) => {
-        if (it.promoted_to) return false;
-        if (status) return it.status === status;
+        if (it.promoted_to) {
+          return false;
+        }
+        if (status) {
+          return it.status === status;
+        }
         return it.status === 'new';
       });
       return json({ items: items.map(serializeItem) });
@@ -80,12 +88,20 @@ export function registerInboxTools(server: McpServer, repo: IProjectsRepo): void
     },
     async ({ item_id, title, description, status, project_id }) => {
       const item = await repo.getInboxItem(item_id);
-      if (!item) return err(`Inbox item not found: ${item_id}`);
+      if (!item) {
+        return err(`Inbox item not found: ${item_id}`);
+      }
 
       const next = { ...item };
-      if (title !== undefined) next.title = title;
-      if (description !== undefined) next.note = description;
-      if (project_id !== undefined) next.project_id = project_id || null;
+      if (title !== undefined) {
+        next.title = title;
+      }
+      if (description !== undefined) {
+        next.note = description;
+      }
+      if (project_id !== undefined) {
+        next.project_id = project_id || null;
+      }
 
       if (status !== undefined) {
         next.status = status;
@@ -107,7 +123,9 @@ export function registerInboxTools(server: McpServer, repo: IProjectsRepo): void
     { item_id: z.string().describe('The inbox item ID to delete') },
     async ({ item_id }) => {
       const item = await repo.getInboxItem(item_id);
-      if (!item) return err(`Inbox item not found: ${item_id}`);
+      if (!item) {
+        return err(`Inbox item not found: ${item_id}`);
+      }
       await repo.deleteInboxItem(item_id);
       return json({ ok: true });
     }
@@ -123,11 +141,15 @@ export function registerInboxTools(server: McpServer, repo: IProjectsRepo): void
     },
     async ({ item_id, project_id, milestone_id }) => {
       const item = await repo.getInboxItem(item_id);
-      if (!item) return err(`Inbox item not found: ${item_id}`);
+      if (!item) {
+        return err(`Inbox item not found: ${item_id}`);
+      }
 
       const cols = await repo.listColumns(project_id);
       const firstCol = cols[0];
-      if (!firstCol) return err(`Project not found or has no pipeline: ${project_id}`);
+      if (!firstCol) {
+        return err(`Project not found or has no pipeline: ${project_id}`);
+      }
 
       const tktId = ticketId();
       const now = nowTimestamp();
@@ -182,13 +204,17 @@ export function registerInboxTools(server: McpServer, repo: IProjectsRepo): void
     },
     async ({ item_id, label }) => {
       const item = await repo.getInboxItem(item_id);
-      if (!item) return err(`Inbox item not found: ${item_id}`);
+      if (!item) {
+        return err(`Inbox item not found: ${item_id}`);
+      }
 
       const projLabel = label || item.title;
       const slug = slugify(projLabel);
 
       const existing = await repo.getProjectBySlug(slug);
-      if (existing) return err(`A project with slug "${slug}" already exists.`);
+      if (existing) {
+        return err(`A project with slug "${slug}" already exists.`);
+      }
 
       const seeded = await seedProject(repo, { label: projLabel });
 

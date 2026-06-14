@@ -120,7 +120,9 @@ export class HostBridgePreparer implements IHostBridgePreparer {
   async release(machineId: string, sandboxKey: string): Promise<void> {
     this.registry.releaseSession(machineId, sandboxKey);
     const ws = this.registry.getActiveWs(machineId);
-    if (!ws) return;
+    if (!ws) {
+      return;
+    }
     try {
       await this.wsHandler.invokeOnWs<void>(ws, 'compute:stop-host', [sandboxKey]);
     } catch {

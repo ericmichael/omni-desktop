@@ -3,20 +3,8 @@ import { tmpdir } from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import {
-  ProjectFileStoreManager,
-  type ProjectFileStoreManagerEvents,
-} from '@/lib/project-file-store-manager';
-import type {
-  Milestone,
-  MilestoneId,
-  Page,
-  PageId,
-  Project,
-  ProjectId,
-  Ticket,
-  TicketId,
-} from '@/shared/types';
+import { ProjectFileStoreManager, type ProjectFileStoreManagerEvents } from '@/lib/project-file-store-manager';
+import type { Milestone, MilestoneId, Page, PageId, Project, ProjectId, Ticket, TicketId } from '@/shared/types';
 
 const T = Date.UTC(2026, 3, 12, 12, 0, 0);
 
@@ -51,6 +39,7 @@ const makeProject = (overrides: Partial<Project> = {}): Project => ({
   label: 'Project One',
   slug: 'project-one',
   createdAt: T,
+  sources: [],
   ...overrides,
 });
 
@@ -189,9 +178,9 @@ describe('cross-project indexing', () => {
   });
 
   it('writeTicket rejects an unknown projectId', async () => {
-    await expect(
-      manager.writeTicket(makeTicket('ghost' as ProjectId, { id: 't-ghost' as TicketId }))
-    ).rejects.toThrow(/unknown project/);
+    await expect(manager.writeTicket(makeTicket('ghost' as ProjectId, { id: 't-ghost' as TicketId }))).rejects.toThrow(
+      /unknown project/
+    );
   });
 
   it('deleteTicket removes from the reverse index', async () => {

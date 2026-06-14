@@ -8,15 +8,15 @@ the server (`src/server/managers.ts`) and the `aci` sandbox-profile builder
 
 ## What it provisions
 
-| Resource | Purpose | App env var(s) produced |
-|---|---|---|
-| User-assigned managed identity | AcrPull + manage ACI sandbox groups + Files | `AZURE_CLIENT_ID` |
-| Log Analytics workspace | ACI + app logs | — |
-| Container Registry (ACR) | launcher + agent images (admin off; MI AcrPull) | `OMNI_AZURE_REGISTRY` |
-| Storage account + file share | per-project workspace (Azure Files) | `AZURE_STORAGE_ACCOUNT_NAME` |
-| Container Apps managed environment | agent-sandbox env (sandboxes themselves spawn as ACI groups) | `OMNI_AZURE_ENV` |
-| PostgreSQL Flexible Server + db | pooled multi-tenant data (RLS) | `OMNI_DATABASE_URL` |
-| Web App for Containers + plan | the launcher server | `OMNI_DATA_API_URL`, `OMNI_AZURE_*`, … |
+| Resource                           | Purpose                                                      | App env var(s) produced                |
+| ---------------------------------- | ------------------------------------------------------------ | -------------------------------------- |
+| User-assigned managed identity     | AcrPull + manage ACI sandbox groups + Files                  | `AZURE_CLIENT_ID`                      |
+| Log Analytics workspace            | ACI + app logs                                               | —                                      |
+| Container Registry (ACR)           | launcher + agent images (admin off; MI AcrPull)              | `OMNI_AZURE_REGISTRY`                  |
+| Storage account + file share       | per-project workspace (Azure Files)                          | `AZURE_STORAGE_ACCOUNT_NAME`           |
+| Container Apps managed environment | agent-sandbox env (sandboxes themselves spawn as ACI groups) | `OMNI_AZURE_ENV`                       |
+| PostgreSQL Flexible Server + db    | pooled multi-tenant data (RLS)                               | `OMNI_DATABASE_URL`                    |
+| Web App for Containers + plan      | the launcher server                                          | `OMNI_DATA_API_URL`, `OMNI_AZURE_*`, … |
 
 Role assignments granted to the managed identity: **AcrPull** (on the ACR) and a
 **least-privilege custom role** (`<prefix>-aci-sandbox-manager`, scoped to the

@@ -1,5 +1,5 @@
 import { makeStyles, mergeClasses, Subtitle1, Subtitle2, Title1, Title2, Title3 } from '@fluentui/react-components';
-import type { HTMLAttributes } from 'react';
+import type { ElementType, HTMLAttributes } from 'react';
 import { forwardRef } from 'react';
 
 type HeadingLevel = 'h1' | 'h2' | 'h3' | 'h4';
@@ -29,7 +29,7 @@ const useStyles = makeStyles({
 export const Heading = forwardRef<HTMLHeadingElement, HeadingProps>(
   ({ as: tag = 'h2', size = 'md', className, children, ...props }, ref) => {
     const styles = useStyles();
-    const Component = sizeToComponent[size];
+    const Component = sizeToComponent[size] as ElementType;
 
     return (
       <Component ref={ref} as={tag} className={mergeClasses(styles.root, className)} {...props}>

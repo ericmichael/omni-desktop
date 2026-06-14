@@ -176,7 +176,13 @@ export const OnboardingWizard = memo(() => {
       });
       await agentConfigApi.setModels(config);
       const providerLabel =
-        identity === 'openai' ? 'OpenAI' : identity === 'anthropic' ? 'Anthropic' : kind === 'ollama' ? 'Ollama' : 'your local server';
+        identity === 'openai'
+          ? 'OpenAI'
+          : identity === 'anthropic'
+            ? 'Anthropic'
+            : kind === 'ollama'
+              ? 'Ollama'
+              : 'your local server';
       setConnected({
         providerLabel,
         modelLabel: model.label,

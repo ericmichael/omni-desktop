@@ -1,7 +1,7 @@
-import { ScrollArea as ScrollAreaPrimitive } from 'radix-ui'
-import * as React from 'react'
+import { ScrollArea as ScrollAreaPrimitive } from 'radix-ui';
+import * as React from 'react';
 
-import { cn } from '@/renderer/omniagents-ui/lib/utils'
+import { cn } from '@/renderer/omniagents-ui/lib/utils';
 
 function ScrollArea({ className, children, ...props }: React.ComponentProps<typeof ScrollAreaPrimitive.Root>) {
   return (
@@ -15,7 +15,7 @@ function ScrollArea({ className, children, ...props }: React.ComponentProps<type
       <ScrollBar />
       <ScrollAreaPrimitive.Corner />
     </ScrollAreaPrimitive.Root>
-  )
+  );
 }
 
 function ScrollBar({
@@ -35,9 +35,12 @@ function ScrollBar({
       )}
       {...props}
     >
-      <ScrollAreaPrimitive.ScrollAreaThumb data-slot="scroll-area-thumb" className="relative flex-1 rounded-full bg-border" />
+      <ScrollAreaPrimitive.ScrollAreaThumb
+        data-slot="scroll-area-thumb"
+        className="relative flex-1 rounded-full bg-border"
+      />
     </ScrollAreaPrimitive.ScrollAreaScrollbar>
-  )
+  );
 }
 
-export { ScrollArea, ScrollBar }
+export { ScrollArea, ScrollBar };

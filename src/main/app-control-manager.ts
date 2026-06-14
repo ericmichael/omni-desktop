@@ -181,7 +181,9 @@ export class AppControlManager {
       return null;
     }
     const wc = webContentsNS.fromId(entry.webContentsId);
-    if (!wc || wc.isDestroyed()) return null;
+    if (!wc || wc.isDestroyed()) {
+      return null;
+    }
     return { entry, wc };
   }
 
@@ -305,10 +307,7 @@ export class AppControlManager {
     return wc.executeJavaScript(code, true);
   }
 
-  async screenshot(
-    handleId: AppHandleId,
-    options: AppScreenshotOptions = {}
-  ): Promise<string> {
+  async screenshot(handleId: AppHandleId, options: AppScreenshotOptions = {}): Promise<string> {
     const { entry, wc } = this.requireWebContents(handleId);
     // `capturePage()` with no rect grabs the full visible viewport. For
     // `fullPage: true` we'd need to scroll-and-stitch via CDP; skip for v1.
@@ -346,7 +345,9 @@ export class AppControlManager {
     // which races the webview's own mount. Return an empty tree rather than
     // log a "not ready" error to stderr every time.
     const ref = this.tryWebContents(handleId);
-    if (!ref) return { ref: 'e1', role: 'empty' };
+    if (!ref) {
+      return { ref: 'e1', role: 'empty' };
+    }
     ensureAttached(ref.wc);
     return snapshot(ref.wc);
   }
@@ -358,17 +359,15 @@ export class AppControlManager {
    */
   async snapshotDiff(handleId: AppHandleId): Promise<SnapshotDiff> {
     const ref = this.tryWebContents(handleId);
-    if (!ref) return { added: [], removed: [], unchanged: 0 };
+    if (!ref) {
+      return { added: [], removed: [], unchanged: 0 };
+    }
     ensureAttached(ref.wc);
     const fresh = await snapshot(ref.wc);
     return diffSnapshots(ref.wc, fresh);
   }
 
-  async click(
-    handleId: AppHandleId,
-    ref: string,
-    options: { button?: AppClickButton } = {}
-  ): Promise<void> {
+  async click(handleId: AppHandleId, ref: string, options: { button?: AppClickButton } = {}): Promise<void> {
     const { wc } = this.requireWebContents(handleId);
     const { cx, cy } = await resolveRefBox(wc, ref);
     const button = MOUSE_BUTTON_MAP[options.button ?? 'left'];
@@ -417,8 +416,8 @@ export class AppControlManager {
       const dx = Number(options.dx ?? 0) | 0;
       const dy = Number(options.dy ?? 0) | 0;
       if (dx === 0 && dy === 0) {
-return;
-}
+        return;
+      }
       expr = `window.scrollBy(${dx}, ${dy})`;
     }
     await wc.executeJavaScript(expr, true);
@@ -454,13 +453,10 @@ return;
       return { matches: 0, activeOrdinal: 0 };
     }
     return new Promise((resolve) => {
-      const handler = (
-        _: unknown,
-        result: { activeMatchOrdinal: number; matches: number; finalUpdate: boolean }
-      ) => {
+      const handler = (_: unknown, result: { activeMatchOrdinal: number; matches: number; finalUpdate: boolean }) => {
         if (!result.finalUpdate) {
-return;
-}
+          return;
+        }
         wc.removeListener('found-in-page', handler);
         resolve({ matches: result.matches, activeOrdinal: result.activeMatchOrdinal });
       };
@@ -506,7 +502,9 @@ return;
     // ready" as an empty log rather than throwing — the error path would
     // spam the main-process stderr with no user benefit.
     const ref = this.tryWebContents(handleId);
-    if (!ref) return [];
+    if (!ref) {
+      return [];
+    }
     const { wc } = ref;
     // Enable lazily so agents don't pay the CDP overhead when they don't
     // ask for network entries.
@@ -539,11 +537,7 @@ return;
   }
 
   /** Per-element screenshot. `ref` comes from the most recent snapshot. */
-  async elementScreenshot(
-    handleId: AppHandleId,
-    ref: string,
-    options: AppScreenshotOptions = {}
-  ): Promise<string> {
+  async elementScreenshot(handleId: AppHandleId, ref: string, options: AppScreenshotOptions = {}): Promise<string> {
     const { entry, wc } = this.requireWebContents(handleId);
     ensureAttached(wc);
     const buffer = await elementScreenshot(wc, ref);
@@ -558,10 +552,7 @@ return;
   }
 
   /** Full-page (scroll-and-stitch equivalent) screenshot via CDP. */
-  async fullPageScreenshot(
-    handleId: AppHandleId,
-    options: AppScreenshotOptions = {}
-  ): Promise<string> {
+  async fullPageScreenshot(handleId: AppHandleId, options: AppScreenshotOptions = {}): Promise<string> {
     const { entry, wc } = this.requireWebContents(handleId);
     const buffer = await fullPageScreenshot(wc);
     const rootDir = options.artifactsSubdir
@@ -576,9 +567,7 @@ return;
 
   async setViewport(
     handleId: AppHandleId,
-    options:
-      | { width: number; height: number; deviceScaleFactor?: number; mobile?: boolean }
-      | { clear: true }
+    options: { width: number; height: number; deviceScaleFactor?: number; mobile?: boolean } | { clear: true }
   ): Promise<void> {
     const { wc } = this.requireWebContents(handleId);
     if ('clear' in options) {
@@ -599,7 +588,9 @@ return;
     // Soft-fail: zoom is fire-and-forget from keyboard shortcuts and tab-
     // switch races regularly send it at a webview that's still mounting.
     const ref = this.tryWebContents(handleId);
-    if (!ref) return;
+    if (!ref) {
+      return;
+    }
     // Clamp to Chromium's supported range.
     const clamped = Math.max(0.25, Math.min(5, factor));
     ref.wc.setZoomFactor(clamped);
@@ -613,7 +604,9 @@ return;
   ): Promise<unknown[]> {
     // Soft-fail for StorageTab mount races — returning [] beats stderr spam.
     const ref = this.tryWebContents(handleId);
-    if (!ref) return [];
+    if (!ref) {
+      return [];
+    }
     return ref.wc.session.cookies.get(filter);
   }
 
@@ -635,10 +628,7 @@ return;
     await wc.session.cookies.set(cookie);
   }
 
-  async cookiesClear(
-    handleId: AppHandleId,
-    filter: { url?: string; name?: string } = {}
-  ): Promise<number> {
+  async cookiesClear(handleId: AppHandleId, filter: { url?: string; name?: string } = {}): Promise<number> {
     const { wc } = this.requireWebContents(handleId);
     const matches = await wc.session.cookies.get(filter);
     let removed = 0;
@@ -659,13 +649,12 @@ return;
 
   // -- storage (localStorage / sessionStorage) ----------------------------
 
-  async storageGet(
-    handleId: AppHandleId,
-    which: 'local' | 'session'
-  ): Promise<Record<string, string>> {
+  async storageGet(handleId: AppHandleId, which: 'local' | 'session'): Promise<Record<string, string>> {
     // Soft-fail for StorageTab mount races.
     const ref = this.tryWebContents(handleId);
-    if (!ref) return {};
+    if (!ref) {
+      return {};
+    }
     const expr = `(() => {
       const s = window.${which === 'local' ? 'localStorage' : 'sessionStorage'};
       const out = {};
@@ -678,11 +667,7 @@ return;
     return (await ref.wc.executeJavaScript(expr, true)) as Record<string, string>;
   }
 
-  async storageSet(
-    handleId: AppHandleId,
-    which: 'local' | 'session',
-    entries: Record<string, string>
-  ): Promise<void> {
+  async storageSet(handleId: AppHandleId, which: 'local' | 'session', entries: Record<string, string>): Promise<void> {
     const { wc } = this.requireWebContents(handleId);
     const expr = `(() => {
       const s = window.${which === 'local' ? 'localStorage' : 'sessionStorage'};
@@ -694,10 +679,7 @@ return;
 
   async storageClear(handleId: AppHandleId, which: 'local' | 'session'): Promise<void> {
     const { wc } = this.requireWebContents(handleId);
-    await wc.executeJavaScript(
-      `window.${which === 'local' ? 'localStorage' : 'sessionStorage'}.clear()`,
-      true
-    );
+    await wc.executeJavaScript(`window.${which === 'local' ? 'localStorage' : 'sessionStorage'}.clear()`, true);
   }
 
   async waitFor(
@@ -725,23 +707,23 @@ return;
       });
     }
 
-    const selectorExpr = options.selector
-      ? `!!document.querySelector(${JSON.stringify(options.selector)})`
-      : null;
+    const selectorExpr = options.selector ? `!!document.querySelector(${JSON.stringify(options.selector)})` : null;
 
     while (Date.now() < deadline) {
       if (selectorExpr) {
         const hit = await wc.executeJavaScript(selectorExpr);
         if (hit) {
-return { ok: true, matched: 'selector' };
-}
+          return { ok: true, matched: 'selector' };
+        }
       }
       if (options.urlIncludes) {
         if (wc.getURL().includes(options.urlIncludes)) {
           return { ok: true, matched: 'url' };
         }
       }
-      await new Promise((r) => setTimeout(r, 100));
+      await new Promise((r) => {
+        setTimeout(r, 100);
+      });
     }
     throw new Error(`wait_for: condition not met within ${timeoutMs}ms`);
   }
@@ -795,7 +777,9 @@ export const createAppControlManager = (arg: {
   ipc.handle('app:wait-for', (_, handleId, options) => manager.waitFor(handleId, options));
   ipc.handle('app:pdf', (_, handleId, options) => manager.pdf(handleId, options));
   ipc.handle('app:full-screenshot', (_, handleId, options) => manager.fullPageScreenshot(handleId, options));
-  ipc.handle('app:element-screenshot', (_, handleId, ref, options) => manager.elementScreenshot(handleId, ref, options));
+  ipc.handle('app:element-screenshot', (_, handleId, ref, options) =>
+    manager.elementScreenshot(handleId, ref, options)
+  );
   ipc.handle('app:set-viewport', (_, handleId, options) => manager.setViewport(handleId, options));
   ipc.handle('app:set-user-agent', (_, handleId, ua) => manager.setUserAgent(handleId, ua));
   ipc.handle('app:set-zoom', (_, handleId, factor) => manager.setZoom(handleId, factor));

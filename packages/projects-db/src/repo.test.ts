@@ -22,17 +22,17 @@ let db: DatabaseSync;
 let repo: ProjectsRepo;
 
 const seedProject = () => {
-  db.prepare(
-    "INSERT INTO projects (id, label, slug) VALUES (?, ?, ?)"
-  ).run(PROJECT_ID, 'Test', 'test');
+  db.prepare('INSERT INTO projects (id, label, slug) VALUES (?, ?, ?)').run(PROJECT_ID, 'Test', 'test');
 };
 
 const seedTicket = (columnLogicalId: string, idOverride?: string): string => {
   const id = idOverride ?? ticketId();
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO tickets (id, project_id, column_id, title, description, priority)
     VALUES (?, ?, ?, ?, '', 'medium')
-  `).run(id, PROJECT_ID, defaultColumnId(PROJECT_ID, columnLogicalId), `Ticket ${id}`);
+  `
+  ).run(id, PROJECT_ID, defaultColumnId(PROJECT_ID, columnLogicalId), `Ticket ${id}`);
   return id;
 };
 
@@ -190,10 +190,7 @@ describe('syncColumnsForProject', () => {
   it('removes columns that no longer exist', () => {
     const trimmed = initialDefaults.slice(0, 4);
     const result = repo.syncColumnsForProject(PROJECT_ID, trimmed);
-    expect(result.removed).toEqual([
-      defaultColumnId(PROJECT_ID, 'pr'),
-      defaultColumnId(PROJECT_ID, 'completed'),
-    ]);
+    expect(result.removed).toEqual([defaultColumnId(PROJECT_ID, 'pr'), defaultColumnId(PROJECT_ID, 'completed')]);
     expect(repo.listColumns(PROJECT_ID)).toHaveLength(4);
   });
 
@@ -205,8 +202,7 @@ describe('syncColumnsForProject', () => {
     // Set up: two tickets, one with a milestone, one without
     const tid1 = seedTicket('implementation');
     const tid2 = seedTicket('implementation');
-    db.prepare(`INSERT INTO milestones (id, project_id, title) VALUES (?, ?, ?)`)
-      .run('ms_1', PROJECT_ID, 'M1');
+    db.prepare(`INSERT INTO milestones (id, project_id, title) VALUES (?, ?, ?)`).run('ms_1', PROJECT_ID, 'M1');
     db.prepare('UPDATE tickets SET milestone_id = ? WHERE id = ?').run('ms_1', tid1);
 
     repo.replaceAllMilestones([]);
@@ -251,16 +247,15 @@ describe('syncColumnsForProject', () => {
 describe('replaceAll* preserves child data', () => {
   const seedTicketWithComment = (commentId: string): string => {
     const tid = seedTicket('implementation');
-    db.prepare(
-      `INSERT INTO ticket_comments (id, ticket_id, author, content) VALUES (?, ?, 'human', 'hello')`
-    ).run(commentId, tid);
+    db.prepare(`INSERT INTO ticket_comments (id, ticket_id, author, content) VALUES (?, ?, 'human', 'hello')`).run(
+      commentId,
+      tid
+    );
     return tid;
   };
 
   const seedSecondProject = (id = 'proj_other'): string => {
-    db.prepare(
-      `INSERT INTO projects (id, label, slug) VALUES (?, ?, ?)`
-    ).run(id, 'Other', 'other');
+    db.prepare(`INSERT INTO projects (id, label, slug) VALUES (?, ?, ?)`).run(id, 'Other', 'other');
     repo.syncColumnsForProject(id, initialDefaults);
     return id;
   };
@@ -279,10 +274,12 @@ describe('replaceAll* preserves child data', () => {
 
   it('replaceAllProjects: adding a new project preserves existing children', () => {
     const tid = seedTicket('implementation');
-    db.prepare(`INSERT INTO milestones (id, project_id, title) VALUES (?, ?, ?)`)
-      .run('ms_a', PROJECT_ID, 'M');
-    db.prepare(`INSERT INTO pages (id, project_id, title, is_root) VALUES (?, ?, ?, 1)`)
-      .run('page_a', PROJECT_ID, 'Root');
+    db.prepare(`INSERT INTO milestones (id, project_id, title) VALUES (?, ?, ?)`).run('ms_a', PROJECT_ID, 'M');
+    db.prepare(`INSERT INTO pages (id, project_id, title, is_root) VALUES (?, ?, ?, 1)`).run(
+      'page_a',
+      PROJECT_ID,
+      'Root'
+    );
     const existing = repo.getProject(PROJECT_ID)!;
 
     repo.replaceAllProjects([
@@ -326,9 +323,11 @@ describe('replaceAll* preserves child data', () => {
   });
 
   it('replaceAllProjects: preserves inbox_items.project_id linkage', () => {
-    db.prepare(
-      `INSERT INTO inbox_items (id, title, project_id) VALUES (?, ?, ?)`
-    ).run('ib_1', 'Some thought', PROJECT_ID);
+    db.prepare(`INSERT INTO inbox_items (id, title, project_id) VALUES (?, ?, ?)`).run(
+      'ib_1',
+      'Some thought',
+      PROJECT_ID
+    );
     const existing = repo.getProject(PROJECT_ID)!;
 
     // Routine "save projects" — the old code would SET NULL the inbox link.
@@ -365,8 +364,7 @@ describe('replaceAll* preserves child data', () => {
 
   it('replaceAllMilestones: updating one milestone preserves ticket links', () => {
     const tid = seedTicket('implementation');
-    db.prepare(`INSERT INTO milestones (id, project_id, title) VALUES (?, ?, ?)`)
-      .run('ms_1', PROJECT_ID, 'M1');
+    db.prepare(`INSERT INTO milestones (id, project_id, title) VALUES (?, ?, ?)`).run('ms_1', PROJECT_ID, 'M1');
     db.prepare('UPDATE tickets SET milestone_id = ? WHERE id = ?').run('ms_1', tid);
     const ms = repo.getMilestone('ms_1')!;
 
@@ -377,12 +375,17 @@ describe('replaceAll* preserves child data', () => {
   });
 
   it('replaceAllPages: parent/child pages survive a no-op save in any order', () => {
-    db.prepare(
-      `INSERT INTO pages (id, project_id, title, is_root) VALUES (?, ?, ?, 1)`
-    ).run('page_root', PROJECT_ID, 'Root');
-    db.prepare(
-      `INSERT INTO pages (id, project_id, parent_id, title) VALUES (?, ?, ?, ?)`
-    ).run('page_child', PROJECT_ID, 'page_root', 'Child');
+    db.prepare(`INSERT INTO pages (id, project_id, title, is_root) VALUES (?, ?, ?, 1)`).run(
+      'page_root',
+      PROJECT_ID,
+      'Root'
+    );
+    db.prepare(`INSERT INTO pages (id, project_id, parent_id, title) VALUES (?, ?, ?, ?)`).run(
+      'page_child',
+      PROJECT_ID,
+      'page_root',
+      'Child'
+    );
     const root = repo.getPage('page_root')!;
     const child = repo.getPage('page_child')!;
 
@@ -394,9 +397,7 @@ describe('replaceAll* preserves child data', () => {
   });
 
   it('replaceAllInboxItems: idempotent save preserves rows', () => {
-    db.prepare(
-      `INSERT INTO inbox_items (id, title) VALUES (?, ?)`
-    ).run('ib_1', 'A');
+    db.prepare(`INSERT INTO inbox_items (id, title) VALUES (?, ?)`).run('ib_1', 'A');
     const row = repo.getInboxItem('ib_1')!;
 
     repo.replaceAllInboxItems([row]);
@@ -432,12 +433,16 @@ describe('replaceAll* preserves child data', () => {
   });
 
   it('replaceAllTasks: deleting one task preserves the rest', () => {
-    db.prepare(
-      `INSERT INTO tasks (id, project_id, task_description, status) VALUES (?, ?, ?, '{}')`
-    ).run('tk_1', PROJECT_ID, 'A');
-    db.prepare(
-      `INSERT INTO tasks (id, project_id, task_description, status) VALUES (?, ?, ?, '{}')`
-    ).run('tk_2', PROJECT_ID, 'B');
+    db.prepare(`INSERT INTO tasks (id, project_id, task_description, status) VALUES (?, ?, ?, '{}')`).run(
+      'tk_1',
+      PROJECT_ID,
+      'A'
+    );
+    db.prepare(`INSERT INTO tasks (id, project_id, task_description, status) VALUES (?, ?, ?, '{}')`).run(
+      'tk_2',
+      PROJECT_ID,
+      'B'
+    );
     const t2 = repo.getTask('tk_2')!;
 
     repo.replaceAllTasks([t2]);

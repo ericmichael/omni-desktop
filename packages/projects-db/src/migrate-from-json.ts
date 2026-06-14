@@ -74,7 +74,9 @@ interface JsonTicket {
   // Multi-source migration: prReview/prMergedAt are now Record<sourceId, ...>.
   // The JSON migrator accepts both the legacy scalar shape and the new map
   // shape so we don't have to special-case the unmigrated electron-store dump.
-  prReview?: { status: 'approved' | 'changes_requested'; at: number } | Record<string, { status: 'approved' | 'changes_requested'; at: number }>;
+  prReview?:
+    | { status: 'approved' | 'changes_requested'; at: number }
+    | Record<string, { status: 'approved' | 'changes_requested'; at: number }>;
   prMergedAt?: number | Record<string, number>;
   assignee?: string;
   createdAt: number;
@@ -178,7 +180,9 @@ const DEFAULT_COLUMNS: JsonColumn[] = SHARED_DEFAULT_COLUMNS.map((c) => ({
  * - Else (both absent), produce an empty array.
  */
 function _legacyToSources(p: JsonProject): unknown[] {
-  if (Array.isArray(p.sources)) return p.sources;
+  if (Array.isArray(p.sources)) {
+    return p.sources;
+  }
   if (p.source && typeof p.source === 'object') {
     const id = Math.random().toString(36).slice(2, 18);
     return [{ ...(p.source as object), id, mountName: p.slug }];
@@ -204,8 +208,8 @@ export function migrateFromJson(repo: ProjectsRepo, db: DatabaseSync, data: Json
   // Idempotency: skip if DB already has projects
   const existing = repo.listProjects();
   if (existing.length > 0) {
-return 0;
-}
+    return 0;
+  }
 
   const projects = data.projects ?? [];
   const tickets = data.tickets ?? [];
@@ -352,8 +356,7 @@ return 0;
     // 5. Inbox items
     for (const item of inboxItems) {
       const foldedNote =
-        [item.note ?? '', foldLegacyShaping(item.shaping, 'outcome', 'notDoing')].filter(Boolean).join('\n\n') ||
-        null;
+        [item.note ?? '', foldLegacyShaping(item.shaping, 'outcome', 'notDoing')].filter(Boolean).join('\n\n') || null;
       const wasShaped = item.status === 'shaped';
       repo.upsertInboxItem({
         id: item.id,

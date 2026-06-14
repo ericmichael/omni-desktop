@@ -1,25 +1,25 @@
 # Teams: settings merge / precedence spec
 
-Status: design (not yet implemented). Applies to the **Azure/cloud** deployment only — Electron and local-server modes stay single-user (see `docs/cloud-state-invariant.md` and the project memory). Scopes the question: when one deployment hosts many independent teams, where does each `StoreData` setting live, and how is the *effective* value computed for an agent run?
+Status: design (not yet implemented). Applies to the **Azure/cloud** deployment only — Electron and local-server modes stay single-user (see `docs/cloud-state-invariant.md` and the project memory). Scopes the question: when one deployment hosts many independent teams, where does each `StoreData` setting live, and how is the _effective_ value computed for an agent run?
 
 ## Guiding principle
 
-This is a **personal-first tool**. The default scope is **per-user**; "team" is the exception, reserved for genuinely shared *work artifacts* (the project/ticket data) and *optional shared base layers* of agent config. There is almost no "pure team-only setting" — the team owns the data, not the preferences.
+This is a **personal-first tool**. The default scope is **per-user**; "team" is the exception, reserved for genuinely shared _work artifacts_ (the project/ticket data) and _optional shared base layers_ of agent config. There is almost no "pure team-only setting" — the team owns the data, not the preferences.
 
 ## Layers (low → high precedence)
 
-| Layer | Source | Writable by | Scope |
-|---|---|---|---|
-| **D — Deployment** | bicep / env (`OMNI_AZURE_*`, etc.) | operator only, immutable at runtime | whole deployment |
-| **T — Team** | `team_settings` row (RLS-scoped) | team role ≥ admin | one team |
-| **U — User** | `user_settings` row (per EasyAuth principal) | the user | global **(G)** or per-(user, team) **(P)** |
+| Layer              | Source                                       | Writable by                         | Scope                                      |
+| ------------------ | -------------------------------------------- | ----------------------------------- | ------------------------------------------ |
+| **D — Deployment** | bicep / env (`OMNI_AZURE_*`, etc.)           | operator only, immutable at runtime | whole deployment                           |
+| **T — Team**       | `team_settings` row (RLS-scoped)             | team role ≥ admin                   | one team                                   |
+| **U — User**       | `user_settings` row (per EasyAuth principal) | the user                            | global **(G)** or per-(user, team) **(P)** |
 
 The RLS isolation boundary is the **team** (`app.current_tenant = team_id`). A user's session resolves: principal → team memberships → active team → set `app.current_tenant`. Identity (the principal) is separate from the data-scope key (the team).
 
 ## Merge operators
 
 - **`D-only`** — value comes solely from D; T/U read-only.
-- **`D-floor ⊕ T`** — D sets the maximally-permissive bound; T may only *further restrict*; effective = most-restrictive intersection. No U layer.
+- **`D-floor ⊕ T`** — D sets the maximally-permissive bound; T may only _further restrict_; effective = most-restrictive intersection. No U layer.
 - **`T→U scalar`** — effective = `U ?? T ?? built-in default`.
 - **`T ∪ U`** (collection keyed by id/name) — union; on key collision the **U entry shadows** the T entry; U may **tombstone** a T entry (hide it for that user).
 - **`T ⊕ U`** (map overlay) — shallow key-merge, **U key wins**; T may mark keys **locked** (not user-overridable).
@@ -31,49 +31,49 @@ The RLS isolation boundary is the **team** (`app.current_tenant = team_id`). A u
 
 ### Merged (team base + user overlay)
 
-| Setting | Rule | Conflict / notes |
-|---|---|---|
-| `modelsConfig.providers` | `T ∪ U` | keyed by provider name; U shadows T. A member rides the team key or brings their own. |
-| `modelsConfig.default` | `T→U scalar` | U's chosen default model, else team's. |
-| `mcpConfig.mcpServers` | `T ∪ U` | keyed by server name; U shadows; U may tombstone a team server it doesn't want. |
-| `envVars` | `T ⊕ U` | parse to map, U key wins; team may **lock** keys (e.g. a required base URL) so U can't override. |
-| `skillSources` | `T ∪ U` | keyed by skill name; U's version shadows. |
-| `installedBundles` | `T ∪ U` | keyed by `${repo}:${plugin}`; U shadows. |
-| `enabledExtensions` | `T ∪ U` (per-id bool) | enabled if T or U enables; **U disable wins** for that user. |
-| `customApps` | `T ∪ U` | keyed by app id; team dock + personal additions. |
+| Setting                  | Rule                  | Conflict / notes                                                                                 |
+| ------------------------ | --------------------- | ------------------------------------------------------------------------------------------------ |
+| `modelsConfig.providers` | `T ∪ U`               | keyed by provider name; U shadows T. A member rides the team key or brings their own.            |
+| `modelsConfig.default`   | `T→U scalar`          | U's chosen default model, else team's.                                                           |
+| `mcpConfig.mcpServers`   | `T ∪ U`               | keyed by server name; U shadows; U may tombstone a team server it doesn't want.                  |
+| `envVars`                | `T ⊕ U`               | parse to map, U key wins; team may **lock** keys (e.g. a required base URL) so U can't override. |
+| `skillSources`           | `T ∪ U`               | keyed by skill name; U's version shadows.                                                        |
+| `installedBundles`       | `T ∪ U`               | keyed by `${repo}:${plugin}`; U shadows.                                                         |
+| `enabledExtensions`      | `T ∪ U` (per-id bool) | enabled if T or U enables; **U disable wins** for that user.                                     |
+| `customApps`             | `T ∪ U`               | keyed by app id; team dock + personal additions.                                                 |
 
 ### User-identity (never team)
 
-| Setting | Rule | Notes |
-|---|---|---|
-| `gitCredentials` | `U-identity` | resolved against the launching user; pushes carry *their* identity, not a managed team bot. Team owns *which* repos via project `sources`, not the creds. |
-| `githubAccount` | `U-identity` | per-user OAuth link. |
+| Setting          | Rule         | Notes                                                                                                                                                     |
+| ---------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `gitCredentials` | `U-identity` | resolved against the launching user; pushes carry _their_ identity, not a managed team bot. Team owns _which_ repos via project `sources`, not the creds. |
+| `githubAccount`  | `U-identity` | per-user OAuth link.                                                                                                                                      |
 
 ### User-only
 
-| Setting | Rule | Scope | Notes |
-|---|---|---|---|
-| `theme`, `glassTone`, `codeDeckBackground` | `U-only` | G | appearance follows me across teams. |
-| `layoutMode`, `codeLayoutMode` | `U-only` | G | |
-| `audioSettings` | `U-only` | G | hardware. |
-| `previewFeatures` | `U-only` | G | personal opt-in; D may hard-disable preview. |
-| `weeklyReviewDay` | `U-only` | G | my review cadence (personal GTD-style review). |
-| `lastWeeklyReviewAt` | `U-only` | P | tracks my review *within this team's work*. |
-| `wipLimit` | `U-only` | P | my cognitive limit on my active tickets — **depends on a ticket-assignee concept** (see Guards). |
-| `codeTabs`, `activeCodeTabId`, `activeTicketId` | `U-only` | P | my open columns / focus, against this team's projects. |
-| `chatSessionId`, `chatProfileName`, `chatContainerId` | `U-only` | P | my chat's session + sandbox binding, per team. |
-| `browserTabsets` | `U-only` | P | keyed by per-team `codeTabId`. |
-| `browserProfiles`, `browserHistory`, `browserBookmarks` | `U-only` | G | personal browsing. |
-| `onboardingComplete` | `U-only` | P | largely **derived** (auto-true if effective `modelsConfig` has providers); stored only to remember a dismissed welcome. |
-| `defaultProfileName` | `T→U scalar` | P | constrained to D's `availableSandboxProfiles`. |
+| Setting                                                 | Rule         | Scope | Notes                                                                                                                   |
+| ------------------------------------------------------- | ------------ | ----- | ----------------------------------------------------------------------------------------------------------------------- |
+| `theme`, `glassTone`, `codeDeckBackground`              | `U-only`     | G     | appearance follows me across teams.                                                                                     |
+| `layoutMode`, `codeLayoutMode`                          | `U-only`     | G     |                                                                                                                         |
+| `audioSettings`                                         | `U-only`     | G     | hardware.                                                                                                               |
+| `previewFeatures`                                       | `U-only`     | G     | personal opt-in; D may hard-disable preview.                                                                            |
+| `weeklyReviewDay`                                       | `U-only`     | G     | my review cadence (personal GTD-style review).                                                                          |
+| `lastWeeklyReviewAt`                                    | `U-only`     | P     | tracks my review _within this team's work_.                                                                             |
+| `wipLimit`                                              | `U-only`     | P     | my cognitive limit on my active tickets — **depends on a ticket-assignee concept** (see Guards).                        |
+| `codeTabs`, `activeCodeTabId`, `activeTicketId`         | `U-only`     | P     | my open columns / focus, against this team's projects.                                                                  |
+| `chatSessionId`, `chatProfileName`, `chatContainerId`   | `U-only`     | P     | my chat's session + sandbox binding, per team.                                                                          |
+| `browserTabsets`                                        | `U-only`     | P     | keyed by per-team `codeTabId`.                                                                                          |
+| `browserProfiles`, `browserHistory`, `browserBookmarks` | `U-only`     | G     | personal browsing.                                                                                                      |
+| `onboardingComplete`                                    | `U-only`     | P     | largely **derived** (auto-true if effective `modelsConfig` has providers); stored only to remember a dismissed welcome. |
+| `defaultProfileName`                                    | `T→U scalar` | P     | constrained to D's `availableSandboxProfiles`.                                                                          |
 
 ### Deployment-only / floor
 
-| Setting | Rule | Notes |
-|---|---|---|
-| `availableSandboxProfiles`, sandbox CPU/mem | `D-only` | `OMNI_AZURE_*`-forced. |
-| `platform` (enterprise creds) | `D-only` | |
-| `networkConfig` | `D-floor ⊕ T` | egress security boundary; team may tighten, **no user overlay**. |
+| Setting                                     | Rule          | Notes                                                            |
+| ------------------------------------------- | ------------- | ---------------------------------------------------------------- |
+| `availableSandboxProfiles`, sandbox CPU/mem | `D-only`      | `OMNI_AZURE_*`-forced.                                           |
+| `platform` (enterprise creds)               | `D-only`      |                                                                  |
+| `networkConfig`                             | `D-floor ⊕ T` | egress security boundary; team may tighten, **no user overlay**. |
 
 ### Infra / N-A in cloud
 
@@ -94,8 +94,8 @@ The effective config the agent sees is computed **per launching user**, in this 
 ## Write authority & guards
 
 - **T-layer writes** (model providers, mcp/env base, network policy, extensions/skills base, repo source config) require team role ≥ **admin**.
-- **Shared secret visibility**: team-layer model keys are *usable* by members but **masked** in the UI (show "configured", admins rotate, never echo the value).
-- **`wipLimit` dependency**: a per-user limit on "my active tickets" needs **ticket assignment**. A ticket is **always team-owned** (its team is the RLS scope and never changes); `assignee` is an *additive, optional* pointer to a member that only drives the personal "my work" filters (WIP, weekly review). Default is **Unassigned**; **any team member** may (re)assign, and assigning never alters ownership or visibility.
+- **Shared secret visibility**: team-layer model keys are _usable_ by members but **masked** in the UI (show "configured", admins rotate, never echo the value).
+- **`wipLimit` dependency**: a per-user limit on "my active tickets" needs **ticket assignment**. A ticket is **always team-owned** (its team is the RLS scope and never changes); `assignee` is an _additive, optional_ pointer to a member that only drives the personal "my work" filters (WIP, weekly review). Default is **Unassigned**; **any team member** may (re)assign, and assigning never alters ownership or visibility.
 - **RLS prerequisite**: real cross-team isolation requires the non-superuser `omni_app` Postgres role (the manual README step). With genuine multi-team data this stops being optional.
 
 ## Data-model consequences (for the follow-on implementation plan)

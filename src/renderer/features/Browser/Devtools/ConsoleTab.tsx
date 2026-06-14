@@ -101,10 +101,14 @@ export const ConsoleTab = memo(({ entries, onClear }: { entries: Entry[]; onClea
   // Auto-scroll to bottom on new entries — standard devtools behavior.
   useEffect(() => {
     const el = listRef.current;
-    if (!el) return;
+    if (!el) {
+      return;
+    }
     // Only auto-scroll if the user is already near the bottom.
     const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-    if (atBottom) el.scrollTop = el.scrollHeight;
+    if (atBottom) {
+      el.scrollTop = el.scrollHeight;
+    }
   }, [entries]);
 
   const filtered = level === 'all' ? entries : entries.filter((e) => e.level === level);

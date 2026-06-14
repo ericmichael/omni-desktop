@@ -1,5 +1,12 @@
 import { makeStyles, tokens } from '@fluentui/react-components';
-import { Add20Regular, ArrowSync20Regular, CheckmarkCircle20Regular, Play20Filled, Stop20Filled, Warning20Regular } from '@fluentui/react-icons';
+import {
+  Add20Regular,
+  ArrowSync20Regular,
+  CheckmarkCircle20Regular,
+  Play20Filled,
+  Stop20Filled,
+  Warning20Regular,
+} from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useMemo } from 'react';
 
@@ -96,31 +103,34 @@ export const TicketColumnBadge = memo(({ ticketId }: { ticketId: TicketId }) => 
 
   const columnLabel = useMemo(() => {
     if (!ticket?.columnId || !pipeline) {
-return null;
-}
+      return null;
+    }
     return pipeline.columns.find((c) => c.id === ticket.columnId)?.label ?? null;
   }, [ticket?.columnId, pipeline]);
 
   // Hide when resolved — TicketResolutionBadge takes over.
   if (ticket?.resolution) {
-return null;
-}
+    return null;
+  }
   if (!columnLabel) {
-return null;
-}
+    return null;
+  }
 
-  return (
-    <span className={styles.columnBadge}>
-      {columnLabel}
-    </span>
-  );
+  return <span className={styles.columnBadge}>{columnLabel}</span>;
 });
 TicketColumnBadge.displayName = 'TicketColumnBadge';
 
 /** Header action: new session button (+ icon). */
 export const TicketHeaderActions = memo(({ ticketId }: { ticketId: TicketId }) => {
   const { handleReset } = useTicketAutomation(ticketId);
-  return <IconButton aria-label="New session" icon={<Add20Regular style={{ width: 10, height: 10 }} />} size="sm" onClick={handleReset} />;
+  return (
+    <IconButton
+      aria-label="New session"
+      icon={<Add20Regular style={{ width: 10, height: 10 }} />}
+      size="sm"
+      onClick={handleReset}
+    />
+  );
 });
 TicketHeaderActions.displayName = 'TicketHeaderActions';
 
@@ -129,12 +139,12 @@ export const TicketBannerActions = memo(({ ticketId }: { ticketId: TicketId }) =
   const styles = useStyles();
   const tickets = useStore($tickets);
   const ticket = tickets[ticketId];
-  const { phase, handleStart, handleStop, handleReset } = useTicketAutomation(ticketId);
+  const { phase, handleStart, handleStop } = useTicketAutomation(ticketId);
 
   // When the ticket has a resolution, TicketResolutionBadge handles the display.
   if (ticket?.resolution) {
-return null;
-}
+    return null;
+  }
 
   const isAutonomous = phase === 'running';
   const isProvisioning = phase === 'provisioning' || phase === 'connecting' || phase === 'session_creating';
@@ -146,7 +156,12 @@ return null;
       <>
         <ArrowSync20Regular style={{ width: 10, height: 10 }} className={`${styles.greenIcon} animate-spin`} />
         <span className={styles.greenText}>Working</span>
-        <IconButton aria-label="Stop" icon={<Stop20Filled style={{ width: 10, height: 10 }} />} size="sm" onClick={handleStop} />
+        <IconButton
+          aria-label="Stop"
+          icon={<Stop20Filled style={{ width: 10, height: 10 }} />}
+          size="sm"
+          onClick={handleStop}
+        />
       </>
     );
   }
@@ -186,12 +201,10 @@ export const TicketResolutionBadge = memo(({ ticketId }: { ticketId: TicketId })
   const ticket = tickets[ticketId];
 
   if (!ticket?.resolution) {
-return null;
-}
+    return null;
+  }
 
-  return (
-    <Badge color={RESOLUTION_COLORS[ticket.resolution]}>{RESOLUTION_LABELS[ticket.resolution]}</Badge>
-  );
+  return <Badge color={RESOLUTION_COLORS[ticket.resolution]}>{RESOLUTION_LABELS[ticket.resolution]}</Badge>;
 });
 TicketResolutionBadge.displayName = 'TicketResolutionBadge';
 

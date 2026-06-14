@@ -20,8 +20,8 @@ async function fileToBase64(file: File): Promise<string> {
   const buf = new Uint8Array(await file.arrayBuffer());
   let bin = '';
   for (let i = 0; i < buf.length; i++) {
-bin += String.fromCharCode(buf[i] ?? 0);
-}
+    bin += String.fromCharCode(buf[i] ?? 0);
+  }
   return btoa(bin);
 }
 
@@ -30,13 +30,13 @@ function pcm16ToFloat32(b64: string): Float32Array {
   const bin = atob(b64);
   const bytes = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) {
-bytes[i] = bin.charCodeAt(i);
-}
+    bytes[i] = bin.charCodeAt(i);
+  }
   const i16 = new Int16Array(bytes.buffer, bytes.byteOffset, Math.floor(bytes.byteLength / 2));
   const out = new Float32Array(i16.length);
   for (let i = 0; i < i16.length; i++) {
-out[i] = (i16[i] ?? 0) / 32768;
-}
+    out[i] = (i16[i] ?? 0) / 32768;
+  }
   return out;
 }
 
@@ -54,7 +54,8 @@ class VoiceClient {
 
   private ctx(): AudioContext {
     if (!this.audioCtx) {
-      const Ctor = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const Ctor =
+        window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       this.audioCtx = new Ctor();
     }
     return this.audioCtx;
@@ -62,23 +63,23 @@ class VoiceClient {
 
   async getStatus(): Promise<VoiceStatus> {
     if (this.emitter) {
-return this.emitter.invoke('voice:get-status');
-}
+      return this.emitter.invoke('voice:get-status');
+    }
     return (await fetch('/api/voice/status').then((r) => r.json())) as VoiceStatus;
   }
 
   async start(): Promise<VoiceStatus> {
     if (this.emitter) {
-return this.emitter.invoke('voice:start');
-}
+      return this.emitter.invoke('voice:start');
+    }
     return (await fetch('/api/voice/start', { method: 'POST' }).then((r) => r.json())) as VoiceStatus;
   }
 
   /** PCM16LE mono base64 at `sampleRate` → recognized text. */
   async transcribe(pcmBase64: string, sampleRate: number): Promise<string> {
     if (this.emitter) {
-return this.emitter.invoke('voice:transcribe', pcmBase64, sampleRate);
-}
+      return this.emitter.invoke('voice:transcribe', pcmBase64, sampleRate);
+    }
     const res = await fetch('/api/voice/transcribe', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -92,10 +93,7 @@ return this.emitter.invoke('voice:transcribe', pcmBase64, sampleRate);
    * routes to the local sidecar (IPC in Electron, HTTP in self-hosted server).
    * Returns the stored wav + precomputed `.npy` embedding paths.
    */
-  async importSample(
-    personaId: string,
-    file: File,
-  ): Promise<{ file: string; embeddingFile: string }> {
+  async importSample(personaId: string, file: File): Promise<{ file: string; embeddingFile: string }> {
     const dataBase64 = await fileToBase64(file);
     if (this.emitter) {
       return this.emitter.invoke('voice:import-sample', personaId, file.name, dataBase64);
@@ -111,15 +109,15 @@ return this.emitter.invoke('voice:transcribe', pcmBase64, sampleRate);
   async speak(text: string, voice?: string): Promise<void> {
     const ctx = this.ctx();
     if (ctx.state === 'suspended') {
-await ctx.resume();
-}
+      await ctx.resume();
+    }
     this.nextStartAt = Math.max(this.nextStartAt, ctx.currentTime);
 
     const play = (pcmBase64: string, sampleRate: number): void => {
       const f32 = pcm16ToFloat32(pcmBase64);
       if (!f32.length) {
-return;
-}
+        return;
+      }
       const buf = ctx.createBuffer(1, f32.length, sampleRate);
       buf.getChannelData(0).set(f32);
       const src = ctx.createBufferSource();
@@ -135,13 +133,13 @@ return;
       await new Promise<void>((resolve, reject) => {
         const offAudio = this.listener!.on('voice:audio', (_e, p) => {
           if (p.streamId === streamId) {
-play(p.pcm, p.sampleRate);
-}
+            play(p.pcm, p.sampleRate);
+          }
         });
         const offEnd = this.listener!.on('voice:audio-end', (_e, p) => {
           if (p.streamId !== streamId) {
-return;
-}
+            return;
+          }
           offAudio();
           offEnd();
           resolve();
@@ -163,8 +161,8 @@ return;
     }).then((r) => r.json());
     const { pcm, sampleRate } = res as { pcm: string; sampleRate: number };
     if (pcm) {
-play(pcm, sampleRate);
-}
+      play(pcm, sampleRate);
+    }
   }
 }
 
@@ -182,8 +180,8 @@ function isVoiceCloudLinked(): boolean {
 let _client: VoiceClient | null = null;
 export const getVoiceClient = (): VoiceClient => {
   if (!_client) {
-_client = new VoiceClient();
-}
+    _client = new VoiceClient();
+  }
   return _client;
 };
 

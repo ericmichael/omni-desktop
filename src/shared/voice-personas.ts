@@ -21,9 +21,7 @@
  *    re-authored offline from masters we hold, so they ship embedding-only.
  */
 
-export type VoiceRef =
-  | { kind: 'predefined'; name: string }
-  | { kind: 'clone'; embeddingFile: string; file?: string };
+export type VoiceRef = { kind: 'predefined'; name: string } | { kind: 'clone'; embeddingFile: string; file?: string };
 
 export interface VoicePersona {
   /** `default` | `jarvis` | `custom-<uuid>`. */

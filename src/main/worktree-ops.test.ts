@@ -4,11 +4,11 @@
  * generateWorktreeName is tested for format/constraints.
  * checkGitRepo, createWorktree, removeWorktree use real tmpdir git repos.
  */
-import { execSync } from 'child_process';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { execSync } from 'child_process';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Mock getWorktreesDir so createWorktree/removeWorktree use our tmpdir
@@ -17,7 +17,13 @@ vi.mock('@/main/util', () => ({
   getWorktreesDir: () => worktreesTmpDir,
 }));
 
-import { checkGitRepo, createWorktree, generateWorktreeName, isWorktreeDirty,removeWorktree } from '@/main/worktree-ops';
+import {
+  checkGitRepo,
+  createWorktree,
+  generateWorktreeName,
+  isWorktreeDirty,
+  removeWorktree,
+} from '@/main/worktree-ops';
 
 // ---------------------------------------------------------------------------
 // Helpers

@@ -1,4 +1,4 @@
-import { makeStyles,Skeleton as FluentSkeleton, SkeletonItem } from '@fluentui/react-components';
+import { makeStyles, Skeleton as FluentSkeleton, SkeletonItem } from '@fluentui/react-components';
 
 const useStyles = makeStyles({
   root: {

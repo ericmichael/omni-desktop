@@ -55,17 +55,11 @@ describe('buildMarimoAiToml — null cases', () => {
   });
 
   it('returns null when default has no slash', () => {
-    expect(
-      buildMarimoAiToml(
-        makeConfig({ default: 'openai', providers: { openai: openaiProvider() } })
-      )
-    ).toBeNull();
+    expect(buildMarimoAiToml(makeConfig({ default: 'openai', providers: { openai: openaiProvider() } }))).toBeNull();
   });
 
   it('returns null when provider key does not exist', () => {
-    expect(
-      buildMarimoAiToml(makeConfig({ default: 'missing/gpt-4o', providers: {} }))
-    ).toBeNull();
+    expect(buildMarimoAiToml(makeConfig({ default: 'missing/gpt-4o', providers: {} }))).toBeNull();
   });
 
   it('returns null when neither provider nor model has api_key', () => {

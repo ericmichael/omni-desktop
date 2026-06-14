@@ -1,8 +1,17 @@
-import { makeStyles, shorthands,tokens } from '@fluentui/react-components';
+import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
 import { ArrowUp20Regular, Folder20Regular, Home20Regular } from '@fluentui/react-icons';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 
-import { AnimatedDialog, Button, DialogBody, DialogContent, DialogFooter, DialogHeader, Input, ListSkeleton } from '@/renderer/ds';
+import {
+  AnimatedDialog,
+  Button,
+  DialogBody,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  Input,
+  ListSkeleton,
+} from '@/renderer/ds';
 import { emitter } from '@/renderer/services/ipc';
 
 const useStyles = makeStyles({
@@ -105,11 +114,7 @@ const DirectoryRow = memo(({ entry, onNavigate }: DirectoryRowProps) => {
   }, [entry.path, onNavigate]);
 
   return (
-    <button
-      type="button"
-      onClick={handleClick}
-      className={styles.directoryRow}
-    >
+    <button type="button" onClick={handleClick} className={styles.directoryRow}>
       <Folder20Regular style={{ width: 14, height: 14 }} className={styles.folderIcon} />
       <span className={styles.truncate}>{entry.name}</span>
     </button>
@@ -205,20 +210,10 @@ export const DirectoryBrowserDialog = memo(({ open, onClose, onSelect, initialPa
         <DialogBody className={styles.body}>
           {/* Path bar */}
           <div className={styles.pathBar}>
-            <button
-              type="button"
-              onClick={handleHome}
-              className={styles.navButton}
-              title="Home"
-            >
+            <button type="button" onClick={handleHome} className={styles.navButton} title="Home">
               <Home20Regular style={{ width: 16, height: 16 }} />
             </button>
-            <button
-              type="button"
-              onClick={handleUp}
-              className={styles.navButton}
-              title="Parent directory"
-            >
+            <button type="button" onClick={handleUp} className={styles.navButton} title="Parent directory">
               <ArrowUp20Regular style={{ width: 16, height: 16 }} />
             </button>
             <Input

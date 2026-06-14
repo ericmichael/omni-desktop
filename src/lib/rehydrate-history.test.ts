@@ -1,6 +1,6 @@
-import { describe, expect,it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
-import {rehydrateHistory } from './rehydrate-history';
+import { rehydrateHistory } from './rehydrate-history';
 
 describe('rehydrateHistory', () => {
   // -------------------------------------------------------------------

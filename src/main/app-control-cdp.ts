@@ -197,10 +197,7 @@ export async function snapshot(wc: WebContents): Promise<AxNode> {
  * relative to the WebContents viewport). The caller passes these directly
  * to `wc.sendInputEvent`.
  */
-export async function resolveRefBox(
-  wc: WebContents,
-  ref: string
-): Promise<{ cx: number; cy: number }> {
+export async function resolveRefBox(wc: WebContents, ref: string): Promise<{ cx: number; cy: number }> {
   const s = getState(wc);
   const backendNodeId = s.refToBackendNodeId.get(ref);
   if (backendNodeId === undefined) {
@@ -340,14 +337,14 @@ export async function enableNetworkLog(wc: WebContents): Promise<void> {
     s.network = { enabled: false, entries: [], pending: new Map() };
   }
   if (s.network.enabled) {
-return;
-}
+    return;
+  }
 
   const listener = (_event: unknown, method: string, params: unknown) => {
     const net = getState(wc).network;
     if (!net) {
-return;
-}
+      return;
+    }
     try {
       if (method === 'Network.requestWillBeSent') {
         const p = params as {
@@ -416,10 +413,7 @@ return;
   });
 }
 
-function pushEntry(
-  net: NonNullable<AttachmentState['network']>,
-  entry: NetworkLogEntry
-): void {
+function pushEntry(net: NonNullable<AttachmentState['network']>, entry: NetworkLogEntry): void {
   net.pending.delete(entry.requestId);
   net.entries.push(entry);
   if (net.entries.length > NETWORK_LOG_CAP) {
@@ -475,8 +469,8 @@ function flatten(node: import('@/shared/app-control-types').AxNode, out: Snapsho
     ref: node.ref,
   });
   for (const c of node.children ?? []) {
-flatten(c, out);
-}
+    flatten(c, out);
+  }
 }
 
 /**
@@ -485,10 +479,7 @@ flatten(c, out);
  * toast appeared" or "a row went away" without being sensitive to layout
  * changes. Updates the cache so the next diff is against this snapshot.
  */
-export function diffSnapshots(
-  wc: WebContents,
-  current: import('@/shared/app-control-types').AxNode
-): SnapshotDiff {
+export function diffSnapshots(wc: WebContents, current: import('@/shared/app-control-types').AxNode): SnapshotDiff {
   const s = getState(wc);
   const prev = s.lastSnapshotTree;
   s.lastSnapshotTree = current;

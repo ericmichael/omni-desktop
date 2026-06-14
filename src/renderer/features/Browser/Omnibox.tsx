@@ -135,19 +135,19 @@ export const Omnibox = forwardRef<
     const seq = ++suggestSeqRef.current;
     if (!q.trim()) {
       if (seq === suggestSeqRef.current) {
-setSuggestions([]);
-}
+        setSuggestions([]);
+      }
       return;
     }
     try {
       const out = await browserApi.suggest(q, { limit: 8 });
       if (seq === suggestSeqRef.current) {
-setSuggestions(out);
-}
+        setSuggestions(out);
+      }
     } catch {
       if (seq === suggestSeqRef.current) {
-setSuggestions([]);
-}
+        setSuggestions([]);
+      }
     }
   }, []);
 

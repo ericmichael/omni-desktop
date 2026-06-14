@@ -1,5 +1,5 @@
 import { makeStyles, tokens } from '@fluentui/react-components';
-import { Document20Regular, Folder20Regular, FolderOpen20Regular,Image20Regular } from '@fluentui/react-icons';
+import { Document20Regular, Folder20Regular, FolderOpen20Regular, Image20Regular } from '@fluentui/react-icons';
 import { memo, useCallback, useRef, useState } from 'react';
 
 import type { TreeItemOpenChangeData } from '@/renderer/ds';
@@ -28,7 +28,11 @@ const useStyles = makeStyles({
 
 const getFileIcon = (entry: ArtifactFileEntry, isExpanded: boolean, styles: ReturnType<typeof useStyles>) => {
   if (entry.isDirectory) {
-    return isExpanded ? <FolderOpen20Regular style={{ width: 14, height: 14 }} className={styles.folderIcon} /> : <Folder20Regular style={{ width: 14, height: 14 }} className={styles.folderIcon} />;
+    return isExpanded ? (
+      <FolderOpen20Regular style={{ width: 14, height: 14 }} className={styles.folderIcon} />
+    ) : (
+      <Folder20Regular style={{ width: 14, height: 14 }} className={styles.folderIcon} />
+    );
   }
   const ext = entry.name.slice(entry.name.lastIndexOf('.')).toLowerCase();
   if (IMAGE_EXTENSIONS.has(ext)) {
@@ -70,9 +74,7 @@ const FileTreeNode = memo(({ entry, ticketId, selectedPath, onSelect, openItems,
   if (entry.isDirectory) {
     return (
       <TreeItem itemType="branch" value={entry.relativePath}>
-        <TreeItemLayout iconBefore={getFileIcon(entry, isExpanded, styles)}>
-          {entry.name}
-        </TreeItemLayout>
+        <TreeItemLayout iconBefore={getFileIcon(entry, isExpanded, styles)}>{entry.name}</TreeItemLayout>
         {isExpanded && children && (
           <Tree>
             {children.map((child) => (

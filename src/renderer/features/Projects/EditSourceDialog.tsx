@@ -15,15 +15,7 @@ import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useState } from 'react';
 
-import {
-  AnimatedDialog,
-  Button,
-  DialogBody,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  Input,
-} from '@/renderer/ds';
+import { AnimatedDialog, Button, DialogBody, DialogContent, DialogFooter, DialogHeader, Input } from '@/renderer/ds';
 import { GitCredentialDialog } from '@/renderer/features/SettingsModal/GitCredentialDialog';
 import { DirectoryBrowserDialog } from '@/renderer/features/Tickets/DirectoryBrowserDialog';
 import { persistedStoreApi } from '@/renderer/services/store';
@@ -125,7 +117,13 @@ export const EditSourceDialog = memo(({ open, onClose, project, source }: EditSo
     const next: ProjectSource =
       source.kind === 'local'
         ? { id: source.id, mountName, kind: 'local', workspaceDir: path }
-        : { id: source.id, mountName, kind: 'git-remote', repoUrl: path, ...(trimmedBranch ? { defaultBranch: trimmedBranch } : {}) };
+        : {
+            id: source.id,
+            mountName,
+            kind: 'git-remote',
+            repoUrl: path,
+            ...(trimmedBranch ? { defaultBranch: trimmedBranch } : {}),
+          };
 
     const existingIdentities = new Set(project.sources.filter((s) => s.id !== source.id).map(sourceIdentityKey));
     if (existingIdentities.has(sourceIdentityKey(next))) {
@@ -148,9 +146,7 @@ export const EditSourceDialog = memo(({ open, onClose, project, source }: EditSo
   }, [isLocal, workspaceDir, repoUrl, mount, branch, project.id, project.sources, source, onClose]);
 
   const mountPlaceholder = deriveMountName(
-    isLocal
-      ? { ...emptyLocalDraft(), workspaceDir }
-      : { ...emptyLocalDraft(), kind: 'git-remote', repoUrl }
+    isLocal ? { ...emptyLocalDraft(), workspaceDir } : { ...emptyLocalDraft(), kind: 'git-remote', repoUrl }
   );
 
   return (

@@ -149,7 +149,9 @@ export function registerSettingsConfigHandlers(
   });
   ipc.handle('settings:set-models-config', (e: unknown, config: ModelsConfig) => {
     const store = resolveStore(e);
-    const next = mask.restoreModels ? mask.restoreModels(config, store.get('modelsConfig') ?? emptyModelsConfig()) : config;
+    const next = mask.restoreModels
+      ? mask.restoreModels(config, store.get('modelsConfig') ?? emptyModelsConfig())
+      : config;
     store.set('modelsConfig', next);
     afterWrite(e);
   });

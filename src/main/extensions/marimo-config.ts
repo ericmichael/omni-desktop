@@ -26,24 +26,24 @@ type LauncherDefault = { providerKey: string; modelId: string; provider: Provide
 /** Parse `"providerKey/modelId"` and resolve the provider entry. Returns null if anything is missing. */
 const resolveDefault = (config: ModelsConfig): LauncherDefault | null => {
   if (!config.default) {
-return null;
-}
+    return null;
+  }
   const slash = config.default.indexOf('/');
   if (slash <= 0) {
-return null;
-}
+    return null;
+  }
   const providerKey = config.default.slice(0, slash);
   const modelId = config.default.slice(slash + 1);
   const provider = config.providers[providerKey];
   if (!provider) {
-return null;
-}
+    return null;
+  }
   // Either the provider-level api_key or the model-level api_key counts as configured.
   const modelEntry = provider.models[modelId];
   const apiKey = modelEntry?.api_key ?? provider.api_key;
   if (!apiKey) {
-return null;
-}
+    return null;
+  }
   return { providerKey, modelId, provider };
 };
 
@@ -59,8 +59,8 @@ return null;
 export const buildMarimoAiToml = (config: ModelsConfig): string | null => {
   const resolved = resolveDefault(config);
   if (!resolved) {
-return null;
-}
+    return null;
+  }
 
   const { provider, modelId } = resolved;
   const modelEntry = provider.models[modelId];
@@ -76,18 +76,18 @@ return null;
   if (provider.type === 'azure') {
     const lines = [`api_key = ${tomlString(apiKey)}`];
     if (baseUrl) {
-lines.push(`base_url = ${tomlString(baseUrl)}`);
-}
+      lines.push(`base_url = ${tomlString(baseUrl)}`);
+    }
     if (apiVersion) {
-lines.push(`api_version = ${tomlString(apiVersion)}`);
-}
+      lines.push(`api_version = ${tomlString(apiVersion)}`);
+    }
     providerSection = `[ai.azure]\n${lines.join('\n')}\n`;
     qualifiedModel = `azure/${modelId}`;
   } else {
     const lines = [`api_key = ${tomlString(apiKey)}`];
     if (baseUrl) {
-lines.push(`base_url = ${tomlString(baseUrl)}`);
-}
+      lines.push(`base_url = ${tomlString(baseUrl)}`);
+    }
     providerSection = `[ai.open_ai]\n${lines.join('\n')}\n`;
     qualifiedModel = `openai/${modelId}`;
   }
@@ -127,12 +127,12 @@ export const loadLauncherModelsConfig = async (): Promise<ModelsConfig | null> =
 export const writeMarimoAiConfig = async (projectDir: string): Promise<void> => {
   const models = await loadLauncherModelsConfig();
   if (!models) {
-return;
-}
+    return;
+  }
   const body = buildMarimoAiToml(models);
   if (!body) {
-return;
-}
+    return;
+  }
 
   const filePath = path.join(projectDir, MARIMO_TOML_FILENAME);
   try {

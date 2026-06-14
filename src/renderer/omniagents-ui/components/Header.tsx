@@ -33,10 +33,10 @@ export function Header({
   onArtifactsToggle,
   showArtifactsButton = false,
 }: {
-  agentName: string
-  onMenu?: () => void
-  onArtifactsToggle?: () => void
-  showArtifactsButton?: boolean
+  agentName: string;
+  onMenu?: () => void;
+  onArtifactsToggle?: () => void;
+  showArtifactsButton?: boolean;
 }) {
   const styles = useStyles();
 
@@ -63,5 +63,5 @@ export function Header({
         ) : null}
       </div>
     </div>
-  )
+  );
 }

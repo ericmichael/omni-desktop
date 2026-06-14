@@ -1,4 +1,4 @@
-import { makeStyles, shorthands,tokens } from '@fluentui/react-components';
+import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
 import { memo, useCallback, useEffect, useState } from 'react';
 
 import { Button, Spinner } from '@/renderer/ds';
@@ -7,10 +7,25 @@ import type { PlatformCredentials } from '@/shared/types';
 
 const useStyles = makeStyles({
   center: { display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', height: '100%' },
-  gate: { width: '100%', maxWidth: '384px', display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalXXL, padding: '32px' },
+  gate: {
+    width: '100%',
+    maxWidth: '384px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXXL,
+    padding: '32px',
+  },
   header: { textAlign: 'center' },
-  title: { fontSize: tokens.fontSizeBase400, fontWeight: tokens.fontWeightSemibold, color: tokens.colorNeutralForeground1 },
-  subtitle: { fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground2, marginTop: tokens.spacingVerticalS },
+  title: {
+    fontSize: tokens.fontSizeBase400,
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground1,
+  },
+  subtitle: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground2,
+    marginTop: tokens.spacingVerticalS,
+  },
   card: {
     backgroundColor: tokens.colorNeutralBackground2,
     borderRadius: tokens.borderRadiusLarge,
@@ -111,8 +126,8 @@ export const AuthGate = memo(({ children }: { children: React.ReactNode }) => {
   const [copied, setCopied] = useState(false);
   const handleCopyCode = useCallback(() => {
     if (flow.step !== 'pending') {
-return;
-}
+      return;
+    }
     try {
       // Secure context (HTTPS / localhost)
       navigator.clipboard.writeText(flow.userCode);
@@ -158,9 +173,7 @@ return;
       <div className={styles.gate}>
         <div className={styles.header}>
           <h1 className={styles.title}>Sign in to Omni Code</h1>
-          <p className={styles.subtitle}>
-            Sign in with your institutional account to continue.
-          </p>
+          <p className={styles.subtitle}>Sign in with your institutional account to continue.</p>
         </div>
 
         <div className={styles.card}>
@@ -172,23 +185,14 @@ return;
 
           {flow.step === 'pending' && (
             <>
-              <p className={styles.pendingHint}>
-                {flow.message || 'Enter this code at the verification URL:'}
-              </p>
+              <p className={styles.pendingHint}>{flow.message || 'Enter this code at the verification URL:'}</p>
               <div className={styles.codeRow}>
-                <code className={styles.codeText}>
-                  {flow.userCode}
-                </code>
+                <code className={styles.codeText}>{flow.userCode}</code>
                 <Button size="sm" variant="ghost" onClick={handleCopyCode}>
                   {copied ? 'Copied' : 'Copy'}
                 </Button>
               </div>
-              <a
-                href={flow.verificationUri}
-                target="_blank"
-                rel="noopener noreferrer"
-                className={styles.verifyLink}
-              >
+              <a href={flow.verificationUri} target="_blank" rel="noopener noreferrer" className={styles.verifyLink}>
                 {flow.verificationUri}
               </a>
               <div className={styles.waitingRow}>
@@ -200,9 +204,7 @@ return;
 
           {flow.step === 'error' && (
             <>
-              <div className={styles.errorBox}>
-                {flow.error}
-              </div>
+              <div className={styles.errorBox}>{flow.error}</div>
               <Button variant="primary" onClick={handleSignIn} className={styles.fullWidthBtn}>
                 Try again
               </Button>

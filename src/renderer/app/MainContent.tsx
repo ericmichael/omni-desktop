@@ -76,8 +76,8 @@ export const MainContent = memo(() => {
   useEffect(() => {
     setMounted((prev) => {
       if (prev.has(active)) {
-return prev;
-}
+        return prev;
+      }
       const next = new Set(prev);
       next.add(active);
       return next;

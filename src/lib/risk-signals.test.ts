@@ -53,17 +53,13 @@ const baseInput = {
 
 describe('detectRisks', () => {
   it('returns empty on empty state', () => {
-    expect(
-      detectRisks({ tickets: [], milestones: [], inboxItems: [], ...baseInput })
-    ).toEqual([]);
+    expect(detectRisks({ tickets: [], milestones: [], inboxItems: [], ...baseInput })).toEqual([]);
   });
 
   describe('stalled tickets', () => {
     it('flags tickets with no movement in threshold days', () => {
       const stale = NOW - (RISK_THRESHOLDS.stalledTicketDays + 1) * DAY_MS;
-      const tickets = [
-        makeTicket({ id: 't1', columnChangedAt: stale, phaseChangedAt: stale, updatedAt: stale }),
-      ];
+      const tickets = [makeTicket({ id: 't1', columnChangedAt: stale, phaseChangedAt: stale, updatedAt: stale })];
       const risks = detectRisks({ tickets, milestones: [], inboxItems: [], ...baseInput });
       expect(risks.some((r) => r.kind === 'stalled_ticket')).toBe(true);
     });
@@ -106,9 +102,7 @@ describe('detectRisks', () => {
 
     it('does not flag running tickets', () => {
       const stale = NOW - 20 * DAY_MS;
-      const tickets = [
-        makeTicket({ id: 't1', phase: 'running', phaseChangedAt: stale, updatedAt: stale }),
-      ];
+      const tickets = [makeTicket({ id: 't1', phase: 'running', phaseChangedAt: stale, updatedAt: stale })];
       const risks = detectRisks({ tickets, milestones: [], inboxItems: [], ...baseInput });
       expect(risks.some((r) => r.kind === 'stalled_ticket')).toBe(false);
     });
@@ -219,9 +213,7 @@ describe('detectRisks', () => {
 
     it('is suppressed when a deadline signal already fires for the same milestone', () => {
       const quiet = NOW - 20 * DAY_MS;
-      const milestones = [
-        makeMilestone({ id: 'm1', updatedAt: quiet, dueDate: NOW + 2 * DAY_MS }),
-      ];
+      const milestones = [makeMilestone({ id: 'm1', updatedAt: quiet, dueDate: NOW + 2 * DAY_MS })];
       const tickets = [
         makeTicket({ id: 't1', milestoneId: 'm1', updatedAt: quiet }),
         makeTicket({ id: 't2', milestoneId: 'm1', updatedAt: quiet }),
@@ -251,9 +243,7 @@ describe('detectRisks', () => {
 
     it('ignores promoted items', () => {
       const old = NOW - 6.5 * DAY_MS;
-      const inboxItems = [
-        makeInbox({ id: 'i1', createdAt: old, promotedTo: { kind: 'ticket', id: 't1', at: NOW } }),
-      ];
+      const inboxItems = [makeInbox({ id: 'i1', createdAt: old, promotedTo: { kind: 'ticket', id: 't1', at: NOW } })];
       const risks = detectRisks({ tickets: [], milestones: [], inboxItems, ...baseInput });
       expect(risks).toHaveLength(0);
     });
@@ -291,9 +281,7 @@ describe('detectRisks', () => {
 
     it('does not flag overdue projects whose tickets are all resolved', () => {
       const projects = [{ id: 'p1', label: 'Project 1', dueDate: NOW - DAY_MS }];
-      const tickets = [
-        makeTicket({ id: 't1', resolution: 'completed', resolvedAt: NOW - 2 * DAY_MS }),
-      ];
+      const tickets = [makeTicket({ id: 't1', resolution: 'completed', resolvedAt: NOW - 2 * DAY_MS })];
       const risks = detectRisks({
         tickets,
         milestones: [],

@@ -1,4 +1,4 @@
-import { type ChildProcess,spawn } from 'child_process';
+import { type ChildProcess, spawn } from 'child_process';
 import { ipcMain, net } from 'electron';
 
 import { getFreePort } from '@/lib/free-port';
@@ -7,11 +7,7 @@ import type { ExtensionManifest } from '@/main/extensions/types';
 import type { getStore } from '@/main/store';
 
 type Store = ReturnType<typeof getStore>;
-import type {
-  ExtensionDescriptor,
-  ExtensionEnsureResult,
-  ExtensionInstanceState,
-} from '@/shared/extensions';
+import type { ExtensionDescriptor, ExtensionEnsureResult, ExtensionInstanceState } from '@/shared/extensions';
 import type { IIpcListener } from '@/shared/ipc-listener';
 import type { IpcRendererEvents } from '@/shared/types';
 
@@ -103,8 +99,8 @@ export class ExtensionManager {
 
   setEnabled = async (id: string, enabled: boolean): Promise<void> => {
     if (!this._getManifest(id)) {
-return;
-}
+      return;
+    }
     const current = this.store.get('enabledExtensions') ?? {};
     this.store.set('enabledExtensions', { ...current, [id]: enabled });
     if (!enabled) {
@@ -129,9 +125,7 @@ return;
 
   ensureInstance = (id: string, cwd: string): Promise<ExtensionEnsureResult> => {
     if (!this.isEnabled(id)) {
-      return Promise.reject(
-        new Error(`Extension '${id}' is not enabled. Enable it in Settings → Extensions.`)
-      );
+      return Promise.reject(new Error(`Extension '${id}' is not enabled. Enable it in Settings → Extensions.`));
     }
     const manifest = this._getManifest(id);
     if (!manifest) {
@@ -168,8 +162,8 @@ return;
 
     inst.startPromise = this.startInstance(inst).finally(() => {
       if (inst) {
-inst.startPromise = null;
-}
+        inst.startPromise = null;
+      }
     });
     return inst.startPromise;
   };
@@ -177,8 +171,8 @@ inst.startPromise = null;
   releaseInstance = (id: string, cwd: string): void => {
     const inst = this.instances.get(instanceKey(id, cwd));
     if (!inst) {
-return;
-}
+      return;
+    }
     inst.refcount = Math.max(0, inst.refcount - 1);
     if (inst.refcount === 0) {
       this.scheduleIdleShutdown(inst);
@@ -275,14 +269,17 @@ return;
     throw new Error(err);
   };
 
-  private stopInstance = async (inst: Instance, reason: 'idle' | 'shutdown' | 'disabled' | 'timeout'): Promise<void> => {
+  private stopInstance = async (
+    inst: Instance,
+    reason: 'idle' | 'shutdown' | 'disabled' | 'timeout'
+  ): Promise<void> => {
     this.clearIdleTimer(inst);
     const proc = inst.proc;
     inst.proc = null;
     if (!proc || proc.exitCode !== null) {
       if (reason !== 'timeout') {
-this.transition(inst, { state: 'idle' });
-}
+        this.transition(inst, { state: 'idle' });
+      }
       this.instances.delete(instanceKey(inst.manifest.id, inst.cwd));
       return;
     }
@@ -291,8 +288,8 @@ this.transition(inst, { state: 'idle' });
       let done = false;
       const finish = () => {
         if (done) {
-return;
-}
+          return;
+        }
         done = true;
         resolve();
       };

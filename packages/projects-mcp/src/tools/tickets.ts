@@ -1,10 +1,19 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { type IProjectsRepo, nowTimestamp, ticketId } from 'omni-projects-db';
-import type { ColumnRow, CommentRow, TicketRow } from 'omni-projects-db';
+import {
+  type ColumnRow,
+  type CommentRow,
+  type IProjectsRepo,
+  nowTimestamp,
+  ticketId,
+  type TicketRow,
+} from 'omni-projects-db';
 import { z } from 'zod';
 
 const json = (data: unknown) => ({ content: [{ type: 'text' as const, text: JSON.stringify(data) }] });
-const err = (message: string) => ({ content: [{ type: 'text' as const, text: JSON.stringify({ error: message }) }], isError: true as const });
+const err = (message: string) => ({
+  content: [{ type: 'text' as const, text: JSON.stringify({ error: message }) }],
+  isError: true as const,
+});
 
 function ticketPayload(t: TicketRow, cols: ColumnRow[], comments: CommentRow[]) {
   const column = cols.find((c) => c.id === t.column_id);
@@ -41,7 +50,9 @@ export function registerTicketTools(server: McpServer, repo: IProjectsRepo): voi
     { ticket_id: z.string().describe('The ticket ID to look up.') },
     async ({ ticket_id }) => {
       const ticket = await repo.getTicket(ticket_id);
-      if (!ticket) return err(`Ticket not found: ${ticket_id}`);
+      if (!ticket) {
+        return err(`Ticket not found: ${ticket_id}`);
+      }
 
       const cols = await repo.listColumns(ticket.project_id);
       const comments = await repo.listCommentsByTicket(ticket_id);
@@ -66,7 +77,9 @@ export function registerTicketTools(server: McpServer, repo: IProjectsRepo): voi
     async ({ project_id, title, description, priority, milestone_id, branch, use_worktree, assignee }) => {
       const cols = await repo.listColumns(project_id);
       const firstCol = cols[0];
-      if (!firstCol) return err(`Project not found or has no pipeline: ${project_id}`);
+      if (!firstCol) {
+        return err(`Project not found or has no pipeline: ${project_id}`);
+      }
 
       const id = ticketId();
       const now = nowTimestamp();
@@ -118,22 +131,50 @@ export function registerTicketTools(server: McpServer, repo: IProjectsRepo): voi
       add_blocked_by: z.array(z.string()).optional().describe('Ticket IDs to add as blockers.'),
       remove_blocked_by: z.array(z.string()).optional().describe('Ticket IDs to remove as blockers.'),
     },
-    async ({ ticket_id, title, description, priority, branch, use_worktree, assignee, add_blocked_by, remove_blocked_by }) => {
+    async ({
+      ticket_id,
+      title,
+      description,
+      priority,
+      branch,
+      use_worktree,
+      assignee,
+      add_blocked_by,
+      remove_blocked_by,
+    }) => {
       const ticket = await repo.getTicket(ticket_id);
-      if (!ticket) return err(`Ticket not found: ${ticket_id}`);
+      if (!ticket) {
+        return err(`Ticket not found: ${ticket_id}`);
+      }
 
       const next = { ...ticket };
-      if (title !== undefined) next.title = title;
-      if (description !== undefined) next.description = description;
-      if (priority !== undefined) next.priority = priority;
-      if (branch !== undefined) next.branch = branch || null;
-      if (use_worktree !== undefined) next.use_worktree = use_worktree ? 1 : 0;
-      if (assignee !== undefined) next.assignee = assignee || null;
+      if (title !== undefined) {
+        next.title = title;
+      }
+      if (description !== undefined) {
+        next.description = description;
+      }
+      if (priority !== undefined) {
+        next.priority = priority;
+      }
+      if (branch !== undefined) {
+        next.branch = branch || null;
+      }
+      if (use_worktree !== undefined) {
+        next.use_worktree = use_worktree ? 1 : 0;
+      }
+      if (assignee !== undefined) {
+        next.assignee = assignee || null;
+      }
 
       if (add_blocked_by || remove_blocked_by) {
         const current = new Set<string>(JSON.parse(ticket.blocked_by));
-        for (const id of add_blocked_by ?? []) current.add(id);
-        for (const id of remove_blocked_by ?? []) current.delete(id);
+        for (const id of add_blocked_by ?? []) {
+          current.add(id);
+        }
+        for (const id of remove_blocked_by ?? []) {
+          current.delete(id);
+        }
         next.blocked_by = JSON.stringify([...current]);
       }
 
@@ -153,7 +194,9 @@ export function registerTicketTools(server: McpServer, repo: IProjectsRepo): voi
     },
     async ({ ticket_id, column }) => {
       const ticket = await repo.getTicket(ticket_id);
-      if (!ticket) return err(`Ticket not found: ${ticket_id}`);
+      if (!ticket) {
+        return err(`Ticket not found: ${ticket_id}`);
+      }
 
       const cols = await repo.listColumns(ticket.project_id);
       const target = cols.find((c) => c.label.toLowerCase() === column.toLowerCase());
@@ -175,7 +218,9 @@ export function registerTicketTools(server: McpServer, repo: IProjectsRepo): voi
     { ticket_id: z.string().describe('The ticket ID to archive') },
     async ({ ticket_id }) => {
       const ticket = await repo.getTicket(ticket_id);
-      if (!ticket) return err(`Ticket not found: ${ticket_id}`);
+      if (!ticket) {
+        return err(`Ticket not found: ${ticket_id}`);
+      }
 
       const now = nowTimestamp();
       await repo.upsertTicket({ ...ticket, archived_at: now, updated_at: now });
@@ -190,7 +235,9 @@ export function registerTicketTools(server: McpServer, repo: IProjectsRepo): voi
     { ticket_id: z.string().describe('The ticket ID to unarchive') },
     async ({ ticket_id }) => {
       const ticket = await repo.getTicket(ticket_id);
-      if (!ticket) return err(`Ticket not found: ${ticket_id}`);
+      if (!ticket) {
+        return err(`Ticket not found: ${ticket_id}`);
+      }
 
       await repo.upsertTicket({ ...ticket, archived_at: null, updated_at: nowTimestamp() });
 
@@ -211,16 +258,26 @@ export function registerTicketTools(server: McpServer, repo: IProjectsRepo): voi
       const cols = await repo.listColumns(project_id);
       if (cols.length === 0) {
         const exists = await repo.getProject(project_id);
-        if (!exists) return err(`Project not found: ${project_id}`);
+        if (!exists) {
+          return err(`Project not found: ${project_id}`);
+        }
       }
 
       const columnId = column ? cols.find((c) => c.label.toLowerCase() === column.toLowerCase())?.id : undefined;
 
       const tickets = (await repo.listTicketsByProject(project_id)).filter((t) => {
-        if (t.archived_at) return false;
-        if (milestone_id && t.milestone_id !== milestone_id) return false;
-        if (priority && t.priority !== priority) return false;
-        if (columnId && t.column_id !== columnId) return false;
+        if (t.archived_at) {
+          return false;
+        }
+        if (milestone_id && t.milestone_id !== milestone_id) {
+          return false;
+        }
+        if (priority && t.priority !== priority) {
+          return false;
+        }
+        if (columnId && t.column_id !== columnId) {
+          return false;
+        }
         return true;
       });
 

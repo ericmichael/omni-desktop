@@ -47,6 +47,7 @@ The browser build (`vite.browser.config.ts`) produces a standalone SPA that prox
 ### Transport abstraction
 
 IPC goes through `TransportEmitter` / `TransportListener` interfaces (`src/shared/transport.ts`). Two implementations in `src/renderer/transport/`:
+
 - `ElectronTransportEmitter/Listener` — wraps typed-ipc
 - `WsTransportEmitter/Listener` — JSON-RPC-ish over a single WebSocket, with reconnect + message queue; fetches an auth token from `/api/ws-token` (loopback-only) before dialing `/ws`
 

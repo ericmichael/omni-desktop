@@ -1,4 +1,4 @@
-import { makeStyles, shorthands,tokens } from '@fluentui/react-components';
+import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
 import { ArrowMaximize20Regular, Dismiss20Regular } from '@fluentui/react-icons';
 import { memo, useCallback, useEffect, useRef } from 'react';
 

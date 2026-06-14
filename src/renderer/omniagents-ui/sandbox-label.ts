@@ -21,12 +21,13 @@ const KNOWN_PROFILE_LABELS: Record<string, string> = {
   'aci-desktop': 'Cloud · Desktop',
 };
 
-const titleCase = (s: string): string =>
-  s.length === 0 ? s : s[0]!.toUpperCase() + s.slice(1);
+const titleCase = (s: string): string => (s.length === 0 ? s : s[0]!.toUpperCase() + s.slice(1));
 
 const resolveBase = (profileName: string, machines: MachineSummary[]): string => {
   const known = KNOWN_PROFILE_LABELS[profileName];
-  if (known) return known;
+  if (known) {
+    return known;
+  }
   if (profileName.startsWith('local:')) {
     const machineId = profileName.slice('local:'.length);
     const machine = machines.find((m) => m.machineId === machineId);
@@ -35,10 +36,7 @@ const resolveBase = (profileName: string, machines: MachineSummary[]): string =>
   return titleCase(profileName);
 };
 
-export const buildProfileLabel = (
-  profileName: string,
-  machines: MachineSummary[] = $machines.get()
-): string => {
+export const buildProfileLabel = (profileName: string, machines: MachineSummary[] = $machines.get()): string => {
   const base = resolveBase(profileName, machines);
   return import.meta.env.MODE === 'development' ? `${base} (dev)` : base;
 };

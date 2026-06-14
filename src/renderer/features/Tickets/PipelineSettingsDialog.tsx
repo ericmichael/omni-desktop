@@ -83,12 +83,18 @@ const useStyles = makeStyles({
 
 const linesToText = (values: string[] | undefined): string => values?.join('\n') ?? '';
 const textToLines = (value: string): string[] | undefined => {
-  const lines = value.split('\n').map((line) => line.trim()).filter(Boolean);
+  const lines = value
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
   return lines.length > 0 ? lines : undefined;
 };
 const skillsToText = (values: string[] | undefined): string => values?.join(', ') ?? '';
 const textToSkills = (value: string): string[] | undefined => {
-  const skills = value.split(',').map((skill) => skill.trim()).filter(Boolean);
+  const skills = value
+    .split(',')
+    .map((skill) => skill.trim())
+    .filter(Boolean);
   return skills.length > 0 ? skills : undefined;
 };
 
@@ -173,7 +179,8 @@ const ColumnEditor = memo(
       [column.id, onWorkflowChange]
     );
     const handleDefinitionOfDoneChange = useCallback(
-      (e: React.ChangeEvent<HTMLTextAreaElement>) => onWorkflowChange(column.id, { definitionOfDone: textToLines(e.target.value) }),
+      (e: React.ChangeEvent<HTMLTextAreaElement>) =>
+        onWorkflowChange(column.id, { definitionOfDone: textToLines(e.target.value) }),
       [column.id, onWorkflowChange]
     );
     const handleAgentInstructionsChange = useCallback(
@@ -182,7 +189,8 @@ const ColumnEditor = memo(
       [column.id, onWorkflowChange]
     );
     const handleRecommendedSkillsChange = useCallback(
-      (e: React.ChangeEvent<HTMLInputElement>) => onWorkflowChange(column.id, { recommendedSkills: textToSkills(e.target.value) }),
+      (e: React.ChangeEvent<HTMLInputElement>) =>
+        onWorkflowChange(column.id, { recommendedSkills: textToSkills(e.target.value) }),
       [column.id, onWorkflowChange]
     );
 
@@ -202,7 +210,10 @@ const ColumnEditor = memo(
             <button
               onClick={handleStartRename}
               className="text-xs px-1.5 py-0.5 rounded-full font-medium cursor-pointer hover:ring-1 hover:ring-accent-500/50"
-              style={{ color: getColumnColors(column.id).badgeColor, backgroundColor: getColumnColors(column.id).badgeBg }}
+              style={{
+                color: getColumnColors(column.id).badgeColor,
+                backgroundColor: getColumnColors(column.id).badgeBg,
+              }}
               title="Click to rename"
             >
               {column.label}
@@ -225,12 +236,7 @@ const ColumnEditor = memo(
               isDisabled={index === total - 1}
             />
             {isRemovable && (
-              <IconButton
-                aria-label="Remove column"
-                icon={<Delete20Filled />}
-                size="sm"
-                onClick={handleRemoveColumn}
-              />
+              <IconButton aria-label="Remove column" icon={<Delete20Filled />} size="sm" onClick={handleRemoveColumn} />
             )}
           </div>
         </div>
@@ -350,8 +356,8 @@ export const PipelineSettingsDialog = memo(
     const handleGateChange = useCallback((columnId: string, checked: boolean) => {
       setEditColumns((prev) => {
         if (!prev) {
-return prev;
-}
+          return prev;
+        }
         return prev.map((col) => (col.id !== columnId ? col : { ...col, gate: checked }));
       });
     }, []);
@@ -359,8 +365,8 @@ return prev;
     const handleDescriptionChange = useCallback((columnId: string, value: string) => {
       setEditColumns((prev) => {
         if (!prev) {
-return prev;
-}
+          return prev;
+        }
         return prev.map((col) => (col.id !== columnId ? col : { ...col, description: value || undefined }));
       });
     }, []);
@@ -436,7 +442,10 @@ return prev;
       if (!trimmed) {
         return;
       }
-      const id = trimmed.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+      const id = trimmed
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_|_$/g, '');
       if (!id) {
         return;
       }

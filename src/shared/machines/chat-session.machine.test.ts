@@ -3,12 +3,7 @@ import { createActor, getNextSnapshot } from 'xstate';
 
 import type { MessageItem } from '@/shared/chat-types';
 
-import {
-  type ChatSessionContext,
-  type ChatSessionEvent,
-  chatSessionMachine,
-  isThinking,
-} from './chat-session.machine';
+import { type ChatSessionContext, type ChatSessionEvent, chatSessionMachine, isThinking } from './chat-session.machine';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -237,9 +232,7 @@ describe('chatSessionMachine', () => {
           prompt: 'hello',
         });
         const items = ctx(after).items as MessageItem[];
-        const userMsgs = items.filter(
-          (it) => it.type === 'chat' && it.role === 'user',
-        );
+        const userMsgs = items.filter((it) => it.type === 'chat' && it.role === 'user');
         expect(userMsgs.length).toBe(1);
       });
 
@@ -449,9 +442,7 @@ describe('chatSessionMachine', () => {
         output: 'file.txt',
         session_id: 'sess-1',
       });
-      const tool = ctx(snap).items.find(
-        (it) => it.type === 'tool' && (it as any).call_id === 'c1',
-      ) as any;
+      const tool = ctx(snap).items.find((it) => it.type === 'tool' && (it as any).call_id === 'c1') as any;
       expect(tool.status).toBe('result');
       expect(tool.output).toBe('file.txt');
     });

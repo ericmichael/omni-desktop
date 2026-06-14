@@ -41,11 +41,11 @@ function isEnabled(machineName: string): boolean {
           : null;
 
     if (!flag) {
-return false;
-}
+      return false;
+    }
     if (flag === '1' || flag === 'true' || flag === '*') {
-return true;
-}
+      return true;
+    }
 
     // Comma-separated filter: "rpc,terminal"
     const filters = flag.split(',').map((s) => s.trim().toLowerCase());
@@ -64,11 +64,11 @@ function formatTags(tags: Record<string, string | number | boolean | null | unde
   const parts: string[] = [];
   for (const [k, v] of Object.entries(tags)) {
     if (v == null || v === '') {
-continue;
-}
+      continue;
+    }
     parts.push(`${k}=${v}`);
   }
-  return parts.length > 0 ? ` ${  parts.join(' ')}` : '';
+  return parts.length > 0 ? ` ${parts.join(' ')}` : '';
 }
 
 // ---------------------------------------------------------------------------
@@ -104,7 +104,7 @@ export function createMachineLogger(machineName: string, opts?: MachineLoggerOpt
     if (count <= 3) {
       console.warn(
         `${prefix} dropped event '${eventType}' — no handler in current state. ` +
-          `If this event should always apply, move it to the machine root's on: {}.`,
+          `If this event should always apply, move it to the machine root's on: {}.`
       );
     } else if (count === 4) {
       console.warn(`${prefix} suppressing further '${eventType}' drop warnings`);
@@ -115,6 +115,7 @@ export function createMachineLogger(machineName: string, opts?: MachineLoggerOpt
     // Dropped-event detection at @xstate.event — fires before processing.
     if (inspectionEvent.type === '@xstate.event' && detectDrops) {
       const { event, actorRef } = inspectionEvent as InspectionEvent & {
+        event: { type: string };
         actorRef?: { getSnapshot?: () => { can?: (e: unknown) => boolean } };
       };
       // Skip XState-internal synthetic events
@@ -133,16 +134,16 @@ export function createMachineLogger(machineName: string, opts?: MachineLoggerOpt
 
     if (inspectionEvent.type === '@xstate.snapshot') {
       const { event, snapshot } = inspectionEvent;
-      const snap = snapshot as any;
+      const snap = snapshot as unknown as { value: unknown; context?: Record<string, unknown> };
 
       if (!verbose || !isEnabled(machineName)) {
-return;
-}
+        return;
+      }
 
       // Skip synthetic init events from verbose logging too
       if (event.type === 'xstate.init') {
-return;
-}
+        return;
+      }
 
       const now = Date.now();
       const delta = now - lastTransitionTime;
@@ -156,20 +157,20 @@ return;
       const contextParts: string[] = [];
       if (ctx) {
         if (ctx.error) {
-contextParts.push(`error="${ctx.error}"`);
-}
-        if (ctx.reconnectAttempt > 0) {
-contextParts.push(`attempt=${ctx.reconnectAttempt}`);
-}
-        if (ctx.pendingCount > 0) {
-contextParts.push(`pending=${ctx.pendingCount}`);
-}
+          contextParts.push(`error="${ctx.error}"`);
+        }
+        if (typeof ctx.reconnectAttempt === 'number' && ctx.reconnectAttempt > 0) {
+          contextParts.push(`attempt=${ctx.reconnectAttempt}`);
+        }
+        if (typeof ctx.pendingCount === 'number' && ctx.pendingCount > 0) {
+          contextParts.push(`pending=${ctx.pendingCount}`);
+        }
         if (ctx.phase) {
-contextParts.push(`phase=${ctx.phase}`);
-}
+          contextParts.push(`phase=${ctx.phase}`);
+        }
         if (ctx.exitCode != null) {
-contextParts.push(`exitCode=${ctx.exitCode}`);
-}
+          contextParts.push(`exitCode=${ctx.exitCode}`);
+        }
       }
       const contextStr = contextParts.length > 0 ? `  {${contextParts.join(', ')}}` : '';
 
@@ -196,16 +197,16 @@ function shouldDetectDrops(): boolean {
   try {
     const ls = typeof localStorage !== 'undefined' ? localStorage.getItem('debug:machines:drops') : null;
     if (ls === '0' || ls === 'false') {
-return false;
-}
+      return false;
+    }
     if (ls === '1' || ls === 'true') {
-return true;
-}
+      return true;
+    }
     // Default: on in dev, off in prod
     const viteEnv = (import.meta as unknown as { env?: { DEV?: boolean } }).env;
     if (viteEnv && typeof viteEnv.DEV === 'boolean') {
-return viteEnv.DEV;
-}
+      return viteEnv.DEV;
+    }
     if (typeof process !== 'undefined' && process.env) {
       return process.env.NODE_ENV !== 'production';
     }

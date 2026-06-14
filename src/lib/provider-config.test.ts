@@ -84,10 +84,7 @@ describe('buildProviderConfig', () => {
       makeDefault: 'if-unset',
     });
     expect(config.default).toBe('openai/gpt-5.5');
-    expect(Object.keys(config.providers['anthropic']?.models ?? {})).toEqual([
-      'claude-sonnet-4-6',
-      'claude-fable-5',
-    ]);
+    expect(Object.keys(config.providers['anthropic']?.models ?? {})).toEqual(['claude-sonnet-4-6', 'claude-fable-5']);
     expect(config.providers['anthropic']?.api_key).toBe('sk-new');
   });
 });
@@ -166,9 +163,10 @@ describe('probeForProvider', () => {
   });
 
   it('recognizes anthropic-shaped litellm providers by name or model prefix', () => {
-    expect(
-      probeForProvider('anthropic', { type: 'litellm', api_key: 'sk-ant', models: {} })
-    ).toEqual({ kind: 'anthropic', apiKey: 'sk-ant' });
+    expect(probeForProvider('anthropic', { type: 'litellm', api_key: 'sk-ant', models: {} })).toEqual({
+      kind: 'anthropic',
+      apiKey: 'sk-ant',
+    });
     expect(
       probeForProvider('litellm', {
         type: 'litellm',

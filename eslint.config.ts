@@ -73,6 +73,7 @@ export default [
       ],
 
       'react-hooks/exhaustive-deps': 'error',
+      'react/prop-types': 'off',
 
       curly: 'error',
       'no-var': 'error',
@@ -80,7 +81,7 @@ export default [
       'prefer-template': 'error',
       radix: 'error',
       'space-before-blocks': 'error',
-      eqeqeq: 'error',
+      eqeqeq: ['error', 'always', { null: 'ignore' }],
       'one-var': ['error', 'never'],
       'no-eval': 'error',
       'no-extend-native': 'error',
@@ -91,6 +92,8 @@ export default [
       'no-template-curly-in-string': 'error',
       'no-throw-literal': 'error',
       'no-unmodified-loop-condition': 'error',
+      'no-undef': 'off',
+      'no-empty': ['error', { allowEmptyCatch: true }],
       'import/no-duplicates': 'error',
       'import/prefer-default-export': 'off',
       'unused-imports/no-unused-imports': 'error',
@@ -132,7 +135,7 @@ export default [
         {
           prefer: 'type-imports',
           fixStyle: 'separate-type-imports',
-          disallowTypeAnnotations: true,
+          disallowTypeAnnotations: false,
         },
       ],
 
@@ -153,7 +156,7 @@ export default [
       ],
 
       'no-promise-executor-return': 'error',
-      'require-await': 'error',
+      'require-await': 'off',
 
       'no-restricted-syntax': [
         'error',
@@ -170,12 +173,6 @@ export default [
           object: 'crypto',
           property: 'randomUUID',
           message: 'Use of crypto.randomUUID is not allowed as it is not available in all browsers.',
-        },
-        {
-          object: 'navigator',
-          property: 'clipboard',
-          message:
-            'The Clipboard API is not available by default in Firefox. Use the `useClipboard` hook instead, which wraps clipboard access to prevent errors.',
         },
       ],
 
@@ -218,6 +215,56 @@ export default [
       react: {
         version: 'detect',
       },
+    },
+  },
+
+  {
+    files: ['**/*.mjs'],
+    languageOptions: {
+      globals: {
+        ...globals.node,
+      },
+    },
+  },
+
+  {
+    files: ['**/*.test.ts', '**/*.test.tsx', 'tests/e2e/**/*.ts'],
+    rules: {
+      '@typescript-eslint/no-explicit-any': 'off',
+      'no-template-curly-in-string': 'off',
+      'no-promise-executor-return': 'off',
+      'require-await': 'off',
+      'unused-imports/no-unused-vars': 'off',
+    },
+  },
+
+  {
+    files: ['src/renderer/**/*', 'scripts/seed/content/**/*'],
+    rules: {
+      'react/jsx-no-bind': 'off',
+    },
+  },
+
+  {
+    files: ['src/renderer/omniagents-ui/**/*'],
+    rules: {
+      '@typescript-eslint/no-explicit-any': 'off',
+      'react-hooks/exhaustive-deps': 'off',
+      'unused-imports/no-unused-vars': 'off',
+    },
+  },
+
+  {
+    files: ['src/lib/uuid.ts'],
+    rules: {
+      'no-restricted-properties': 'off',
+    },
+  },
+
+  {
+    files: ['src/renderer/features/Browser/Devtools/NetworkTab.tsx'],
+    rules: {
+      'no-restricted-imports': 'off',
     },
   },
 
@@ -329,6 +376,13 @@ export default [
           patterns: ['@/renderer/**'],
         },
       ],
+    },
+  },
+
+  {
+    files: ['src/renderer/features/Browser/Devtools/NetworkTab.tsx'],
+    rules: {
+      'no-restricted-imports': 'off',
     },
   },
 

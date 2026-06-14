@@ -1,70 +1,67 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 
 type Props = {
-  src: string
-  alt: string
-  onClose: () => void
-}
+  src: string;
+  alt: string;
+  onClose: () => void;
+};
 
 export function ImageLightbox({ src, alt, onClose }: Props) {
-  const [scale, setScale] = useState(1)
-  const [translate, setTranslate] = useState({ x: 0, y: 0 })
-  const dragging = useRef(false)
-  const lastPos = useRef({ x: 0, y: 0 })
+  const [scale, setScale] = useState(1);
+  const [translate, setTranslate] = useState({ x: 0, y: 0 });
+  const dragging = useRef(false);
+  const lastPos = useRef({ x: 0, y: 0 });
 
   const resetView = useCallback(() => {
-    setScale(1)
-    setTranslate({ x: 0, y: 0 })
-  }, [])
+    setScale(1);
+    setTranslate({ x: 0, y: 0 });
+  }, []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-onClose()
-}
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
 
   const onWheel = useCallback((e: React.WheelEvent) => {
-    e.stopPropagation()
-    setScale((s) => Math.min(Math.max(0.25, s - e.deltaY * 0.001), 5))
-  }, [])
+    e.stopPropagation();
+    setScale((s) => Math.min(Math.max(0.25, s - e.deltaY * 0.001), 5));
+  }, []);
 
-  const onPointerDown = useCallback((e: React.PointerEvent) => {
-    if (scale <= 1) {
-return
-}
-    dragging.current = true
-    lastPos.current = { x: e.clientX, y: e.clientY }
-    ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
-  }, [scale])
+  const onPointerDown = useCallback(
+    (e: React.PointerEvent) => {
+      if (scale <= 1) {
+        return;
+      }
+      dragging.current = true;
+      lastPos.current = { x: e.clientX, y: e.clientY };
+      (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    },
+    [scale]
+  );
 
   const onPointerMove = useCallback((e: React.PointerEvent) => {
     if (!dragging.current) {
-return
-}
-    const dx = e.clientX - lastPos.current.x
-    const dy = e.clientY - lastPos.current.y
-    lastPos.current = { x: e.clientX, y: e.clientY }
-    setTranslate((t) => ({ x: t.x + dx, y: t.y + dy }))
-  }, [])
+      return;
+    }
+    const dx = e.clientX - lastPos.current.x;
+    const dy = e.clientY - lastPos.current.y;
+    lastPos.current = { x: e.clientX, y: e.clientY };
+    setTranslate((t) => ({ x: t.x + dx, y: t.y + dy }));
+  }, []);
 
   const onPointerUp = useCallback(() => {
-    dragging.current = false
-  }, [])
+    dragging.current = false;
+  }, []);
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-background/90"
-      onClick={onClose}
-    >
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/90" onClick={onClose}>
       {/* Controls */}
-      <div
-        className="absolute top-4 right-4 z-10 flex gap-2"
-        onClick={(e) => e.stopPropagation()}
-      >
+      <div className="absolute top-4 right-4 z-10 flex gap-2" onClick={(e) => e.stopPropagation()}>
         <button
           className="w-8 h-8 rounded bg-muted/70 hover:bg-muted text-foreground text-sm"
           onClick={() => setScale((s) => Math.min(s + 0.5, 5))}
@@ -79,10 +76,7 @@ return
         >
           −
         </button>
-        <button
-          className="h-8 px-2 rounded bg-muted/70 hover:bg-muted text-foreground text-xs"
-          onClick={resetView}
-        >
+        <button className="h-8 px-2 rounded bg-muted/70 hover:bg-muted text-foreground text-xs" onClick={resetView}>
           Reset
         </button>
         <button
@@ -105,10 +99,10 @@ return
         }}
         draggable={false}
         onClick={(e) => {
-          e.stopPropagation()
+          e.stopPropagation();
           if (scale <= 1) {
-setScale(2)
-}
+            setScale(2);
+          }
         }}
         onWheel={onWheel}
         onPointerDown={onPointerDown}
@@ -116,5 +110,5 @@ setScale(2)
         onPointerUp={onPointerUp}
       />
     </div>
-  )
+  );
 }

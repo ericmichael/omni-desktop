@@ -84,9 +84,7 @@ function parseGitRepoUrl(url) {
   const sshShort = /^git@([^:]+):(.+?)(?:\.git)?\/?$/.exec(trimmed);
   if (sshShort) return { host: sshShort[1], repo: sshShort[2] };
 
-  const protocol = /^(?:[a-z][a-z0-9+\-.]*:\/\/)([^@/]+@)?([^/]+)\/(.+?)(?:\.git)?\/?$/i.exec(
-    trimmed,
-  );
+  const protocol = /^(?:[a-z][a-z0-9+\-.]*:\/\/)([^@/]+@)?([^/]+)\/(.+?)(?:\.git)?\/?$/i.exec(trimmed);
   if (protocol) return { host: protocol[2], repo: protocol[3] };
 
   return null;
@@ -247,7 +245,7 @@ function main() {
       writeFileSync(
         filePath,
         `# Project: ${project.label} (${project.id})\n# Audit-generated from projects.db; do not edit.\n${yaml}`,
-        'utf-8',
+        'utf-8'
       );
       written++;
     } catch (err) {

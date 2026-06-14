@@ -11,9 +11,9 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
+import type { ProjectRow } from '../types.js';
 import { createPgPool, type Pool, runPgMigrations } from './connection.js';
 import { PgProjectsRepo } from './pg-repo.js';
-import type { ProjectRow } from '../types.js';
 
 const URL = process.env['OMNI_TEST_DATABASE_URL'];
 
@@ -51,7 +51,9 @@ describe.skipIf(!URL)('PgProjectsRepo (live Postgres)', () => {
   });
 
   beforeEach(async () => {
-    await pool.query('TRUNCATE projects, pipeline_columns, milestones, tickets, ticket_comments, pages, inbox_items, tasks CASCADE');
+    await pool.query(
+      'TRUNCATE projects, pipeline_columns, milestones, tickets, ticket_comments, pages, inbox_items, tasks CASCADE'
+    );
   });
 
   it('reads back what it writes (tenant-scoped)', async () => {
@@ -97,13 +99,33 @@ describe.skipIf(!URL)('PgProjectsRepo (live Postgres)', () => {
     await repoA.syncColumnsForProject('pd', [{ logicalId: 'backlog', label: 'Backlog' }]);
     const columnId = (await repoA.listColumns('pd'))[0]!.id;
     await repoA.upsertTicket({
-      id: 't1', project_id: 'pd', milestone_id: null, column_id: columnId,
-      title: 'First', description: '', priority: 'medium', branch: null,
-      blocked_by: '[]', resolution: null, resolved_at: null,
-      archived_at: null, column_changed_at: null, use_worktree: 0, worktree_path: null,
-      worktree_name: null, supervisor_session_id: null, phase: null, phase_changed_at: null,
-      supervisor_task_id: null, token_usage: null, runs: '[]', pr_review: null,
-      pr_merged_at: null, assignee: null, created_at: '2026-01-01 00:00:00.000', updated_at: '2026-01-01 00:00:00.000',
+      id: 't1',
+      project_id: 'pd',
+      milestone_id: null,
+      column_id: columnId,
+      title: 'First',
+      description: '',
+      priority: 'medium',
+      branch: null,
+      blocked_by: '[]',
+      resolution: null,
+      resolved_at: null,
+      archived_at: null,
+      column_changed_at: null,
+      use_worktree: 0,
+      worktree_path: null,
+      worktree_name: null,
+      supervisor_session_id: null,
+      phase: null,
+      phase_changed_at: null,
+      supervisor_task_id: null,
+      token_usage: null,
+      runs: '[]',
+      pr_review: null,
+      pr_merged_at: null,
+      assignee: null,
+      created_at: '2026-01-01 00:00:00.000',
+      updated_at: '2026-01-01 00:00:00.000',
     });
     await repoA.replaceCommentsForTicket('t1', [
       { id: 'c1', ticket_id: 't1', author: 'agent', content: 'hi', created_at: '2026-01-01 00:00:01.000' },

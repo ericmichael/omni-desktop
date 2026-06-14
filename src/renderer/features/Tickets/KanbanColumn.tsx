@@ -1,5 +1,5 @@
 import { useDroppable } from '@dnd-kit/core';
-import { makeStyles, mergeClasses, shorthands,tokens } from '@fluentui/react-components';
+import { makeStyles, mergeClasses, shorthands, tokens } from '@fluentui/react-components';
 import { Add16Regular } from '@fluentui/react-icons';
 import { memo, useCallback, useMemo } from 'react';
 
@@ -127,10 +127,7 @@ export const KanbanColumn = memo(({ column, tickets, onNewTicket }: KanbanColumn
             </span>
           )}
         </div>
-        <span
-          className={styles.countBadge}
-          style={{ color: colors.badgeColor, backgroundColor: colors.badgeBg }}
-        >
+        <span className={styles.countBadge} style={{ color: colors.badgeColor, backgroundColor: colors.badgeBg }}>
           {tickets.length}
         </span>
       </div>

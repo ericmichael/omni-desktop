@@ -2,13 +2,7 @@ import { computed } from 'nanostores';
 
 import { emitter } from '@/renderer/services/ipc';
 import { persistedStoreApi } from '@/renderer/services/store';
-import type {
-  InboxItem,
-  InboxItemId,
-  MilestoneId,
-  ProjectId,
-  Ticket,
-} from '@/shared/types';
+import type { InboxItem, InboxItemId, MilestoneId, ProjectId, Ticket } from '@/shared/types';
 
 /**
  * Inbox state. Derived directly from `persistedStoreApi.$atom` so it stays
@@ -20,8 +14,8 @@ import type {
 export const $inboxItems = computed(persistedStoreApi.$atom, (store) => {
   const out: Record<InboxItemId, InboxItem> = {};
   for (const item of store.inboxItems ?? []) {
-out[item.id] = item;
-}
+    out[item.id] = item;
+  }
   return out;
 });
 
@@ -36,9 +30,7 @@ export const $laterInbox = computed($inboxItems, (items) =>
 );
 
 /** Promoted tombstones — what this item became. */
-export const $promotedInbox = computed($inboxItems, (items) =>
-  Object.values(items).filter((i) => !!i.promotedTo)
-);
+export const $promotedInbox = computed($inboxItems, (items) => Object.values(items).filter((i) => !!i.promotedTo));
 
 /** Count for the sidebar badge. Only counts actionable items. */
 export const $activeInboxCount = computed($activeInbox, (items) => items.length);
@@ -72,8 +64,7 @@ export const inboxApi = {
     opts: { projectId: ProjectId; milestoneId?: MilestoneId; columnId?: string }
   ): Promise<Ticket> => emitter.invoke('inbox:promote-to-ticket', id, opts),
 
-  promoteToProject: (id: InboxItemId, opts: { label: string }) =>
-    emitter.invoke('inbox:promote-to-project', id, opts),
+  promoteToProject: (id: InboxItemId, opts: { label: string }) => emitter.invoke('inbox:promote-to-project', id, opts),
 
   sweep: (): Promise<number> => emitter.invoke('inbox:sweep'),
 

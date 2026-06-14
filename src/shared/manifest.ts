@@ -74,9 +74,7 @@ export const FileMode = {
  * calling into the launcher's credential service. Matches the
  * `OmniKeychainEnvValue` subclass on that side.
  */
-export type EnvValueRef =
-  | { type: 'literal'; value: string }
-  | { type: 'omni_keychain'; key: string };
+export type EnvValueRef = { type: 'literal'; value: string } | { type: 'omni_keychain'; key: string };
 
 export type EnvEntry = {
   description?: string;
@@ -159,24 +157,12 @@ export type GitRepoEntry = BaseEntry & {
  *  "box_mount" | "s3_files_mount"`.
  */
 export type MountEntry = BaseEntry & {
-  type:
-    | 's3_mount'
-    | 'gcs_mount'
-    | 'azure_blob_mount'
-    | 'r2_mount'
-    | 'box_mount'
-    | 's3_files_mount';
+  type: 's3_mount' | 'gcs_mount' | 'azure_blob_mount' | 'r2_mount' | 'box_mount' | 's3_files_mount';
   /** Remaining fields are provider-specific; round-trip as-is. */
   [key: string]: unknown;
 };
 
-export type ManifestEntry =
-  | FileEntry
-  | DirEntry
-  | LocalFileEntry
-  | LocalDirEntry
-  | GitRepoEntry
-  | MountEntry;
+export type ManifestEntry = FileEntry | DirEntry | LocalFileEntry | LocalDirEntry | GitRepoEntry | MountEntry;
 
 // ----------------------------------------------------------------------------
 // Manifest — agents/sandbox/manifest.py:Manifest

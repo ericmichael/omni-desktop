@@ -16,7 +16,9 @@ export function getOmniConfigDir(): string {
     return join(appData, 'OmniCode');
   }
   const xdgConfig = process.env['XDG_CONFIG_HOME'];
-  if (xdgConfig) return join(xdgConfig, 'omni_code');
+  if (xdgConfig) {
+    return join(xdgConfig, 'omni_code');
+  }
   return join(homedir(), '.config', 'omni_code');
 }
 

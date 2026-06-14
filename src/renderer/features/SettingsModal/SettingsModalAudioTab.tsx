@@ -174,9 +174,7 @@ export const SettingsModalAudioTab = memo(() => {
       <Card>
         {needsPermission && (
           <div className={styles.permissionRow}>
-            <span className={styles.description}>
-              Grant microphone access once to show device names.
-            </span>
+            <span className={styles.description}>Grant microphone access once to show device names.</span>
             <Button size="sm" variant="ghost" onClick={grantPermission}>
               Allow
             </Button>
@@ -216,7 +214,13 @@ export const SettingsModalAudioTab = memo(() => {
                   ))}
                 </Select>
               </div>
-              <Button size="sm" variant="ghost" onClick={outputTest.play} isDisabled={outputTest.playing} className={styles.testBtn}>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={outputTest.play}
+                isDisabled={outputTest.playing}
+                className={styles.testBtn}
+              >
                 {outputTest.playing ? 'Playing…' : 'Test'}
               </Button>
             </div>
@@ -238,8 +242,8 @@ export const SettingsModalAudioTab = memo(() => {
           <Switch checked={settings.autoGainControl} onCheckedChange={onChangeGain} />
         </FormField>
         <p className={styles.description}>
-          Applies the next time Voice mode is opened. Disable processing if you use external
-          DSP (e.g. a hardware mixer or system-level noise suppression).
+          Applies the next time Voice mode is opened. Disable processing if you use external DSP (e.g. a hardware mixer
+          or system-level noise suppression).
         </p>
       </Card>
 
@@ -303,7 +307,8 @@ function useInputLevelMeter(deviceId: string | null) {
         } as MediaTrackConstraints,
       });
       streamRef.current = stream;
-      const Ctx = window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const Ctx =
+        window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       const ctx = new Ctx();
       ctxRef.current = ctx;
       const source = ctx.createMediaStreamSource(stream);
@@ -380,10 +385,7 @@ const InputLevelBar = memo(({ level, styles }: InputLevelBarProps) => {
   return (
     <div className={styles.meter}>
       <div className={styles.meterTrack}>
-        <div
-          className={`${styles.meterFill} ${clipping ? styles.meterFillClip : ''}`}
-          style={{ width: `${pct}%` }}
-        />
+        <div className={`${styles.meterFill} ${clipping ? styles.meterFillClip : ''}`} style={{ width: `${pct}%` }} />
       </div>
       <span className={styles.meterValue}>{pct}%</span>
     </div>
@@ -402,7 +404,8 @@ function useOutputTestTone(deviceId: string | null, audioElRef: React.RefObject<
   const play = useCallback(async () => {
     setError(null);
     try {
-      const Ctx = window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const Ctx =
+        window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       const ctx = new Ctx();
       const dest = ctx.createMediaStreamDestination();
 

@@ -1,11 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createActor, getNextSnapshot } from 'xstate';
 
-import {
-  getTerminalConnectionStatus,
-  type TerminalTabEvent,
-  terminalTabMachine,
-} from './terminal-tab.machine';
+import { getTerminalConnectionStatus, type TerminalTabEvent, terminalTabMachine } from './terminal-tab.machine';
 
 const input = { tabId: 'tab-1' };
 

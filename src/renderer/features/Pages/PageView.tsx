@@ -409,7 +409,11 @@ const DocPageView = memo(({ pageId, projectId }: PageViewProps) => {
 
       {/* External-change banner */}
       {showConflict && (
-        <div className={mergeClasses(styles.banner, isGlass && styles.bannerGlass)} role="status" data-slot="page-conflict-banner">
+        <div
+          className={mergeClasses(styles.banner, isGlass && styles.bannerGlass)}
+          role="status"
+          data-slot="page-conflict-banner"
+        >
           <span className={styles.bannerText}>
             This page was updated somewhere else. Your changes haven’t been saved over it yet.
           </span>

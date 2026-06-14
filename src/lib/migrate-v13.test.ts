@@ -1,20 +1,11 @@
-import { mkdir,mkdtemp, readFile, rm, writeFile } from 'fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { migrateStoreV13, type MigrationInput } from '@/lib/migrate-v13';
 import { ProjectFileStore, type ProjectFileStoreEvents } from '@/lib/project-file-store';
-import type {
-  Milestone,
-  MilestoneId,
-  Page,
-  PageId,
-  Project,
-  ProjectId,
-  Ticket,
-  TicketId,
-} from '@/shared/types';
+import type { Milestone, MilestoneId, Page, PageId, Project, ProjectId, Ticket, TicketId } from '@/shared/types';
 
 const T1 = Date.UTC(2026, 3, 10, 9, 0, 0);
 const T2 = Date.UTC(2026, 3, 11, 10, 0, 0);
@@ -47,6 +38,7 @@ function fixture(): MigrationInput {
     label: 'Launcher',
     slug: 'launcher',
     createdAt: T1,
+    sources: [],
     pipeline: {
       columns: [
         { id: 'backlog', label: 'Backlog' },
@@ -60,6 +52,7 @@ function fixture(): MigrationInput {
     slug: 'personal',
     isPersonal: true,
     createdAt: T1,
+    sources: [],
   };
   const tickets: Ticket[] = [
     {

@@ -54,9 +54,7 @@ export class SupervisorState {
       return;
     }
     if (!isValidTransition(this.phase, to)) {
-      console.warn(
-        `[SupervisorState] Invalid transition for ${this.ticketId}: ${this.phase} → ${to}. Ignoring.`
-      );
+      console.warn(`[SupervisorState] Invalid transition for ${this.ticketId}: ${this.phase} → ${to}. Ignoring.`);
       return;
     }
     const from = this.phase;

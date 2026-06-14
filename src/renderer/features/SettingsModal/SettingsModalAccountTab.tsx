@@ -1,7 +1,16 @@
-import { makeStyles, shorthands,tokens } from '@fluentui/react-components';
+import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
 import { memo, useCallback, useEffect, useState } from 'react';
 
-import { Button, Card, FormField, FormSkeleton, MessageBar, MessageBarBody, SectionLabel, Spinner } from '@/renderer/ds';
+import {
+  Button,
+  Card,
+  FormField,
+  FormSkeleton,
+  MessageBar,
+  MessageBarBody,
+  SectionLabel,
+  Spinner,
+} from '@/renderer/ds';
 import { ConnectCloudCard } from '@/renderer/features/SettingsModal/ConnectCloudCard';
 import { MachinesCard } from '@/renderer/features/SettingsModal/MachinesCard';
 import { emitter, ipc, isCloudLinked, isElectron } from '@/renderer/services/ipc';
@@ -106,8 +115,8 @@ export const SettingsModalAccountTab = memo(() => {
   const [copied, setCopied] = useState(false);
   const handleCopyCode = useCallback(() => {
     if (flow.step !== 'pending') {
-return;
-}
+      return;
+    }
     try {
       navigator.clipboard.writeText(flow.userCode);
     } catch {
@@ -191,7 +200,9 @@ return;
       <Card>
         {flow.step === 'idle' && (
           <>
-            <p className={styles.text}>Sign in with your institutional account to access managed sandboxes and enterprise features.</p>
+            <p className={styles.text}>
+              Sign in with your institutional account to access managed sandboxes and enterprise features.
+            </p>
             <div className={styles.flexEnd}>
               <Button size="sm" variant="primary" onClick={handleSignIn}>
                 Sign in
@@ -202,21 +213,16 @@ return;
 
         {flow.step === 'pending' && (
           <>
-            <p className={styles.text}>{flow.message || 'Enter the code below at the verification URL to complete sign-in.'}</p>
+            <p className={styles.text}>
+              {flow.message || 'Enter the code below at the verification URL to complete sign-in.'}
+            </p>
             <div className={styles.codeBox}>
-              <code className={styles.codeText}>
-                {flow.userCode}
-              </code>
+              <code className={styles.codeText}>{flow.userCode}</code>
               <Button size="sm" variant="ghost" onClick={handleCopyCode}>
                 {copied ? 'Copied' : 'Copy'}
               </Button>
             </div>
-            <a
-              href={flow.verificationUri}
-              target="_blank"
-              rel="noopener noreferrer"
-              className={styles.link}
-            >
+            <a href={flow.verificationUri} target="_blank" rel="noopener noreferrer" className={styles.link}>
               {flow.verificationUri}
             </a>
             <div className={styles.waitingRow}>
@@ -228,7 +234,9 @@ return;
 
         {flow.step === 'error' && (
           <>
-            <MessageBar intent="error"><MessageBarBody>{flow.error}</MessageBarBody></MessageBar>
+            <MessageBar intent="error">
+              <MessageBarBody>{flow.error}</MessageBarBody>
+            </MessageBar>
             <div className={styles.flexEnd}>
               <Button size="sm" variant="primary" onClick={handleSignIn}>
                 Try again

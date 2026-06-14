@@ -25,14 +25,13 @@ export const AssigneePicker = memo(function AssigneePicker({
 
   useEffect(() => {
     // Refresh the roster when the picker mounts (cheap; no-op without teams).
-    if (members.length === 0) void loadMembers();
+    if (members.length === 0) {
+      void loadMembers();
+    }
   }, [members.length]);
 
   const handleUnassign = useCallback(() => void ticketApi.assignTicket(ticketId, null), [ticketId]);
-  const handleAssign = useCallback(
-    (userId: string) => () => void ticketApi.assignTicket(ticketId, userId),
-    [ticketId]
-  );
+  const handleAssign = useCallback((userId: string) => () => void ticketApi.assignTicket(ticketId, userId), [ticketId]);
 
   const current = members.find((m) => m.userId === assignee);
   const label = current ? memberLabel(current) : assignee ? assignee : 'Unassigned';

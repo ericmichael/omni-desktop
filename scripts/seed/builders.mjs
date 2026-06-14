@@ -56,13 +56,7 @@ export async function copyTree(src, dst, skip = new Set()) {
  *
  * Returns the absolute path of the project directory (same as input).
  */
-export async function setupProjectRepo({
-  projectDir,
-  contentDir,
-  commitMessages = [],
-  branches = [],
-  manifest,
-}) {
+export async function setupProjectRepo({ projectDir, contentDir, commitMessages = [], branches = [], manifest }) {
   await fs.rm(projectDir, { recursive: true, force: true });
   await fs.mkdir(projectDir, { recursive: true });
 

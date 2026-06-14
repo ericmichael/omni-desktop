@@ -246,9 +246,10 @@ export class OmniInstallManager {
     const RM_BACKOFF_MS = [0, 500, 1500];
 
     for (let attempt = 0; attempt < RM_ATTEMPTS; attempt++) {
-      if (RM_BACKOFF_MS[attempt] > 0) {
+      const backoffMs = RM_BACKOFF_MS[attempt] ?? 0;
+      if (backoffMs > 0) {
         await new Promise<void>((resolve) => {
-          setTimeout(resolve, RM_BACKOFF_MS[attempt]);
+          setTimeout(resolve, backoffMs);
         });
       }
       try {
@@ -300,12 +301,16 @@ export class OmniInstallManager {
     const legacyDir = path.join(app.getPath('userData'), 'omni');
 
     // Same path (e.g. dev override) — nothing to do.
-    if (path.resolve(newDir) === path.resolve(legacyDir)) return;
+    if (path.resolve(newDir) === path.resolve(legacyDir)) {
+      return;
+    }
 
     const legacyVenv = path.join(legacyDir, '.venv');
     const newVenv = path.join(newDir, '.venv');
 
-    if (!(await pathExists(legacyVenv))) return;
+    if (!(await pathExists(legacyVenv))) {
+      return;
+    }
     if (await pathExists(newVenv)) {
       this.log.info(c.gray('Legacy venv found but new location already populated — skipping migration\r\n'));
       return;
@@ -345,7 +350,7 @@ export class OmniInstallManager {
       if (!match) {
         return null;
       }
-      return parseInt(match[1], 16) === 1;
+      return parseInt(match[1]!, 16) === 1;
     } catch {
       return null;
     }
@@ -507,9 +512,7 @@ export class OmniInstallManager {
     // to the repo root in .env. Transitive deps (omniagents, etc.) still come
     // from the index.
     const editablePath = options.env.OMNI_CODE_EDITABLE_PATH || process.env.OMNI_CODE_EDITABLE_PATH;
-    const target: string[] = editablePath
-      ? ['--editable', editablePath]
-      : [`omni-code==${OMNI_CODE_VERSION}`];
+    const target: string[] = editablePath ? ['--editable', editablePath] : [`omni-code==${OMNI_CODE_VERSION}`];
 
     if (editablePath) {
       this.log.info(c.yellow(`Dev mode: installing omni-code editable from ${editablePath}\r\n`));
@@ -559,8 +562,7 @@ export class OmniInstallManager {
     uvPath: string,
     options: { cwd: string; env: Record<string, string> }
   ): Promise<'success' | 'canceled' | 'error' | 'skipped'> => {
-    const editablePath =
-      options.env.OMNIAGENTS_EDITABLE_PATH || process.env.OMNIAGENTS_EDITABLE_PATH;
+    const editablePath = options.env.OMNIAGENTS_EDITABLE_PATH || process.env.OMNIAGENTS_EDITABLE_PATH;
     if (!editablePath) {
       return 'skipped';
     }

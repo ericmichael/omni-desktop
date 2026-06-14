@@ -14,6 +14,7 @@ layer. This plan makes the Chat tab render a reserved, pinned member of `codeTab
 full per-column mini-OS (dock with Code / Desktop / Browser / Terminal).
 
 **Locked decisions (Eric, 2026-06-11):**
+
 1. Chat gains the dock (full mini-OS). The floating "Omni's PC" VNC widget is deleted;
    the Desktop dock app replaces it.
 2. The chat column does NOT appear in the Spaces deck for now — Chat-tab only. The deck
@@ -22,18 +23,19 @@ full per-column mini-OS (dock with Code / Desktop / Browser / Terminal).
 
 ## Current State (what is duplicated)
 
-| Concern | Chat implementation | Column implementation |
-|---|---|---|
-| Launch lifecycle | `use-chat-auto-launch.ts` | `use-code-auto-launch.ts` (both wrap shared `useAutoLaunch`) |
-| Identity/persistence | store keys `chatSessionId`, `chatProfileName`, `chatContainerId` | `CodeTab` fields `sessionId`, `profileName`, `containerId` |
-| Status | `$chatProcessStatus` (computed view) | `$codeTabStatuses[tabId]` (same source map) |
-| Status polling | `agent-process.ts` polls `'chat'` on an interval | `Code/state.ts` polls each tab |
-| Running view | `SandboxRunningView` (direct `OmniAgentsApp`) | `CodeRunningView` → `CodeWorkspaceLayout` |
-| VNC | `FloatingWidget` overlay ("Omni's PC") | Desktop dock app |
-| Switch scrim, sandbox labels/options, profile-change semantics, session-change semantics, containerId capture | duplicated verbatim in `Chat.tsx` | `CodeTabContent.tsx` |
-| Snapshot GC protection | special case in `main/index.ts` (`chatSessionId`) | `codeTabs` loop in the same block |
+| Concern                                                                                                       | Chat implementation                                              | Column implementation                                        |
+| ------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------ |
+| Launch lifecycle                                                                                              | `use-chat-auto-launch.ts`                                        | `use-code-auto-launch.ts` (both wrap shared `useAutoLaunch`) |
+| Identity/persistence                                                                                          | store keys `chatSessionId`, `chatProfileName`, `chatContainerId` | `CodeTab` fields `sessionId`, `profileName`, `containerId`   |
+| Status                                                                                                        | `$chatProcessStatus` (computed view)                             | `$codeTabStatuses[tabId]` (same source map)                  |
+| Status polling                                                                                                | `agent-process.ts` polls `'chat'` on an interval                 | `Code/state.ts` polls each tab                               |
+| Running view                                                                                                  | `SandboxRunningView` (direct `OmniAgentsApp`)                    | `CodeRunningView` → `CodeWorkspaceLayout`                    |
+| VNC                                                                                                           | `FloatingWidget` overlay ("Omni's PC")                           | Desktop dock app                                             |
+| Switch scrim, sandbox labels/options, profile-change semantics, session-change semantics, containerId capture | duplicated verbatim in `Chat.tsx`                                | `CodeTabContent.tsx`                                         |
+| Snapshot GC protection                                                                                        | special case in `main/index.ts` (`chatSessionId`)                | `codeTabs` loop in the same block                            |
 
 Chat-specific behavior that must survive:
+
 - **Per-conversation scratch workspace**: `useSessionWorkspaceDir(store.workspaceDir, sessionId)`
   gives each conversation an isolated `<workspaceDir>/Sessions/<sessionId>` dir; switching
   conversations changes the workspace, which `useAutoLaunch`'s reset effect already turns into
@@ -58,10 +60,11 @@ Chat-specific behavior that must survive:
 ### 2. Store migration (v25 → v26, `project-migrations.ts`)
 
 In the v26 step:
+
 - If `codeTabs` lacks an entry with id `CHAT_TAB_ID`, prepend
   `{ id: CHAT_TAB_ID, projectId: null, sessionId: chatSessionId ?? uuidv4(), profileName:
-  chatProfileName ?? defaultProfileName ?? 'host', profileNameExplicit: false,
-  ...(chatContainerId ? { containerId: chatContainerId } : {}), createdAt: now }`.
+chatProfileName ?? defaultProfileName ?? 'host', profileNameExplicit: false,
+...(chatContainerId ? { containerId: chatContainerId } : {}), createdAt: now }`.
 - Delete store keys `chatSessionId`, `chatProfileName`, `chatContainerId`.
 - Remove the three keys from `StoreData` and from the electron-store JSON schema in
   `shared/types.ts`. (Schema validation runs at store construction, before migration: the root
@@ -142,7 +145,7 @@ no other consumers, delete the component too).
 ### 7. Voice and activity
 
 - `CHAT_VOICE_SCOPE` (`'chat'`) stays; `CodeTabContent`'s `VoiceScopeContext.Provider
-  value={tab.id}` now supplies the identical scope string for the chat tab, so `VoiceHotkeys`,
+value={tab.id}` now supplies the identical scope string for the chat tab, so `VoiceHotkeys`,
   the local-voice glow, and `column-activity` publishing need no changes. Remove the now-dead
   `VoiceScopeContext.Provider` in `Chat.tsx`.
 
@@ -165,6 +168,7 @@ No IPC contract changes. No main-process API changes. Store schema: three keys r
 ## Test Plan
 
 Unit (vitest):
+
 - `project-migrations.test.ts` v26: synthesizes the chat record from the three legacy keys
   (and mints a sessionId when `chatSessionId` was null); deletes the keys; idempotent when the
   record already exists; bumps `schemaVersion` to 26; ladder/idempotency assertions move to 26.
@@ -173,6 +177,7 @@ Unit (vitest):
   `removeTab(CHAT_TAB_ID)` is a no-op.
 
 Live smoke (browser/server mode, desktop + 390px):
+
 - Existing conversation survives the migration (same session id, transcript loads, container
   reattaches or falls back cleanly).
 - Chat tab: conversation renders, Conversations drawer opens/searches/switches (switch →
@@ -206,7 +211,7 @@ Live smoke (browser/server mode, desktop + 390px):
 1. `CHAT_TAB_ID`/`isChatTab` + migration v26 + store schema/type removal + migration tests.
 2. `CodeTabContent` chat-mode branches + `CodeWorkspaceLayout` greeting/inline-dock plumbing.
 3. `codeApi` guards (`addTab`, `removeTab`, `reorderTabs`) + deck filter + polling consolidation
-   + snapshot-GC simplification + state tests.
+   - snapshot-GC simplification + state tests.
 4. `Chat.tsx` rewrite to the thin wrapper; delete `use-chat-auto-launch.ts`, `Chat/state.ts`,
    `SandboxRunningView`, dead styles, (maybe) `FloatingWidget`.
 5. Live smoke per test plan; commit.

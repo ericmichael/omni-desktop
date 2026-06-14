@@ -2,7 +2,7 @@
 
 ## The principle
 
-In the cloud deployment (Path B — the launcher *server* running as a Web App for
+In the cloud deployment (Path B — the launcher _server_ running as a Web App for
 Containers; see `infra/main.bicep` and the root `Dockerfile`), the "host
 filesystem" is the App Service container's local disk. That disk is:
 
@@ -21,22 +21,22 @@ So the invariant we design against is:
 > Azure Files (workspaces) — never the container disk. The container disk holds
 > only artifacts that are regenerated at boot from those durable inputs.**
 
-By this definition, depending on the host filesystem is acceptable *only* for
+By this definition, depending on the host filesystem is acceptable _only_ for
 derived scratch that is rebuilt deterministically on startup. It is **not**
 acceptable for anything a user edits and expects to persist, or anything that
 must differ per tenant.
 
 ## What already honors the invariant
 
-| Concern | Durable home in cloud | Code |
-|---|---|---|
-| Settings (per-tenant) | Postgres `user_settings` JSONB row (RLS-isolated) | `PgSettingsStore` (`src/server/managers.ts:217`) |
-| Project data (projects/tickets/milestones/pages/inbox/tasks) | Postgres | `PgProjectsRepo` (`src/server/managers.ts:81`) |
-| Project workspaces | Azure Files share, mounted at `/workspace` | `aci-profile.ts` `file_share` block; `infra/main.bicep` storage + share |
-| Agent runtime (omni CLI) | Baked into the image; no runtime install | `OMNI_CLI_PATH` (`Dockerfile`; `src/main/omni-install-manager.ts:631`) |
-| `aci.yml` / `aci-desktop.yml` sandbox profile | Written to the container disk, **but fully regenerated from env vars on every boot** | `writeAciProfile` ← `buildAciProfile` (`src/main/aci-profile.ts:111`), called in `src/server/managers.ts:167` |
+| Concern                                                      | Durable home in cloud                                                                | Code                                                                                                          |
+| ------------------------------------------------------------ | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
+| Settings (per-tenant)                                        | Postgres `user_settings` JSONB row (RLS-isolated)                                    | `PgSettingsStore` (`src/server/managers.ts:217`)                                                              |
+| Project data (projects/tickets/milestones/pages/inbox/tasks) | Postgres                                                                             | `PgProjectsRepo` (`src/server/managers.ts:81`)                                                                |
+| Project workspaces                                           | Azure Files share, mounted at `/workspace`                                           | `aci-profile.ts` `file_share` block; `infra/main.bicep` storage + share                                       |
+| Agent runtime (omni CLI)                                     | Baked into the image; no runtime install                                             | `OMNI_CLI_PATH` (`Dockerfile`; `src/main/omni-install-manager.ts:631`)                                        |
+| `aci.yml` / `aci-desktop.yml` sandbox profile                | Written to the container disk, **but fully regenerated from env vars on every boot** | `writeAciProfile` ← `buildAciProfile` (`src/main/aci-profile.ts:111`), called in `src/server/managers.ts:167` |
 
-The `aci.yml` write is the canonical example of an *acceptable* host-fs
+The `aci.yml` write is the canonical example of an _acceptable_ host-fs
 dependency: it is a pure function of the `OMNI_AZURE_*` / `AZURE_STORAGE_*`
 environment variables (which come from the Bicep outputs), so losing it on
 restart costs nothing — it is rewritten before the first request.
@@ -47,12 +47,12 @@ The four Settings configs that used to be written straight to the **shared,
 ephemeral** container config dir (`models.json` / `mcp.json` / `network.json` /
 `.env`) are now store-backed and honor the invariant:
 
-| Setting (Settings tab) | Store key | How secrets stay off disk |
-|---|---|---|
-| Models | `modelsConfig` | per-tenant `user_settings` (Postgres); `api_key` rewritten to `${OMNI_SECRET_*}` refs on disk |
-| MCP Servers | `mcpConfig` | per-tenant `user_settings`; `env`/`headers` values rewritten to refs |
-| Network | `networkConfig` | per-tenant `user_settings`; non-secret, materialized verbatim |
-| Environment | `envVars` | per-tenant `user_settings`; injected straight into the agent env — **no `.env` file written in cloud** |
+| Setting (Settings tab) | Store key       | How secrets stay off disk                                                                              |
+| ---------------------- | --------------- | ------------------------------------------------------------------------------------------------------ |
+| Models                 | `modelsConfig`  | per-tenant `user_settings` (Postgres); `api_key` rewritten to `${OMNI_SECRET_*}` refs on disk          |
+| MCP Servers            | `mcpConfig`     | per-tenant `user_settings`; `env`/`headers` values rewritten to refs                                   |
+| Network                | `networkConfig` | per-tenant `user_settings`; non-secret, materialized verbatim                                          |
+| Environment            | `envVars`       | per-tenant `user_settings`; injected straight into the agent env — **no `.env` file written in cloud** |
 
 How it works (see `src/main/config-materializer.ts` and `src/server/managers.ts`):
 

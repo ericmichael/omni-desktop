@@ -1,14 +1,14 @@
-import React from 'react'
+import React from 'react';
 
 export type RecapInfo = {
-  text: string
-  timestamp: number
-}
+  text: string;
+  timestamp: number;
+};
 
 type Props = {
-  recap: RecapInfo | null
-  onDismiss: () => void
-}
+  recap: RecapInfo | null;
+  onDismiss: () => void;
+};
 
 // Docked session-recap panel. Shows the most recent /recap output (or a
 // programmatically-triggered recap) until dismissed. Styled like the
@@ -16,7 +16,7 @@ type Props = {
 // a ~400-word block: scrollable, whitespace-preserving prose.
 export function RecapPanel({ recap, onDismiss }: Props) {
   if (!recap) {
-    return null
+    return null;
   }
 
   return (
@@ -38,5 +38,5 @@ export function RecapPanel({ recap, onDismiss }: Props) {
         </div>
       </div>
     </div>
-  )
+  );
 }

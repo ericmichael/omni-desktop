@@ -19,10 +19,7 @@ import type {
  * Omni-native location; `.claude-plugin/` is supported so existing Claude
  * Code plugin marketplaces (e.g. `anthropics/skills`) keep working.
  */
-const MARKETPLACE_PATHS = [
-  '.omni-plugin/marketplace.json',
-  '.claude-plugin/marketplace.json',
-];
+const MARKETPLACE_PATHS = ['.omni-plugin/marketplace.json', '.claude-plugin/marketplace.json'];
 const SKILL_FILENAME = 'SKILL.md';
 
 type RepoSpec = { owner: string; repo: string; ref: string };
@@ -34,15 +31,18 @@ export function bundleKey(repo: string, plugin: string): string {
 
 /** Normalize "anthropics/skills" or a github URL into { owner, repo, ref }. */
 export function parseRepoSpec(spec: string): RepoSpec {
-  const trimmed = spec.trim().replace(/\.git$/, '').replace(/\/+$/, '');
+  const trimmed = spec
+    .trim()
+    .replace(/\.git$/, '')
+    .replace(/\/+$/, '');
   const short = trimmed.match(/^([\w.-]+)\/([\w.-]+)(?:@([\w./-]+))?$/);
   if (short) {
-return { owner: short[1]!, repo: short[2]!, ref: short[3] ?? 'main' };
-}
+    return { owner: short[1]!, repo: short[2]!, ref: short[3] ?? 'main' };
+  }
   const url = trimmed.match(/^https?:\/\/github\.com\/([\w.-]+)\/([\w.-]+)(?:\/tree\/([\w./-]+))?$/);
   if (url) {
-return { owner: url[1]!, repo: url[2]!, ref: url[3] ?? 'main' };
-}
+    return { owner: url[1]!, repo: url[2]!, ref: url[3] ?? 'main' };
+  }
   throw new Error(`Unsupported marketplace source: ${spec}`);
 }
 
@@ -75,8 +75,8 @@ async function readManifest(repoRoot: string): Promise<MarketplaceManifest> {
   for (const candidate of MARKETPLACE_PATHS) {
     raw = await readFile(join(repoRoot, candidate), 'utf-8').catch(() => undefined);
     if (raw !== undefined) {
-break;
-}
+      break;
+    }
   }
   if (raw === undefined) {
     throw new Error(`Repo does not contain ${MARKETPLACE_PATHS.join(' or ')}`);
@@ -100,8 +100,8 @@ break;
  */
 async function resolveAppIcons(manifest: MarketplaceManifest, repoRoot: string): Promise<void> {
   if (!manifest.apps) {
-return;
-}
+    return;
+  }
   for (const app of manifest.apps) {
     if (app.icon && (app.icon.startsWith('./') || app.icon.startsWith('/'))) {
       const svgPath = join(repoRoot, app.icon);
@@ -204,12 +204,7 @@ export async function installMarketplacePlugin(
       ref: repoSpec.ref,
     };
 
-    const { installed, sourceUpdates } = await copyPluginSkills(
-      configDir,
-      root,
-      plugin,
-      bundleSource
-    );
+    const { installed, sourceUpdates } = await copyPluginSkills(configDir, root, plugin, bundleSource);
 
     const sources = { ...(store.get('skillSources') ?? {}), ...sourceUpdates };
     store.set('skillSources', sources);
@@ -264,12 +259,7 @@ export async function updateMarketplacePlugin(
       ref: repoSpec.ref,
     };
 
-    const { installed, sourceUpdates } = await copyPluginSkills(
-      configDir,
-      root,
-      plugin,
-      bundleSource
-    );
+    const { installed, sourceUpdates } = await copyPluginSkills(configDir, root, plugin, bundleSource);
 
     const liveNames = new Set(installed.map((s) => s.name));
     const previousBundle = (store.get('installedBundles') ?? {})[key];
@@ -283,8 +273,8 @@ export async function updateMarketplacePlugin(
     const disabledDir = getDisabledSkillsDir(configDir);
     for (const name of previousNames) {
       if (liveNames.has(name)) {
-continue;
-}
+        continue;
+      }
       const src = sources[name];
       if (src?.kind === 'marketplace' && src.repo === repoSlug && src.plugin === pluginName) {
         await rm(join(skillsDir, name), { recursive: true, force: true });
@@ -349,8 +339,7 @@ export async function checkBundleUpdates(store: SkillStore): Promise<BundleUpdat
         const removedSkills = bundle.skillNames.filter((n) => !liveSet.has(n));
 
         const liveVersion = manifest.metadata?.version;
-        const versionChanged =
-          liveVersion !== undefined && liveVersion !== bundle.version;
+        const versionChanged = liveVersion !== undefined && liveVersion !== bundle.version;
         const hasDiff = addedSkills.length > 0 || removedSkills.length > 0 || versionChanged;
 
         return {

@@ -17,13 +17,7 @@
  * invokers via `machine.provide({ actors: ... })`. This file is pure —
  * no React, no RPC client, no IPC. Stubs for tests.
  */
-import {
-  assign,
-  type ActorRefFrom,
-  fromCallback,
-  setup,
-  type SnapshotFrom,
-} from 'xstate';
+import { type ActorRefFrom, assign, fromCallback, setup, type SnapshotFrom } from 'xstate';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -101,19 +95,16 @@ export const chatBootMachine = setup({
 
   actions: {
     setCapabilities: assign({
-      capabilities: ({ event }) =>
-        (event as Extract<ChatBootEvent, { type: 'BOOTSTRAP_OK' }>).capabilities,
+      capabilities: ({ event }) => (event as Extract<ChatBootEvent, { type: 'BOOTSTRAP_OK' }>).capabilities,
       error: null,
     }),
     setError: assign({
-      error: ({ event }) =>
-        (event as Extract<ChatBootEvent, { type: 'BOOTSTRAP_FAILED' | 'SESSION_ERROR' }>).error,
+      error: ({ event }) => (event as Extract<ChatBootEvent, { type: 'BOOTSTRAP_FAILED' | 'SESSION_ERROR' }>).error,
     }),
     clearError: assign({ error: null }),
     markBooted: assign({ hasBooted: true }),
     setSessionId: assign({
-      sessionId: ({ event }) =>
-        (event as Extract<ChatBootEvent, { type: 'SET_SESSION_ID' }>).sessionId,
+      sessionId: ({ event }) => (event as Extract<ChatBootEvent, { type: 'SET_SESSION_ID' }>).sessionId,
     }),
   },
 

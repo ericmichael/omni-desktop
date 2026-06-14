@@ -17,13 +17,7 @@
  * layer); admin team-base writes go through {@link setTeamBase}, gated upstream.
  * Reads are synchronous off in-memory caches hydrated once ({@link whenReady}).
  */
-import {
-  loadTeamSettings,
-  loadUserSettings,
-  type PgPool,
-  saveTeamSettings,
-  saveUserSettings,
-} from 'omni-projects-db';
+import { loadTeamSettings, loadUserSettings, type PgPool, saveTeamSettings, saveUserSettings } from 'omni-projects-db';
 
 import { emptyMcpConfig, emptyModelsConfig } from '@/lib/agent-config';
 import { mergeById, mergeEnvVars, mergeMcpConfig, mergeModelsConfig, mergeRecord } from '@/main/config-merge';
@@ -100,7 +94,9 @@ export class CompositeSettingsStore {
 
   private notify(): void {
     const snap = this.store;
-    for (const cb of this.changeCallbacks) cb(snap);
+    for (const cb of this.changeCallbacks) {
+      cb(snap);
+    }
   }
 
   /** Effective value of a `team` key (team base ⊕ user overlay). */
@@ -154,7 +150,9 @@ export class CompositeSettingsStore {
     } else {
       val = this.user[key as string];
     }
-    if (val === undefined) val = defaultValue !== undefined ? defaultValue : DEFAULTS[key];
+    if (val === undefined) {
+      val = defaultValue !== undefined ? defaultValue : DEFAULTS[key];
+    }
     return val as StoreData[K];
   }
 
@@ -165,7 +163,9 @@ export class CompositeSettingsStore {
     if (typeof keyOrData === 'string') {
       this.writeUser(keyOrData, value as StoreData[K]);
     } else {
-      for (const [k, v] of Object.entries(keyOrData)) this.writeUser(k as keyof StoreData, v as never);
+      for (const [k, v] of Object.entries(keyOrData)) {
+        this.writeUser(k as keyof StoreData, v as never);
+      }
     }
     this.persistUser();
     this.notify();
@@ -173,7 +173,9 @@ export class CompositeSettingsStore {
 
   private writeUser<K extends keyof StoreData>(key: K, value: StoreData[K]): void {
     const cls = classify(key);
-    if (cls.layer === 'deployment') return; // not user-writable
+    if (cls.layer === 'deployment') {
+      return;
+    } // not user-writable
     if (cls.layer === 'team' || cls.scope === 'team') {
       const bt = ((this.user['byTeam'] as Record<string, AnyRec> | undefined) ?? {}) as Record<string, AnyRec>;
       const teamDoc = { ...(bt[this.teamId] ?? {}) };
@@ -200,7 +202,9 @@ export class CompositeSettingsStore {
     const cls = classify(key);
     if (cls.layer === 'team' || cls.scope === 'team') {
       const bt = (this.user['byTeam'] as Record<string, AnyRec> | undefined) ?? {};
-      if (bt[this.teamId]) delete bt[this.teamId]![key as string];
+      if (bt[this.teamId]) {
+        delete bt[this.teamId]![key as string];
+      }
     } else {
       delete this.user[key as string];
     }
@@ -219,7 +223,9 @@ export class CompositeSettingsStore {
     const out: AnyRec = { ...DEFAULTS };
     for (const key of Object.keys(DEFAULTS) as Array<keyof StoreData>) {
       const v = this.get(key);
-      if (v !== undefined) out[key as string] = v;
+      if (v !== undefined) {
+        out[key as string] = v;
+      }
     }
     return out as StoreData;
   }

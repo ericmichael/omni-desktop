@@ -64,7 +64,7 @@ export class PgProjectsRepo implements IProjectsRepo {
 
   /** Convenience: a read that returns the first row or undefined. */
   private async one<T>(sql: string, params: unknown[]): Promise<T | undefined> {
-    return this.tx(async (c) => ((await c.query(sql, params)).rows[0] as T | undefined));
+    return this.tx(async (c) => (await c.query(sql, params)).rows[0] as T | undefined);
   }
 
   // ---- Projects ----
@@ -96,9 +96,18 @@ export class PgProjectsRepo implements IProjectsRepo {
          due_date = EXCLUDED.due_date, pinned_at = EXCLUDED.pinned_at,
          updated_at = EXCLUDED.updated_at`,
       [
-        this.tenantId, row.id, row.label, row.slug,
-        row.is_personal, row.auto_dispatch, row.sources, row.sandbox_profile,
-        row.due_date, row.pinned_at, row.created_at, row.updated_at,
+        this.tenantId,
+        row.id,
+        row.label,
+        row.slug,
+        row.is_personal,
+        row.auto_dispatch,
+        row.sources,
+        row.sandbox_profile,
+        row.due_date,
+        row.pinned_at,
+        row.created_at,
+        row.updated_at,
       ]
     );
   }
@@ -114,7 +123,10 @@ export class PgProjectsRepo implements IProjectsRepo {
 
   async setProjectConfig(id: string, configJson: string | null): Promise<void> {
     await this.tx((c) =>
-      c.query(`UPDATE projects SET config = $1, updated_at = ${"to_char((now() AT TIME ZONE 'utc'), 'YYYY-MM-DD HH24:MI:SS.MS')"} WHERE id = $2`, [configJson, id])
+      c.query(
+        `UPDATE projects SET config = $1, updated_at = ${"to_char((now() AT TIME ZONE 'utc'), 'YYYY-MM-DD HH24:MI:SS.MS')"} WHERE id = $2`,
+        [configJson, id]
+      )
     );
   }
 
@@ -136,7 +148,10 @@ export class PgProjectsRepo implements IProjectsRepo {
   // ---- Pipeline columns ----
 
   listColumns(projectId: string): Promise<ColumnRow[]> {
-    return this.rows<ColumnRow>('SELECT tenant_id, id, project_id, label, description, sort_order, gate, max_concurrent, workflow::text AS workflow FROM pipeline_columns WHERE project_id = $1 ORDER BY sort_order', [projectId]);
+    return this.rows<ColumnRow>(
+      'SELECT tenant_id, id, project_id, label, description, sort_order, gate, max_concurrent, workflow::text AS workflow FROM pipeline_columns WHERE project_id = $1 ORDER BY sort_order',
+      [projectId]
+    );
   }
 
   async upsertColumn(row: ColumnRow): Promise<void> {
@@ -151,7 +166,17 @@ export class PgProjectsRepo implements IProjectsRepo {
          label = EXCLUDED.label, description = EXCLUDED.description,
          sort_order = EXCLUDED.sort_order, gate = EXCLUDED.gate,
          max_concurrent = EXCLUDED.max_concurrent, workflow = EXCLUDED.workflow`,
-      [this.tenantId, row.id, row.project_id, row.label, row.description, row.sort_order, row.gate, row.max_concurrent, row.workflow]
+      [
+        this.tenantId,
+        row.id,
+        row.project_id,
+        row.label,
+        row.description,
+        row.sort_order,
+        row.gate,
+        row.max_concurrent,
+        row.workflow,
+      ]
     );
   }
 
@@ -186,7 +211,12 @@ export class PgProjectsRepo implements IProjectsRepo {
     const result: ColumnSyncResult = { inserted: [], removed: [], remappedTickets: [] };
 
     return this.tx(async (c) => {
-      const oldRows = (await c.query('SELECT tenant_id, id, project_id, label, description, sort_order, gate, max_concurrent, workflow::text AS workflow FROM pipeline_columns WHERE project_id = $1 ORDER BY sort_order', [projectId])).rows as ColumnRow[];
+      const oldRows = (
+        await c.query(
+          'SELECT tenant_id, id, project_id, label, description, sort_order, gate, max_concurrent, workflow::text AS workflow FROM pipeline_columns WHERE project_id = $1 ORDER BY sort_order',
+          [projectId]
+        )
+      ).rows as ColumnRow[];
       const oldById = new Map(oldRows.map((r) => [r.id, r]));
       const newById = new Map(newRows.map((r) => [r.id, r]));
       const newByLabelLower = new Map(newRows.map((r) => [r.label.toLowerCase(), r]));
@@ -199,7 +229,10 @@ export class PgProjectsRepo implements IProjectsRepo {
       // Free labels held by columns about to be removed (UNIQUE(project_id,label)).
       for (const oldRow of oldRows) {
         if (!newById.has(oldRow.id)) {
-          await c.query('UPDATE pipeline_columns SET label = $1 WHERE id = $2', [`__obsolete__${oldRow.id}`, oldRow.id]);
+          await c.query('UPDATE pipeline_columns SET label = $1 WHERE id = $2', [
+            `__obsolete__${oldRow.id}`,
+            oldRow.id,
+          ]);
         }
       }
 
@@ -212,7 +245,8 @@ export class PgProjectsRepo implements IProjectsRepo {
       }
 
       // Remap tickets whose column was removed.
-      const tickets = (await c.query('SELECT * FROM tickets WHERE project_id = $1 ORDER BY created_at', [projectId])).rows as TicketRow[];
+      const tickets = (await c.query('SELECT * FROM tickets WHERE project_id = $1 ORDER BY created_at', [projectId]))
+        .rows as TicketRow[];
       const oldFirst = oldRows[0];
       const oldLast = oldRows[oldRows.length - 1];
 
@@ -306,13 +340,34 @@ export class PgProjectsRepo implements IProjectsRepo {
          assignee = EXCLUDED.assignee,
          updated_at = EXCLUDED.updated_at`,
       [
-        this.tenantId, row.id, row.project_id, row.milestone_id, row.column_id,
-        row.title, row.description, row.priority, row.branch,
-        row.blocked_by, row.resolution, row.resolved_at,
-        row.archived_at, row.column_changed_at,
-        row.use_worktree, row.worktree_path, row.worktree_name, row.supervisor_session_id,
-        row.phase, row.phase_changed_at, row.supervisor_task_id, row.token_usage, row.runs,
-        row.pr_review, row.pr_merged_at, row.assignee, row.created_at, row.updated_at,
+        this.tenantId,
+        row.id,
+        row.project_id,
+        row.milestone_id,
+        row.column_id,
+        row.title,
+        row.description,
+        row.priority,
+        row.branch,
+        row.blocked_by,
+        row.resolution,
+        row.resolved_at,
+        row.archived_at,
+        row.column_changed_at,
+        row.use_worktree,
+        row.worktree_path,
+        row.worktree_name,
+        row.supervisor_session_id,
+        row.phase,
+        row.phase_changed_at,
+        row.supervisor_task_id,
+        row.token_usage,
+        row.runs,
+        row.pr_review,
+        row.pr_merged_at,
+        row.assignee,
+        row.created_at,
+        row.updated_at,
       ]
     );
   }
@@ -400,8 +455,19 @@ export class PgProjectsRepo implements IProjectsRepo {
          due_date = EXCLUDED.due_date, completed_at = EXCLUDED.completed_at,
          pinned_at = EXCLUDED.pinned_at, updated_at = EXCLUDED.updated_at`,
       [
-        this.tenantId, row.id, row.project_id, row.title, row.description, row.branch, row.brief,
-        row.status, row.due_date, row.completed_at, row.pinned_at, row.created_at, row.updated_at,
+        this.tenantId,
+        row.id,
+        row.project_id,
+        row.title,
+        row.description,
+        row.branch,
+        row.brief,
+        row.status,
+        row.due_date,
+        row.completed_at,
+        row.pinned_at,
+        row.created_at,
+        row.updated_at,
       ]
     );
   }
@@ -453,8 +519,18 @@ export class PgProjectsRepo implements IProjectsRepo {
          is_root = EXCLUDED.is_root, kind = EXCLUDED.kind, properties = EXCLUDED.properties,
          updated_at = EXCLUDED.updated_at`,
       [
-        this.tenantId, row.id, row.project_id, row.parent_id, row.title, row.icon,
-        row.sort_order, row.is_root, row.kind, row.properties, row.created_at, row.updated_at,
+        this.tenantId,
+        row.id,
+        row.project_id,
+        row.parent_id,
+        row.title,
+        row.icon,
+        row.sort_order,
+        row.is_root,
+        row.kind,
+        row.properties,
+        row.created_at,
+        row.updated_at,
       ]
     );
   }
@@ -520,8 +596,16 @@ export class PgProjectsRepo implements IProjectsRepo {
          status = EXCLUDED.status, later_at = EXCLUDED.later_at,
          promoted_to = EXCLUDED.promoted_to, updated_at = EXCLUDED.updated_at`,
       [
-        this.tenantId, row.id, row.title, row.note, row.project_id, row.status,
-        row.later_at, row.promoted_to, row.created_at, row.updated_at,
+        this.tenantId,
+        row.id,
+        row.title,
+        row.note,
+        row.project_id,
+        row.status,
+        row.later_at,
+        row.promoted_to,
+        row.created_at,
+        row.updated_at,
       ]
     );
   }
@@ -573,8 +657,18 @@ export class PgProjectsRepo implements IProjectsRepo {
          worktree_name = EXCLUDED.worktree_name, session_id = EXCLUDED.session_id,
          ticket_id = EXCLUDED.ticket_id, last_urls = EXCLUDED.last_urls`,
       [
-        this.tenantId, row.id, row.project_id, row.task_description, row.status, row.created_at,
-        row.branch, row.worktree_path, row.worktree_name, row.session_id, row.ticket_id, row.last_urls,
+        this.tenantId,
+        row.id,
+        row.project_id,
+        row.task_description,
+        row.status,
+        row.created_at,
+        row.branch,
+        row.worktree_path,
+        row.worktree_name,
+        row.session_id,
+        row.ticket_id,
+        row.last_urls,
       ]
     );
   }

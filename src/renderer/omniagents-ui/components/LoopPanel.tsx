@@ -21,14 +21,20 @@ const PROMPT_TRUNCATE = 100;
 
 function shortPrompt(prompt: string, max: number): string {
   const oneLine = prompt.replace(/\s+/g, ' ').trim();
-  if (oneLine.length <= max) return oneLine;
-  return oneLine.slice(0, max - 1) + '…';
+  if (oneLine.length <= max) {
+    return oneLine;
+  }
+  return `${oneLine.slice(0, max - 1)}…`;
 }
 
 function formatInterval(seconds: number): string {
-  if (seconds < 60) return `${Math.round(seconds)}s`;
+  if (seconds < 60) {
+    return `${Math.round(seconds)}s`;
+  }
   const minutes = Math.round(seconds / 60);
-  if (minutes < 60) return `${minutes}m`;
+  if (minutes < 60) {
+    return `${minutes}m`;
+  }
   const hours = Math.floor(minutes / 60);
   const rem = minutes - hours * 60;
   return rem === 0 ? `${hours}h` : `${hours}h${rem}m`;
@@ -41,12 +47,16 @@ function formatTimeRemaining(unixTimestamp: number): string {
 
 export function LoopPanel({ tasks, onDismiss }: { tasks: LoopTaskSnapshot[]; onDismiss?: () => void }) {
   const active = tasks.filter((task) => task.status === 'active');
-  if (active.length === 0) return null;
+  if (active.length === 0) {
+    return null;
+  }
 
   const next = [...active].sort(
     (a, b) => (a.next_fire_at ?? Number.MAX_SAFE_INTEGER) - (b.next_fire_at ?? Number.MAX_SAFE_INTEGER)
   )[0];
-  if (!next) return null;
+  if (!next) {
+    return null;
+  }
   const cadence =
     next.mode === 'dynamic'
       ? 'dynamic'
@@ -54,8 +64,12 @@ export function LoopPanel({ tasks, onDismiss }: { tasks: LoopTaskSnapshot[]; onD
         ? `every ${formatInterval(next.interval_seconds)}`
         : `cron ${next.cron}`;
   const tail = [cadence, `id ${next.id}`];
-  if (next.next_fire_at) tail.unshift(`in ${formatTimeRemaining(next.next_fire_at)}`);
-  if (active.length > 1) tail.push(`${active.length} loops`);
+  if (next.next_fire_at) {
+    tail.unshift(`in ${formatTimeRemaining(next.next_fire_at)}`);
+  }
+  if (active.length > 1) {
+    tail.push(`${active.length} loops`);
+  }
 
   return (
     <div className="px-3 pt-2">

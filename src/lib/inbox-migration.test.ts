@@ -165,7 +165,7 @@ describe('upgradeLegacyInbox (batch)', () => {
       idGen
     );
     expect(items.map((i) => i.id)).toEqual(['1', '3']);
-    expect(items[1].status).toBe('later');
-    expect(items[1].laterAt).toBe(500);
+    expect(items[1]!.status).toBe('later');
+    expect(items[1]!.laterAt).toBe(500);
   });
 });

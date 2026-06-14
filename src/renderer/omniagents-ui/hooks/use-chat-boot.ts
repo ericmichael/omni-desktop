@@ -17,8 +17,8 @@ import type { RPCClient } from '@/renderer/omniagents-ui/rpc/client';
 import {
   type ChatBootCapabilities,
   type ChatBootEvent,
-  type ChatBootPhase,
   chatBootMachine,
+  type ChatBootPhase,
   isBootReady,
 } from '@/shared/machines/chat-boot.machine';
 import { createMachineLogger } from '@/shared/machines/machine-logger';
@@ -57,10 +57,7 @@ async function runBootstrap(opts: UseChatBootOptions): Promise<ChatBootCapabilit
   // approvals onto the dedicated ``tool_approval_requested`` event +
   // ``tool_approval_response`` RPC, no client_request hop.
   try {
-    await client.clientFunctions(1, [
-      { name: 'ui.set_status' },
-      { name: 'ui.add_artifact' },
-    ]);
+    await client.clientFunctions(1, [{ name: 'ui.set_status' }, { name: 'ui.add_artifact' }]);
   } catch {
     // Non-fatal — older servers may not support this.
   }
@@ -71,11 +68,11 @@ async function runBootstrap(opts: UseChatBootOptions): Promise<ChatBootCapabilit
   try {
     const info = (await client.getAgentInfo()) as any;
     if (info?.name) {
-agentName = normalizeAgentName(String(info.name));
-}
+      agentName = normalizeAgentName(String(info.name));
+    }
     if (info?.welcome_text) {
-welcomeText = String(info.welcome_text);
-}
+      welcomeText = String(info.welcome_text);
+    }
   } catch {
     // Keep defaults on failure.
   }
@@ -95,8 +92,8 @@ welcomeText = String(info.welcome_text);
         // tool reality.
         const res = (await client.serverCall('fs_get_workspace_root')) as any;
         if (res?.path) {
-workspacePath = String(res.path);
-}
+          workspacePath = String(res.path);
+        }
       } catch {
         /* ignore */
       }
@@ -109,7 +106,7 @@ workspacePath = String(res.path);
   let voiceEnabled = false;
   if (wsRealtimeUrl) {
     try {
-      const { RealtimeRPCClient } = await import('../rpc/realtime');
+      const { RealtimeRPCClient } = await import('@/renderer/omniagents-ui/rpc/realtime');
       const rtc = new RealtimeRPCClient(wsRealtimeUrl, token);
       await rtc.connect();
       try {
@@ -211,8 +208,8 @@ export function useChatBoot(opts: UseChatBootOptions) {
             .loadSession(sessionId)
             .then(() => {
               if (cancelled) {
-return;
-}
+                return;
+              }
               // loadSession updates the chat-session machine directly; we
               // peek at its snapshot to decide whether it landed in a
               // good state. The `initError` state is surfaced as a
@@ -222,8 +219,7 @@ return;
               const snap = chatSession.actor.getSnapshot();
               const v = snap.value as unknown;
               const isError =
-                v === 'initError' ||
-                (typeof v === 'object' && v !== null && 'initError' in (v as object));
+                v === 'initError' || (typeof v === 'object' && v !== null && 'initError' in (v as object));
               if (isError) {
                 sendBack({
                   type: 'SESSION_ERROR',
@@ -235,8 +231,8 @@ return;
             })
             .catch((err: unknown) => {
               if (cancelled) {
-return;
-}
+                return;
+              }
               sendBack({
                 type: 'SESSION_ERROR',
                 error: String((err as Error)?.message || err),
@@ -252,7 +248,6 @@ return;
     // invokers via closure and propagated via SET_SESSION_ID events. If
     // we re-created the machine on every sessionId change, the boot state
     // would reset.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client, chatSession, wsRealtimeUrl, token]);
 
   const actor = useActorRef(machine, {

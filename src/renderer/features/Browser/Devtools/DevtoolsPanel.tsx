@@ -119,22 +119,29 @@ export const DevtoolsPanel = memo(
 
     // Resize via a top-edge drag handle. We listen at the document level so
     // the drag keeps working when the cursor momentarily leaves the handle.
-    const handleDown = useCallback((e: React.MouseEvent) => {
-      draggingRef.current = true;
-      startYRef.current = e.clientY;
-      startHeightRef.current = height;
-      document.body.style.userSelect = 'none';
-    }, [height]);
+    const handleDown = useCallback(
+      (e: React.MouseEvent) => {
+        draggingRef.current = true;
+        startYRef.current = e.clientY;
+        startHeightRef.current = height;
+        document.body.style.userSelect = 'none';
+      },
+      [height]
+    );
 
     useEffect(() => {
       const onMove = (e: MouseEvent) => {
-        if (!draggingRef.current) return;
+        if (!draggingRef.current) {
+          return;
+        }
         const delta = startYRef.current - e.clientY;
         const next = Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, startHeightRef.current + delta));
         setHeight(next);
       };
       const onUp = () => {
-        if (!draggingRef.current) return;
+        if (!draggingRef.current) {
+          return;
+        }
         draggingRef.current = false;
         document.body.style.userSelect = '';
       };

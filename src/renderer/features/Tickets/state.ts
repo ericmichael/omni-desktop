@@ -149,7 +149,10 @@ export const $activeTickets = computed([$tickets, $tasks], (ticketMap, taskMap) 
   const tasks = Object.values(taskMap);
   const liveTaskTicketIds = new Set(
     tasks
-      .filter((t) => t.ticketId && (t.status.type === 'running' || t.status.type === 'connecting' || t.status.type === 'starting'))
+      .filter(
+        (t) =>
+          t.ticketId && (t.status.type === 'running' || t.status.type === 'connecting' || t.status.type === 'starting')
+      )
       .map((t) => t.ticketId!)
   );
 
@@ -194,17 +197,12 @@ export const ticketApi = {
   checkGitRepo: projectsApi.checkGitRepo,
 
   // Tickets
-  addTicket: async (
-    ticket: Omit<Ticket, 'id' | 'createdAt' | 'updatedAt' | 'columnId'>
-  ): Promise<Ticket> => {
+  addTicket: async (ticket: Omit<Ticket, 'id' | 'createdAt' | 'updatedAt' | 'columnId'>): Promise<Ticket> => {
     const created = await emitter.invoke('project:add-ticket', ticket);
     $tickets.setKey(created.id, created);
     return created;
   },
-  updateTicket: async (
-    id: TicketId,
-    patch: Partial<Omit<Ticket, 'id' | 'projectId' | 'createdAt'>>
-  ): Promise<void> => {
+  updateTicket: async (id: TicketId, patch: Partial<Omit<Ticket, 'id' | 'projectId' | 'createdAt'>>): Promise<void> => {
     await emitter.invoke('project:update-ticket', id, patch);
     const existing = $tickets.get()[id];
     if (existing) {
@@ -342,10 +340,7 @@ export const ticketApi = {
     void ticketApi.fetchTasks();
     return ok;
   },
-  mergeTicket: async (
-    ticketId: TicketId,
-    sourceId: string
-  ): Promise<import('@/shared/types').PrMergeResult> => {
+  mergeTicket: async (ticketId: TicketId, sourceId: string): Promise<import('@/shared/types').PrMergeResult> => {
     const result = await emitter.invoke('project:merge-ticket', ticketId, sourceId);
     void ticketApi.fetchTasks();
     return result;
@@ -479,7 +474,8 @@ export const ticketApi = {
         $tickets.setKey(ticketId, persisted);
       }
     }
-    const projectId = ($tickets.get()[ticketId] ?? persistedStoreApi.$atom.get().tickets.find((t) => t.id === ticketId))?.projectId;
+    const projectId = ($tickets.get()[ticketId] ?? persistedStoreApi.$atom.get().tickets.find((t) => t.id === ticketId))
+      ?.projectId;
     if (projectId) {
       void ticketApi.fetchTickets(projectId);
     }

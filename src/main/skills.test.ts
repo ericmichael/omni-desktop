@@ -3,14 +3,14 @@
  * active + disabled directories, install from .skill zip, uninstall,
  * and enable/disable via directory move.
  */
+import archiver from 'archiver';
 import { createWriteStream, existsSync, mkdtempSync, rmSync } from 'fs';
 import { mkdir, readdir, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import archiver from 'archiver';
-
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import type { SkillStore } from '@/main/skills';
 import {
   getSkillsDir,
   installSkillFromFile,
@@ -19,7 +19,6 @@ import {
   setSkillEnabled,
   uninstallSkill,
 } from '@/main/skills';
-import type { SkillStore } from '@/main/skills';
 import type { StoreData } from '@/shared/types';
 
 // ---------------------------------------------------------------------------
@@ -300,7 +299,11 @@ describe('setSkillEnabled', () => {
 describe('installSkillFromFile', () => {
   it('installs a valid .skill zip and returns SkillEntry', async () => {
     const zipPath = join(configDir, 'test.skill');
-    await createSkillZip(zipPath, 'test-skill', '---\nname: test-skill\ndescription: A test\nversion: "1.0"\n---\n\nBody');
+    await createSkillZip(
+      zipPath,
+      'test-skill',
+      '---\nname: test-skill\ndescription: A test\nversion: "1.0"\n---\n\nBody'
+    );
 
     const store = createMockStore();
     const entry = await installSkillFromFile(configDir, zipPath, store);

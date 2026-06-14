@@ -25,15 +25,18 @@ export const SettingsModalPreviewFeatures = memo(() => {
   useEffect(() => {
     emitter.invoke('platform:is-enterprise').then(setIsEnterprise);
   }, []);
-  const onChange = useCallback((checked: boolean) => {
-    persistedStoreApi.setKey('previewFeatures', checked);
-    // GA users (no preview features, no enterprise) fall back to the
-    // no-isolation `host` profile. Enterprise stays on whatever profile
-    // the user selected since the platform path is its own surface.
-    if (!checked && !isEnterprise) {
-      persistedStoreApi.setKey('defaultProfileName', 'host');
-    }
-  }, [isEnterprise]);
+  const onChange = useCallback(
+    (checked: boolean) => {
+      persistedStoreApi.setKey('previewFeatures', checked);
+      // GA users (no preview features, no enterprise) fall back to the
+      // no-isolation `host` profile. Enterprise stays on whatever profile
+      // the user selected since the platform path is its own surface.
+      if (!checked && !isEnterprise) {
+        persistedStoreApi.setKey('defaultProfileName', 'host');
+      }
+    },
+    [isEnterprise]
+  );
 
   return (
     <div className={styles.root}>

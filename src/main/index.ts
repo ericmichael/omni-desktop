@@ -14,38 +14,34 @@ import { getArtifactsDir } from '@/lib/artifacts';
 import { createAppControlManager } from '@/main/app-control-manager';
 import { listRepos as azureListRepos } from '@/main/azure-repos';
 import { createBrowserManager } from '@/main/browser-manager';
-import { getVoiceService } from '@/main/voice-service';
 import {
   getStatus as codexStatus,
   loginWithBrowser,
   loginWithDeviceFlow,
   logout as codexLogout,
 } from '@/main/codex-auth';
+import { wireComputeReverseHandlers } from '@/main/compute-reverse-handlers';
+import { migrateAgentConfigFromFiles } from '@/main/config-files-migration';
+import { materializeAgentConfig } from '@/main/config-materializer';
+import { createConsoleManager } from '@/main/console-manager';
+import { rowToProject } from '@/main/db-store-bridge';
+import { createDownloadsManager } from '@/main/downloads-manager';
 import {
   ensureFreshAccessToken as ensureFreshEntraToken,
   getStatus as entraStatus,
   loginWithDeviceFlow as entraLoginWithDeviceFlow,
   logout as entraLogout,
 } from '@/main/entra-auth';
-import { getOrCreateMachineIdentity, renameMachine } from '@/main/machine-identity';
-import { wireComputeReverseHandlers } from '@/main/compute-reverse-handlers';
-import { wireReverseRpcRouter } from '@/main/reverse-rpc-bridge';
-import { wireTunnelReverseHandlers } from '@/main/tunnel-handler';
-import { migrateAgentConfigFromFiles } from '@/main/config-files-migration';
-import { materializeAgentConfig } from '@/main/config-materializer';
-import { createConsoleManager } from '@/main/console-manager';
-import { rowToProject } from '@/main/db-store-bridge';
-import { createDownloadsManager } from '@/main/downloads-manager';
 import { createExtensionManager } from '@/main/extension-manager';
 import {
   linkWithDeviceFlow as githubLink,
   listOrgs as githubListOrgs,
   searchRepos as githubSearchRepos,
 } from '@/main/github-auth';
+import { getOrCreateMachineIdentity, renameMachine } from '@/main/machine-identity';
 import { MainProcessManager } from '@/main/main-process-manager';
 import { getMcpBinPath } from '@/main/mcp-config-manager';
 import { registerMigrationHandlers } from '@/main/migration-handlers';
-import { registerTeamHandlers } from '@/server/team-handlers';
 import { createOmniInstallManager } from '@/main/omni-install-manager';
 import { migrateLegacyPagesToConfigDir } from '@/main/pages-relocation-migration';
 import { createPermissionsManager } from '@/main/permissions-manager';
@@ -55,9 +51,11 @@ import { createProcessManager } from '@/main/process-manager';
 import { backfillProjectConfigs } from '@/main/project-config-backfill';
 import { closeProjectDb, getDb, openProjectDb } from '@/main/project-db';
 import { createProjectManager } from '@/main/project-manager';
+import { wireReverseRpcRouter } from '@/main/reverse-rpc-bridge';
 import { LocalSecretStore } from '@/main/secret-store';
 import { DEFAULT_CHAT_SNAPSHOT_TTL_MS, gcStaleSnapshots, registerSnapshotHandlers } from '@/main/snapshot-manager';
 import { getStore } from '@/main/store';
+import { wireTunnelReverseHandlers } from '@/main/tunnel-handler';
 import {
   ensureDirectory,
   getDefaultWorkspaceDir,
@@ -67,7 +65,9 @@ import {
   isDirectory,
   isFile,
 } from '@/main/util';
+import { getVoiceService } from '@/main/voice-service';
 import { WorkspaceSyncManager } from '@/main/workspace-sync-manager';
+import { registerTeamHandlers } from '@/server/team-handlers';
 import { tokenLast4 } from '@/shared/git-credentials';
 import {
   registerConfigHandlers,
@@ -385,23 +385,24 @@ const withTokenPersistence = (client: ReturnType<typeof createPlatformClient>) =
 const syncPlatformClients = (platform?: Parameters<typeof createPlatformClient>[0]) => {
   const client = withTokenPersistence(createPlatformClient(platform, platformFetchFn));
   processManager.platformClient = client;
+  return client;
 };
-syncPlatformClients(store.get('platform'));
+let platformClient = syncPlatformClients(store.get('platform'));
 store.onDidChange('platform', (newVal) => {
-  syncPlatformClients(newVal);
+  platformClient = syncPlatformClients(newVal);
 });
 
 // Background workspace sync manager — like OneDrive for project workspaces.
 const syncManager = new WorkspaceSyncManager({
   fetchFn: platformFetchFn,
-  platformClient: processManager.platformClient,
+  platformClient,
   manifestDir: OMNI_CONFIG_DIR,
   onStatusChange: (projectId, status) => {
     main.sendToWindow('workspace-sync:status-changed', projectId, status);
   },
 });
 store.onDidChange('platform', () => {
-  syncManager.setPlatformClient(processManager.platformClient);
+  syncManager.setPlatformClient(platformClient);
 });
 
 // On startup, refresh platform policy if already signed in.
@@ -791,12 +792,16 @@ const broadcastStore = (): void =>
 
 const cloudStatusFromStore = (): import('@/shared/types').CloudStatus => {
   const cm = store.get('cloudMode');
-  if (!cm) return { connected: false };
+  if (!cm) {
+    return { connected: false };
+  }
   const live = entraStatus();
   // Belt + suspenders: if the secret store has been cleared out (e.g. user
   // wiped userData) treat the cloudMode flag as stale and report disconnected
   // so the renderer drops back to local mode after a restart.
-  if (!live.signedIn) return { connected: false };
+  if (!live.signedIn) {
+    return { connected: false };
+  }
   return {
     connected: true,
     url: cm.url,
@@ -871,7 +876,9 @@ main.ipc.handle('cloud:unlink', () => {
 
 main.ipc.handle('cloud:get-access-token', async () => {
   const cm = store.get('cloudMode');
-  if (!cm) throw new Error('Not connected to a cloud');
+  if (!cm) {
+    throw new Error('Not connected to a cloud');
+  }
   return ensureFreshEntraToken(cm.tenantId, cm.clientId);
 });
 
@@ -913,7 +920,9 @@ const cleanupTunnelReverse = wireTunnelReverseHandlers((event) => {
 // entirely (Node's fetch is unrestricted) and returns the opaque WS token.
 main.ipc.handle('cloud:get-ws-token', async () => {
   const cm = store.get('cloudMode');
-  if (!cm) throw new Error('Not connected to a cloud');
+  if (!cm) {
+    throw new Error('Not connected to a cloud');
+  }
   const accessToken = await ensureFreshEntraToken(cm.tenantId, cm.clientId);
   const res = await net.fetch(`${cm.url}/api/ws-token`, {
     headers: { Authorization: `Bearer ${accessToken}` },

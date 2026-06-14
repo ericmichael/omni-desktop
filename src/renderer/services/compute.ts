@@ -40,7 +40,9 @@ const FORWARDED_CHANNELS = [
 let initialized = false;
 
 export const initComputeBridge = (): void => {
-  if (initialized) return;
+  if (initialized) {
+    return;
+  }
   initialized = true;
   if (!isElectron || !isCloudLinked || !wsEmitter) {
     return;

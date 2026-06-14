@@ -27,5 +27,6 @@ npm run preview
 ## Scope
 
 Specific to `habit-tracker`. Knows:
+
 - Build output goes to `dist/`.
 - Preview is the command that matters for "does v0.1 actually run end-to-end" — dev mode can hide build-time bugs.

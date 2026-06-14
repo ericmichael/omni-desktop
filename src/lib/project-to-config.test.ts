@@ -20,6 +20,7 @@ function baseProject(overrides: Partial<Project> = {}): Project {
     label: 'Test',
     slug: 'test',
     createdAt: 1_700_000_000_000,
+    sources: [],
     ...overrides,
   };
 }
@@ -85,7 +86,9 @@ describe('projectToConfig', () => {
 
   it('local-workspace project — local_dir entry at "."', () => {
     const project = baseProject({
-      sources: [{ id: 'src-1', mountName: 'myapi', kind: 'local', workspaceDir: '/home/eric/repos/myapi', gitDetected: true }],
+      sources: [
+        { id: 'src-1', mountName: 'myapi', kind: 'local', workspaceDir: '/home/eric/repos/myapi', gitDetected: true },
+      ],
     });
     const config = projectToConfig(project, DEFAULTS);
 
@@ -167,9 +170,7 @@ describe('projectToConfig', () => {
     const project = baseProject();
     const config = projectToConfig(project, {
       ...DEFAULTS,
-      extraMcpServers: [
-        { type: 'sse', name: 'github', url: 'https://example/sse' },
-      ],
+      extraMcpServers: [{ type: 'sse', name: 'github', url: 'https://example/sse' }],
     });
 
     expect(config.mcp_servers).toHaveLength(2);
@@ -184,12 +185,7 @@ describe('projectToConfig', () => {
     const project = baseProject();
     const config = projectToConfig(project, DEFAULTS);
 
-    expect(config.capabilities.map((c) => c.type)).toEqual([
-      'filesystem',
-      'shell',
-      'skills',
-      'compaction',
-    ]);
+    expect(config.capabilities.map((c) => c.type)).toEqual(['filesystem', 'shell', 'skills', 'compaction']);
   });
 
   it('skills capability wires the configured skills dir', () => {

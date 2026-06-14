@@ -20,6 +20,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { WebSocket } from 'ws';
 
+import { uuidv4 } from '@/lib/uuid';
 import type { MachineRegistry } from '@/server/machine-registry';
 import type { WsHandler } from '@/server/ws-handler';
 
@@ -32,7 +33,7 @@ const tunnels = new Map<string, ActiveTunnel>();
 
 let listenerWired = false;
 
-const newTunnelId = (): string => `tn-${crypto.randomUUID()}`;
+const newTunnelId = (): string => `tn-${uuidv4()}`;
 
 export const setupLocalTunnelProxy = (
   fastify: FastifyInstance,
@@ -50,7 +51,9 @@ export const setupLocalTunnelProxy = (
         close?: boolean;
       };
       const tunnel = tunnels.get(evt.tunnelId);
-      if (!tunnel) return; // unknown / late frame
+      if (!tunnel) {
+        return;
+      } // unknown / late frame
       if (evt.close) {
         try {
           tunnel.clientSocket.close();
@@ -60,7 +63,9 @@ export const setupLocalTunnelProxy = (
         tunnels.delete(evt.tunnelId);
         return;
       }
-      if (tunnel.clientSocket.readyState !== 1 /* OPEN */) return;
+      if (tunnel.clientSocket.readyState !== 1 /* OPEN */) {
+        return;
+      }
       const buf = Buffer.from(evt.dataBase64, 'base64');
       tunnel.clientSocket.send(evt.binary ? buf : buf.toString('utf-8'));
     });
@@ -101,7 +106,9 @@ export const setupLocalTunnelProxy = (
  */
 const resolveUpstream = (port: string, subPath: string, query: string): string | null => {
   const n = Number.parseInt(port, 10);
-  if (!Number.isInteger(n) || n <= 0 || n > 65535) return null;
+  if (!Number.isInteger(n) || n <= 0 || n > 65535) {
+    return null;
+  }
   return `http://127.0.0.1:${n}/${subPath}${query}`;
 };
 
@@ -127,8 +134,12 @@ async function handleHttp(
   // Strip hop-by-hop / sensitive headers; the laptop's fetch will set its own.
   const headers: Record<string, string> = {};
   for (const [k, v] of Object.entries(request.headers)) {
-    if (k === 'host' || k === 'connection' || k === 'keep-alive') continue;
-    if (typeof v === 'string') headers[k] = v;
+    if (k === 'host' || k === 'connection' || k === 'keep-alive') {
+      continue;
+    }
+    if (typeof v === 'string') {
+      headers[k] = v;
+    }
   }
   const body =
     request.method !== 'GET' && request.method !== 'HEAD'
@@ -145,7 +156,9 @@ async function handleHttp(
     }>(ws, 'compute:tunnel-http', [{ url, method: request.method, headers, body }]);
     reply.status(envelope.status);
     for (const [k, v] of Object.entries(envelope.headers ?? {})) {
-      if (k === 'transfer-encoding' || k === 'content-encoding' || k === 'content-length') continue;
+      if (k === 'transfer-encoding' || k === 'content-encoding' || k === 'content-length') {
+        continue;
+      }
       reply.header(k, v);
     }
     reply.send(Buffer.from(envelope.bodyBase64, 'base64'));
@@ -190,7 +203,9 @@ function handleWs(
   const closeLaptop = (): void => {
     // Best-effort tell the laptop to release its half.
     const liveWs = registry.getActiveWs(machineId);
-    if (!liveWs) return;
+    if (!liveWs) {
+      return;
+    }
     void wsHandler.invokeOnWs(liveWs, 'compute:tunnel-ws-close', [{ tunnelId }]).catch(() => {});
   };
 
@@ -221,7 +236,9 @@ function handleWs(
     .then(() => {
       opened = true;
       const queued = pending.splice(0);
-      for (const f of queued) writeFrame(f.b64, f.binary);
+      for (const f of queued) {
+        writeFrame(f.b64, f.binary);
+      }
     })
     .catch((err) => {
       closeClient(4502, `tunnel-open failed: ${err.message ?? 'unknown'}`);

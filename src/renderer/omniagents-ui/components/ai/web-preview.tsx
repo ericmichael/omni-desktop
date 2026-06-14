@@ -1,48 +1,53 @@
-import { CheckIcon, CopyIcon, PlayIcon, Trash2Icon, XIcon } from 'lucide-react'
-import type { ComponentProps, ReactNode } from 'react'
-import { createContext, forwardRef, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { CheckIcon, CopyIcon, PlayIcon, Trash2Icon, XIcon } from 'lucide-react';
+import type { ComponentProps, ReactNode } from 'react';
+import { createContext, forwardRef, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 
-import { Button } from '@/renderer/omniagents-ui/components/ui/button'
-import { Input } from '@/renderer/omniagents-ui/components/ui/input'
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/renderer/omniagents-ui/components/ui/tooltip'
-import { cn } from '@/renderer/omniagents-ui/lib/utils'
+import { Button } from '@/renderer/omniagents-ui/components/ui/button';
+import { Input } from '@/renderer/omniagents-ui/components/ui/input';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/renderer/omniagents-ui/components/ui/tooltip';
+import { cn } from '@/renderer/omniagents-ui/lib/utils';
 
 export interface WebPreviewContextValue {
-  url: string
-  setUrl: (url: string) => void
-  consoleOpen: boolean
-  setConsoleOpen: (open: boolean) => void
+  url: string;
+  setUrl: (url: string) => void;
+  consoleOpen: boolean;
+  setConsoleOpen: (open: boolean) => void;
 }
 
-const WebPreviewContext = createContext<WebPreviewContextValue | null>(null)
+const WebPreviewContext = createContext<WebPreviewContextValue | null>(null);
 
 const useWebPreview = () => {
-  const context = useContext(WebPreviewContext)
+  const context = useContext(WebPreviewContext);
   if (!context) {
-    throw new Error('WebPreview components must be used within a WebPreview')
+    throw new Error('WebPreview components must be used within a WebPreview');
   }
-  return context
-}
+  return context;
+};
 
 /** Public alias for consuming the context outside of ai-elements components. */
-export { useWebPreview as useWebPreviewContext }
+export { useWebPreview as useWebPreviewContext };
 
 export type WebPreviewProps = ComponentProps<'div'> & {
-  defaultUrl?: string
-  onUrlChange?: (url: string) => void
-}
+  defaultUrl?: string;
+  onUrlChange?: (url: string) => void;
+};
 
 export const WebPreview = ({ className, children, defaultUrl = '', onUrlChange, ...props }: WebPreviewProps) => {
-  const [url, setUrl] = useState(defaultUrl)
-  const [consoleOpen, setConsoleOpen] = useState(false)
+  const [url, setUrl] = useState(defaultUrl);
+  const [consoleOpen, setConsoleOpen] = useState(false);
 
   const handleUrlChange = useCallback(
     (newUrl: string) => {
-      setUrl(newUrl)
-      onUrlChange?.(newUrl)
+      setUrl(newUrl);
+      onUrlChange?.(newUrl);
     },
     [onUrlChange]
-  )
+  );
 
   const contextValue = useMemo<WebPreviewContextValue>(
     () => ({
@@ -52,7 +57,7 @@ export const WebPreview = ({ className, children, defaultUrl = '', onUrlChange, 
       url,
     }),
     [consoleOpen, handleUrlChange, url]
-  )
+  );
 
   return (
     <WebPreviewContext.Provider value={contextValue}>
@@ -60,20 +65,20 @@ export const WebPreview = ({ className, children, defaultUrl = '', onUrlChange, 
         {children}
       </div>
     </WebPreviewContext.Provider>
-  )
-}
+  );
+};
 
-export type WebPreviewNavigationProps = ComponentProps<'div'>
+export type WebPreviewNavigationProps = ComponentProps<'div'>;
 
 export const WebPreviewNavigation = ({ className, children, ...props }: WebPreviewNavigationProps) => (
   <div className={cn('flex items-center gap-1 border-b p-2', className)} {...props}>
     {children}
   </div>
-)
+);
 
 export type WebPreviewNavigationButtonProps = ComponentProps<typeof Button> & {
-  tooltip?: string
-}
+  tooltip?: string;
+};
 
 export const WebPreviewNavigationButton = ({
   onClick,
@@ -101,57 +106,59 @@ export const WebPreviewNavigationButton = ({
       </TooltipContent>
     </Tooltip>
   </TooltipProvider>
-)
+);
 
-export type WebPreviewUrlProps = ComponentProps<typeof Input>
+export type WebPreviewUrlProps = ComponentProps<typeof Input>;
 
-export const WebPreviewUrl = forwardRef<HTMLInputElement, WebPreviewUrlProps>(({ value, onChange, onKeyDown, ...props }, ref) => {
-  const { url, setUrl } = useWebPreview()
-  const [prevUrl, setPrevUrl] = useState(url)
-  const [inputValue, setInputValue] = useState(url)
+export const WebPreviewUrl = forwardRef<HTMLInputElement, WebPreviewUrlProps>(
+  ({ value, onChange, onKeyDown, ...props }, ref) => {
+    const { url, setUrl } = useWebPreview();
+    const [prevUrl, setPrevUrl] = useState(url);
+    const [inputValue, setInputValue] = useState(url);
 
-  // Sync input value with context URL when it changes externally (derived state pattern)
-  if (url !== prevUrl) {
-    setPrevUrl(url)
-    setInputValue(url)
+    // Sync input value with context URL when it changes externally (derived state pattern)
+    if (url !== prevUrl) {
+      setPrevUrl(url);
+      setInputValue(url);
+    }
+
+    const handleChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+      setInputValue(event.target.value);
+      onChange?.(event);
+    };
+
+    const handleKeyDown = useCallback(
+      (event: React.KeyboardEvent<HTMLInputElement>) => {
+        if (event.key === 'Enter') {
+          const target = event.target as HTMLInputElement;
+          setUrl(target.value);
+        }
+        onKeyDown?.(event);
+      },
+      [setUrl, onKeyDown]
+    );
+
+    return (
+      <Input
+        ref={ref}
+        className="h-8 flex-1 text-sm"
+        onChange={onChange ?? handleChange}
+        onKeyDown={handleKeyDown}
+        placeholder="Enter URL..."
+        value={value ?? inputValue}
+        {...props}
+      />
+    );
   }
-
-  const handleChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    setInputValue(event.target.value)
-    onChange?.(event)
-  }
-
-  const handleKeyDown = useCallback(
-    (event: React.KeyboardEvent<HTMLInputElement>) => {
-      if (event.key === 'Enter') {
-        const target = event.target as HTMLInputElement
-        setUrl(target.value)
-      }
-      onKeyDown?.(event)
-    },
-    [setUrl, onKeyDown]
-  )
-
-  return (
-    <Input
-      ref={ref}
-      className="h-8 flex-1 text-sm"
-      onChange={onChange ?? handleChange}
-      onKeyDown={handleKeyDown}
-      placeholder="Enter URL..."
-      value={value ?? inputValue}
-      {...props}
-    />
-  )
-})
-WebPreviewUrl.displayName = 'WebPreviewUrl'
+);
+WebPreviewUrl.displayName = 'WebPreviewUrl';
 
 export type WebPreviewBodyProps = ComponentProps<'iframe'> & {
-  loading?: ReactNode
-}
+  loading?: ReactNode;
+};
 
 export const WebPreviewBody = ({ className, loading, src, ...props }: WebPreviewBodyProps) => {
-  const { url } = useWebPreview()
+  const { url } = useWebPreview();
 
   return (
     <div className="flex-1">
@@ -164,131 +171,145 @@ export const WebPreviewBody = ({ className, loading, src, ...props }: WebPreview
       />
       {loading}
     </div>
-  )
-}
+  );
+};
 
 export type ConsoleLogEntry = {
-  level: 'log' | 'warn' | 'error' | 'result'
-  message: string
-  timestamp: Date
-}
+  level: 'log' | 'warn' | 'error' | 'result';
+  message: string;
+  timestamp: Date;
+};
 
 export type WebPreviewConsoleProps = ComponentProps<'div'> & {
-  logs?: ConsoleLogEntry[]
-  onClear?: () => void
-  onExecute?: (code: string) => void
-}
+  logs?: ConsoleLogEntry[];
+  onClear?: () => void;
+  onExecute?: (code: string) => void;
+};
 
-const LEVEL_LABELS = ['all', 'error', 'warn', 'log'] as const
-type LevelFilter = (typeof LEVEL_LABELS)[number]
+const LEVEL_LABELS = ['all', 'error', 'warn', 'log'] as const;
+type LevelFilter = (typeof LEVEL_LABELS)[number];
 
 const CopyButton = ({ text, className }: { text: string; className?: string }) => {
-  const [copied, setCopied] = useState(false)
+  const [copied, setCopied] = useState(false);
   const handleCopy = useCallback(() => {
     void navigator.clipboard.writeText(text).then(() => {
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1500)
-    })
-  }, [text])
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  }, [text]);
   return (
     <button
       type="button"
       onClick={handleCopy}
-      className={cn('inline-flex shrink-0 items-center justify-center rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover/log:opacity-100', className)}
+      className={cn(
+        'inline-flex shrink-0 items-center justify-center rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover/log:opacity-100',
+        className
+      )}
       aria-label="Copy"
     >
       {copied ? <CheckIcon className="h-3 w-3" /> : <CopyIcon className="h-3 w-3" />}
     </button>
-  )
-}
+  );
+};
 
-const MIN_CONSOLE_HEIGHT = 80
-const DEFAULT_CONSOLE_HEIGHT = 200
-const MAX_CONSOLE_HEIGHT = 600
+const MIN_CONSOLE_HEIGHT = 80;
+const DEFAULT_CONSOLE_HEIGHT = 200;
+const MAX_CONSOLE_HEIGHT = 600;
 
-export const WebPreviewConsole = ({ className, logs = [], onClear, onExecute, children, ...props }: WebPreviewConsoleProps) => {
-  const { consoleOpen, setConsoleOpen } = useWebPreview()
-  const [filter, setFilter] = useState<LevelFilter>('all')
-  const [scriptInput, setScriptInput] = useState('')
-  const [copyAllDone, setCopyAllDone] = useState(false)
-  const [height, setHeight] = useState(DEFAULT_CONSOLE_HEIGHT)
-  const scrollRef = useRef<HTMLDivElement>(null)
-  const draggingRef = useRef(false)
-  const startYRef = useRef(0)
-  const startHeightRef = useRef(0)
+export const WebPreviewConsole = ({
+  className,
+  logs = [],
+  onClear,
+  onExecute,
+  children,
+  ...props
+}: WebPreviewConsoleProps) => {
+  const { consoleOpen, setConsoleOpen } = useWebPreview();
+  const [filter, setFilter] = useState<LevelFilter>('all');
+  const [scriptInput, setScriptInput] = useState('');
+  const [copyAllDone, setCopyAllDone] = useState(false);
+  const [height, setHeight] = useState(DEFAULT_CONSOLE_HEIGHT);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const draggingRef = useRef(false);
+  const startYRef = useRef(0);
+  const startHeightRef = useRef(0);
 
-  const errorCount = useMemo(() => logs.filter((l) => l.level === 'error').length, [logs])
-  const warnCount = useMemo(() => logs.filter((l) => l.level === 'warn').length, [logs])
+  const errorCount = useMemo(() => logs.filter((l) => l.level === 'error').length, [logs]);
+  const warnCount = useMemo(() => logs.filter((l) => l.level === 'warn').length, [logs]);
 
-  const filtered = useMemo(
-    () => (filter === 'all' ? logs : logs.filter((l) => l.level === filter)),
-    [logs, filter]
-  )
+  const filtered = useMemo(() => (filter === 'all' ? logs : logs.filter((l) => l.level === filter)), [logs, filter]);
 
   // Auto-scroll to bottom when new logs arrive
   useEffect(() => {
-    const el = scrollRef.current
+    const el = scrollRef.current;
     if (el && consoleOpen) {
-      el.scrollTop = el.scrollHeight
+      el.scrollTop = el.scrollHeight;
     }
-  }, [filtered.length, consoleOpen])
+  }, [filtered.length, consoleOpen]);
 
   const handleCopyAll = useCallback(() => {
     const text = filtered
       .map((l) => `[${l.timestamp.toLocaleTimeString()}] [${l.level.toUpperCase()}] ${l.message}`)
-      .join('\n')
+      .join('\n');
     void navigator.clipboard.writeText(text).then(() => {
-      setCopyAllDone(true)
-      setTimeout(() => setCopyAllDone(false), 1500)
-    })
-  }, [filtered])
+      setCopyAllDone(true);
+      setTimeout(() => setCopyAllDone(false), 1500);
+    });
+  }, [filtered]);
 
   const handleExec = useCallback(() => {
-    const code = scriptInput.trim()
+    const code = scriptInput.trim();
     if (!code) {
-return
-}
-    onExecute?.(code)
-    setScriptInput('')
-  }, [scriptInput, onExecute])
+      return;
+    }
+    onExecute?.(code);
+    setScriptInput('');
+  }, [scriptInput, onExecute]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
       if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault()
-        handleExec()
+        e.preventDefault();
+        handleExec();
       }
     },
     [handleExec]
-  )
+  );
 
   // Resize via drag
-  const handlePointerDown = useCallback((e: React.PointerEvent) => {
-    e.preventDefault()
-    draggingRef.current = true
-    startYRef.current = e.clientY
-    startHeightRef.current = height
-    ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
-  }, [height])
+  const handlePointerDown = useCallback(
+    (e: React.PointerEvent) => {
+      e.preventDefault();
+      draggingRef.current = true;
+      startYRef.current = e.clientY;
+      startHeightRef.current = height;
+      (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    },
+    [height]
+  );
 
   const handlePointerMove = useCallback((e: React.PointerEvent) => {
     if (!draggingRef.current) {
-return
-}
-    const delta = startYRef.current - e.clientY
-    setHeight(Math.min(MAX_CONSOLE_HEIGHT, Math.max(MIN_CONSOLE_HEIGHT, startHeightRef.current + delta)))
-  }, [])
+      return;
+    }
+    const delta = startYRef.current - e.clientY;
+    setHeight(Math.min(MAX_CONSOLE_HEIGHT, Math.max(MIN_CONSOLE_HEIGHT, startHeightRef.current + delta)));
+  }, []);
 
   const handlePointerUp = useCallback(() => {
-    draggingRef.current = false
-  }, [])
+    draggingRef.current = false;
+  }, []);
 
   if (!consoleOpen) {
-return null
-}
+    return null;
+  }
 
   return (
-    <div className={cn('flex flex-col border-t bg-muted/50 font-mono text-sm', className)} style={{ height }} {...props}>
+    <div
+      className={cn('flex flex-col border-t bg-muted/50 font-mono text-sm', className)}
+      style={{ height }}
+      {...props}
+    >
       {/* Resize handle */}
       <div
         className="flex h-1.5 shrink-0 cursor-row-resize items-center justify-center hover:bg-accent/50 active:bg-accent"
@@ -312,18 +333,12 @@ return null
               onClick={() => setFilter(level)}
               className={cn(
                 'rounded px-1.5 py-0.5 text-[10px] font-medium transition-colors',
-                filter === level
-                  ? 'bg-accent text-accent-foreground'
-                  : 'text-muted-foreground hover:text-foreground'
+                filter === level ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:text-foreground'
               )}
             >
               {level === 'all' ? 'All' : level.charAt(0).toUpperCase() + level.slice(1)}
-              {level === 'error' && errorCount > 0 && (
-                <span className="ml-1 text-destructive">{errorCount}</span>
-              )}
-              {level === 'warn' && warnCount > 0 && (
-                <span className="ml-1 text-warning">{warnCount}</span>
-              )}
+              {level === 'error' && errorCount > 0 && <span className="ml-1 text-destructive">{errorCount}</span>}
+              {level === 'warn' && warnCount > 0 && <span className="ml-1 text-warning">{warnCount}</span>}
             </button>
           ))}
         </div>
@@ -341,7 +356,9 @@ return null
                 {copyAllDone ? <CheckIcon className="h-3 w-3" /> : <CopyIcon className="h-3 w-3" />}
               </button>
             </TooltipTrigger>
-            <TooltipContent side="top"><p>Copy all logs</p></TooltipContent>
+            <TooltipContent side="top">
+              <p>Copy all logs</p>
+            </TooltipContent>
           </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
@@ -355,7 +372,9 @@ return null
                 <Trash2Icon className="h-3 w-3" />
               </button>
             </TooltipTrigger>
-            <TooltipContent side="top"><p>Clear console</p></TooltipContent>
+            <TooltipContent side="top">
+              <p>Clear console</p>
+            </TooltipContent>
           </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
@@ -368,7 +387,9 @@ return null
                 <XIcon className="h-3 w-3" />
               </button>
             </TooltipTrigger>
-            <TooltipContent side="top"><p>Close console</p></TooltipContent>
+            <TooltipContent side="top">
+              <p>Close console</p>
+            </TooltipContent>
           </Tooltip>
         </TooltipProvider>
       </div>
@@ -391,7 +412,9 @@ return null
               )}
               key={`${i}-${log.timestamp.getTime()}-${log.level}`}
             >
-              <span className="shrink-0 select-none text-muted-foreground/60">{log.timestamp.toLocaleTimeString()}</span>
+              <span className="shrink-0 select-none text-muted-foreground/60">
+                {log.timestamp.toLocaleTimeString()}
+              </span>
               <span className="min-w-0 flex-1 break-all whitespace-pre-wrap">{log.message}</span>
               <CopyButton text={log.message} />
             </div>
@@ -429,11 +452,13 @@ return null
                   <PlayIcon className="h-3 w-3" />
                 </button>
               </TooltipTrigger>
-              <TooltipContent side="top"><p>Run (Enter)</p></TooltipContent>
+              <TooltipContent side="top">
+                <p>Run (Enter)</p>
+              </TooltipContent>
             </Tooltip>
           </TooltipProvider>
         </div>
       )}
     </div>
-  )
-}
+  );
+};

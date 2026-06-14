@@ -73,10 +73,7 @@ const detect = (scope: PullRequestBannerScope): Promise<ContainerPullRequest[]> 
  *
  * Pure — exported for tests.
  */
-export const mergePollResult = (
-  prev: ContainerPullRequest[],
-  next: ContainerPullRequest[]
-): ContainerPullRequest[] => {
+export const mergePollResult = (prev: ContainerPullRequest[], next: ContainerPullRequest[]): ContainerPullRequest[] => {
   const nextUrls = new Set(next.map((pr) => pr.url));
   const stickyMerged = prev.filter((pr) => pr.state === 'MERGED' && !nextUrls.has(pr.url));
   return [...next, ...stickyMerged];
@@ -93,44 +90,42 @@ export const mergePollResult = (
  * content fills its container absolutely); the default takes a row in flow (for
  * deck columns, which stack header → banner → content).
  */
-export const PullRequestBanner = memo(
-  ({ scope, floating }: { scope: PullRequestBannerScope; floating?: boolean }) => {
-    const styles = useStyles();
-    const [prs, setPrs] = useState<ContainerPullRequest[]>([]);
+export const PullRequestBanner = memo(({ scope, floating }: { scope: PullRequestBannerScope; floating?: boolean }) => {
+  const styles = useStyles();
+  const [prs, setPrs] = useState<ContainerPullRequest[]>([]);
 
-    const key = scope.kind === 'chat' ? 'chat' : scope.tabId;
-    const poll = useCallback(() => {
-      detect(scope)
-        .then((next) => setPrs((prev) => mergePollResult(prev, next)))
-        .catch(() => {
-          // Transient detection failure (container restarting, CLI hiccup):
-          // keep the current badges rather than blanking the banner.
-        });
-      // scope is reconstructed each render; key captures its identity.
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [key]);
+  const key = scope.kind === 'chat' ? 'chat' : scope.tabId;
+  const poll = useCallback(() => {
+    detect(scope)
+      .then((next) => setPrs((prev) => mergePollResult(prev, next)))
+      .catch(() => {
+        // Transient detection failure (container restarting, CLI hiccup):
+        // keep the current badges rather than blanking the banner.
+      });
+    // scope is reconstructed each render; key captures its identity.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
 
-    useEffect(() => {
-      // Scope changed (different tab/conversation): drop the previous scope's
-      // badges — sticky merged state is per-surface, not global.
-      setPrs([]);
-      poll();
-      const interval = setInterval(poll, POLL_INTERVAL_MS);
-      return () => clearInterval(interval);
-    }, [poll]);
+  useEffect(() => {
+    // Scope changed (different tab/conversation): drop the previous scope's
+    // badges — sticky merged state is per-surface, not global.
+    setPrs([]);
+    poll();
+    const interval = setInterval(poll, POLL_INTERVAL_MS);
+    return () => clearInterval(interval);
+  }, [poll]);
 
-    if (prs.length === 0) {
-      return null;
-    }
-    const tabId = scope.kind === 'code-tab' ? scope.tabId : undefined;
-    return (
-      <div className={mergeClasses(styles.banner, floating && styles.floating)}>
-        <span className={styles.label}>Pull request{prs.length > 1 ? 's' : ''}</span>
-        {prs.map((pr) => (
-          <PullRequestBadge key={pr.url} pr={pr} tabId={tabId} />
-        ))}
-      </div>
-    );
+  if (prs.length === 0) {
+    return null;
   }
-);
+  const tabId = scope.kind === 'code-tab' ? scope.tabId : undefined;
+  return (
+    <div className={mergeClasses(styles.banner, floating && styles.floating)}>
+      <span className={styles.label}>Pull request{prs.length > 1 ? 's' : ''}</span>
+      {prs.map((pr) => (
+        <PullRequestBadge key={pr.url} pr={pr} tabId={tabId} />
+      ))}
+    </div>
+  );
+});
 PullRequestBanner.displayName = 'PullRequestBanner';

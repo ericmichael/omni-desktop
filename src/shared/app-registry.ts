@@ -45,7 +45,16 @@ export type CustomAppEntry = {
 };
 
 export const BUILTIN_APPS: AppDescriptor[] = [
-  { id: 'chat', label: 'Chat', icon: 'Chat20Regular', kind: 'builtin-chat', scope: 'always', builtin: true, order: 0, columnScoped: true },
+  {
+    id: 'chat',
+    label: 'Chat',
+    icon: 'Chat20Regular',
+    kind: 'builtin-chat',
+    scope: 'always',
+    builtin: true,
+    order: 0,
+    columnScoped: true,
+  },
   {
     id: 'code',
     label: 'Code',
@@ -68,7 +77,16 @@ export const BUILTIN_APPS: AppDescriptor[] = [
     sandboxUrlKey: 'noVncUrl',
     columnScoped: true,
   },
-  { id: 'browser', label: 'Browser', icon: 'Globe20Regular', kind: 'builtin-browser', scope: 'always', builtin: true, order: 30, columnScoped: true },
+  {
+    id: 'browser',
+    label: 'Browser',
+    icon: 'Globe20Regular',
+    kind: 'builtin-browser',
+    scope: 'always',
+    builtin: true,
+    order: 30,
+    columnScoped: true,
+  },
   {
     id: 'terminal',
     label: 'Terminal',

@@ -1,7 +1,7 @@
 import {
+  _electron as electron,
   type Browser,
   type BrowserContext,
-  _electron as electron,
   type ElectronApplication,
   expect,
   type Page,

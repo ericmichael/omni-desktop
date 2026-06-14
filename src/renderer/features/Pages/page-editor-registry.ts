@@ -17,11 +17,7 @@
 import { createActor, fromCallback, fromPromise } from 'xstate';
 
 import { pageApi } from '@/renderer/features/Pages/state';
-import {
-  type PageEditorActor,
-  type PageEditorEvent,
-  pageEditorMachine,
-} from '@/shared/machines/page-editor.machine';
+import { type PageEditorActor, type PageEditorEvent, pageEditorMachine } from '@/shared/machines/page-editor.machine';
 import type { PageId } from '@/shared/types';
 
 type Entry = {
@@ -71,10 +67,7 @@ export function acquirePageEditor(pageId: PageId): PageEditorActor {
     existing.refs += 1;
     return existing.actor;
   }
-  const actor = createActor(
-    pageEditorMachine.provide({ actors: createPageActors(pageId) }),
-    { input: { pageId } },
-  );
+  const actor = createActor(pageEditorMachine.provide({ actors: createPageActors(pageId) }), { input: { pageId } });
   actor.start();
   registry.set(pageId, { actor, refs: 1 });
   return actor;

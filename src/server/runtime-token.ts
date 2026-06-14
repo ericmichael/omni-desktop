@@ -17,6 +17,8 @@
  */
 import { createHmac, timingSafeEqual } from 'node:crypto';
 
+import { uuidv4 } from '@/lib/uuid';
+
 const DEFAULT_TTL_SEC = 12 * 60 * 60; // 12h — comfortably longer than a session.
 
 export interface RuntimeTokenClaims {
@@ -58,7 +60,7 @@ export function resolveRuntimeTokenSecret(env: NodeJS.ProcessEnv = process.env):
   if (explicit) {
     console.warn('[runtime-token] OMNI_RUNTIME_TOKEN_SECRET is too short (<16 chars); ignoring.');
   }
-  const generated = crypto.randomUUID() + crypto.randomUUID();
+  const generated = uuidv4() + uuidv4();
   console.warn(
     '[runtime-token] OMNI_RUNTIME_TOKEN_SECRET not set — using a random per-process secret. ' +
       'Set it to a stable value for multi-replica deployments.'
@@ -90,11 +92,7 @@ export function signRuntimeToken(
  * Verify a runtime token and return its claims, or null if the signature is
  * invalid, the format is malformed, or it has expired.
  */
-export function verifyRuntimeToken(
-  secret: string,
-  token: string,
-  now = Date.now()
-): RuntimeTokenClaims | null {
+export function verifyRuntimeToken(secret: string, token: string, now = Date.now()): RuntimeTokenClaims | null {
   const dot = token.indexOf('.');
   if (dot <= 0) {
     return null;

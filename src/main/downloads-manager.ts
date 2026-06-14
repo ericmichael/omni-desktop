@@ -57,8 +57,8 @@ export class DownloadsManager {
    */
   watchSession(session: Session, partition?: string): void {
     if (this.watched.has(session)) {
-return;
-}
+      return;
+    }
     this.watched.add(session);
     session.on('will-download', (_event, item) => {
       const id = `dl-${nextId++}`;
@@ -125,9 +125,7 @@ export interface CreateDownloadsManagerOptions {
   sendToWindow: SendToWindow;
 }
 
-export function createDownloadsManager(
-  options: CreateDownloadsManagerOptions
-): [DownloadsManager, () => void] {
+export function createDownloadsManager(options: CreateDownloadsManagerOptions): [DownloadsManager, () => void] {
   const { ipc, sendToWindow } = options;
   const broadcast = () => sendToWindow('browser:downloads-changed', manager.list());
   const manager = new DownloadsManager(broadcast);
@@ -137,8 +135,8 @@ export function createDownloadsManager(
   // and also again whenever the renderer asks for state (cheap).
   const watchAll = () => {
     if (!app.isReady()) {
-return;
-}
+      return;
+    }
     try {
       manager.watchSession(sessionNS.defaultSession);
     } catch {
@@ -146,10 +144,10 @@ return;
     }
   };
   if (app.isReady()) {
-watchAll();
-} else {
-app.once('ready', watchAll);
-}
+    watchAll();
+  } else {
+    app.once('ready', watchAll);
+  }
 
   ipc.handle('browser:downloads-list', () => manager.list());
   ipc.handle('browser:downloads-clear', () => manager.clearCompleted());
@@ -157,15 +155,15 @@ app.once('ready', watchAll);
   ipc.handle('browser:downloads-open-file', (_: unknown, id: string) => {
     const entry = manager.list().find((e) => e.id === id);
     if (!entry?.savePath) {
-throw new Error('Download has no path yet');
-}
+      throw new Error('Download has no path yet');
+    }
     return shell.openPath(entry.savePath);
   });
   ipc.handle('browser:downloads-show-in-folder', (_: unknown, id: string) => {
     const entry = manager.list().find((e) => e.id === id);
     if (!entry?.savePath) {
-throw new Error('Download has no path yet');
-}
+      throw new Error('Download has no path yet');
+    }
     shell.showItemInFolder(entry.savePath);
   });
   /**
@@ -175,8 +173,8 @@ throw new Error('Download has no path yet');
    */
   ipc.handle('browser:downloads-watch-partition', (_: unknown, partition: string) => {
     if (!partition) {
-return;
-}
+      return;
+    }
     try {
       const s = sessionNS.fromPartition(partition);
       manager.watchSession(s, partition);

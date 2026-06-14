@@ -2,20 +2,26 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { ChevronDownIcon } from 'lucide-react';
 import React, { useMemo, useState } from 'react';
 
-import type { ActivityGroupData } from './activity-group';
-import { computeGroupSummary, formatGroupSummary } from './activity-group';
-import { formatArgsPreview, ToolCard } from './MessageList';
+import type { ToolItem } from '@/shared/chat-types';
 
-export function ActivityGroup({ group, statusText }: { group: ActivityGroupData; statusText?: string }) {
-  // Singleton without grouping — render as plain ToolCard
+import type { ActivityGroupData } from './activity-group';
+import { computeGroupSummary, formatArgsPreview, formatGroupSummary } from './activity-group';
+
+type ActivityGroupProps = {
+  group: ActivityGroupData;
+  statusText?: string;
+  renderTool: (item: ToolItem) => React.ReactNode;
+};
+
+export function ActivityGroup({ group, statusText, renderTool }: ActivityGroupProps) {
   if (group.tools.length === 1 && !group.runId) {
-    return <ToolCard item={group.tools[0]!} />;
+    return renderTool(group.tools[0]!);
   }
 
-  return <GroupCard group={group} statusText={statusText} />;
+  return <GroupCard group={group} statusText={statusText} renderTool={renderTool} />;
 }
 
-function GroupCard({ group, statusText }: { group: ActivityGroupData; statusText?: string }) {
+function GroupCard({ group, statusText, renderTool }: ActivityGroupProps) {
   const [expanded, setExpanded] = useState(false);
   const summary = useMemo(() => computeGroupSummary(group.tools), [group.tools]);
   const summaryText = useMemo(() => formatGroupSummary(summary), [summary]);
@@ -84,7 +90,7 @@ function GroupCard({ group, statusText }: { group: ActivityGroupData; statusText
           >
             <div data-slot="activity-group-content" className="space-y-2 pl-4 border-l-2 border-border ml-3">
               {group.tools.map((t, i) => (
-                <ToolCard key={t.call_id || i} item={t} />
+                <React.Fragment key={t.call_id || i}>{renderTool(t)}</React.Fragment>
               ))}
             </div>
           </motion.div>

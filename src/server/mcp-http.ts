@@ -90,9 +90,7 @@ export function registerMcpHttpRoute(fastify: FastifyInstance, deps: McpHttpDeps
       request.log.error({ err }, '[mcp-http] request failed');
       if (!reply.raw.headersSent) {
         reply.raw.writeHead(500, { 'Content-Type': 'application/json' });
-        reply.raw.end(
-          JSON.stringify({ jsonrpc: '2.0', error: { code: -32603, message: 'Internal error' }, id: null })
-        );
+        reply.raw.end(JSON.stringify({ jsonrpc: '2.0', error: { code: -32603, message: 'Internal error' }, id: null }));
       }
       void transport.close();
       void server.close();

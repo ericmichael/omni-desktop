@@ -128,11 +128,7 @@ const listStagedFiles = async (gitDir: string, hasHead: boolean): Promise<FileDi
   }
   // No HEAD: every tracked path in the index is "added" for the first commit.
   // `git ls-files --stage -z` lists index entries, which is what we need.
-  const { stdout } = await execFileAsync(
-    'git',
-    ['-C', gitDir, 'ls-files', '--stage', '-z'],
-    { timeout: 10_000 }
-  );
+  const { stdout } = await execFileAsync('git', ['-C', gitDir, 'ls-files', '--stage', '-z'], { timeout: 10_000 });
   const files: FileDiff[] = [];
   for (const entry of stdout.split('\0')) {
     if (!entry) {
@@ -160,20 +156,16 @@ const listStagedFiles = async (gitDir: string, hasHead: boolean): Promise<FileDi
 };
 
 const listUnstagedFiles = async (gitDir: string): Promise<FileDiff[]> => {
-  const { stdout } = await execFileAsync(
-    'git',
-    ['-C', gitDir, 'diff', '--name-status', '-M', '-C', '-z'],
-    { timeout: 10_000 }
-  );
+  const { stdout } = await execFileAsync('git', ['-C', gitDir, 'diff', '--name-status', '-M', '-C', '-z'], {
+    timeout: 10_000,
+  });
   return parseNameStatus(stdout, 'unstaged');
 };
 
 const listUntrackedFiles = async (gitDir: string): Promise<FileDiff[]> => {
-  const { stdout } = await execFileAsync(
-    'git',
-    ['-C', gitDir, 'ls-files', '--others', '--exclude-standard', '-z'],
-    { timeout: 10_000 }
-  );
+  const { stdout } = await execFileAsync('git', ['-C', gitDir, 'ls-files', '--others', '--exclude-standard', '-z'], {
+    timeout: 10_000,
+  });
   const files: FileDiff[] = [];
   for (const filePath of stdout.split('\0')) {
     if (!filePath) {
@@ -236,9 +228,7 @@ const patchArgsFor = (gitDir: string, file: FileDiff, mergeBase: string, hasHead
       return [...common, mergeBase, 'HEAD', '--', file.path];
     case 'staged':
       // `--cached` without HEAD can error; pass the empty tree explicitly.
-      return hasHead
-        ? [...common, '--cached', '--', file.path]
-        : [...common, '--cached', EMPTY_TREE, '--', file.path];
+      return hasHead ? [...common, '--cached', '--', file.path] : [...common, '--cached', EMPTY_TREE, '--', file.path];
     case 'unstaged':
       return [...common, '--', file.path];
     case 'untracked':
@@ -297,7 +287,9 @@ export async function getGitFilesChanged(input: GitFilesChangedInput): Promise<D
           continue;
         }
 
-        const { stdout: patch } = await execFileAsync('git', patchArgsFor(gitDir, file, mergeBase, hasHead), { timeout: 5_000 });
+        const { stdout: patch } = await execFileAsync('git', patchArgsFor(gitDir, file, mergeBase, hasHead), {
+          timeout: 5_000,
+        });
         file.patch = patch;
 
         if (file.patch) {

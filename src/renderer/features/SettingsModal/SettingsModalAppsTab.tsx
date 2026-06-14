@@ -126,12 +126,12 @@ const useStyles = makeStyles({
     transitionProperty: 'border-color, color, background-color',
     transitionDuration: '120ms',
     ':hover': {
-      borderColor: tokens.colorNeutralStroke1,
+      border: `1px solid ${tokens.colorNeutralStroke1}`,
       color: tokens.colorNeutralForeground1,
     },
   },
   iconBtnSelected: {
-    borderColor: tokens.colorBrandStroke1,
+    border: `1px solid ${tokens.colorBrandStroke1}`,
     backgroundColor: tokens.colorBrandBackground2,
     color: tokens.colorBrandForeground1,
   },
@@ -217,10 +217,7 @@ const AppCard = memo(
           title="Show in the session dock (column-scoped). When off, the app only opens as its own deck column."
         >
           <span>In dock</span>
-          <Switch
-            checked={app.columnScoped ?? false}
-            onCheckedChange={(v) => onToggleColumnScoped(app.id, v)}
-          />
+          <Switch checked={app.columnScoped ?? false} onCheckedChange={(v) => onToggleColumnScoped(app.id, v)} />
         </label>
         <button
           type="button"
@@ -376,7 +373,10 @@ export const SettingsModalAppsTab = memo(() => {
 
   const handleRemove = useCallback((id: string) => {
     const current = persistedStoreApi.$atom.get().customApps ?? [];
-    void persistedStoreApi.setKey('customApps', current.filter((a) => a.id !== id));
+    void persistedStoreApi.setKey(
+      'customApps',
+      current.filter((a) => a.id !== id)
+    );
   }, []);
 
   const handleToggleColumnScoped = useCallback((id: string, value: boolean) => {
@@ -397,17 +397,10 @@ export const SettingsModalAppsTab = memo(() => {
 
       <div className={styles.section}>
         <SectionLabel>Installed</SectionLabel>
-        {customApps.length === 0 && !showForm && (
-          <div className={styles.empty}>No custom apps added yet.</div>
-        )}
+        {customApps.length === 0 && !showForm && <div className={styles.empty}>No custom apps added yet.</div>}
 
         {customApps.map((app) => (
-          <AppCard
-            key={app.id}
-            app={app}
-            onRemove={handleRemove}
-            onToggleColumnScoped={handleToggleColumnScoped}
-          />
+          <AppCard key={app.id} app={app} onRemove={handleRemove} onToggleColumnScoped={handleToggleColumnScoped} />
         ))}
 
         {showForm ? (
@@ -439,19 +432,25 @@ export const SettingsModalAppsTab = memo(() => {
                 <Switch checked={columnScoped} onCheckedChange={setColumnScoped} />
                 <span>
                   {columnScoped
-                    ? 'Available column-scoped — visible in each session\'s dock.'
+                    ? "Available column-scoped — visible in each session's dock."
                     : 'Global only — opens as its own deck column via the app launcher.'}
                 </span>
               </label>
             </FormField>
             <div className={styles.addFormActions}>
-              <Button size="sm" variant="ghost" onClick={handleCancel}>Cancel</Button>
-              <Button size="sm" onClick={handleAdd} isDisabled={!isValid}>Add</Button>
+              <Button size="sm" variant="ghost" onClick={handleCancel}>
+                Cancel
+              </Button>
+              <Button size="sm" onClick={handleAdd} isDisabled={!isValid}>
+                Add
+              </Button>
             </div>
           </div>
         ) : (
           <div>
-            <Button size="sm" variant="ghost" onClick={() => setShowForm(true)}>Add custom app</Button>
+            <Button size="sm" variant="ghost" onClick={() => setShowForm(true)}>
+              Add custom app
+            </Button>
           </div>
         )}
       </div>

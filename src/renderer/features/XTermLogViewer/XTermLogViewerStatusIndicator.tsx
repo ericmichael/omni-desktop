@@ -1,4 +1,4 @@
-import { makeStyles, mergeClasses, shorthands,tokens } from '@fluentui/react-components';
+import { makeStyles, mergeClasses, shorthands, tokens } from '@fluentui/react-components';
 import Linkify from 'linkify-react';
 import type { Opts as LinkifyOpts } from 'linkifyjs';
 import type { HTMLAttributes, PropsWithChildren } from 'react';
@@ -36,10 +36,7 @@ export const XTermLogViewerStatusIndicator = ({
 }: PropsWithChildren<Props>) => {
   const styles = useStyles();
   return (
-    <div
-      className={mergeClasses(styles.root, className)}
-      {...rest}
-    >
+    <div className={mergeClasses(styles.root, className)} {...rest}>
       <span
         data-loading={isLoading}
         className="[&_a]:font-semibold [&_a:hover]:underline data-[loading=true]:after:inline-block data-[loading=true]:after:animate-ellipsis data-[loading=true]:after:content-['...']"

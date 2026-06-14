@@ -7,8 +7,8 @@
  * The manager watches sessions (default + every browser partition the
  * renderer registers) and attaches a single handler per session.
  */
-import { session as sessionNS } from 'electron';
 import type { Session } from 'electron';
+import { session as sessionNS } from 'electron';
 
 import type { IIpcListener } from '@/shared/ipc-listener';
 import type { PermissionName, PermissionRequest } from '@/shared/permissions-types';
@@ -36,8 +36,8 @@ export class PermissionsManager {
 
   watchSession(session: Session, partition?: string): void {
     if (this.watched.has(session)) {
-return;
-}
+      return;
+    }
     this.watched.add(session);
     session.setPermissionRequestHandler((webContents, permission, callback, details) => {
       const id = `perm-${nextId++}`;
@@ -76,8 +76,8 @@ return;
   decide(id: string, allow: boolean): void {
     const p = this.pending.get(id);
     if (!p) {
-return;
-}
+      return;
+    }
     p.decide(allow);
     this.pending.delete(id);
     this.broadcast(this.list());
@@ -102,13 +102,11 @@ export function createPermissionsManager(options: {
   // `browser:permissions-watch-partition`.
 
   ipc.handle('browser:permissions-list', () => manager.list());
-  ipc.handle('browser:permissions-decide', (_: unknown, id: string, allow: boolean) =>
-    manager.decide(id, allow)
-  );
+  ipc.handle('browser:permissions-decide', (_: unknown, id: string, allow: boolean) => manager.decide(id, allow));
   ipc.handle('browser:permissions-watch-partition', (_: unknown, partition: string) => {
     if (!partition) {
-return;
-}
+      return;
+    }
     try {
       const s = sessionNS.fromPartition(partition);
       manager.watchSession(s, partition);
@@ -119,5 +117,10 @@ return;
 
   queueMicrotask(() => emit(manager.list()));
 
-  return [manager, () => { /* nothing to release — handlers live on Session */ }];
+  return [
+    manager,
+    () => {
+      /* nothing to release — handlers live on Session */
+    },
+  ];
 }

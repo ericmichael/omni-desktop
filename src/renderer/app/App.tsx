@@ -119,28 +119,28 @@ export const App = () => {
       {/* All framer-motion animations respect the OS reduce-motion setting.
           Hand-written CSS animations carry their own media-query overrides. */}
       <MotionConfig reducedMotion="user">
-      <SystemInfoProvider>
-        <div className={styles.shell}>
-          <ErrorBoundary FallbackComponent={ErrorBoundaryFallback}>
-            <SystemInfoLoadingGate>
-              <AuthGate>
-                <MigrationNotice />
-                <div className={styles.layout}>
-                  <MainContent />
-                </div>
-                <QuickCapture />
-                <GlobalAgent />
-                <GlobalAgentAmbientGlow />
-                <VoiceHotkeys />
-                <CommandPalette />
-                <SyncBar />
-                <StatusAnnouncer />
-              </AuthGate>
-            </SystemInfoLoadingGate>
-            <ToastContainer />
-          </ErrorBoundary>
-        </div>
-      </SystemInfoProvider>
+        <SystemInfoProvider>
+          <div className={styles.shell}>
+            <ErrorBoundary FallbackComponent={ErrorBoundaryFallback}>
+              <SystemInfoLoadingGate>
+                <AuthGate>
+                  <MigrationNotice />
+                  <div className={styles.layout}>
+                    <MainContent />
+                  </div>
+                  <QuickCapture />
+                  <GlobalAgent />
+                  <GlobalAgentAmbientGlow />
+                  <VoiceHotkeys />
+                  <CommandPalette />
+                  <SyncBar />
+                  <StatusAnnouncer />
+                </AuthGate>
+              </SystemInfoLoadingGate>
+              <ToastContainer />
+            </ErrorBoundary>
+          </div>
+        </SystemInfoProvider>
       </MotionConfig>
     </FluentProvider>
   );

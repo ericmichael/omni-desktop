@@ -144,7 +144,7 @@ Medium — one quarter of 20% time across the platform team. Not a crunch.
     {
       seedKeySuffix: 'done-audit-failover',
       title: 'Audit db-failover runbook',
-      description: 'Walk through with someone who hasn\'t seen it. Fix any ambiguities.',
+      description: "Walk through with someone who hasn't seen it. Fix any ambiguities.",
       columnId: 'completed',
       priority: 'high',
       resolution: 'completed',
@@ -183,7 +183,7 @@ Medium — one quarter of 20% time across the platform team. Not a crunch.
     {
       seedKeySuffix: 'spec-rotation-runbook',
       title: 'Write rotation.md',
-      description: 'Currently referenced in context.md but doesn\'t exist. Decide the shape before writing.',
+      description: "Currently referenced in context.md but doesn't exist. Decide the shape before writing.",
       columnId: 'spec',
       priority: 'medium',
       createdAgo: 7 * day,

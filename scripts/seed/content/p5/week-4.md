@@ -16,7 +16,7 @@
 
 ## Readings
 
-- *Think Python* ch. 10.
+- _Think Python_ ch. 10.
 
 ## Student flags
 

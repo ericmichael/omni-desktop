@@ -26,8 +26,7 @@ for (const name of MODULES) {
     // exactly what this script exists to repair. Propagate anything else (a truly
     // missing dep, syntax error, etc.) so real breakage isn't masked by a rebuild.
     const isAbiMismatch = msg.includes('NODE_MODULE_VERSION') || msg.includes('was compiled against');
-    const isMissingBinary =
-      err?.code === 'MODULE_NOT_FOUND' && (msg.includes('.node') || msg.includes('/build/'));
+    const isMissingBinary = err?.code === 'MODULE_NOT_FOUND' && (msg.includes('.node') || msg.includes('/build/'));
     if (isAbiMismatch || isMissingBinary) {
       broken.push(name);
     } else {

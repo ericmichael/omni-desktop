@@ -51,9 +51,7 @@ export const TicketAutopilotLaunchDialog = memo(() => {
       <DialogContent className="max-w-md">
         <DialogHeader>Start autopilot</DialogHeader>
         <DialogBody className="flex flex-col gap-3">
-          <div className="text-sm text-fg-muted">
-            Choose the sandbox profile for this autopilot run.
-          </div>
+          <div className="text-sm text-fg-muted">Choose the sandbox profile for this autopilot run.</div>
           <div className="flex items-center justify-between gap-3 rounded-lg border border-stroke-1 bg-bgCard p-3">
             <div className="min-w-0">
               <div className="truncate text-sm font-medium text-fg">{ticket.title || 'Untitled ticket'}</div>
@@ -67,7 +65,9 @@ export const TicketAutopilotLaunchDialog = memo(() => {
           </div>
         </DialogBody>
         <DialogFooter>
-          <Button variant="ghost" onClick={handleClose}>Cancel</Button>
+          <Button variant="ghost" onClick={handleClose}>
+            Cancel
+          </Button>
           <Button onClick={handleStart}>Start autopilot</Button>
         </DialogFooter>
       </DialogContent>

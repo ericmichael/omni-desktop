@@ -6,12 +6,12 @@ launcher.
 
 ## Layout
 
-| File                          | Purpose                                                              |
-|-------------------------------|----------------------------------------------------------------------|
-| `Dockerfile`                  | Image definition (postgres, redis, code-server, VNC stack, runtimes) |
-| `entrypoint.sh`               | UID/GID remap, infra startup, gitconfig persistence                  |
-| `start-vnc.sh`                | Spawns Xvfb + XFCE + x11vnc + noVNC. Invoked by `omni serve` as a service. |
-| `apply-network-isolation.sh`  | Applies `OMNI_SANDBOX_NETWORK_ALLOWLIST` via iptables on boot.       |
+| File                         | Purpose                                                                    |
+| ---------------------------- | -------------------------------------------------------------------------- |
+| `Dockerfile`                 | Image definition (postgres, redis, code-server, VNC stack, runtimes)       |
+| `entrypoint.sh`              | UID/GID remap, infra startup, gitconfig persistence                        |
+| `start-vnc.sh`               | Spawns Xvfb + XFCE + x11vnc + noVNC. Invoked by `omni serve` as a service. |
+| `apply-network-isolation.sh` | Applies `OMNI_SANDBOX_NETWORK_ALLOWLIST` via iptables on boot.             |
 
 ## Building
 

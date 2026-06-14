@@ -123,7 +123,9 @@ const nextTransitionText = (ticket: Ticket, pipeline: Pipeline): string => {
   if (!nextColumn) {
     return 'No next column is available; if the current definition of done is satisfied, call `goal_complete` and stop.';
   }
-  const gateText = nextColumn.gate ? ' This destination is a human gate; move there and stop without advancing further.' : '';
+  const gateText = nextColumn.gate
+    ? ' This destination is a human gate; move there and stop without advancing further.'
+    : '';
   return `When the current column definition of done is satisfied, move the ticket to \`${nextColumn.label}\` with \`move_ticket\`.${gateText}`;
 };
 

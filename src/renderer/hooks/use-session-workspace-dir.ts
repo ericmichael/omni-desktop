@@ -11,10 +11,7 @@ import { emitter } from '@/renderer/services/ipc';
  * Returns `null` until resolved (or when `baseDir` is empty), which keeps
  * `useAutoLaunch` from launching with a half-formed path.
  */
-export function useSessionWorkspaceDir(
-  baseDir: string | null | undefined,
-  sessionId: string
-): string | null {
+export function useSessionWorkspaceDir(baseDir: string | null | undefined, sessionId: string): string | null {
   const [dir, setDir] = useState<string | null>(null);
   useEffect(() => {
     if (!baseDir) {

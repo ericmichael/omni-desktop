@@ -22,23 +22,29 @@ Status: design, decision-complete, not yet implemented. Companion to `docs/teams
 ## 1. Decisions (resolved)
 
 ### 1.1 Control-plane scoping
+
 `users`/`teams`/`team_members`/`invitations` are NOT under `app.current_tenant`. Introduce a second GUC **`app.current_principal`** set per-tx; principal-scoped RLS on these tables. Membership lookups go through a **`SECURITY DEFINER` function `omni_team_ids(principal)`** to avoid RLS self-recursion on `team_members`. Read-isolation via RLS; membership/role **writes** additionally app-level capability-checked server-side. `omni_app` (NOBYPASSRLS) becomes mandatory.
 
 ### 1.2 Roles + capabilities
+
 `role ∈ {owner, admin, member}`. member = read/write project data, own user overlay, read merged team settings (secrets masked). admin = + write team_settings (T-layer), rotate team secrets, invite/remove/role member↔admin. owner (exactly one) = + transfer ownership, delete team. Any member may assign tickets.
 
 ### 1.3 Bootstrap
+
 **Auto-create a personal team** on first sign-in (principal with no memberships): create `users` row (from EasyAuth claims), `teams` row `kind='personal'`, `team_members` owner row. That team's id is the default active team. Invitations are additive (accepting adds a membership; never blocks getting your personal team).
 
 ### 1.4 Existing-data migration (zero loss, no re-onboarding)
+
 For each existing principal (`tenant_id != 'local'`): create user + **team with `id = principal`** (reuse the principal id as the personal team id → **no project-data row is rewritten**, since every row already has `tenant_id = principal`) + owner membership. Bifurcate the existing `user_settings.data` blob: T-keys → `team_settings(team_id=principal)`; G-keys → `user_settings_v2(principal)` top level; P-keys → nested under `data->'byTeam'->principal`. Because it's a migrated solo user, the whole prior config becomes the team base with an empty user overlay → **effective merged config is byte-identical to today**. Always create a `'local'` user/team/membership idempotently so non-easyauth keeps working. Retain old `user_settings` (drop in a later release).
 
 ### 1.5 Membership resolution + session wiring
+
 Principal = identity (EasyAuth id or `'local'`). Client sends `activeTeamId` on `/ws` (persisted in `localStorage`, defaults to personal team). On connect: bootstrap user → resolve requested team → **verify `(team, principal)` membership, else close `4403`** → session carries `principalId` (identity) + `teamId` (data scope). `createTenant` re-keyed by `teamId`; user-scoped reads/secrets keyed by connecting principal. `HandlerContext` + `PersistentSession` gain `principalId`; session key → **`${teamId}::${principalId}::${sessionId}`**. Runtime-token claims → `{teamId, principalId, sessionId}`.
 
 **Fan-out gap (must fix with the re-keying, not after):** `store:changed` carries the full `StoreData` incl. U-only P-keys (`codeTabs`, `activeTicketId`, …). Broadcasting one user's tabs team-wide is a leak + bug. Fix: project/team keys via `sendToTenant(teamId, …)`; **user-scoped keys via new `sendToPrincipalInTeam(teamId, principalId, …)`**. Mutation handlers route by key class.
 
 ### 1.6 Authorization (server-side only)
+
 `requireRole(ctx, teamId, min)` in new `src/server/authz.ts` gates all T-layer writes + control-plane mutations. U-layer writes never gated. Renderer only hides/disables admin UI by `team:get-my-role`. **Team secrets masked**: merged `settings:get-*` replaces team-origin secret fields with sentinel `"__OMNI_TEAM_SECRET__"`; on save, sentinel = preserve stored value (never overwrite); rotation is an explicit admin action.
 
 ## 2. Data model (PG migrations v6–v9)
@@ -89,7 +95,7 @@ Move secrets to Postgres behind the existing `SecretStore` interface. `user_secr
 - **Cross-team leak via superuser** — highest severity; gate rollout on Commit 1 (omni_app + boot guard).
 - **Migration data loss** — new tables populated by copy, source retained, guarded; test merged effective `StoreData` byte-equals pre-migration blob.
 - **personal-team-id == principal-id invariant** — shared teams get UUIDs; personal teams reuse principal id (EasyAuth GUID or `'local'`); uniqueness from `teams` PK.
-- **`store:changed` user-key leak** — must land *with* team re-keying (Commit 4), not after.
+- **`store:changed` user-key leak** — must land _with_ team re-keying (Commit 4), not after.
 - **Secret masking round-trip** — server must preserve stored value when sentinel echoed back; test it.
 - **RLS recursion on `team_members`** — `SECURITY DEFINER omni_team_ids()` in the same migration as the policy.
 - **Multi-replica NOTIFY** — new settings/secret tables need dedicated notify triggers; listener re-hydrates both composite halves.

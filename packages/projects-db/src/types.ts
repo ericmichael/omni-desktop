@@ -6,7 +6,7 @@ export type ProjectRow = {
   slug: string;
   is_personal: number;
   auto_dispatch: number;
-  sources: string;             // JSON array of ProjectSource; defaults to '[]'
+  sources: string; // JSON array of ProjectSource; defaults to '[]'
   /**
    * Per-project sandbox profile name. ``null`` = inherit the user-default
    * profile selected in launcher Settings. Profile names resolve to YAML
@@ -15,8 +15,8 @@ export type ProjectRow = {
   sandbox_profile: string | null;
   /** JSON-stringified ProjectConfig — see src/lib/project-to-config.ts (launcher). */
   config: string | null;
-  due_date: string | null;     // epoch ms, stringified
-  pinned_at: string | null;    // epoch ms, stringified
+  due_date: string | null; // epoch ms, stringified
+  pinned_at: string | null; // epoch ms, stringified
   created_at: string;
   updated_at: string;
 };
@@ -41,7 +41,7 @@ export type TicketRow = {
   description: string;
   priority: string;
   branch: string | null;
-  blocked_by: string;                    // JSON array
+  blocked_by: string; // JSON array
   resolution: string | null;
   resolved_at: string | null;
   archived_at: string | null;
@@ -54,11 +54,11 @@ export type TicketRow = {
   phase: string | null;
   phase_changed_at: string | null;
   supervisor_task_id: string | null;
-  token_usage: string | null;           // JSON
-  runs: string;                          // JSON array
+  token_usage: string | null; // JSON
+  runs: string; // JSON array
   // Launcher-specific PR state
-  pr_review: string | null;             // JSON array of PullRequestLink
-  pr_merged_at: string | null;          // JSON map source id -> epoch ms
+  pr_review: string | null; // JSON array of PullRequestLink
+  pr_merged_at: string | null; // JSON map source id -> epoch ms
   // Teams (SQLite v9 / PG v6) — assigned member's principal id, or null
   assignee: string | null;
   created_at: string;
@@ -83,7 +83,7 @@ export type MilestoneRow = {
   status: string;
   due_date: string | null;
   completed_at: string | null;
-  pinned_at: string | null;    // epoch ms, stringified
+  pinned_at: string | null; // epoch ms, stringified
   created_at: string;
   updated_at: string;
 };
@@ -97,7 +97,7 @@ export type PageRow = {
   sort_order: number;
   is_root: number;
   kind: string;
-  properties: string | null;  // JSON
+  properties: string | null; // JSON
   created_at: string;
   updated_at: string;
 };
@@ -118,12 +118,12 @@ export type TaskRow = {
   id: string;
   project_id: string;
   task_description: string;
-  status: string;              // JSON
+  status: string; // JSON
   created_at: string;
   branch: string | null;
   worktree_path: string | null;
   worktree_name: string | null;
   session_id: string | null;
   ticket_id: string | null;
-  last_urls: string | null;   // JSON
+  last_urls: string | null; // JSON
 };

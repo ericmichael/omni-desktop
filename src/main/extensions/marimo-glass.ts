@@ -1,11 +1,7 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 
-import {
-  MARIMO_GLASS_CSS_FILENAME,
-  MARIMO_GLASS_CSS_OFF,
-  MARIMO_GLASS_CSS_ON,
-} from '@/lib/marimo-glass-css';
+import { MARIMO_GLASS_CSS_FILENAME, MARIMO_GLASS_CSS_OFF, MARIMO_GLASS_CSS_ON } from '@/lib/marimo-glass-css';
 import { ensureDirectory } from '@/main/util';
 
 /**
@@ -22,10 +18,7 @@ export const getGlassCssPath = (projectPagesDir: string): string =>
  * with content selected by the `enabled` flag. Always writes — overwrite is
  * the point, since toggling glass mode on/off rewrites this file.
  */
-export const writeGlassCss = async (
-  projectPagesDir: string,
-  enabled: boolean
-): Promise<void> => {
+export const writeGlassCss = async (projectPagesDir: string, enabled: boolean): Promise<void> => {
   await ensureDirectory(projectPagesDir);
   const filePath = getGlassCssPath(projectPagesDir);
   const content = enabled ? MARIMO_GLASS_CSS_ON : MARIMO_GLASS_CSS_OFF;
@@ -49,11 +42,11 @@ export const ensureNotebookCssReference = async (notebookPath: string): Promise<
   }
   const bare = 'app = marimo.App()';
   if (!content.includes(bare)) {
-return;
-}
+    return;
+  }
   if (content.includes('css_file')) {
-return;
-}
+    return;
+  }
   const next = content.replace(bare, 'app = marimo.App(css_file="marimo-glass.css")');
   await fs.writeFile(notebookPath, next, 'utf-8');
 };

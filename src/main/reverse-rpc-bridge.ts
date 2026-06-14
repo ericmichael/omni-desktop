@@ -30,10 +30,7 @@ const handlers = new Map<string, MainReverseHandler>();
  * previous handler for the channel (last-write-wins; useful when the
  * compute-client setup runs again after a settings change).
  */
-export const registerMainReverseHandler = (
-  channel: string,
-  handler: MainReverseHandler
-): (() => void) => {
+export const registerMainReverseHandler = (channel: string, handler: MainReverseHandler): (() => void) => {
   handlers.set(channel, handler);
   return () => {
     const current = handlers.get(channel);

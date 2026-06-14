@@ -70,11 +70,7 @@ function extractAccountId(tokens: { id_token?: string; access_token?: string }):
     }
     const authNs = claims['https://api.openai.com/auth'] as { chatgpt_account_id?: string } | undefined;
     const orgs = claims['organizations'] as Array<{ id?: string }> | undefined;
-    return (
-      (claims['chatgpt_account_id'] as string | undefined) ??
-      authNs?.chatgpt_account_id ??
-      orgs?.[0]?.id
-    );
+    return (claims['chatgpt_account_id'] as string | undefined) ?? authNs?.chatgpt_account_id ?? orgs?.[0]?.id;
   };
   if (tokens.id_token) {
     const acct = fromClaims(parseJwtClaims(tokens.id_token));
@@ -242,7 +238,7 @@ export function loginWithBrowser(openUrl: (url: string) => void): Promise<CodexS
         cleanup();
         reject(new Error('Codex authorization timed out'));
       },
-      5 * 60 * 1000,
+      5 * 60 * 1000
     );
 
     const cleanup = (): void => {

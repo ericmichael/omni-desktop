@@ -19,7 +19,7 @@
  * against the cloud launcher.
  */
 
-import { setOauthTokens, getOauthTokens, deleteOauthTokens } from '@/main/secret-store';
+import { deleteOauthTokens, getOauthTokens, setOauthTokens } from '@/main/secret-store';
 
 /** Persisted shape — keep stable; the renderer reads this via cloud:get-access-token. */
 export type EntraTokens = {
@@ -52,13 +52,15 @@ const EXPIRY_SKEW_MS = 60_000;
  */
 function decodeJwt(token: string): Record<string, unknown> | undefined {
   const payload = token.split('.')[1];
-  if (!payload) return undefined;
+  if (!payload) {
+    return undefined;
+  }
   try {
     // Pad base64url for atob/Buffer.
-    const b64 = payload.replace(/-/g, '+').replace(/_/g, '/').padEnd(
-      payload.length + ((4 - (payload.length % 4)) % 4),
-      '=',
-    );
+    const b64 = payload
+      .replace(/-/g, '+')
+      .replace(/_/g, '/')
+      .padEnd(payload.length + ((4 - (payload.length % 4)) % 4), '=');
     return JSON.parse(Buffer.from(b64, 'base64').toString('utf-8'));
   } catch {
     return undefined;
@@ -66,15 +68,22 @@ function decodeJwt(token: string): Record<string, unknown> | undefined {
 }
 
 /** Pull the AAD object id + display fields out of a v2.0 id_token / access_token. */
-export function extractAccount(
-  tokens: { id_token?: string; access_token: string },
-): { oid: string; name?: string; email?: string } | undefined {
+export function extractAccount(tokens: {
+  id_token?: string;
+  access_token: string;
+}): { oid: string; name?: string; email?: string } | undefined {
   const tryClaims = (raw: string | undefined) => {
-    if (!raw) return undefined;
+    if (!raw) {
+      return undefined;
+    }
     const claims = decodeJwt(raw);
-    if (!claims) return undefined;
+    if (!claims) {
+      return undefined;
+    }
     const oid = typeof claims['oid'] === 'string' ? (claims['oid'] as string) : undefined;
-    if (!oid) return undefined;
+    if (!oid) {
+      return undefined;
+    }
     const name = typeof claims['name'] === 'string' ? (claims['name'] as string) : undefined;
     const email =
       typeof claims['email'] === 'string'
@@ -97,16 +106,11 @@ const tokenUrl = (tenantId: string): string =>
  *  offline_access for the refresh token. ``.default`` returns a token whose
  *  ``aud`` is the resource (the launcher app's clientId), which is what
  *  EasyAuth's ``allowedAudiences`` is configured to accept. */
-const defaultScope = (clientId: string): string =>
-  `${clientId}/.default openid profile offline_access`;
+const defaultScope = (clientId: string): string => `${clientId}/.default openid profile offline_access`;
 
 /** Refresh an access token using the refresh_token grant. AAD rotates the
  *  refresh token on each call; we always store the latest. */
-export async function refreshTokens(
-  tenantId: string,
-  clientId: string,
-  refreshToken: string,
-): Promise<EntraTokens> {
+export async function refreshTokens(tenantId: string, clientId: string, refreshToken: string): Promise<EntraTokens> {
   const resp = await fetch(tokenUrl(tenantId), {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -136,22 +140,17 @@ export async function refreshTokens(
 
 /** Returns *tokens* unchanged when the access token is still fresh, else
  *  refreshes and persists the rotated bundle. */
-export async function ensureFreshTokens(
-  tenantId: string,
-  clientId: string,
-  tokens: EntraTokens,
-): Promise<EntraTokens> {
-  if (tokens.expires - EXPIRY_SKEW_MS > Date.now()) return tokens;
+export async function ensureFreshTokens(tenantId: string, clientId: string, tokens: EntraTokens): Promise<EntraTokens> {
+  if (tokens.expires - EXPIRY_SKEW_MS > Date.now()) {
+    return tokens;
+  }
   const refreshed = await refreshTokens(tenantId, clientId, tokens.refresh);
   setOauthTokens(STORE_ID, refreshed as unknown as Record<string, unknown>);
   return refreshed;
 }
 
 /** Fetch + persist a fresh access token. Throws if not signed in. */
-export async function ensureFreshAccessToken(
-  tenantId: string,
-  clientId: string,
-): Promise<string> {
+export async function ensureFreshAccessToken(tenantId: string, clientId: string): Promise<string> {
   const stored = getOauthTokens(STORE_ID) as EntraTokens | undefined;
   if (!stored?.refresh) {
     throw new Error('Not signed in to cloud');
@@ -164,7 +163,9 @@ export async function ensureFreshAccessToken(
  *  (id_token isn't kept). */
 export function getStatus(): EntraStatus {
   const stored = getOauthTokens(STORE_ID) as EntraTokens | undefined;
-  if (!stored?.access) return { signedIn: false };
+  if (!stored?.access) {
+    return { signedIn: false };
+  }
   const account = extractAccount({ access_token: stored.access });
   return account ? { signedIn: true, account } : { signedIn: false };
 }
@@ -211,9 +212,7 @@ export async function loginWithDeviceFlow(opts: {
   onCode({
     userCode: start.user_code,
     verificationUri: start.verification_uri,
-    ...(start.verification_uri_complete
-      ? { verificationUriComplete: start.verification_uri_complete }
-      : {}),
+    ...(start.verification_uri_complete ? { verificationUriComplete: start.verification_uri_complete } : {}),
   });
 
   // AAD's default interval is 5s; bump slightly to avoid ``slow_down``.
@@ -285,9 +284,7 @@ export async function loginWithDeviceFlow(opts: {
     if (body.error === 'authorization_declined') {
       throw new Error('Cloud sign-in declined');
     }
-    throw new Error(
-      `Cloud sign-in failed: ${body.error ?? 'unknown'} — ${body.error_description ?? ''}`,
-    );
+    throw new Error(`Cloud sign-in failed: ${body.error ?? 'unknown'} — ${body.error_description ?? ''}`);
   }
   throw new Error('Cloud sign-in timed out');
 }
