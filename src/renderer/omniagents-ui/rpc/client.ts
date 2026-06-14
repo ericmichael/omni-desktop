@@ -652,7 +652,13 @@ export class RPCClient {
       params.trigger_run = true;
     }
     if (opts?.variables) {
-      params.variables = opts.variables;
+      const { safe_tool_overrides, ...variables } = opts.variables;
+      if (Object.keys(variables).length > 0) {
+        params.variables = variables;
+      }
+      if (safe_tool_overrides && !opts.safeToolOverrides) {
+        params.safe_tool_overrides = safe_tool_overrides;
+      }
     }
     if (opts?.safeToolOverrides) {
       params.safe_tool_overrides = opts.safeToolOverrides;

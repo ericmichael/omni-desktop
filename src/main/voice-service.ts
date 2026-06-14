@@ -38,11 +38,13 @@ const VOICE_DEPS = [
   'safetensors',
   'huggingface_hub',
 ];
+const VOICE_REQUEST_TIMEOUT_MS = 110_000;
 
 /** Per-request resolver state keyed by the protocol message `id`. */
 interface Pending {
   resolve: (value: unknown) => void;
   reject: (err: Error) => void;
+  timer: NodeJS.Timeout;
   /** TTS only: called for each streamed audio chunk. */
   onAudio?: (pcmBase64: string, sampleRate: number) => void;
 }
@@ -227,10 +229,19 @@ export class VoiceService {
     const id = String(++this.seq);
     const line = `${JSON.stringify({ id, ...payload })}\n`;
     return new Promise<unknown>((resolve, reject) => {
-      this.pending.set(id, { resolve, reject, onAudio });
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error(`voice request timed out after ${Math.round(VOICE_REQUEST_TIMEOUT_MS / 1000)}s`));
+        this.restartAfterStalledRequest();
+      }, VOICE_REQUEST_TIMEOUT_MS);
+      this.pending.set(id, { resolve, reject, timer, onAudio });
       this.proc!.stdin!.write(line, (err) => {
         if (err) {
+          const pending = this.pending.get(id);
           this.pending.delete(id);
+          if (pending) {
+            clearTimeout(pending.timer);
+          }
           reject(err);
         }
       });
@@ -283,6 +294,7 @@ export class VoiceService {
     }
     // Terminal message for this request.
     this.pending.delete(id);
+    clearTimeout(p.timer);
     if (msg.ok === false) {
       p.reject(new Error(typeof msg.error === 'string' ? msg.error : 'voice request failed'));
     } else {
@@ -292,7 +304,10 @@ export class VoiceService {
 
   private onExit(code: number | null): void {
     const err = new Error(`voice sidecar exited (code ${code})`);
-    this.pending.forEach((p) => p.reject(err));
+    this.pending.forEach((p) => {
+      clearTimeout(p.timer);
+      p.reject(err);
+    });
     this.pending.clear();
     // Reject (not resolve) any in-flight start() so the caller sees the crash
     // instead of a false "ready" — otherwise voice:start/api returns success
@@ -307,6 +322,15 @@ export class VoiceService {
   private fail(message: string): void {
     this.status = { state: 'error', stt: false, tts: false, sampleRate: null, error: message };
     this.readyWaiters.splice(0).forEach((w) => w.reject(new Error(message)));
+  }
+
+  private restartAfterStalledRequest(): void {
+    const child = this.proc;
+    if (!child) {
+      return;
+    }
+    console.warn('[voice] restarting sidecar after stalled request');
+    child.kill();
   }
 
   dispose(): void {
