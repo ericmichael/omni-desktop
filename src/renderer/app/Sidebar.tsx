@@ -59,6 +59,13 @@ const ALL_TABS: {
     iconActive: <DataBarVertical24Filled />,
     enterprise: true,
   },
+  {
+    value: 'routines',
+    label: 'Routines',
+    icon: <DataBarVertical24Regular />,
+    iconActive: <DataBarVertical24Filled />,
+    alwaysVisible: true,
+  },
   { value: 'gallery', label: 'Gallery', icon: <Beaker24Regular />, iconActive: <Beaker24Filled />, devOnly: true },
   {
     value: 'settings',

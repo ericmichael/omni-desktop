@@ -50,6 +50,7 @@ import { backfillProjectConfigs } from '@/main/project-config-backfill';
 import { closeProjectDb, getDb, openProjectDb } from '@/main/project-db';
 import { registerProjectHandlers } from '@/main/project-handlers';
 import { ProjectManager } from '@/main/project-manager';
+import { registerScheduledTaskHandlers, ScheduledTaskManager } from '@/main/scheduled-task-manager';
 import { registerSnapshotHandlers } from '@/main/snapshot-manager';
 import { registerSupervisorHandlers } from '@/main/supervisor-handlers';
 import { getOmniConfigDir } from '@/main/util';
@@ -407,6 +408,7 @@ export const wireGlobalHandlers = async (arg: {
   type TenantInstance = {
     projectManager: ProjectManager;
     processManager: ProcessManager;
+    scheduledTaskManager: ScheduledTaskManager;
     settings: SettingsStore;
     extension: ExtensionManager;
     browser: BrowserContext;
@@ -565,6 +567,18 @@ export const wireGlobalHandlers = async (arg: {
     };
     applyPlatformClient();
     settings.onDidAnyChange(() => applyPlatformClient());
+    const scheduledTaskManager = new ScheduledTaskManager({
+      store: settings as any,
+      processManager,
+      sendToWindow: (channel, ...args) => {
+        if (channel === 'store:changed') {
+          tenantSend('store:changed', getStoreSnapshot(teamId, principalId));
+          return;
+        }
+        tenantSend(channel, ...args);
+      },
+    });
+    scheduledTaskManager.start();
     // Computer-as-sandbox: the per-principal set of `local:<machineId>` picker
     // entries is derived from the machine registry in `broadcastMachines` (a
     // sync cache read by `getStoreSnapshot`). The single `HostBridgePreparer`
@@ -610,7 +624,7 @@ export const wireGlobalHandlers = async (arg: {
     // (enabledExtensions / browser profiles/tabs/history/bookmarks are per-user).
     const extension = new ExtensionManager({ store: settings as any, sendToWindow: tenantSend });
     const browser = buildBrowserContext(settings as any, tenantSend);
-    ref = { projectManager, processManager, settings, extension, browser, configDir };
+    ref = { projectManager, processManager, scheduledTaskManager, settings, extension, browser, configDir };
     tenants.set(tenantKey(teamId, principalId), ref);
     return ref;
   };
@@ -874,6 +888,7 @@ export const wireGlobalHandlers = async (arg: {
   );
   registerInboxHandlers(ipc, (e) => tenantPM(e).inbox);
   registerProcessHandlers(ipc, (e) => ctxTenant(e).processManager);
+  registerScheduledTaskHandlers(ipc, (e) => ctxTenant(e).scheduledTaskManager);
   registerExtensionHandlers(ipc, (e) => ctxTenant(e).extension);
   registerBrowserHandlers(ipc, (e) => ctxTenant(e).browser);
 
@@ -1628,6 +1643,7 @@ export const wireGlobalHandlers = async (arg: {
       await stopListener();
     }
     const tenantCleanups = [...tenants.values()].flatMap((t) => [
+      Promise.resolve(t.scheduledTaskManager.stop()),
       t.projectManager.exit(),
       t.processManager.cleanup(),
       t.extension.cleanup(),

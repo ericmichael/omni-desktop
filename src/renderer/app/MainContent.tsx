@@ -8,6 +8,7 @@ import { Code } from '@/renderer/features/Code/Code';
 import { Dashboards } from '@/renderer/features/Dashboards/Dashboards';
 import { Gallery } from '@/renderer/features/Gallery/Gallery';
 import { OnboardingWizard } from '@/renderer/features/Onboarding/OnboardingWizard';
+import { ScheduledTasks } from '@/renderer/features/ScheduledTasks/ScheduledTasks';
 import { SettingsPage } from '@/renderer/features/SettingsModal/SettingsPage';
 import { Tickets } from '@/renderer/features/Tickets/Tickets';
 import { persistedStoreApi } from '@/renderer/services/store';
@@ -93,6 +94,7 @@ export const MainContent = memo(() => {
     { key: 'spaces', Component: Code },
     { key: 'projects', Component: Tickets },
     { key: 'dashboards', Component: Dashboards },
+    { key: 'routines', Component: ScheduledTasks },
     { key: 'settings', Component: SettingsPage },
     ...(import.meta.env.DEV ? [{ key: 'gallery' as const, Component: Gallery }] : []),
   ];
