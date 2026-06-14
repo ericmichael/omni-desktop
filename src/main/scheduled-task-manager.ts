@@ -7,8 +7,8 @@ import { WebSocket as WsWebSocket } from 'ws';
 import { mostRecentMissedScheduledTaskRun, nextScheduledTaskRun } from '@/lib/scheduled-task-schedule';
 import type { ProcessManager } from '@/main/process-manager';
 import { ensureDirectory } from '@/main/util';
-import { getLocalWorkspaceDir } from '@/shared/project-source';
 import type { IIpcListener } from '@/shared/ipc-listener';
+import { getLocalWorkspaceDir } from '@/shared/project-source';
 import type {
   IpcRendererEvents,
   Project,

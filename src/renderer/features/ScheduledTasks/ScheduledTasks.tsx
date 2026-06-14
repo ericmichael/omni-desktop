@@ -393,7 +393,10 @@ export const ScheduledTasks = memo(() => {
             {sorted.map((task) => (
               <button
                 key={task.id}
-                className={mergeClasses(styles.listItem, !creating && selectedTask?.id === task.id && styles.selectedListItem)}
+                className={mergeClasses(
+                  styles.listItem,
+                  !creating && selectedTask?.id === task.id && styles.selectedListItem
+                )}
                 type="button"
                 onClick={() => {
                   cancelEdit();
@@ -541,7 +544,11 @@ const RoutineDetail = ({
           {task.profileName ? getProfileMenuLabel(task.profileName, machines) : 'Default sandbox'}
         </div>
       </div>
-      <Switch checked={task.enabled} label={task.enabled ? 'Active' : 'Paused'} onChange={(_, data) => void onToggle(task, data.checked)} />
+      <Switch
+        checked={task.enabled}
+        label={task.enabled ? 'Active' : 'Paused'}
+        onChange={(_, data) => void onToggle(task, data.checked)}
+      />
     </div>
     <div className={styles.row}>
       <Button size="small" onClick={() => void onRunNow(task)} disabled={busy}>
@@ -574,7 +581,13 @@ const RoutineDetail = ({
       </div>
     ) : null}
     <AllowedToolsPanel styles={styles} task={task} onRevokeTool={onRevokeTool} onRevokeMcpTool={onRevokeMcpTool} />
-    <RunHistory styles={styles} task={task} onOpenSession={onOpenSession} onAllowTool={onAllowTool} onAllowMcpTool={onAllowMcpTool} />
+    <RunHistory
+      styles={styles}
+      task={task}
+      onOpenSession={onOpenSession}
+      onAllowTool={onAllowTool}
+      onAllowMcpTool={onAllowMcpTool}
+    />
   </div>
 );
 
@@ -1021,7 +1034,7 @@ async function resolveRoutineWorkspaceDir(
       return source.workspaceDir;
     }
     if (store.workspaceDir && project) {
-      return `${store.workspaceDir.replace(/[\/]+$/, '')}/Projects/${project.slug}`;
+      return `${store.workspaceDir.replace(/[/\\]+$/, '')}/Projects/${project.slug}`;
     }
     return undefined;
   }
