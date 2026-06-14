@@ -8,8 +8,10 @@ import { mostRecentMissedScheduledTaskRun, nextScheduledTaskRun } from '@/lib/sc
 import type { ProcessManager } from '@/main/process-manager';
 import { ensureDirectory } from '@/main/util';
 import type { IIpcListener } from '@/shared/ipc-listener';
+import { getLocalWorkspaceDir } from '@/shared/project-source';
 import type {
   IpcRendererEvents,
+  Project,
   ScheduledTask,
   ScheduledTaskAllowedMcpTool,
   ScheduledTaskInput,
@@ -18,6 +20,7 @@ import type {
   ScheduledTaskUpdate,
   StoreData,
 } from '@/shared/types';
+import { firstSource } from '@/shared/types';
 
 const TICK_MS = 60_000;
 const HISTORY_LIMIT = 25;
@@ -60,6 +63,7 @@ type ApprovalRequest = {
 type ManagerDeps = {
   store: ScheduledTaskStore;
   processManager: ProcessManager;
+  getProjects: () => Project[];
   sendToWindow?: <T extends keyof IpcRendererEvents>(channel: T, ...args: IpcRendererEvents[T]) => void;
   now?: () => number;
 };
@@ -72,6 +76,7 @@ type NotifiableRunStatus = Extract<
 export class ScheduledTaskManager {
   private store: ScheduledTaskStore;
   private processManager: ProcessManager;
+  private getProjects: () => Project[];
   private sendToWindow?: ManagerDeps['sendToWindow'];
   private now: () => number;
   private timer: ReturnType<typeof setInterval> | null = null;
@@ -82,6 +87,7 @@ export class ScheduledTaskManager {
   constructor(deps: ManagerDeps) {
     this.store = deps.store;
     this.processManager = deps.processManager;
+    this.getProjects = deps.getProjects;
     this.sendToWindow = deps.sendToWindow;
     this.now = deps.now ?? Date.now;
   }
@@ -511,11 +517,19 @@ export class ScheduledTaskManager {
 
   private async resolveWorkspaceDir(task: ScheduledTask, sessionId: string): Promise<string> {
     const baseDir = this.store.get('workspaceDir');
+    if (task.projectId) {
+      const project = this.getProjects().find((item) => item.id === task.projectId);
+      const projectWorkspaceDir = getLocalWorkspaceDir(firstSource(project));
+      if (projectWorkspaceDir) {
+        return projectWorkspaceDir;
+      }
+      if (!baseDir?.trim()) {
+        throw new Error('Workspace root is not configured');
+      }
+      return join(baseDir, 'Projects', project?.slug ?? task.projectId);
+    }
     if (!baseDir?.trim()) {
       throw new Error('Workspace root is not configured');
-    }
-    if (task.projectId) {
-      return baseDir;
     }
     const safeId = sessionId.replace(/[^a-zA-Z0-9_-]/g, '') || 'default';
     const dir = join(baseDir, 'Sessions', safeId);

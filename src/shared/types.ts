@@ -693,6 +693,9 @@ export const schema: Schema<StoreData> = {
         ticketId: { type: 'string' },
         sessionId: { type: 'string' },
         ticketTitle: { type: 'string' },
+        routineId: { type: 'string' },
+        routineName: { type: 'string' },
+        routineSchedule: { type: 'string' },
         workspaceDir: { type: 'string' },
         profileName: { type: 'string' },
         containerId: { type: 'string' },
@@ -1316,6 +1319,9 @@ export type CodeTab = {
   ticketId?: TicketId;
   sessionId?: string;
   ticketTitle?: string;
+  routineId?: string;
+  routineName?: string;
+  routineSchedule?: string;
   workspaceDir?: string;
   /** When set, this tab renders as a global app column (webview) instead of an agent session. */
   customAppId?: string;

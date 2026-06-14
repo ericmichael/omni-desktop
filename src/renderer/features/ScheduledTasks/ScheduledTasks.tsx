@@ -30,6 +30,7 @@ import type {
   ScheduledTaskRun,
   ScheduledTaskSchedule,
 } from '@/shared/types';
+import { firstSource } from '@/shared/types';
 
 const useStyles = makeStyles({
   root: {
@@ -58,7 +59,7 @@ const useStyles = makeStyles({
   },
   grid: {
     display: 'grid',
-    gridTemplateColumns: 'minmax(280px, 420px) minmax(320px, 1fr)',
+    gridTemplateColumns: 'minmax(260px, 360px) minmax(420px, 1fr)',
     gap: '20px',
     '@media (max-width: 900px)': {
       gridTemplateColumns: '1fr',
@@ -71,6 +72,38 @@ const useStyles = makeStyles({
   cards: {
     display: 'grid',
     gap: '12px',
+  },
+  listCard: {
+    padding: '12px',
+  },
+  listHeader: {
+    alignItems: 'center',
+    display: 'flex',
+    justifyContent: 'space-between',
+    marginBottom: '10px',
+  },
+  listItem: {
+    alignItems: 'flex-start',
+    backgroundColor: tokens.colorNeutralBackground1,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    borderRadius: tokens.borderRadiusMedium,
+    color: tokens.colorNeutralForeground1,
+    cursor: 'pointer',
+    display: 'grid',
+    gap: '4px',
+    padding: '12px',
+    textAlign: 'left',
+    width: '100%',
+    ':hover': {
+      backgroundColor: tokens.colorNeutralBackground1Hover,
+    },
+  },
+  selectedListItem: {
+    backgroundColor: tokens.colorBrandBackground2,
+    border: `1px solid ${tokens.colorBrandStroke1}`,
+  },
+  detailCard: {
+    padding: '18px',
   },
   taskCard: {
     padding: '16px',
@@ -135,6 +168,13 @@ const useStyles = makeStyles({
     display: 'flex',
     gap: '8px',
     justifyContent: 'space-between',
+  },
+  section: {
+    borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
+    display: 'grid',
+    gap: '12px',
+    marginTop: '16px',
+    paddingTop: '14px',
   },
   runItem: {
     border: `1px solid ${tokens.colorNeutralStroke2}`,
@@ -210,6 +250,8 @@ export const ScheduledTasks = memo(() => {
   const machines = useStore($machines);
   const [isEnterprise, setIsEnterprise] = useState(false);
   const [createForm, setCreateForm] = useState<RoutineFormState>(() => createEmptyFormState(store.defaultProfileName));
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [creating, setCreating] = useState(true);
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<RoutineFormState | null>(null);
   const [busyTaskId, setBusyTaskId] = useState<string | null>(null);
@@ -231,6 +273,17 @@ export const ScheduledTasks = memo(() => {
       ),
     [store.scheduledTasks]
   );
+  const selectedTask = useMemo(
+    () => sorted.find((task) => task.id === selectedTaskId) ?? sorted[0] ?? null,
+    [selectedTaskId, sorted]
+  );
+
+  useEffect(() => {
+    if (creating || selectedTaskId || !selectedTask) {
+      return;
+    }
+    setSelectedTaskId(selectedTask.id);
+  }, [creating, selectedTask, selectedTaskId]);
 
   const createTask = async () => {
     setError(null);
@@ -241,6 +294,7 @@ export const ScheduledTasks = memo(() => {
         projectId: current.projectId,
         profileName: current.profileName,
       }));
+      setCreating(false);
     } catch (err) {
       setError((err as Error).message);
     }
@@ -248,6 +302,8 @@ export const ScheduledTasks = memo(() => {
 
   const startEdit = (task: ScheduledTask) => {
     setEditError(null);
+    setCreating(false);
+    setSelectedTaskId(task.id);
     setEditingTaskId(task.id);
     setEditForm(toFormState(task, store.defaultProfileName));
   };
@@ -287,32 +343,7 @@ export const ScheduledTasks = memo(() => {
     if (!run.sessionId) {
       return;
     }
-    const tabs = persistedStoreApi.getKey('codeTabs') ?? [];
-    const existing = tabs.find((tab) => tab.sessionId === run.sessionId);
-    if (existing) {
-      await persistedStoreApi.setKey('activeCodeTabId', existing.id);
-      await persistedStoreApi.setKey('layoutMode', 'spaces');
-      return;
-    }
-    let workspaceDir: string | undefined;
-    if (task.projectId) {
-      workspaceDir = store.workspaceDir;
-    } else if (store.workspaceDir) {
-      try {
-        workspaceDir = await emitter.invoke('util:session-workspace-dir', store.workspaceDir, run.sessionId);
-      } catch {}
-    }
-    const tab: CodeTab = {
-      id: `routine-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      projectId: task.projectId ?? null,
-      sessionId: run.sessionId,
-      profileName: task.profileName ?? store.defaultProfileName ?? 'host',
-      profileNameExplicit: Boolean(task.profileName),
-      createdAt: Date.now(),
-      ...(workspaceDir ? { workspaceDir } : {}),
-    };
-    await persistedStoreApi.setKey('codeTabs', [...tabs, tab]);
-    await persistedStoreApi.setKey('activeCodeTabId', tab.id);
+    await ensureRoutineSessionTab(task, run.sessionId, store, true);
     await persistedStoreApi.setKey('layoutMode', 'spaces');
   };
 
@@ -343,94 +374,222 @@ export const ScheduledTasks = memo(() => {
         </div>
       </div>
       <div className={styles.grid}>
-        <Card>
-          <RoutineForm
-            styles={styles}
-            value={createForm}
-            projects={store.projects}
-            sandboxContext={{ isEnterprise, available: store.availableSandboxProfiles, machines }}
-            machines={machines}
-            submitLabel="Create routine"
-            error={error}
-            onChange={setCreateForm}
-            onSubmit={() => void createTask()}
-          />
+        <Card className={styles.listCard}>
+          <div className={styles.listHeader}>
+            <div className={styles.runHeading}>Routine index</div>
+            <Button
+              size="small"
+              appearance={creating ? 'primary' : 'secondary'}
+              onClick={() => {
+                cancelEdit();
+                setCreating(true);
+              }}
+            >
+              New
+            </Button>
+          </div>
+          <div className={styles.cards}>
+            {sorted.length === 0 ? <div className={styles.empty}>No routines yet.</div> : null}
+            {sorted.map((task) => (
+              <button
+                key={task.id}
+                className={mergeClasses(
+                  styles.listItem,
+                  !creating && selectedTask?.id === task.id && styles.selectedListItem
+                )}
+                type="button"
+                onClick={() => {
+                  cancelEdit();
+                  setCreating(false);
+                  setSelectedTaskId(task.id);
+                }}
+              >
+                <span className={styles.taskName}>{task.name}</span>
+                <span className={styles.muted}>{formatSchedule(task)}</span>
+                <span className={styles.muted}>{formatProject(task, store.projects)}</span>
+                <span className={styles.muted}>{task.history[0] ? lastRunLabel(task.history[0]) : 'Never run'}</span>
+              </button>
+            ))}
+          </div>
         </Card>
-        <div className={styles.cards}>
-          {sorted.length === 0 ? <Card className={styles.empty}>No routines yet.</Card> : null}
-          {sorted.map((task) => {
-            const isEditing = editingTaskId === task.id && editForm;
-            return (
-              <Card key={task.id} className={styles.taskCard}>
-                <div className={styles.taskTop}>
-                  <div>
-                    <div className={styles.taskName}>{task.name}</div>
-                    <div className={styles.muted}>{formatSchedule(task)}</div>
-                    <div className={styles.muted}>{formatProject(task, store.projects)}</div>
-                    <div className={styles.muted}>
-                      {task.profileName ? getProfileMenuLabel(task.profileName, machines) : 'Default sandbox'}
-                    </div>
-                  </div>
-                  <Switch
-                    checked={task.enabled}
-                    label={task.enabled ? 'Active' : 'Paused'}
-                    onChange={(_, data) => void scheduledTaskApi.update(task.id, { enabled: data.checked })}
-                  />
-                </div>
-                <div className={styles.row}>
-                  <Button size="small" onClick={() => void runNow(task)} disabled={busyTaskId === task.id}>
-                    Run now
-                  </Button>
-                  <Button size="small" appearance="secondary" onClick={() => startEdit(task)}>
-                    Edit
-                  </Button>
-                  <Button size="small" appearance="secondary" onClick={() => void scheduledTaskApi.delete(task.id)}>
-                    Delete
-                  </Button>
-                  <span className={styles.muted}>{task.history[0] ? lastRunLabel(task.history[0]) : 'Never run'}</span>
-                </div>
-                {isEditing ? (
-                  <div className={styles.runHistory} aria-label={`Edit ${task.name}`}>
-                    <div className={styles.runHeading}>Edit routine</div>
-                    <RoutineForm
-                      styles={styles}
-                      value={editForm}
-                      projects={store.projects}
-                      sandboxContext={{ isEnterprise, available: store.availableSandboxProfiles, machines }}
-                      machines={machines}
-                      submitLabel="Save changes"
-                      error={editError}
-                      showEnabled
-                      busy={savingTaskId === task.id}
-                      onChange={setEditForm}
-                      onSubmit={() => void saveEdit(task)}
-                      onCancel={cancelEdit}
-                    />
-                  </div>
-                ) : null}
-                <AllowedToolsPanel
-                  styles={styles}
-                  task={task}
-                  onRevokeTool={revokeTool}
-                  onRevokeMcpTool={revokeMcpTool}
-                />
-                <RunHistory
-                  styles={styles}
-                  task={task}
-                  onOpenSession={openSession}
-                  onAllowTool={allowTool}
-                  onAllowMcpTool={allowMcpTool}
-                />
-              </Card>
-            );
-          })}
-        </div>
+        <Card className={styles.detailCard}>
+          {creating ? (
+            <>
+              <div className={styles.runHeading}>Create routine</div>
+              <RoutineForm
+                styles={styles}
+                value={createForm}
+                projects={store.projects}
+                sandboxContext={{ isEnterprise, available: store.availableSandboxProfiles, machines }}
+                machines={machines}
+                submitLabel="Create routine"
+                error={error}
+                onChange={setCreateForm}
+                onSubmit={() => void createTask()}
+              />
+            </>
+          ) : selectedTask ? (
+            <RoutineDetail
+              styles={styles}
+              task={selectedTask}
+              projects={store.projects}
+              machines={machines}
+              isEditing={editingTaskId === selectedTask.id && Boolean(editForm)}
+              editForm={editForm}
+              editError={editError}
+              saving={savingTaskId === selectedTask.id}
+              busy={busyTaskId === selectedTask.id}
+              sandboxContext={{ isEnterprise, available: store.availableSandboxProfiles, machines }}
+              onRunNow={runNow}
+              onStartEdit={startEdit}
+              onDelete={async (task) => {
+                await scheduledTaskApi.delete(task.id);
+                setSelectedTaskId(null);
+                setCreating(sorted.length <= 1);
+              }}
+              onToggle={(task, enabled) => scheduledTaskApi.update(task.id, { enabled })}
+              onEditChange={setEditForm}
+              onSaveEdit={saveEdit}
+              onCancelEdit={cancelEdit}
+              onOpenSession={openSession}
+              onAllowTool={allowTool}
+              onAllowMcpTool={allowMcpTool}
+              onRevokeTool={revokeTool}
+              onRevokeMcpTool={revokeMcpTool}
+            />
+          ) : (
+            <div className={styles.empty}>Select or create a routine.</div>
+          )}
+        </Card>
       </div>
     </div>
   );
 });
 
 ScheduledTasks.displayName = 'ScheduledTasks';
+
+export const RoutineSessionWatcher = memo(() => {
+  const store = useStore(persistedStoreApi.$atom);
+
+  useEffect(() => {
+    for (const task of store.scheduledTasks ?? []) {
+      if (!task.runningSessionId) {
+        continue;
+      }
+      void ensureRoutineSessionTab(task, task.runningSessionId, store);
+    }
+  }, [store]);
+
+  return null;
+});
+
+RoutineSessionWatcher.displayName = 'RoutineSessionWatcher';
+
+type RoutineDetailProps = {
+  styles: ReturnType<typeof useStyles>;
+  task: ScheduledTask;
+  projects: Project[];
+  machines: Parameters<typeof getProfileMenuLabel>[1];
+  sandboxContext: ComponentProps<typeof SandboxPicker>['context'];
+  isEditing: boolean;
+  editForm: RoutineFormState | null;
+  editError: string | null;
+  saving: boolean;
+  busy: boolean;
+  onRunNow: (task: ScheduledTask) => Promise<void>;
+  onStartEdit: (task: ScheduledTask) => void;
+  onDelete: (task: ScheduledTask) => Promise<void>;
+  onToggle: (task: ScheduledTask, enabled: boolean) => Promise<ScheduledTask>;
+  onEditChange: (value: RoutineFormState) => void;
+  onSaveEdit: (task: ScheduledTask) => Promise<void>;
+  onCancelEdit: () => void;
+  onOpenSession: (task: ScheduledTask, run: ScheduledTaskRun) => Promise<void>;
+  onAllowTool: (task: ScheduledTask, toolName: string) => Promise<void>;
+  onAllowMcpTool: (task: ScheduledTask, tool: ScheduledTaskAllowedMcpTool) => Promise<void>;
+  onRevokeTool: (task: ScheduledTask, toolName: string) => Promise<void>;
+  onRevokeMcpTool: (task: ScheduledTask, tool: ScheduledTaskAllowedMcpTool) => Promise<void>;
+};
+
+const RoutineDetail = ({
+  styles,
+  task,
+  projects,
+  machines,
+  sandboxContext,
+  isEditing,
+  editForm,
+  editError,
+  saving,
+  busy,
+  onRunNow,
+  onStartEdit,
+  onDelete,
+  onToggle,
+  onEditChange,
+  onSaveEdit,
+  onCancelEdit,
+  onOpenSession,
+  onAllowTool,
+  onAllowMcpTool,
+  onRevokeTool,
+  onRevokeMcpTool,
+}: RoutineDetailProps) => (
+  <div>
+    <div className={styles.taskTop}>
+      <div>
+        <div className={styles.taskName}>{task.name}</div>
+        <div className={styles.muted}>{formatSchedule(task)}</div>
+        <div className={styles.muted}>{formatProject(task, projects)}</div>
+        <div className={styles.muted}>
+          {task.profileName ? getProfileMenuLabel(task.profileName, machines) : 'Default sandbox'}
+        </div>
+      </div>
+      <Switch
+        checked={task.enabled}
+        label={task.enabled ? 'Active' : 'Paused'}
+        onChange={(_, data) => void onToggle(task, data.checked)}
+      />
+    </div>
+    <div className={styles.row}>
+      <Button size="small" onClick={() => void onRunNow(task)} disabled={busy}>
+        Run now
+      </Button>
+      <Button size="small" appearance="secondary" onClick={() => onStartEdit(task)}>
+        Edit
+      </Button>
+      <Button size="small" appearance="secondary" onClick={() => void onDelete(task)}>
+        Delete
+      </Button>
+    </div>
+    {isEditing && editForm ? (
+      <div className={styles.section} aria-label={`Edit ${task.name}`}>
+        <div className={styles.runHeading}>Edit routine</div>
+        <RoutineForm
+          styles={styles}
+          value={editForm}
+          projects={projects}
+          sandboxContext={sandboxContext}
+          machines={machines}
+          submitLabel="Save changes"
+          error={editError}
+          showEnabled
+          busy={saving}
+          onChange={onEditChange}
+          onSubmit={() => void onSaveEdit(task)}
+          onCancel={onCancelEdit}
+        />
+      </div>
+    ) : null}
+    <AllowedToolsPanel styles={styles} task={task} onRevokeTool={onRevokeTool} onRevokeMcpTool={onRevokeMcpTool} />
+    <RunHistory
+      styles={styles}
+      task={task}
+      onOpenSession={onOpenSession}
+      onAllowTool={onAllowTool}
+      onAllowMcpTool={onAllowMcpTool}
+    />
+  </div>
+);
 
 type RoutineFormProps = {
   styles: ReturnType<typeof useStyles>;
@@ -811,6 +970,82 @@ function formatProject(task: ScheduledTask, projects: Project[]): string {
     return 'No project';
   }
   return projects.find((project) => project.id === task.projectId)?.label ?? 'Unknown project';
+}
+
+async function ensureRoutineSessionTab(
+  task: ScheduledTask,
+  sessionId: string,
+  store: ReturnType<typeof persistedStoreApi.get>,
+  activate = false
+): Promise<CodeTab> {
+  const tabs = persistedStoreApi.getKey('codeTabs') ?? [];
+  const existing = tabs.find((tab) => tab.sessionId === sessionId);
+  if (existing) {
+    const nextExisting = {
+      ...existing,
+      routineId: task.id,
+      routineName: task.name,
+      routineSchedule: formatSchedule(task),
+    };
+    if (
+      existing.routineId !== nextExisting.routineId ||
+      existing.routineName !== nextExisting.routineName ||
+      existing.routineSchedule !== nextExisting.routineSchedule
+    ) {
+      await persistedStoreApi.setKey(
+        'codeTabs',
+        tabs.map((tab) => (tab.id === existing.id ? nextExisting : tab))
+      );
+    }
+    if (activate) {
+      await persistedStoreApi.setKey('activeCodeTabId', existing.id);
+    }
+    return nextExisting;
+  }
+  const workspaceDir = await resolveRoutineWorkspaceDir(task, sessionId, store);
+  const tab: CodeTab = {
+    id: `routine-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    projectId: task.projectId ?? null,
+    sessionId,
+    routineId: task.id,
+    routineName: task.name,
+    routineSchedule: formatSchedule(task),
+    profileName: task.profileName ?? store.defaultProfileName ?? 'host',
+    profileNameExplicit: Boolean(task.profileName),
+    createdAt: Date.now(),
+    ...(workspaceDir ? { workspaceDir } : {}),
+  };
+  await persistedStoreApi.setKey('codeTabs', [...tabs, tab]);
+  if (activate) {
+    await persistedStoreApi.setKey('activeCodeTabId', tab.id);
+  }
+  return tab;
+}
+
+async function resolveRoutineWorkspaceDir(
+  task: ScheduledTask,
+  sessionId: string,
+  store: ReturnType<typeof persistedStoreApi.get>
+): Promise<string | undefined> {
+  if (task.projectId) {
+    const project = store.projects.find((item) => item.id === task.projectId);
+    const source = firstSource(project);
+    if (source?.kind === 'local') {
+      return source.workspaceDir;
+    }
+    if (store.workspaceDir && project) {
+      return `${store.workspaceDir.replace(/[/\\]+$/, '')}/Projects/${project.slug}`;
+    }
+    return undefined;
+  }
+  if (!store.workspaceDir) {
+    return undefined;
+  }
+  try {
+    return await emitter.invoke('util:session-workspace-dir', store.workspaceDir, sessionId);
+  } catch {
+    return undefined;
+  }
 }
 
 function lastRunLabel(run: ScheduledTask['history'][number]): string {
