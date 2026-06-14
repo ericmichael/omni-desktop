@@ -49,7 +49,7 @@ export type WindowProps = {
 /**
  * Data stored in the electron store.
  */
-export type LayoutMode = 'chat' | 'spaces' | 'projects' | 'dashboards' | 'settings' | 'gallery';
+export type LayoutMode = 'chat' | 'spaces' | 'projects' | 'dashboards' | 'routines' | 'settings' | 'gallery';
 export type OmniTheme =
   | 'omni'
   | 'teams-light'
@@ -203,6 +203,7 @@ export type StoreData = {
   weeklyReviewDay: number;
   /** Timestamp (ms) of last completed weekly review. Null if never done. */
   lastWeeklyReviewAt: number | null;
+  scheduledTasks: ScheduledTask[];
   schemaVersion: number;
   // Chat session identity lives on the reserved ``codeTabs`` entry
   // (``CHAT_TAB_ID``) since v26; the legacy ``chatSessionId`` /
@@ -346,6 +347,70 @@ export type PagesMigrationState = {
   /** True once the user dismissed the notice or ran cleanup. */
   acknowledged: boolean;
 };
+
+export type ScheduledTaskSchedule =
+  | { kind: 'manual' }
+  | { kind: 'interval'; everyMinutes: number }
+  | { kind: 'daily'; time: string; weekdaysOnly?: boolean }
+  | { kind: 'weekly'; dayOfWeek: number; time: string };
+
+export type ScheduledTaskRunStatus = 'running' | 'waiting_for_approval' | 'completed' | 'skipped' | 'failed';
+
+export type ScheduledTaskPermissionMode = 'ask';
+
+export type ScheduledTaskRun = {
+  id: string;
+  scheduledFor: number;
+  startedAt: number;
+  completedAt?: number;
+  status: ScheduledTaskRunStatus;
+  runId?: string;
+  sessionId?: string;
+  processId?: string;
+  pendingApprovalToolName?: string;
+  pendingApprovalServerLabel?: string;
+  pendingApprovalKind?: 'function' | 'mcp';
+  reason?: string;
+};
+
+export type ScheduledTaskAllowedMcpTool = {
+  serverLabel: string;
+  toolName: string;
+};
+
+export type ScheduledTask = {
+  id: string;
+  name: string;
+  description: string;
+  instructions: string;
+  schedule: ScheduledTaskSchedule;
+  permissionMode: ScheduledTaskPermissionMode;
+  enabled: boolean;
+  projectId?: ProjectId;
+  profileName?: string;
+  createdAt: number;
+  updatedAt: number;
+  nextRunAt: number | null;
+  lastRunAt?: number;
+  runningSessionId?: string;
+  runningProcessId?: string;
+  allowedToolNames: string[];
+  allowedMcpTools: ScheduledTaskAllowedMcpTool[];
+  history: ScheduledTaskRun[];
+};
+
+export type ScheduledTaskInput = {
+  name: string;
+  description?: string;
+  instructions: string;
+  schedule: ScheduledTaskSchedule;
+  permissionMode?: ScheduledTaskPermissionMode;
+  enabled?: boolean;
+  projectId?: ProjectId;
+  profileName?: string;
+};
+
+export type ScheduledTaskUpdate = Partial<ScheduledTaskInput> & { enabled?: boolean };
 
 // #region Browser types
 
@@ -512,7 +577,7 @@ export const schema: Schema<StoreData> = {
     // 'code' and 'os' are pre-v20 names for 'spaces'; 'more' is the retired
     // mobile overflow page. Kept so existing stores load before the renderer's
     // migrateLayoutMode pass converts them.
-    enum: ['chat', 'spaces', 'os', 'code', 'projects', 'dashboards', 'settings', 'more', 'gallery'],
+    enum: ['chat', 'spaces', 'os', 'code', 'projects', 'dashboards', 'routines', 'settings', 'more', 'gallery'],
     default: 'chat',
   },
   theme: {
@@ -562,6 +627,56 @@ export const schema: Schema<StoreData> = {
   lastWeeklyReviewAt: {
     type: ['number', 'null'],
     default: null,
+  },
+  scheduledTasks: {
+    type: 'array',
+    default: [],
+    items: {
+      type: 'object',
+      properties: {
+        id: { type: 'string' },
+        name: { type: 'string' },
+        description: { type: 'string' },
+        instructions: { type: 'string' },
+        schedule: { type: 'object' },
+        permissionMode: { type: 'string', enum: ['ask'], default: 'ask' },
+        enabled: { type: 'boolean' },
+        projectId: { type: 'string' },
+        profileName: { type: 'string' },
+        createdAt: { type: 'number' },
+        updatedAt: { type: 'number' },
+        nextRunAt: { type: ['number', 'null'] },
+        lastRunAt: { type: 'number' },
+        runningSessionId: { type: 'string' },
+        runningProcessId: { type: 'string' },
+        allowedToolNames: { type: 'array', default: [], items: { type: 'string' } },
+        allowedMcpTools: {
+          type: 'array',
+          default: [],
+          items: {
+            type: 'object',
+            properties: {
+              serverLabel: { type: 'string' },
+              toolName: { type: 'string' },
+            },
+            required: ['serverLabel', 'toolName'],
+          },
+        },
+        history: { type: 'array', default: [], items: { type: 'object' } },
+      },
+      required: [
+        'id',
+        'name',
+        'description',
+        'instructions',
+        'schedule',
+        'enabled',
+        'createdAt',
+        'updatedAt',
+        'nextRunAt',
+        'history',
+      ],
+    },
   },
   schemaVersion: {
     type: 'number',
@@ -1807,6 +1922,21 @@ type StoreIpcEvents = Namespaced<
   }
 >;
 
+type ScheduledTaskIpcEvents = Namespaced<
+  'scheduled-task',
+  {
+    list: () => ScheduledTask[];
+    create: (input: ScheduledTaskInput) => ScheduledTask;
+    update: (taskId: string, patch: ScheduledTaskUpdate) => ScheduledTask;
+    delete: (taskId: string) => void;
+    'run-now': (taskId: string) => ScheduledTask;
+    'allow-tool': (taskId: string, toolName: string) => ScheduledTask;
+    'revoke-tool': (taskId: string, toolName: string) => ScheduledTask;
+    'allow-mcp-tool': (taskId: string, tool: ScheduledTaskAllowedMcpTool) => ScheduledTask;
+    'revoke-mcp-tool': (taskId: string, tool: ScheduledTaskAllowedMcpTool) => ScheduledTask;
+  }
+>;
+
 /**
  * Main Process API. Main process handles these events, renderer process invokes them.
  */
@@ -2562,7 +2692,11 @@ export type RunOverrides = {
   /** Prepended to the column's existing additional_instructions. */
   additionalInstructions?: string;
   /** Approval policy override; replaces the column's default. */
-  safeToolOverrides?: { safe_tool_names?: string[]; safe_tool_patterns?: string[] };
+  safeToolOverrides?: {
+    safe_tool_names?: string[];
+    safe_tool_patterns?: string[];
+    safe_mcp_tools?: { server_label: string; tool_name: string }[];
+  };
 };
 
 export type SupervisorBridgeRequest =
@@ -3110,6 +3244,7 @@ export type IpcEvents = MainProcessIpcEvents &
   UtilIpcEvents &
   TerminalIpcEvents &
   StoreIpcEvents &
+  ScheduledTaskIpcEvents &
   ConfigIpcEvents &
   CodexIpcEvents &
   CloudIpcEvents &

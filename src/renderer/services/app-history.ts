@@ -26,6 +26,7 @@ const TAB_TITLES: Record<LayoutMode, string> = {
   spaces: 'Spaces',
   projects: 'Projects',
   dashboards: 'Dashboards',
+  routines: 'Routines',
   settings: 'Settings',
   gallery: 'Gallery',
 };

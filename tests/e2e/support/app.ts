@@ -28,6 +28,11 @@ export async function openSettings(page: Page): Promise<void> {
   await expect(page.getByRole('tab', { name: 'Settings' })).toHaveAttribute('aria-selected', 'true');
 }
 
+export async function openRoutines(page: Page): Promise<void> {
+  await page.getByRole('tab', { name: 'Routines' }).click();
+  await expect(page.getByRole('tab', { name: 'Routines' })).toHaveAttribute('aria-selected', 'true');
+}
+
 export async function createProject(page: Page, projectName: string): Promise<void> {
   await openProjects(page);
   await page.getByRole('button', { name: 'New project' }).first().click();

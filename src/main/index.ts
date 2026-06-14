@@ -2,7 +2,7 @@ if (process.env.NODE_ENV === 'development') {
   require('dotenv/config');
 }
 
-import { app, dialog, net, protocol, shell } from 'electron';
+import { app, dialog, ipcMain, net, protocol, shell } from 'electron';
 import { existsSync, writeFileSync } from 'fs';
 import { migrateFromJson } from 'omni-projects-db';
 import { join, resolve } from 'path';
@@ -52,6 +52,7 @@ import { backfillProjectConfigs } from '@/main/project-config-backfill';
 import { closeProjectDb, getDb, openProjectDb } from '@/main/project-db';
 import { createProjectManager } from '@/main/project-manager';
 import { wireReverseRpcRouter } from '@/main/reverse-rpc-bridge';
+import { registerScheduledTaskHandlers, ScheduledTaskManager } from '@/main/scheduled-task-manager';
 import { LocalSecretStore } from '@/main/secret-store';
 import { DEFAULT_CHAT_SNAPSHOT_TTL_MS, gcStaleSnapshots, registerSnapshotHandlers } from '@/main/snapshot-manager';
 import { getStore } from '@/main/store';
@@ -292,6 +293,13 @@ const [processManager, cleanupProcessManager] = createProcessManager({
   // which omni serve folds into manifest.environment (`_inject_user_env`).
   getExtraEnv: () => parseEnvVars(store.get('envVars') ?? ''),
 });
+const scheduledTaskManager = new ScheduledTaskManager({
+  store,
+  processManager,
+  sendToWindow: main.sendToWindow,
+});
+const scheduledTaskChannels = registerScheduledTaskHandlers(main.ipc, () => scheduledTaskManager);
+scheduledTaskManager.start();
 
 // Create ConsoleManager — proxies terminal:* IPC into omni serve's
 // WebSocket. Constructed after ProcessManager because it needs the
@@ -468,6 +476,12 @@ async function cleanup() {
     cleanupConsole(),
     cleanupAppControl(),
     cleanupOmniInstall(),
+    (async () => {
+      scheduledTaskManager.stop();
+      for (const channel of scheduledTaskChannels) {
+        ipcMain.removeHandler(channel);
+      }
+    })(),
     cleanupProcessManager(),
     cleanupProject(),
     cleanupExtensions(),

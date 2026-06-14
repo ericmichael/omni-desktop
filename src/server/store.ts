@@ -46,6 +46,7 @@ export const DEFAULTS: StoreData = {
   wipLimit: 3,
   weeklyReviewDay: 5,
   lastWeeklyReviewAt: null,
+  scheduledTasks: [],
   enabledExtensions: {},
   skillSources: {},
   installedBundles: {},
