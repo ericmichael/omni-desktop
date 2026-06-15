@@ -52,6 +52,7 @@ import { backfillProjectConfigs } from '@/main/project-config-backfill';
 import { closeProjectDb, getDb, openProjectDb } from '@/main/project-db';
 import { createProjectManager } from '@/main/project-manager';
 import { wireReverseRpcRouter } from '@/main/reverse-rpc-bridge';
+import { RoutineBridge } from '@/main/routine-bridge';
 import { registerScheduledTaskHandlers, ScheduledTaskManager } from '@/main/scheduled-task-manager';
 import { LocalSecretStore } from '@/main/secret-store';
 import { DEFAULT_CHAT_SNAPSHOT_TTL_MS, gcStaleSnapshots, registerSnapshotHandlers } from '@/main/snapshot-manager';
@@ -293,13 +294,16 @@ const [processManager, cleanupProcessManager] = createProcessManager({
   // which omni serve folds into manifest.environment (`_inject_user_env`).
   getExtraEnv: () => parseEnvVars(store.get('envVars') ?? ''),
 });
+const routineBridge = new RoutineBridge(main.sendToWindow);
 const scheduledTaskManager = new ScheduledTaskManager({
   store,
-  processManager,
-  getProjects: () => repo.listProjects().map(rowToProject),
+  bridge: routineBridge,
   sendToWindow: main.sendToWindow,
 });
-const scheduledTaskChannels = registerScheduledTaskHandlers(main.ipc, () => scheduledTaskManager);
+const scheduledTaskChannels = [
+  ...registerScheduledTaskHandlers(main.ipc, () => scheduledTaskManager),
+  ...routineBridge.registerIpc(main.ipc),
+];
 scheduledTaskManager.start();
 
 // Create ConsoleManager — proxies terminal:* IPC into omni serve's
@@ -479,6 +483,7 @@ async function cleanup() {
     cleanupOmniInstall(),
     (async () => {
       scheduledTaskManager.stop();
+      routineBridge.disposeAll();
       for (const channel of scheduledTaskChannels) {
         ipcMain.removeHandler(channel);
       }

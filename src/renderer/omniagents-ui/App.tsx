@@ -4,6 +4,7 @@ import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } 
 import { waitFor } from 'xstate';
 
 import { clearColumnActivity, publishColumnActivity } from '@/renderer/services/column-activity';
+import { forwardRoutineEvent, registerRoutineActor } from '@/renderer/services/routine-bridge';
 import {
   createCursorAssigner,
   fullEntry,
@@ -70,6 +71,7 @@ export function App({
   pendingPlan,
   onPlanDecision,
   ticketId,
+  routineId,
   workspaceDir,
 }: {
   sessionId?: string;
@@ -94,6 +96,8 @@ export function App({
   pendingPlan?: import('@/shared/chat-types').PlanItem | null;
   onPlanDecision?: (approved: boolean) => void;
   ticketId?: TicketId;
+  /** Routine (scheduled task) id when this column hosts a routine run. */
+  routineId?: string;
   workspaceDir?: string;
 }) {
   const uiConfig = useUiConfig();
@@ -1358,6 +1362,116 @@ export function App({
       unregister();
     };
   }, [ticketId, client, machine, actor, handleSubmit]);
+
+  // ---------------------------------------------------------------------------
+  // Routine bridge — same column-ownership model as the supervisor bridge
+  // above, but for scheduled tasks. Main starts a single run on this column's
+  // session via the actor; the conversation streams into the live UI and tool
+  // approvals surface here. Run/approval events forward back so main can drive
+  // routine history / status / toasts.
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    if (!routineId) {
+      return;
+    }
+
+    const awaitChatReady = (): Promise<void> =>
+      waitFor(
+        actor,
+        (s) => {
+          const v = s.value;
+          return typeof v === 'object' && v !== null && 'ready' in v && (v as { ready?: unknown }).ready === 'idle';
+        },
+        { timeout: 30_000 }
+      ).then(() => undefined);
+
+    const unregister = registerRoutineActor({
+      taskId: routineId,
+      startRun: async (prompt, safeToolOverrides) => {
+        await awaitChatReady();
+        const result = await handleSubmit(prompt, undefined, safeToolOverrides ? { safeToolOverrides } : undefined);
+        if (!result?.runId) {
+          throw new Error('start_run did not return a run_id');
+        }
+        return { runId: result.runId };
+      },
+      stop: async () => {
+        const currentRunId = actor.getSnapshot().context.runId;
+        if (currentRunId) {
+          await client.stopRun(currentRunId).catch(() => {});
+        }
+        machine.stop();
+      },
+    });
+
+    return () => {
+      unregister();
+    };
+  }, [routineId, client, machine, actor, handleSubmit]);
+
+  // Forward routine run/approval events back to main's ScheduledTaskManager.
+  useEffect(() => {
+    if (!routineId) {
+      return;
+    }
+    type ApprovalEvent = { run_id?: unknown; end_reason?: unknown; tool_name?: unknown; server_label?: unknown };
+    const toolNameOf = (p: ApprovalEvent): string | undefined =>
+      typeof p.tool_name === 'string' ? p.tool_name : undefined;
+    const offs: Array<() => void> = [];
+
+    offs.push(
+      client.on('run_started', (raw: unknown) => {
+        const p = (raw ?? {}) as ApprovalEvent;
+        forwardRoutineEvent({ kind: 'run-started', taskId: routineId, runId: String(p.run_id ?? '') });
+      })
+    );
+    offs.push(
+      client.on('run_end', (raw: unknown) => {
+        const p = (raw ?? {}) as ApprovalEvent;
+        forwardRoutineEvent({ kind: 'run-end', taskId: routineId, reason: String(p.end_reason ?? 'completed') });
+      })
+    );
+    offs.push(
+      client.on('tool_approval_requested', (raw: unknown) => {
+        const p = (raw ?? {}) as ApprovalEvent;
+        forwardRoutineEvent({
+          kind: 'approval-requested',
+          taskId: routineId,
+          approval: { kind: 'function', ...(toolNameOf(p) ? { toolName: toolNameOf(p) } : {}) },
+        });
+      })
+    );
+    offs.push(
+      client.on('tool_approval_resolved', () => {
+        forwardRoutineEvent({ kind: 'approval-resolved', taskId: routineId });
+      })
+    );
+    offs.push(
+      client.on('mcp_approval_requested', (raw: unknown) => {
+        const p = (raw ?? {}) as ApprovalEvent;
+        forwardRoutineEvent({
+          kind: 'approval-requested',
+          taskId: routineId,
+          approval: {
+            kind: 'mcp',
+            ...(toolNameOf(p) ? { toolName: toolNameOf(p) } : {}),
+            ...(typeof p.server_label === 'string' ? { serverLabel: p.server_label } : {}),
+          },
+        });
+      })
+    );
+    offs.push(
+      client.on('mcp_approval_resolved', () => {
+        forwardRoutineEvent({ kind: 'approval-resolved', taskId: routineId });
+      })
+    );
+
+    return () => {
+      for (const off of offs) {
+        off();
+      }
+    };
+  }, [routineId, client]);
 
   useEffect(() => {
     if (!connected) {

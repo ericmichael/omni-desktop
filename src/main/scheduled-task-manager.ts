@@ -1,17 +1,14 @@
 import { randomUUID } from 'node:crypto';
-import { join } from 'node:path';
 
 import type Store from 'electron-store';
-import { WebSocket as WsWebSocket } from 'ws';
 
 import { mostRecentMissedScheduledTaskRun, nextScheduledTaskRun } from '@/lib/scheduled-task-schedule';
-import type { ProcessManager } from '@/main/process-manager';
-import { ensureDirectory } from '@/main/util';
+import type { RoutineBridge } from '@/main/routine-bridge';
 import type { IIpcListener } from '@/shared/ipc-listener';
-import { getLocalWorkspaceDir } from '@/shared/project-source';
 import type {
   IpcRendererEvents,
-  Project,
+  RoutineApprovalRequest,
+  RoutineBridgeEvent,
   ScheduledTask,
   ScheduledTaskAllowedMcpTool,
   ScheduledTaskInput,
@@ -20,50 +17,27 @@ import type {
   ScheduledTaskUpdate,
   StoreData,
 } from '@/shared/types';
-import { firstSource } from '@/shared/types';
 
 const TICK_MS = 60_000;
 const HISTORY_LIMIT = 25;
-const START_TIMEOUT_MS = 120_000;
-const RPC_TIMEOUT_MS = 10_000;
 const DEFAULT_PERMISSION_MODE: ScheduledTaskPermissionMode = 'ask';
 
 type ScheduledTaskStore = Pick<Store<StoreData>, 'get' | 'set'>;
-
-type StartRunResult = {
-  runId?: string;
-  sessionId?: string;
-};
-
-type RunEndResult = {
-  runId?: string;
-  sessionId?: string;
-  reason?: string;
-};
-
-type StartRunWatcher = StartRunResult & {
-  close: () => void;
-};
 
 type SafeToolOverrides = {
   safe_tool_names?: string[];
   safe_mcp_tools?: { server_label: string; tool_name: string }[];
 };
 
-type StartRunOptions = {
-  safeToolOverrides?: SafeToolOverrides;
-};
-
-type ApprovalRequest = {
-  kind: 'function' | 'mcp';
-  toolName?: string;
-  serverLabel?: string;
-};
-
 type ManagerDeps = {
   store: ScheduledTaskStore;
-  processManager: ProcessManager;
-  getProjects: () => Project[];
+  /**
+   * Bridge to the renderer's Code column. The column owns the omni-serve
+   * session the routine runs in, so the conversation streams into the live UI
+   * and tool approvals surface there. Main only orchestrates (history, status,
+   * toasts) by observing forwarded run/approval events.
+   */
+  bridge: RoutineBridge;
   sendToWindow?: <T extends keyof IpcRendererEvents>(channel: T, ...args: IpcRendererEvents[T]) => void;
   now?: () => number;
 };
@@ -73,23 +47,30 @@ type NotifiableRunStatus = Extract<
   'running' | 'waiting_for_approval' | 'completed' | 'failed'
 >;
 
+/** In-memory binding from a task to its currently active run. */
+type ActiveRun = {
+  historyRunId: string;
+  sessionId: string;
+};
+
 export class ScheduledTaskManager {
   private store: ScheduledTaskStore;
-  private processManager: ProcessManager;
-  private getProjects: () => Project[];
+  private bridge: RoutineBridge;
   private sendToWindow?: ManagerDeps['sendToWindow'];
   private now: () => number;
   private timer: ReturnType<typeof setInterval> | null = null;
   private ticking = false;
   private launching = new Set<string>();
   private completing = new Set<string>();
+  private activeRuns = new Map<string, ActiveRun>();
+  private bridgeUnsub: (() => void) | null = null;
 
   constructor(deps: ManagerDeps) {
     this.store = deps.store;
-    this.processManager = deps.processManager;
-    this.getProjects = deps.getProjects;
+    this.bridge = deps.bridge;
     this.sendToWindow = deps.sendToWindow;
     this.now = deps.now ?? Date.now;
+    this.bridgeUnsub = this.bridge.onEvent((event) => this.handleBridgeEvent(event));
   }
 
   start(): void {
@@ -107,6 +88,8 @@ export class ScheduledTaskManager {
       clearInterval(this.timer);
       this.timer = null;
     }
+    this.bridgeUnsub?.();
+    this.bridgeUnsub = null;
   }
 
   list(): ScheduledTask[] {
@@ -320,70 +303,41 @@ export class ScheduledTaskManager {
     this.launching.add(current.id);
     const historyRunId = randomUUID();
     const sessionId = randomUUID();
-    const processId = `scheduled-task:${current.id}:${historyRunId}`;
     const startedAt = this.now();
+    const safeToolOverrides = buildSafeToolOverrides(current);
     try {
-      const workspaceDir = await this.resolveWorkspaceDir(current, sessionId);
       this.patchTask(current.id, {
         runningSessionId: sessionId,
-        runningProcessId: processId,
         lastRunAt: startedAt,
         nextRunAt: current.schedule.kind === 'manual' ? null : nextScheduledTaskRun(current.schedule, startedAt),
       });
-      await this.processManager.start(processId, {
-        workspaceDir,
-        sessionId,
-        ...(current.projectId ? { projectId: current.projectId } : {}),
-        ...(current.profileName ? { profileNameOverride: current.profileName } : {}),
+      // Ensure the Code column exists and boots the omni-serve session this run
+      // streams into, then start the run through the column actor. The agent
+      // runs inside the visible session — main only observes lifecycle events.
+      await this.bridge.ensureColumn({ taskId: current.id, sessionId, activate: reason === 'manual' });
+      this.activeRuns.set(current.id, { historyRunId, sessionId });
+      const { runId } = await this.bridge.startRun({
+        taskId: current.id,
+        prompt: current.instructions,
+        ...(safeToolOverrides ? { safeToolOverrides } : {}),
       });
-      const wsUrl = await this.waitForWsUrl(processId);
-      const watcher = await startRun(
-        wsUrl,
-        current.instructions,
-        sessionId,
-        {
-          workspace_root: workspaceDir,
-          cwd: workspaceDir,
-          scheduled_task_id: current.id,
-          scheduled_task_name: current.name,
-          scheduled_task_reason: reason,
-        },
-        {
-          onRunEnd: (result) => {
-            void this.finishRun(current.id, historyRunId, processId, runEndStatus(result.reason), result.reason);
-          },
-          onApprovalRequested: (approval) => {
-            this.updateRunStatus(current.id, historyRunId, 'waiting_for_approval', approval);
-          },
-          onApprovalResolved: () => {
-            this.updateRunStatus(current.id, historyRunId, 'running');
-          },
-          onDisconnect: (message) => {
-            void this.finishRun(current.id, historyRunId, processId, 'failed', message);
-          },
-        },
-        buildStartRunOptions(current)
-      );
       this.patchTask(current.id, {
-        runningSessionId: watcher.sessionId ?? sessionId,
-        runningProcessId: processId,
+        runningSessionId: sessionId,
         history: this.prependHistory(this.getTask(current.id), {
           id: historyRunId,
           scheduledFor,
           startedAt,
           status: 'running',
-          ...(watcher.runId ? { runId: watcher.runId } : {}),
-          sessionId: watcher.sessionId ?? sessionId,
-          processId,
+          ...(runId ? { runId } : {}),
+          sessionId,
         }),
       });
       this.notifyRun(current.name, 'running');
     } catch (error) {
-      await this.stopRunProcess(processId);
+      this.activeRuns.delete(current.id);
       const message = (error as Error).message;
       this.patchTask(current.id, {
         runningSessionId: undefined,
-        runningProcessId: undefined,
         history: this.prependHistory(this.getTask(current.id), {
           id: historyRunId,
           scheduledFor,
@@ -391,7 +345,6 @@ export class ScheduledTaskManager {
           completedAt: this.now(),
           status: 'failed',
           sessionId,
-          processId,
           reason: message,
         }),
       });
@@ -402,13 +355,61 @@ export class ScheduledTaskManager {
   }
 
   private hasActiveRun(task: ScheduledTask): boolean {
-    return this.launching.has(task.id) || Boolean(task.runningProcessId || task.runningSessionId);
+    return this.launching.has(task.id) || Boolean(task.runningSessionId);
+  }
+
+  /**
+   * Route a forwarded run/approval event from the routine column onto the
+   * matching task's active run. Events for tasks without an active run (stale
+   * tabs, post-completion disconnects) are ignored.
+   */
+  private handleBridgeEvent(event: RoutineBridgeEvent): void {
+    const active = this.activeRuns.get(event.taskId);
+    if (!active) {
+      return;
+    }
+    switch (event.kind) {
+      case 'run-started':
+        if (event.runId) {
+          this.attachRunId(event.taskId, active.historyRunId, event.runId);
+        }
+        break;
+      case 'run-end':
+        void this.finishRun(event.taskId, active.historyRunId, runEndStatus(event.reason), event.reason);
+        break;
+      case 'approval-requested':
+        this.updateRunStatus(event.taskId, active.historyRunId, 'waiting_for_approval', event.approval);
+        break;
+      case 'approval-resolved':
+        this.updateRunStatus(event.taskId, active.historyRunId, 'running');
+        break;
+      case 'disconnected':
+        void this.finishRun(event.taskId, active.historyRunId, 'failed', 'Routine session closed before completion');
+        break;
+    }
+  }
+
+  private attachRunId(taskId: string, historyRunId: string, runId: string): void {
+    const task = this.tasks().find((item) => item.id === taskId);
+    if (!task) {
+      return;
+    }
+    let changed = false;
+    const history = (task.history ?? []).map((run) => {
+      if (run.id !== historyRunId || run.runId) {
+        return run;
+      }
+      changed = true;
+      return { ...run, runId };
+    });
+    if (changed) {
+      this.patchTask(taskId, { history });
+    }
   }
 
   private async finishRun(
     taskId: string,
     historyRunId: string,
-    processId: string,
     status: 'completed' | 'failed',
     reason?: string
   ): Promise<void> {
@@ -417,11 +418,12 @@ export class ScheduledTaskManager {
     }
     this.completing.add(historyRunId);
     try {
-      await this.stopRunProcess(processId);
+      this.activeRuns.delete(taskId);
       const task = this.tasks().find((item) => item.id === taskId);
       if (!task) {
         return;
       }
+      const finishedRun = (task.history ?? []).find((run) => run.id === historyRunId);
       const history = (task.history ?? []).map((run) =>
         run.id === historyRunId
           ? {
@@ -435,8 +437,9 @@ export class ScheduledTaskManager {
             }
           : run
       );
+      const clearRunning = Boolean(finishedRun?.sessionId && task.runningSessionId === finishedRun.sessionId);
       this.patchTask(taskId, {
-        ...(task.runningProcessId === processId ? { runningSessionId: undefined, runningProcessId: undefined } : {}),
+        ...(clearRunning ? { runningSessionId: undefined } : {}),
         history,
       });
       this.notifyRun(task.name, status, reason);
@@ -449,7 +452,7 @@ export class ScheduledTaskManager {
     taskId: string,
     historyRunId: string,
     status: ScheduledTaskRun['status'],
-    approval?: ApprovalRequest
+    approval?: RoutineApprovalRequest
   ): void {
     const task = this.tasks().find((item) => item.id === taskId);
     if (!task) {
@@ -492,49 +495,6 @@ export class ScheduledTaskManager {
 
   private notifyRun(taskName: string, status: NotifiableRunStatus, reason?: string): void {
     this.sendToWindow?.('toast:show', buildRunToast(taskName, status, reason));
-  }
-
-  private async stopRunProcess(processId: string): Promise<void> {
-    try {
-      await this.processManager.stop(processId);
-    } catch {}
-  }
-
-  private async waitForWsUrl(processId: string): Promise<string> {
-    const deadline = Date.now() + START_TIMEOUT_MS;
-    while (Date.now() < deadline) {
-      const status = this.processManager.getStatus(processId);
-      if ((status.type === 'running' || status.type === 'connecting') && status.data.wsUrl) {
-        return status.data.wsUrl;
-      }
-      if (status.type === 'error') {
-        throw new Error(status.error.message);
-      }
-      await delay(500);
-    }
-    throw new Error('Timed out waiting for scheduled task agent process');
-  }
-
-  private async resolveWorkspaceDir(task: ScheduledTask, sessionId: string): Promise<string> {
-    const baseDir = this.store.get('workspaceDir');
-    if (task.projectId) {
-      const project = this.getProjects().find((item) => item.id === task.projectId);
-      const projectWorkspaceDir = getLocalWorkspaceDir(firstSource(project));
-      if (projectWorkspaceDir) {
-        return projectWorkspaceDir;
-      }
-      if (!baseDir?.trim()) {
-        throw new Error('Workspace root is not configured');
-      }
-      return join(baseDir, 'Projects', project?.slug ?? task.projectId);
-    }
-    if (!baseDir?.trim()) {
-      throw new Error('Workspace root is not configured');
-    }
-    const safeId = sessionId.replace(/[^a-zA-Z0-9_-]/g, '') || 'default';
-    const dir = join(baseDir, 'Sessions', safeId);
-    await ensureDirectory(dir);
-    return dir;
   }
 
   private recomputeNextRuns(): void {
@@ -640,176 +600,6 @@ export function registerScheduledTaskHandlers(
   ];
 }
 
-async function startRun(
-  wsUrl: string,
-  prompt: string,
-  sessionId: string,
-  variables: Record<string, unknown>,
-  handlers: {
-    onRunEnd: (result: RunEndResult) => void;
-    onApprovalRequested: (approval: ApprovalRequest) => void;
-    onApprovalResolved: () => void;
-    onDisconnect: (message: string) => void;
-  },
-  options?: StartRunOptions
-): Promise<StartRunWatcher> {
-  return new Promise((resolve, reject) => {
-    const socket = new WsWebSocket(wsUrl);
-    const id = randomUUID();
-    let resolved = false;
-    let finished = false;
-    let closedByManager = false;
-    let runId: string | undefined;
-    let resolvedSessionId: string | undefined = sessionId;
-    const timer = setTimeout(() => {
-      closedByManager = true;
-      socket.close();
-      reject(new Error('start_run timed out'));
-    }, RPC_TIMEOUT_MS);
-    const close = (): void => {
-      closedByManager = true;
-      socket.close();
-    };
-    socket.once('open', () => {
-      socket.send(
-        JSON.stringify({
-          jsonrpc: '2.0',
-          id,
-          method: 'start_run',
-          params: {
-            prompt,
-            session_id: sessionId,
-            variables,
-            ...(options?.safeToolOverrides ? { safe_tool_overrides: options.safeToolOverrides } : {}),
-          },
-        })
-      );
-    });
-    socket.on('message', (raw) => {
-      try {
-        const msg = JSON.parse(String(raw));
-        if (msg.id === id) {
-          clearTimeout(timer);
-          if (msg.error) {
-            closedByManager = true;
-            socket.close();
-            reject(new Error(msg.error.message ?? 'start_run failed'));
-            return;
-          }
-          const result = parseStartRunResult(msg.result, sessionId);
-          runId = result.runId;
-          resolvedSessionId = result.sessionId;
-          resolved = true;
-          resolve({ ...result, close });
-          return;
-        }
-        if (msg.method === 'tool_approval_requested' || msg.method === 'mcp_approval_requested') {
-          const result = parseRunEventIdentity(msg.params);
-          if (!hasRunIdentity(result) || matchesRun(result, runId, resolvedSessionId)) {
-            handlers.onApprovalRequested(parseApprovalRequest(msg.method, msg.params));
-          }
-          return;
-        }
-        if (msg.method === 'tool_approval_resolved' || msg.method === 'mcp_approval_resolved') {
-          const result = parseRunEventIdentity(msg.params);
-          if (!hasRunIdentity(result) || matchesRun(result, runId, resolvedSessionId)) {
-            handlers.onApprovalResolved();
-          }
-          return;
-        }
-        if (msg.method !== 'run_end') {
-          return;
-        }
-        const result = parseRunEndResult(msg.params);
-        if (!matchesRun(result, runId, resolvedSessionId)) {
-          return;
-        }
-        finished = true;
-        close();
-        handlers.onRunEnd(result);
-      } catch (error) {
-        if (!resolved) {
-          clearTimeout(timer);
-          closedByManager = true;
-          socket.close();
-          reject(error);
-        }
-      }
-    });
-    socket.once('error', (error) => {
-      clearTimeout(timer);
-      if (resolved) {
-        if (!finished && !closedByManager) {
-          finished = true;
-          handlers.onDisconnect(error.message);
-        }
-      } else {
-        reject(error);
-      }
-    });
-    socket.once('close', () => {
-      clearTimeout(timer);
-      if (resolved && !finished && !closedByManager) {
-        finished = true;
-        handlers.onDisconnect('scheduled task run connection closed before run_end');
-      } else if (!resolved && !closedByManager) {
-        reject(new Error('start_run connection closed'));
-      }
-    });
-  });
-}
-
-function parseStartRunResult(result: unknown, fallbackSessionId: string): StartRunResult {
-  const data = isRecord(result) ? result : {};
-  return {
-    ...(typeof data.run_id === 'string' && data.run_id ? { runId: data.run_id } : {}),
-    sessionId: typeof data.session_id === 'string' && data.session_id ? data.session_id : fallbackSessionId,
-  };
-}
-
-function parseRunEndResult(params: unknown): RunEndResult {
-  const data = isRecord(params) ? params : {};
-  return {
-    ...(typeof data.run_id === 'string' && data.run_id ? { runId: data.run_id } : {}),
-    ...(typeof data.session_id === 'string' && data.session_id ? { sessionId: data.session_id } : {}),
-    ...(typeof data.end_reason === 'string' && data.end_reason ? { reason: data.end_reason } : {}),
-  };
-}
-
-function parseRunEventIdentity(params: unknown): RunEndResult {
-  const data = isRecord(params) ? params : {};
-  return {
-    ...(typeof data.run_id === 'string' && data.run_id ? { runId: data.run_id } : {}),
-    ...(typeof data.session_id === 'string' && data.session_id ? { sessionId: data.session_id } : {}),
-  };
-}
-
-function parseApprovalRequest(method: string, params: unknown): ApprovalRequest {
-  const data = isRecord(params) ? params : {};
-  const toolName = typeof data.tool_name === 'string' && data.tool_name.trim() ? data.tool_name.trim() : undefined;
-  const serverLabel =
-    typeof data.server_label === 'string' && data.server_label.trim() ? data.server_label.trim() : undefined;
-  return {
-    kind: method === 'mcp_approval_requested' ? 'mcp' : 'function',
-    ...(toolName ? { toolName } : {}),
-    ...(serverLabel ? { serverLabel } : {}),
-  };
-}
-
-function hasRunIdentity(result: RunEndResult): boolean {
-  return Boolean(result.runId || result.sessionId);
-}
-
-function matchesRun(result: RunEndResult, runId: string | undefined, sessionId: string | undefined): boolean {
-  if (result.runId && runId) {
-    return result.runId === runId;
-  }
-  if (result.sessionId && sessionId) {
-    return result.sessionId === sessionId;
-  }
-  return false;
-}
-
 function runEndStatus(reason: string | undefined): 'completed' | 'failed' {
   return reason && ['failed', 'error', 'cancelled', 'canceled'].includes(reason) ? 'failed' : 'completed';
 }
@@ -876,7 +666,8 @@ function normalizeScheduledTask(task: ScheduledTask): ScheduledTask {
   };
 }
 
-function buildStartRunOptions(task: ScheduledTask): StartRunOptions | undefined {
+/** Build the routine's always-allow list as `safe_tool_overrides`, or undefined. */
+function buildSafeToolOverrides(task: ScheduledTask): SafeToolOverrides | undefined {
   const allowedToolNames = normalizeToolNames(task.allowedToolNames);
   const allowedMcpTools = normalizeMcpTools(task.allowedMcpTools);
   const safeToolOverrides: SafeToolOverrides = {
@@ -891,7 +682,7 @@ function buildStartRunOptions(task: ScheduledTask): StartRunOptions | undefined 
       : {}),
   };
   if (safeToolOverrides.safe_tool_names || safeToolOverrides.safe_mcp_tools) {
-    return { safeToolOverrides };
+    return safeToolOverrides;
   }
   return undefined;
 }
@@ -951,10 +742,4 @@ function normalizeMcpTools(tools: unknown): ScheduledTaskAllowedMcpTool[] {
 
 function sameMcpTool(left: ScheduledTaskAllowedMcpTool, right: ScheduledTaskAllowedMcpTool): boolean {
   return left.serverLabel === right.serverLabel && left.toolName === right.toolName;
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
 }

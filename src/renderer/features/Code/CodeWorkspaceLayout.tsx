@@ -80,6 +80,8 @@ type CodeWorkspaceLayoutProps = {
   sidecarMode?: boolean;
   /** Ticket bound to this column — enables the supervisor bridge actor. */
   ticketId?: TicketId;
+  /** Routine bound to this column — enables the routine bridge actor. */
+  routineId?: string;
 };
 
 /** Build a `WebviewRegistryProps` entry from an AppDescriptor + layout scope. */
@@ -459,6 +461,7 @@ export const CodeWorkspaceLayout = memo(
     agentWorkspaceDir,
     sidecarMode,
     ticketId,
+    routineId,
   }: CodeWorkspaceLayoutProps) => {
     const styles = useStyles();
     const store = useStore(persistedStoreApi.$atom);
@@ -573,6 +576,7 @@ export const CodeWorkspaceLayout = memo(
               pendingPlan={pendingPlan}
               onPlanDecision={onPlanDecision}
               ticketId={ticketId}
+              routineId={routineId}
               workspaceDir={agentWorkspaceDir}
             />
           </div>

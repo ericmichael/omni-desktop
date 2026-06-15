@@ -43,6 +43,8 @@ type OmniAgentsAppProps = {
   onPlanDecision?: (approved: boolean) => void;
   /** Ticket bound to this column. When set, the app registers a supervisor bridge actor. */
   ticketId?: TicketId;
+  /** Routine (scheduled task) bound to this column. When set, the app registers a routine bridge actor. */
+  routineId?: string;
   /** Project workspace directory the launcher already knows about. Used to
    *  pre-fill the workspace chip so it doesn't flash "Select workspace" while
    *  the chat-boot RPC resolves. */
@@ -86,6 +88,7 @@ export const OmniAgentsApp = ({
   pendingPlan,
   onPlanDecision,
   ticketId,
+  routineId,
   workspaceDir,
 }: OmniAgentsAppProps) => {
   // Resolve relative ``/proxy/...`` payloads against the launcher's actual
@@ -119,6 +122,7 @@ export const OmniAgentsApp = ({
             pendingPlan={pendingPlan}
             onPlanDecision={onPlanDecision}
             ticketId={ticketId}
+            routineId={routineId}
             workspaceDir={workspaceDir}
           />
         </ThemeSync>

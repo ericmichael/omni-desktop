@@ -150,6 +150,7 @@ const CodeRunningView = memo(
     agentWorkspaceDir,
     sidecarMode,
     ticketId,
+    routineId,
     switching,
     greeting,
     suggestions,
@@ -178,6 +179,7 @@ const CodeRunningView = memo(
     agentWorkspaceDir?: string;
     sidecarMode?: boolean;
     ticketId?: TicketId;
+    routineId?: string;
     switching?: boolean;
     /** Chat mode: time-of-day greeting shown on the empty conversation. */
     greeting?: string;
@@ -236,6 +238,7 @@ const CodeRunningView = memo(
             agentWorkspaceDir={agentWorkspaceDir}
             sidecarMode={sidecarMode}
             ticketId={ticketId}
+            routineId={routineId}
             greeting={greeting}
             suggestions={suggestions}
           />
@@ -559,6 +562,7 @@ export const CodeTabContent = memo(
               agentWorkspaceDir={agentWorkspaceDir}
               sidecarMode={sidecarMode}
               ticketId={tab.ticketId as TicketId | undefined}
+              routineId={tab.routineId}
               switching={sandboxStatus?.type === 'running' && !!sandboxStatus.data.switching}
               greeting={chatMode ? greeting : undefined}
               suggestions={chatMode ? CHAT_SUGGESTIONS : COLUMN_SUGGESTIONS}

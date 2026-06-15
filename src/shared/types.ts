@@ -2808,6 +2808,65 @@ type SupervisorIpcEvents = Namespaced<
 >;
 
 /**
+ * Routine bridge — same column-ownership model as the supervisor bridge, but
+ * for scheduled tasks (Routines). When a routine fires, main asks the renderer
+ * to ensure a Code column exists for the run and to start a single run on that
+ * column's live session, so the conversation streams into the visible UI
+ * exactly like a user-driven session. Main only orchestrates (history, status,
+ * toasts) by observing the forwarded run/approval events — it never opens its
+ * own socket into the sandbox.
+ */
+export type RoutineBridgeRequest =
+  | {
+      /**
+       * Ensure a Code tab exists for this routine run (keyed by `sessionId`)
+       * and switch the layout to it. Idempotent. Resolves immediately — the
+       * column may still be booting; `start-run` awaits the actor.
+       */
+      kind: 'ensure-column';
+      taskId: string;
+      sessionId: string;
+      activate?: boolean;
+    }
+  | {
+      /**
+       * Start a single run on the routine column's session, routed through the
+       * same handleSubmit path the user's keyboard uses. `safeToolOverrides`
+       * carries the routine's always-allow list so pre-approved tools don't
+       * prompt. Resolves with the run id once `start_run` is acked.
+       */
+      kind: 'start-run';
+      taskId: string;
+      prompt: string;
+      safeToolOverrides?: RunOverrides['safeToolOverrides'];
+    }
+  | { kind: 'stop'; taskId: string }
+  | { kind: 'dispose'; taskId: string };
+
+export type RoutineApprovalRequest = {
+  kind: 'function' | 'mcp';
+  toolName?: string;
+  serverLabel?: string;
+};
+
+export type RoutineBridgeEvent =
+  | { kind: 'run-started'; taskId: string; runId: string }
+  | { kind: 'run-end'; taskId: string; reason: string }
+  | { kind: 'approval-requested'; taskId: string; approval: RoutineApprovalRequest }
+  | { kind: 'approval-resolved'; taskId: string }
+  | { kind: 'disconnected'; taskId: string };
+
+type RoutineIpcEvents = Namespaced<
+  'routine',
+  {
+    /** Renderer reports the result of a routine bridge request issued by main. */
+    'dispatch-result': (requestId: string, ok: boolean, result?: { runId?: string }, error?: string) => void;
+    /** Renderer forwards a routine run/approval event so main can update history. */
+    event: (event: RoutineBridgeEvent) => void;
+  }
+>;
+
+/**
  * Platform API. Main process handles these events, renderer process invokes them.
  * Only functional in enterprise builds (OMNI_PLATFORM_URL set at build time).
  */
@@ -3273,7 +3332,8 @@ export type IpcEvents = MainProcessIpcEvents &
   WorkspaceSyncIpcEvents &
   AppControlIpcEvents &
   BrowserIpcEvents &
-  SupervisorIpcEvents;
+  SupervisorIpcEvents &
+  RoutineIpcEvents;
 
 /**
  * Store events. Main process emits these events, renderer process listens to them.
@@ -3439,6 +3499,19 @@ type SupervisorIpcRendererEvents = Namespaced<
 >;
 
 /**
+ * Routine bridge — main → renderer. Main issues commands to the routine column
+ * actor (ensure the column, start a run). Mirrors the supervisor bridge: tool
+ * calls / approvals are handled by the column itself, never round-tripped
+ * through main.
+ */
+type RoutineIpcRendererEvents = Namespaced<
+  'routine',
+  {
+    dispatch: [string, RoutineBridgeRequest];
+  }
+>;
+
+/**
  * Browser events. Main process emits a full-state snapshot whenever any
  * browser mutation lands — tabs, history, bookmarks, profiles. Renderers
  * simply replace their atom.
@@ -3511,7 +3584,8 @@ export type IpcRendererEvents = TerminalIpcRendererEvents &
   ExtensionIpcRendererEvents &
   WorkspaceSyncIpcRendererEvents &
   BrowserIpcRendererEvents &
-  SupervisorIpcRendererEvents;
+  SupervisorIpcRendererEvents &
+  RoutineIpcRendererEvents;
 
 // #region Config file types
 

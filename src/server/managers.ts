@@ -50,6 +50,7 @@ import { backfillProjectConfigs } from '@/main/project-config-backfill';
 import { closeProjectDb, getDb, openProjectDb } from '@/main/project-db';
 import { registerProjectHandlers } from '@/main/project-handlers';
 import { ProjectManager } from '@/main/project-manager';
+import { RoutineBridge } from '@/main/routine-bridge';
 import { registerScheduledTaskHandlers, ScheduledTaskManager } from '@/main/scheduled-task-manager';
 import { registerSnapshotHandlers } from '@/main/snapshot-manager';
 import { registerSupervisorHandlers } from '@/main/supervisor-handlers';
@@ -409,6 +410,7 @@ export const wireGlobalHandlers = async (arg: {
     projectManager: ProjectManager;
     processManager: ProcessManager;
     scheduledTaskManager: ScheduledTaskManager;
+    routineBridge: RoutineBridge;
     settings: SettingsStore;
     extension: ExtensionManager;
     browser: BrowserContext;
@@ -567,10 +569,10 @@ export const wireGlobalHandlers = async (arg: {
     };
     applyPlatformClient();
     settings.onDidAnyChange(() => applyPlatformClient());
+    const routineBridge = new RoutineBridge(tenantSend);
     const scheduledTaskManager = new ScheduledTaskManager({
       store: settings as any,
-      processManager,
-      getProjects: () => getStoreSnapshot(teamId, principalId).projects,
+      bridge: routineBridge,
       sendToWindow: (channel, ...args) => {
         if (channel === 'store:changed') {
           tenantSend('store:changed', getStoreSnapshot(teamId, principalId));
@@ -625,7 +627,16 @@ export const wireGlobalHandlers = async (arg: {
     // (enabledExtensions / browser profiles/tabs/history/bookmarks are per-user).
     const extension = new ExtensionManager({ store: settings as any, sendToWindow: tenantSend });
     const browser = buildBrowserContext(settings as any, tenantSend);
-    ref = { projectManager, processManager, scheduledTaskManager, settings, extension, browser, configDir };
+    ref = {
+      projectManager,
+      processManager,
+      scheduledTaskManager,
+      routineBridge,
+      settings,
+      extension,
+      browser,
+      configDir,
+    };
     tenants.set(tenantKey(teamId, principalId), ref);
     return ref;
   };
@@ -902,6 +913,7 @@ export const wireGlobalHandlers = async (arg: {
   const defaultTenant = getTenant(DEFAULT_TENANT);
   // Bridge handlers: register once on any bridge with a tenant resolver.
   defaultTenant.projectManager.bridge.registerIpc(ipc, (e) => tenantPM(e).bridge);
+  defaultTenant.routineBridge.registerIpc(ipc, (e) => ctxTenant(e).routineBridge);
   // Local single-tenant server: import any pre-v23 on-disk config files into the
   // shared store once (cloud tenants start empty — never import a shared file).
   if (!dbUrl) {
@@ -1645,6 +1657,7 @@ export const wireGlobalHandlers = async (arg: {
     }
     const tenantCleanups = [...tenants.values()].flatMap((t) => [
       Promise.resolve(t.scheduledTaskManager.stop()),
+      Promise.resolve(t.routineBridge.disposeAll()),
       t.projectManager.exit(),
       t.processManager.cleanup(),
       t.extension.cleanup(),

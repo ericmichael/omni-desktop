@@ -21,7 +21,6 @@ import { $machines } from '@/renderer/services/machines';
 import { scheduledTaskApi } from '@/renderer/services/scheduled-tasks';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type {
-  CodeTab,
   Project,
   ScheduledTask,
   ScheduledTaskAllowedMcpTool,
@@ -30,7 +29,8 @@ import type {
   ScheduledTaskRun,
   ScheduledTaskSchedule,
 } from '@/shared/types';
-import { firstSource } from '@/shared/types';
+
+import { ensureRoutineSessionTab, formatSchedule } from './routine-session';
 
 const useStyles = makeStyles({
   root: {
@@ -467,23 +467,6 @@ export const ScheduledTasks = memo(() => {
 });
 
 ScheduledTasks.displayName = 'ScheduledTasks';
-
-export const RoutineSessionWatcher = memo(() => {
-  const store = useStore(persistedStoreApi.$atom);
-
-  useEffect(() => {
-    for (const task of store.scheduledTasks ?? []) {
-      if (!task.runningSessionId) {
-        continue;
-      }
-      void ensureRoutineSessionTab(task, task.runningSessionId, store);
-    }
-  }, [store]);
-
-  return null;
-});
-
-RoutineSessionWatcher.displayName = 'RoutineSessionWatcher';
 
 type RoutineDetailProps = {
   styles: ReturnType<typeof useStyles>;
@@ -943,109 +926,11 @@ function baseFormState(
   };
 }
 
-function formatSchedule(task: ScheduledTask): string {
-  if (!task.enabled) {
-    return 'Paused';
-  }
-  const next = task.nextRunAt ? ` · next ${new Date(task.nextRunAt).toLocaleString()}` : '';
-  const schedule = task.schedule;
-  if (schedule.kind === 'manual') {
-    return 'Manual';
-  }
-  if (schedule.kind === 'interval') {
-    return `Every ${schedule.everyMinutes} minutes${next}`;
-  }
-  if (schedule.kind === 'daily') {
-    return `${schedule.weekdaysOnly ? 'Weekdays' : 'Daily'} at ${schedule.time}${next}`;
-  }
-  return `Weekly on ${formatDayOfWeek(schedule.dayOfWeek)} at ${schedule.time}${next}`;
-}
-
-function formatDayOfWeek(dayOfWeek: number): string {
-  return ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][dayOfWeek] ?? 'Monday';
-}
-
 function formatProject(task: ScheduledTask, projects: Project[]): string {
   if (!task.projectId) {
     return 'No project';
   }
   return projects.find((project) => project.id === task.projectId)?.label ?? 'Unknown project';
-}
-
-async function ensureRoutineSessionTab(
-  task: ScheduledTask,
-  sessionId: string,
-  store: ReturnType<typeof persistedStoreApi.get>,
-  activate = false
-): Promise<CodeTab> {
-  const tabs = persistedStoreApi.getKey('codeTabs') ?? [];
-  const existing = tabs.find((tab) => tab.sessionId === sessionId);
-  if (existing) {
-    const nextExisting = {
-      ...existing,
-      routineId: task.id,
-      routineName: task.name,
-      routineSchedule: formatSchedule(task),
-    };
-    if (
-      existing.routineId !== nextExisting.routineId ||
-      existing.routineName !== nextExisting.routineName ||
-      existing.routineSchedule !== nextExisting.routineSchedule
-    ) {
-      await persistedStoreApi.setKey(
-        'codeTabs',
-        tabs.map((tab) => (tab.id === existing.id ? nextExisting : tab))
-      );
-    }
-    if (activate) {
-      await persistedStoreApi.setKey('activeCodeTabId', existing.id);
-    }
-    return nextExisting;
-  }
-  const workspaceDir = await resolveRoutineWorkspaceDir(task, sessionId, store);
-  const tab: CodeTab = {
-    id: `routine-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    projectId: task.projectId ?? null,
-    sessionId,
-    routineId: task.id,
-    routineName: task.name,
-    routineSchedule: formatSchedule(task),
-    profileName: task.profileName ?? store.defaultProfileName ?? 'host',
-    profileNameExplicit: Boolean(task.profileName),
-    createdAt: Date.now(),
-    ...(workspaceDir ? { workspaceDir } : {}),
-  };
-  await persistedStoreApi.setKey('codeTabs', [...tabs, tab]);
-  if (activate) {
-    await persistedStoreApi.setKey('activeCodeTabId', tab.id);
-  }
-  return tab;
-}
-
-async function resolveRoutineWorkspaceDir(
-  task: ScheduledTask,
-  sessionId: string,
-  store: ReturnType<typeof persistedStoreApi.get>
-): Promise<string | undefined> {
-  if (task.projectId) {
-    const project = store.projects.find((item) => item.id === task.projectId);
-    const source = firstSource(project);
-    if (source?.kind === 'local') {
-      return source.workspaceDir;
-    }
-    if (store.workspaceDir && project) {
-      return `${store.workspaceDir.replace(/[/\\]+$/, '')}/Projects/${project.slug}`;
-    }
-    return undefined;
-  }
-  if (!store.workspaceDir) {
-    return undefined;
-  }
-  try {
-    return await emitter.invoke('util:session-workspace-dir', store.workspaceDir, sessionId);
-  } catch {
-    return undefined;
-  }
 }
 
 function lastRunLabel(run: ScheduledTask['history'][number]): string {
