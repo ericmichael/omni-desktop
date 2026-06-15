@@ -3551,6 +3551,8 @@ export type ProviderEntry = {
   api_key?: string;
   base_url?: string;
   api_version?: string;
+  use_responses?: boolean;
+  use_responses_websocket?: boolean;
   models: Record<string, ModelEntry>;
 };
 

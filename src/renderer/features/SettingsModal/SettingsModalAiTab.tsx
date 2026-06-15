@@ -335,17 +335,18 @@ export const SettingsModalAiTab = memo(() => {
   );
 
   const updateProvider = useCallback(
-    (name: string, field: string, value: string) => {
+    (name: string, field: string, value: string | boolean | undefined) => {
       updateConfig((c) => {
         const prov = c.providers[name];
         if (!prov) {
           return c;
         }
+        const nextValue = value === '' ? undefined : value;
         return {
           ...c,
           providers: {
             ...c.providers,
-            [name]: { ...prov, [field]: value || undefined },
+            [name]: { ...prov, [field]: nextValue },
           },
         };
       });
@@ -713,7 +714,7 @@ const ProviderRow = memo(
     editingModel: { provider: string; modelId: string } | null;
     newModelId: string;
     onRemove: (name: string) => void;
-    onUpdateProvider: (name: string, field: string, value: string) => void;
+    onUpdateProvider: (name: string, field: string, value: string | boolean | undefined) => void;
     onAddModel: (providerName: string) => void;
     onRemoveModel: (providerName: string, modelId: string) => void;
     onUpdateModel: (providerName: string, modelId: string, field: string, value: unknown) => void;
@@ -730,6 +731,8 @@ const ProviderRow = memo(
     const showBaseUrl =
       provider.type === 'azure' || provider.type === 'openai-compatible' || provider.type === 'litellm';
     const showApiVersion = provider.type === 'azure';
+    const showApiMode =
+      provider.type === 'openai' || provider.type === 'openai-compatible' || provider.type === 'azure';
     // OAuth providers authenticate via the ChatGPT sign-in above, not a key.
     const showApiKey = !isOauth;
 
@@ -751,6 +754,12 @@ const ProviderRow = memo(
     );
     const onChangeApiVersion = useCallback(
       (e: ChangeEvent<HTMLInputElement>) => onUpdateProvider(name, 'api_version', e.target.value),
+      [name, onUpdateProvider]
+    );
+    const onChangeApiMode = useCallback(
+      (e: ChangeEvent<HTMLSelectElement>) => {
+        onUpdateProvider(name, 'use_responses', e.target.value === 'responses' ? undefined : false);
+      },
       [name, onUpdateProvider]
     );
     const onClickAddModel = useCallback(() => onAddModel(name), [name, onAddModel]);
@@ -813,6 +822,17 @@ const ProviderRow = memo(
                   mono
                   className={styles.flex1}
                 />
+              </FormField>
+            )}
+            {showApiMode && (
+              <FormField label="OpenAI API mode">
+                <Select
+                  value={provider.use_responses === false ? 'chat_completions' : 'responses'}
+                  onChange={onChangeApiMode}
+                >
+                  <option value="responses">Responses API (recommended)</option>
+                  <option value="chat_completions">Chat Completions API</option>
+                </Select>
               </FormField>
             )}
 
