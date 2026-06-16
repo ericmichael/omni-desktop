@@ -54,8 +54,8 @@ export const DEFAULT_COLUMNS: ColumnDef[] = [
         'No source edits were made unless explicitly required to investigate a failing reproduction.',
       ],
       agentInstructions:
-        'Activate software-planning for feature, refactor, or spec work. Activate debug if this is a failure investigation and the root cause is not localized. Do not move to Implementation until the plan is decision-complete.',
-      recommendedSkills: ['software-planning', 'debug'],
+        'Activate software-planning for feature, refactor, or spec work. Activate software-debug if this is a failure investigation and the root cause is not localized. Do not move to Implementation until the plan is decision-complete.',
+      recommendedSkills: ['software-planning', 'software-debug'],
     },
   },
   {
@@ -77,7 +77,7 @@ export const DEFAULT_COLUMNS: ColumnDef[] = [
       ],
       agentInstructions:
         'Follow AGENTS.md in every source touched. Use worker agents only for independent subtasks with explicit file ownership and acceptance criteria. For bug fixes, prefer red-before-green testing when practical.',
-      recommendedSkills: ['debug', 'software-planning'],
+      recommendedSkills: ['software-debug', 'software-planning'],
     },
   },
   {
@@ -113,8 +113,8 @@ export const DEFAULT_COLUMNS: ColumnDef[] = [
         'Merge readiness is clear, or blockers are documented.',
       ],
       agentInstructions:
-        'Use push/PR-related skills only when explicitly asked or when the project workflow expects PR preparation. Do not merge unless the user or project policy explicitly allows it.',
-      recommendedSkills: ['push', 'pull', 'land'],
+        'Use git-push/PR-related skills only when explicitly asked or when the project workflow expects PR preparation. Do not merge unless the user or project policy explicitly allows it.',
+      recommendedSkills: ['git-push', 'git-pull', 'git-land'],
     },
   },
   {

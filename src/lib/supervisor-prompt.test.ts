@@ -58,7 +58,7 @@ const WORKFLOW_PIPELINE = makePipeline([
       entryCriteria: ['Spec is approved by a human reviewer', 'Dependencies are unblocked'],
       definitionOfDone: ['Feature flag persists across restarts', 'Targeted Vitest coverage passes'],
       agentInstructions: 'Keep implementation minimal and preserve public APIs.',
-      recommendedSkills: ['bugfix', 'typescript'],
+      recommendedSkills: ['software-bugfix', 'typescript'],
       allowedTransitions: ['col-review'],
       autoDispatch: true,
     },
@@ -205,7 +205,7 @@ describe('buildAutopilotGoalText', () => {
     expect(goalText).toContain('Spec is approved by a human reviewer');
     expect(goalText).toContain('Feature flag persists across restarts');
     expect(goalText).toContain('Keep implementation minimal and preserve public APIs.');
-    expect(goalText).toContain('bugfix');
+    expect(goalText).toContain('software-bugfix');
     expect(goalText).toContain('col-review');
     expect(goalText).toMatch(/auto.?dispatch/i);
     expect(goalText).not.toContain('Reviewer has inspected the full PR diff');
