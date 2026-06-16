@@ -1328,6 +1328,9 @@ export function App({
         if (typeof tickInterval === 'number') {
           goalArgs.tick_interval = tickInterval;
         }
+        if (runOverrides?.safeToolOverrides) {
+          goalArgs.safe_tool_overrides = runOverrides.safeToolOverrides;
+        }
         await client.serverCall('goal', goalArgs, sid);
       },
       goalStop: async () => {
