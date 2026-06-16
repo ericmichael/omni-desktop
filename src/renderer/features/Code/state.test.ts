@@ -208,6 +208,40 @@ describe('reserved chat record guards', () => {
     expect(store.codeTabs.some((t) => t.id === 'chat')).toBe(true);
   });
 
+  it('addTab creates a fresh tab instead of reusing an existing blank session', async () => {
+    resetStore({ codeTabs: [tab({ id: 'blank-tab', projectId: null, sessionId: 'blank-session' })] });
+    const { codeApi } = await import('./state');
+
+    const created = await codeApi.addTab();
+
+    expect(created.id).not.toBe('blank-tab');
+    expect(store.codeTabs).toHaveLength(2);
+    expect(store.activeCodeTabId).toBe(created.id);
+  });
+
+  it('addTab creates a fresh tab instead of reusing a routine session', async () => {
+    resetStore({
+      codeTabs: [
+        tab({
+          id: 'routine-tab',
+          projectId: null,
+          sessionId: 'routine-session',
+          routineId: 'routine-1',
+          routineName: 'Morning review',
+          routineSchedule: 'Manual',
+        }),
+      ],
+    });
+    const { codeApi } = await import('./state');
+
+    const created = await codeApi.addTab();
+
+    expect(created.id).not.toBe('routine-tab');
+    expect(store.codeTabs).toHaveLength(2);
+    expect(store.activeCodeTabId).toBe(created.id);
+    expect(store.codeTabs.find((item) => item.id === 'routine-tab')).toMatchObject({ routineId: 'routine-1' });
+  });
+
   it('removeTab is a no-op for the chat record', async () => {
     resetStore({ codeTabs: [chatTab(), tab({ id: 'tab-1' })] });
     const { codeApi } = await import('./state');

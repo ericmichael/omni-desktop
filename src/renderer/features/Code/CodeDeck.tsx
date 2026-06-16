@@ -2386,16 +2386,6 @@ export const CodeDeck = memo(() => {
     });
   }, []);
 
-  const addingFirstTab = useRef(false);
-  useEffect(() => {
-    if (tabs.length === 0 && !addingFirstTab.current) {
-      addingFirstTab.current = true;
-      codeApi.addTab().finally(() => {
-        addingFirstTab.current = false;
-      });
-    }
-  }, [tabs.length]);
-
   useEffect(() => {
     const firstTab = tabs[0];
     if (!activeTabId && firstTab) {

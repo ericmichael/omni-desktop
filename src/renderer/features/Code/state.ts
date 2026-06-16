@@ -69,17 +69,7 @@ export const codeApi = {
   },
 
   addTab: async (): Promise<CodeTab> => {
-    // Reuse an existing unconfigured tab instead of stacking up orphan
-    // "New Session" columns: a tab created here but abandoned before a
-    // project was picked is indistinguishable from a fresh one.
     const existingTabs = persistedStoreApi.getKey('codeTabs') ?? [];
-    // The reserved chat record is also projectless — never hand it out as a
-    // blank "New Session" tab.
-    const blank = existingTabs.find((t) => !isChatTab(t) && !t.projectId && !t.customAppId && !t.ticketId);
-    if (blank) {
-      await persistedStoreApi.setKey('activeCodeTabId', blank.id);
-      return blank;
-    }
     const tab: CodeTab = {
       id: nanoid(),
       projectId: null,
