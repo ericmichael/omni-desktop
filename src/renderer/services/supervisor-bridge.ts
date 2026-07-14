@@ -112,7 +112,7 @@ async function ensureColumn(request: Extract<SupervisorBridgeRequest, { kind: 'e
       await codeApi.setTabProfile(existing.id, request.profileName);
     }
     await persistedStoreApi.setKey('activeCodeTabId', existing.id);
-    await persistedStoreApi.setKey('layoutMode', 'spaces');
+    await persistedStoreApi.setKey('layoutMode', 'chat');
     return;
   }
   const ticket = (persistedStoreApi.$atom.get().tickets ?? []).find((t) => t.id === request.ticketId);
@@ -124,7 +124,7 @@ async function ensureColumn(request: Extract<SupervisorBridgeRequest, { kind: 'e
     workspaceDir: request.workspaceDir,
     profileName: request.profileName,
   });
-  await persistedStoreApi.setKey('layoutMode', 'spaces');
+  await persistedStoreApi.setKey('layoutMode', 'chat');
 }
 
 const DISPATCH_TIMEOUT_MS = 90_000;

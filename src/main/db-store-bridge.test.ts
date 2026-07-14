@@ -12,6 +12,7 @@ describe('pipeline column row mapping', () => {
     sort_order: 1,
     gate: 0,
     max_concurrent: 2,
+    category: 'doing',
     workflow: JSON.stringify({
       purpose: 'Plan the implementation',
       definitionOfDone: ['Decision-complete plan exists'],
@@ -24,6 +25,7 @@ describe('pipeline column row mapping', () => {
     expect(rowToColumn(baseRow)).toEqual({
       id: 'proj_1__spec',
       label: 'Spec',
+      category: 'doing',
       description: 'Plan the work',
       maxConcurrent: 2,
       workflow: {

@@ -57,7 +57,7 @@ export class Err<E> {
  * @template T The type of the value in the `Ok` case.
  * @template E The type of the error in the `Err` case.
  */
-type Result<T, E = Error> = Ok<T> | Err<E>;
+export type Result<T, E = Error> = Ok<T> | Err<E>;
 
 /**
  * Creates a successful result.

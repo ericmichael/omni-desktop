@@ -26,7 +26,6 @@ export function registerSupervisorHandlers(
   h('project:send-supervisor-message', (s, ticketId, message) => s.sendSupervisorMessage(ticketId, message));
   h('project:reset-supervisor-session', (s, ticketId) => s.resetSupervisorSession(ticketId));
   h('project:set-auto-dispatch', (s, projectId, enabled) => s.setAutoDispatch(projectId, enabled));
-  h('project:get-active-wip-tickets', (s) => s.getActiveWipTickets());
   h('project:get-ticket-workspace', (s, ticketId) => s.getTicketWorkspaceLocked(ticketId));
   h('project:get-tasks', (s) => s.listTasks());
   h('project:finalize-ticket-cleanup', (s, ticketId) => s.finalizeTicketCleanup(ticketId));

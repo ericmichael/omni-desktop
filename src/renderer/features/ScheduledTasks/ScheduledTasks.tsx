@@ -1,220 +1,401 @@
+import { Field, makeStyles, mergeClasses, Switch, tokens } from '@fluentui/react-components';
 import {
-  Button,
-  Card,
-  Field,
-  Input,
-  makeStyles,
-  mergeClasses,
-  Select,
-  Switch,
-  Textarea,
-  tokens,
-} from '@fluentui/react-components';
+  Add20Regular,
+  Delete20Regular,
+  Edit20Regular,
+  MoreHorizontal20Regular,
+  Open20Regular,
+  Play20Regular,
+} from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
 import type { ComponentProps } from 'react';
-import { memo, useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 
+import { formatDuration, formatTimestamp } from '@/lib/format-time';
+import { useIsDesktop } from '@/renderer/common/use-is-desktop';
+import {
+  Badge,
+  Button,
+  Caption1,
+  ConfirmDialog,
+  EmptyState,
+  IconButton,
+  Input,
+  Menu,
+  MenuDivider,
+  MenuItem,
+  MenuList,
+  MenuPopover,
+  MenuTrigger,
+  MessageBar,
+  MessageBarBody,
+  PageHeader,
+  Select,
+  Textarea,
+  TopAppBar,
+} from '@/renderer/ds';
 import { getProfileMenuLabel } from '@/renderer/features/SandboxProfile/profile-list';
 import { SandboxPicker } from '@/renderer/features/SandboxProfile/SandboxPicker';
 import { emitter } from '@/renderer/services/ipc';
 import { $machines } from '@/renderer/services/machines';
 import { scheduledTaskApi } from '@/renderer/services/scheduled-tasks';
 import { persistedStoreApi } from '@/renderer/services/store';
+import { $glassEnabled } from '@/renderer/theme/use-glass';
 import type {
   Project,
   ScheduledTask,
-  ScheduledTaskAllowedMcpTool,
   ScheduledTaskInput,
   ScheduledTaskPermissionMode,
   ScheduledTaskRun,
+  ScheduledTaskRunStatus,
   ScheduledTaskSchedule,
 } from '@/shared/types';
 
-import { ensureRoutineSessionTab, formatSchedule } from './routine-session';
+import { ensureRoutineSessionTab, formatDayOfWeek } from './routine-session';
+import { $routinesView } from './state';
+
+// ---------------------------------------------------------------------------
+// Styles
+// ---------------------------------------------------------------------------
 
 const useStyles = makeStyles({
   root: {
-    height: '100%',
-    overflow: 'auto',
-    padding: '32px',
-    backgroundColor: tokens.colorNeutralBackground1,
-    color: tokens.colorNeutralForeground1,
-  },
-  header: {
     display: 'flex',
-    justifyContent: 'space-between',
-    gap: '16px',
-    alignItems: 'flex-start',
-    marginBottom: '24px',
-  },
-  title: {
-    fontSize: '28px',
-    fontWeight: 700,
-    margin: 0,
-  },
-  subtitle: {
-    color: tokens.colorNeutralForeground3,
-    marginTop: '6px',
-    maxWidth: '720px',
-  },
-  grid: {
-    display: 'grid',
-    gridTemplateColumns: 'minmax(260px, 360px) minmax(420px, 1fr)',
-    gap: '20px',
-    '@media (max-width: 900px)': {
-      gridTemplateColumns: '1fr',
-    },
-  },
-  form: {
-    display: 'grid',
-    gap: '14px',
-  },
-  cards: {
-    display: 'grid',
-    gap: '12px',
-  },
-  listCard: {
-    padding: '12px',
-  },
-  listHeader: {
-    alignItems: 'center',
-    display: 'flex',
-    justifyContent: 'space-between',
-    marginBottom: '10px',
-  },
-  listItem: {
-    alignItems: 'flex-start',
-    backgroundColor: tokens.colorNeutralBackground1,
-    border: `1px solid ${tokens.colorNeutralStroke2}`,
-    borderRadius: tokens.borderRadiusMedium,
-    color: tokens.colorNeutralForeground1,
-    cursor: 'pointer',
-    display: 'grid',
-    gap: '4px',
-    padding: '12px',
-    textAlign: 'left',
     width: '100%',
-    ':hover': {
-      backgroundColor: tokens.colorNeutralBackground1Hover,
+    height: '100%',
+  },
+  rootGlass: {
+    backgroundColor: 'transparent',
+  },
+  listPane: {
+    display: 'flex',
+    flexDirection: 'column',
+    width: '100%',
+    height: '100%',
+    '@media (min-width: 640px)': {
+      width: '320px',
+      flexShrink: 0,
+      borderRight: `1px solid ${tokens.colorNeutralStroke1}`,
     },
   },
-  selectedListItem: {
-    backgroundColor: tokens.colorBrandBackground2,
-    border: `1px solid ${tokens.colorBrandStroke1}`,
+  listPaneGlass: {
+    backgroundColor: tokens.colorNeutralBackground2,
+    backdropFilter: 'var(--glass-blur)',
+    WebkitBackdropFilter: 'var(--glass-blur)',
   },
-  detailCard: {
-    padding: '18px',
+  list: {
+    flex: '1 1 0',
+    minHeight: 0,
+    overflowY: 'auto',
   },
-  taskCard: {
-    padding: '16px',
-  },
-  taskTop: {
+  detailPane: {
+    flex: '1 1 0',
+    minWidth: 0,
     display: 'flex',
-    justifyContent: 'space-between',
-    gap: '12px',
+    flexDirection: 'column',
   },
-  taskName: {
-    fontWeight: 650,
-    fontSize: '16px',
+  detailPaneGlass: {
+    backgroundColor: tokens.colorNeutralBackground1,
+    backdropFilter: 'var(--glass-blur)',
+    WebkitBackdropFilter: 'var(--glass-blur)',
+  },
+  /* List rows — same idiom as the Work tab's task rows. */
+  row: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'stretch',
+    gap: '2px',
+    paddingLeft: tokens.spacingHorizontalL,
+    paddingRight: tokens.spacingHorizontalS,
+    paddingTop: '8px',
+    paddingBottom: '8px',
+    cursor: 'pointer',
+    border: 'none',
+    backgroundColor: 'transparent',
+    width: '100%',
+    textAlign: 'left',
+    ':hover': { backgroundColor: tokens.colorSubtleBackgroundHover },
+    ':focus-visible': {
+      outlineWidth: '2px',
+      outlineStyle: 'solid',
+      outlineColor: tokens.colorBrandStroke1,
+      outlineOffset: '-2px',
+    },
+    '&:hover .routine-row-menu': { opacity: 1 },
+    '&:focus-within .routine-row-menu': { opacity: 1 },
+  },
+  rowMenu: {
+    display: 'flex',
+    alignItems: 'center',
+    flexShrink: 0,
+    opacity: 0,
+    transitionProperty: 'opacity',
+    transitionDuration: tokens.durationFaster,
+  },
+  rowMenuOpen: {
+    opacity: 1,
+  },
+  rowSelected: {
+    backgroundColor: tokens.colorSubtleBackgroundSelected,
+  },
+  rowTop: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+  },
+  rowTitle: {
+    flex: '1 1 0',
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: tokens.fontSizeBase300,
+    color: tokens.colorNeutralForeground1,
+  },
+  rowMeta: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  /* ── Detail: the standard skeleton — full-bleed header band (title +
+     actions), centered scrollable body, content | properties rail. ── */
+  bandHeader: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '2px',
+    paddingLeft: tokens.spacingHorizontalL,
+    paddingRight: tokens.spacingHorizontalL,
+    paddingTop: tokens.spacingVerticalL,
+    paddingBottom: tokens.spacingVerticalS,
+    borderBottom: `1px solid ${tokens.colorNeutralStroke1}`,
+    flexShrink: 0,
+  },
+  bandTitleRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+    minWidth: 0,
+  },
+  bandTitle: {
+    flex: '0 1 auto',
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: tokens.fontSizeBase600,
+    fontWeight: tokens.fontWeightSemibold,
+    lineHeight: tokens.lineHeightBase600,
+    color: tokens.colorNeutralForeground1,
+  },
+  bandSpacer: {
+    flex: '1 1 0',
+  },
+  detailBody: {
+    flex: '1 1 0',
+    minHeight: 0,
+    overflowY: 'auto',
+    padding: tokens.spacingVerticalXXL,
+  },
+  detailBodyInner: {
+    width: '100%',
+    maxWidth: '56rem',
+    marginLeft: 'auto',
+    marginRight: 'auto',
+  },
+  formInner: {
+    width: '100%',
+    maxWidth: '36rem',
+    marginLeft: 'auto',
+    marginRight: 'auto',
+  },
+  /* Content + properties rail — stacks early: the pane sits next to the
+     320px routine list. */
+  split: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: tokens.spacingHorizontalXXL,
+    '@media (max-width: 1000px)': {
+      flexDirection: 'column',
+    },
+  },
+  main: {
+    flex: '1 1 0',
+    minWidth: 0,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXL,
+    '@media (max-width: 1000px)': {
+      width: '100%',
+      flex: '0 0 auto',
+    },
+  },
+  aside: {
+    width: '240px',
+    flexShrink: 0,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalL,
+    '@media (max-width: 1000px)': {
+      width: '100%',
+    },
+  },
+  prop: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '4px',
+  },
+  propText: {
+    display: 'flex',
+    flexDirection: 'column',
+    rowGap: '2px',
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
   },
   muted: {
     color: tokens.colorNeutralForeground3,
-    fontSize: '12px',
   },
-  helperText: {
-    color: tokens.colorNeutralForeground3,
-    fontSize: '12px',
-    lineHeight: '18px',
+  section: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalS,
+  },
+  sectionTitle: {
+    fontSize: tokens.fontSizeBase200,
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground2,
+    textTransform: 'uppercase',
+    letterSpacing: '0.05em',
+  },
+  instructions: {
+    fontSize: tokens.fontSizeBase300,
+    color: tokens.colorNeutralForeground2,
+    lineHeight: tokens.lineHeightBase400,
+    whiteSpace: 'pre-wrap',
+    margin: 0,
+  },
+  runItem: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '4px',
+    paddingTop: tokens.spacingVerticalS,
+    paddingBottom: tokens.spacingVerticalS,
+  },
+  runSummary: {
+    display: 'flex',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: tokens.spacingHorizontalS,
+  },
+  toolItem: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: tokens.spacingHorizontalS,
+  },
+  mono: {
+    fontFamily: tokens.fontFamilyMonospace,
+    fontSize: tokens.fontSizeBase200,
+  },
+  dangerMenuItem: {
+    color: tokens.colorPaletteRedForeground1,
+  },
+  form: {
+    display: 'grid',
+    gap: tokens.spacingVerticalM,
+  },
+  formButtons: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+    marginTop: tokens.spacingVerticalS,
   },
   sandboxRow: {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: '12px',
+    gap: tokens.spacingHorizontalM,
   },
-  row: {
-    display: 'flex',
-    gap: '8px',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-    marginTop: '12px',
-  },
-  empty: {
+  helperText: {
     color: tokens.colorNeutralForeground3,
-    padding: '28px',
-    textAlign: 'center',
-  },
-  runHistory: {
-    borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
-    display: 'grid',
-    gap: '8px',
-    marginTop: '14px',
-    paddingTop: '12px',
-  },
-  runHeading: {
-    color: tokens.colorNeutralForeground2,
-    fontSize: '12px',
-    fontWeight: 650,
-  },
-  allowedTools: {
-    borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
-    display: 'grid',
-    gap: '8px',
-    marginTop: '14px',
-    paddingTop: '12px',
-  },
-  allowedToolItem: {
-    alignItems: 'center',
-    display: 'flex',
-    gap: '8px',
-    justifyContent: 'space-between',
-  },
-  section: {
-    borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
-    display: 'grid',
-    gap: '12px',
-    marginTop: '16px',
-    paddingTop: '14px',
-  },
-  runItem: {
-    border: `1px solid ${tokens.colorNeutralStroke2}`,
-    borderRadius: tokens.borderRadiusMedium,
-    display: 'grid',
-    gap: '4px',
-    padding: '8px',
-  },
-  approvalRunItem: {
-    backgroundColor: tokens.colorPaletteYellowBackground1,
-    border: `1px solid ${tokens.colorPaletteYellowBorder2}`,
-  },
-  runSummary: {
-    alignItems: 'center',
-    display: 'flex',
-    flexWrap: 'wrap',
-    gap: '8px',
-  },
-  statusPill: {
-    backgroundColor: tokens.colorNeutralBackground3,
-    borderRadius: tokens.borderRadiusCircular,
-    color: tokens.colorNeutralForeground2,
-    fontSize: '11px',
-    fontWeight: 650,
-    padding: '2px 8px',
-  },
-  approvalStatusPill: {
-    backgroundColor: tokens.colorPaletteYellowBackground3,
-    color: tokens.colorNeutralForegroundInverted,
-  },
-  runMeta: {
-    alignItems: 'center',
-    display: 'flex',
-    flexWrap: 'wrap',
-    gap: '8px',
-  },
-  mono: {
-    fontFamily: tokens.fontFamilyMonospace,
+    fontSize: tokens.fontSizeBase200,
+    lineHeight: '18px',
   },
 });
+
+// ---------------------------------------------------------------------------
+// Formatting
+// ---------------------------------------------------------------------------
+
+const RUN_STATUS: Record<
+  ScheduledTaskRunStatus,
+  { label: string; color: 'blue' | 'green' | 'red' | 'yellow' | 'default' }
+> = {
+  running: { label: 'Running', color: 'blue' },
+  waiting_for_approval: { label: 'Needs approval', color: 'yellow' },
+  completed: { label: 'Completed', color: 'green' },
+  skipped: { label: 'Skipped', color: 'default' },
+  failed: { label: 'Failed', color: 'red' },
+};
+
+/** Compact schedule for list rows and the detail header — no next-run time. */
+function scheduleLabel(schedule: ScheduledTaskSchedule): string {
+  if (schedule.kind === 'manual') {
+    return 'Manual';
+  }
+  if (schedule.kind === 'interval') {
+    return schedule.everyMinutes === 60 ? 'Hourly' : `Every ${schedule.everyMinutes} min`;
+  }
+  if (schedule.kind === 'daily') {
+    return `${schedule.weekdaysOnly ? 'Weekdays' : 'Daily'} at ${schedule.time}`;
+  }
+  return `${formatDayOfWeek(schedule.dayOfWeek)}s at ${schedule.time}`;
+}
+
+function projectLabel(task: ScheduledTask, projects: Project[]): string | null {
+  if (!task.projectId) {
+    return null;
+  }
+  return projects.find((project) => project.id === task.projectId)?.label ?? 'Unknown project';
+}
+
+function formatRunTime(run: ScheduledTaskRun): string {
+  const started = formatTimestamp(run.startedAt);
+  if (!run.completedAt) {
+    return started;
+  }
+  return `${started} · ${formatDuration(run.completedAt - run.startedAt)}`;
+}
+
+/** The one state worth surfacing on a list row; everything else is noise. */
+function rowAttention(task: ScheduledTask): { label: string; color: 'blue' | 'red' | 'yellow' | 'default' } | null {
+  if (!task.enabled) {
+    return { label: 'Paused', color: 'default' };
+  }
+  const last = task.history[0];
+  if (!last) {
+    return null;
+  }
+  if (last.status === 'waiting_for_approval') {
+    return { label: 'Needs approval', color: 'yellow' };
+  }
+  if (last.status === 'running') {
+    return { label: 'Running', color: 'blue' };
+  }
+  if (last.status === 'failed') {
+    return { label: 'Failed', color: 'red' };
+  }
+  return null;
+}
+
+function isWaitingForApproval(run: ScheduledTaskRun): boolean {
+  return run.status === 'waiting_for_approval';
+}
+
+// ---------------------------------------------------------------------------
+// Form state
+// ---------------------------------------------------------------------------
 
 const DEFAULT_TIME = '09:00';
 
@@ -244,20 +425,36 @@ const createEmptyFormState = (defaultProfileName: string | undefined): RoutineFo
   enabled: true,
 });
 
+// ---------------------------------------------------------------------------
+// Main component
+// ---------------------------------------------------------------------------
+
+/**
+ * The Routines tab: scheduled agent sessions that run while the app is open.
+ * Master-detail like the Work and Inbox tabs — a list pane picks a routine,
+ * the detail pane shows/edits it. On mobile the detail replaces the list.
+ */
 export const ScheduledTasks = memo(() => {
   const styles = useStyles();
   const store = useStore(persistedStoreApi.$atom);
   const machines = useStore($machines);
+  const isGlass = useStore($glassEnabled);
+  const isDesktop = useIsDesktop();
+
   const [isEnterprise, setIsEnterprise] = useState(false);
   const [createForm, setCreateForm] = useState<RoutineFormState>(() => createEmptyFormState(store.defaultProfileName));
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
-  const [creating, setCreating] = useState(true);
+  // Selection lives in `$routinesView` (like the Inbox tab's `$inboxView`),
+  // so cross-tab jumps can land on a specific routine.
+  const view = useStore($routinesView);
+  const selectedTaskId = view.selectedTaskId;
+  const [creating, setCreating] = useState(false);
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<RoutineFormState | null>(null);
   const [busyTaskId, setBusyTaskId] = useState<string | null>(null);
   const [savingTaskId, setSavingTaskId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editError, setEditError] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<ScheduledTask | null>(null);
 
   useEffect(() => {
     emitter
@@ -273,46 +470,82 @@ export const ScheduledTasks = memo(() => {
       ),
     [store.scheduledTasks]
   );
-  const selectedTask = useMemo(
-    () => sorted.find((task) => task.id === selectedTaskId) ?? sorted[0] ?? null,
+
+  // Desktop auto-selects the first routine so the pane is never blank;
+  // mobile requires an explicit tap (the list is the landing view).
+  const explicitSelection = useMemo(
+    () => sorted.find((task) => task.id === selectedTaskId) ?? null,
     [selectedTaskId, sorted]
   );
+  const selectedTask = explicitSelection ?? (isDesktop && !creating ? (sorted[0] ?? null) : null);
+  const isEditing = selectedTask !== null && editingTaskId === selectedTask.id && editForm !== null;
 
-  useEffect(() => {
-    if (creating || selectedTaskId || !selectedTask) {
-      return;
-    }
-    setSelectedTaskId(selectedTask.id);
-  }, [creating, selectedTask, selectedTaskId]);
+  const sandboxContext: ComponentProps<typeof SandboxPicker>['context'] = {
+    isEnterprise,
+    available: store.availableSandboxProfiles,
+    machines,
+  };
+
+  // ----- handlers -----
+
+  const cancelEdit = useCallback(() => {
+    setEditingTaskId(null);
+    setEditForm(null);
+    setEditError(null);
+  }, []);
+
+  const startCreate = useCallback(() => {
+    cancelEdit();
+    setError(null);
+    setCreating(true);
+  }, [cancelEdit]);
+
+  const cancelCreate = useCallback(() => {
+    setCreating(false);
+    setError(null);
+  }, []);
+
+  const selectTask = useCallback(
+    (taskId: string) => {
+      cancelEdit();
+      setCreating(false);
+      $routinesView.set({ selectedTaskId: taskId });
+    },
+    [cancelEdit]
+  );
+
+  const handleBack = useCallback(() => {
+    cancelEdit();
+    setCreating(false);
+    $routinesView.set({ selectedTaskId: null });
+  }, [cancelEdit]);
 
   const createTask = async () => {
     setError(null);
     try {
-      await scheduledTaskApi.create(toScheduledTaskInput(createForm));
+      const task = await scheduledTaskApi.create(toScheduledTaskInput(createForm));
       setCreateForm((current) => ({
         ...createEmptyFormState(store.defaultProfileName),
         projectId: current.projectId,
         profileName: current.profileName,
       }));
       setCreating(false);
+      $routinesView.set({ selectedTaskId: task.id });
     } catch (err) {
       setError((err as Error).message);
     }
   };
 
-  const startEdit = (task: ScheduledTask) => {
-    setEditError(null);
-    setCreating(false);
-    setSelectedTaskId(task.id);
-    setEditingTaskId(task.id);
-    setEditForm(toFormState(task, store.defaultProfileName));
-  };
-
-  const cancelEdit = () => {
-    setEditingTaskId(null);
-    setEditForm(null);
-    setEditError(null);
-  };
+  const startEdit = useCallback(
+    (task: ScheduledTask) => {
+      setEditError(null);
+      setCreating(false);
+      $routinesView.set({ selectedTaskId: task.id });
+      setEditingTaskId(task.id);
+      setEditForm(toFormState(task, store.defaultProfileName));
+    },
+    [store.defaultProfileName]
+  );
 
   const saveEdit = async (task: ScheduledTask) => {
     if (!editForm) {
@@ -339,158 +572,295 @@ export const ScheduledTasks = memo(() => {
     }
   };
 
+  const confirmDelete = useCallback(() => {
+    const task = pendingDelete;
+    if (!task) {
+      return;
+    }
+    void scheduledTaskApi.delete(task.id).then(() => {
+      $routinesView.set({ selectedTaskId: null });
+    });
+  }, [pendingDelete]);
+
+  const closeDelete = useCallback(() => setPendingDelete(null), []);
+
   const openSession = async (task: ScheduledTask, run: ScheduledTaskRun) => {
     if (!run.sessionId) {
       return;
     }
     await ensureRoutineSessionTab(task, run.sessionId, store, true);
-    await persistedStoreApi.setKey('layoutMode', 'spaces');
+    await persistedStoreApi.setKey('layoutMode', 'chat');
   };
 
-  const allowTool = async (task: ScheduledTask, toolName: string) => {
-    await scheduledTaskApi.allowTool(task.id, toolName);
-  };
+  // ----- panes -----
 
-  const revokeTool = async (task: ScheduledTask, toolName: string) => {
-    await scheduledTaskApi.revokeTool(task.id, toolName);
-  };
+  const listPane = (
+    <div className={mergeClasses(styles.listPane, isGlass && styles.listPaneGlass)}>
+      <PageHeader
+        title="Routines"
+        actions={<IconButton aria-label="New routine" icon={<Add20Regular />} size="sm" onClick={startCreate} />}
+      />
+      <div className={styles.list}>
+        {/* Desktop leaves an empty list blank — the detail pane carries the
+            empty state; showing it twice side by side reads as a glitch. */}
+        {sorted.length === 0
+          ? !isDesktop && (
+              <EmptyState
+                title="No routines yet"
+                description="Routines are scheduled agent sessions that run while the app is open."
+                action={
+                  <Button size="sm" leftIcon={<Add20Regular />} onClick={startCreate}>
+                    New routine
+                  </Button>
+                }
+              />
+            )
+          : sorted.map((task) => (
+              <RoutineRow
+                key={task.id}
+                task={task}
+                projects={store.projects}
+                selected={!creating && selectedTask?.id === task.id}
+                styles={styles}
+                onSelect={selectTask}
+                onRunNow={runNow}
+                onStartEdit={startEdit}
+                onRequestDelete={setPendingDelete}
+              />
+            ))}
+      </div>
+    </div>
+  );
 
-  const allowMcpTool = async (task: ScheduledTask, tool: ScheduledTaskAllowedMcpTool) => {
-    await scheduledTaskApi.allowMcpTool(task.id, tool);
-  };
-
-  const revokeMcpTool = async (task: ScheduledTask, tool: ScheduledTaskAllowedMcpTool) => {
-    await scheduledTaskApi.revokeMcpTool(task.id, tool);
-  };
-
-  return (
-    <div className={styles.root}>
-      <div className={styles.header}>
-        <div>
-          <h1 className={styles.title}>Routines</h1>
-          <div className={styles.subtitle}>
-            Schedule local Omni sessions that run while Desktop is open. Use /loop for quick polling inside one session.
+  const detailBody = creating ? (
+    <>
+      {isDesktop && (
+        <div className={styles.bandHeader}>
+          <div className={styles.bandTitleRow}>
+            <span className={styles.bandTitle}>New routine</span>
           </div>
         </div>
+      )}
+      <div className={styles.detailBody}>
+        <div className={styles.formInner}>
+          <RoutineForm
+            styles={styles}
+            value={createForm}
+            projects={store.projects}
+            sandboxContext={sandboxContext}
+            machines={machines}
+            submitLabel="Create routine"
+            error={error}
+            onChange={setCreateForm}
+            onSubmit={() => void createTask()}
+            onCancel={cancelCreate}
+          />
+        </div>
       </div>
-      <div className={styles.grid}>
-        <Card className={styles.listCard}>
-          <div className={styles.listHeader}>
-            <div className={styles.runHeading}>Routine index</div>
-            <Button
-              size="small"
-              appearance={creating ? 'primary' : 'secondary'}
-              onClick={() => {
-                cancelEdit();
-                setCreating(true);
-              }}
-            >
-              New
-            </Button>
+    </>
+  ) : isEditing && selectedTask && editForm ? (
+    <>
+      {isDesktop && (
+        <div className={styles.bandHeader}>
+          <div className={styles.bandTitleRow}>
+            <span className={styles.bandTitle}>Edit routine</span>
           </div>
-          <div className={styles.cards}>
-            {sorted.length === 0 ? <div className={styles.empty}>No routines yet.</div> : null}
-            {sorted.map((task) => (
-              <button
-                key={task.id}
-                className={mergeClasses(
-                  styles.listItem,
-                  !creating && selectedTask?.id === task.id && styles.selectedListItem
-                )}
-                type="button"
-                onClick={() => {
-                  cancelEdit();
-                  setCreating(false);
-                  setSelectedTaskId(task.id);
-                }}
-              >
-                <span className={styles.taskName}>{task.name}</span>
-                <span className={styles.muted}>{formatSchedule(task)}</span>
-                <span className={styles.muted}>{formatProject(task, store.projects)}</span>
-                <span className={styles.muted}>{task.history[0] ? lastRunLabel(task.history[0]) : 'Never run'}</span>
-              </button>
-            ))}
-          </div>
-        </Card>
-        <Card className={styles.detailCard}>
-          {creating ? (
-            <>
-              <div className={styles.runHeading}>Create routine</div>
-              <RoutineForm
-                styles={styles}
-                value={createForm}
-                projects={store.projects}
-                sandboxContext={{ isEnterprise, available: store.availableSandboxProfiles, machines }}
-                machines={machines}
-                submitLabel="Create routine"
-                error={error}
-                onChange={setCreateForm}
-                onSubmit={() => void createTask()}
-              />
-            </>
-          ) : selectedTask ? (
-            <RoutineDetail
-              styles={styles}
-              task={selectedTask}
-              projects={store.projects}
-              machines={machines}
-              isEditing={editingTaskId === selectedTask.id && Boolean(editForm)}
-              editForm={editForm}
-              editError={editError}
-              saving={savingTaskId === selectedTask.id}
-              busy={busyTaskId === selectedTask.id}
-              sandboxContext={{ isEnterprise, available: store.availableSandboxProfiles, machines }}
-              onRunNow={runNow}
-              onStartEdit={startEdit}
-              onDelete={async (task) => {
-                await scheduledTaskApi.delete(task.id);
-                setSelectedTaskId(null);
-                setCreating(sorted.length <= 1);
-              }}
-              onToggle={(task, enabled) => scheduledTaskApi.update(task.id, { enabled })}
-              onEditChange={setEditForm}
-              onSaveEdit={saveEdit}
-              onCancelEdit={cancelEdit}
-              onOpenSession={openSession}
-              onAllowTool={allowTool}
-              onAllowMcpTool={allowMcpTool}
-              onRevokeTool={revokeTool}
-              onRevokeMcpTool={revokeMcpTool}
-            />
-          ) : (
-            <div className={styles.empty}>Select or create a routine.</div>
-          )}
-        </Card>
+        </div>
+      )}
+      <div className={styles.detailBody}>
+        <div className={styles.formInner}>
+          <RoutineForm
+            styles={styles}
+            value={editForm}
+            projects={store.projects}
+            sandboxContext={sandboxContext}
+            machines={machines}
+            submitLabel="Save changes"
+            error={editError}
+            showEnabled
+            busy={savingTaskId === selectedTask.id}
+            onChange={setEditForm}
+            onSubmit={() => void saveEdit(selectedTask)}
+            onCancel={cancelEdit}
+          />
+        </div>
       </div>
+    </>
+  ) : selectedTask ? (
+    <RoutineDetail
+      styles={styles}
+      task={selectedTask}
+      projects={store.projects}
+      machines={machines}
+      busy={busyTaskId === selectedTask.id}
+      onRunNow={runNow}
+      onStartEdit={startEdit}
+      onRequestDelete={setPendingDelete}
+      onToggle={(task, enabled) => void scheduledTaskApi.update(task.id, { enabled })}
+      onOpenSession={openSession}
+    />
+  ) : (
+    <EmptyState
+      title={sorted.length === 0 ? 'No routines yet' : 'Select a routine'}
+      description={
+        sorted.length === 0 ? 'Routines are scheduled agent sessions that run while the app is open.' : undefined
+      }
+      action={
+        sorted.length === 0 ? (
+          <Button size="sm" leftIcon={<Add20Regular />} onClick={startCreate}>
+            New routine
+          </Button>
+        ) : undefined
+      }
+    />
+  );
+
+  const deleteDialog = (
+    <ConfirmDialog
+      open={pendingDelete !== null}
+      onClose={closeDelete}
+      onConfirm={confirmDelete}
+      title={`Delete routine "${pendingDelete?.name ?? ''}"?`}
+      description="Its schedule and run history will be removed. This action cannot be undone."
+      confirmLabel="Delete"
+      destructive
+    />
+  );
+
+  // Mobile: list and detail swap; detail gets a back header.
+  if (!isDesktop) {
+    const detailOpen = creating || explicitSelection !== null;
+    if (!detailOpen) {
+      return (
+        <div className={mergeClasses(styles.root, isGlass && styles.rootGlass)}>
+          {listPane}
+          {deleteDialog}
+        </div>
+      );
+    }
+    return (
+      <div className={mergeClasses(styles.root, isGlass && styles.rootGlass)}>
+        <div className={styles.detailPane}>
+          <TopAppBar title={creating ? 'New routine' : (explicitSelection?.name ?? 'Routine')} onBack={handleBack} />
+          {detailBody}
+        </div>
+        {deleteDialog}
+      </div>
+    );
+  }
+
+  return (
+    <div className={mergeClasses(styles.root, isGlass && styles.rootGlass)}>
+      {listPane}
+      <div className={mergeClasses(styles.detailPane, isGlass && styles.detailPaneGlass)}>{detailBody}</div>
+      {deleteDialog}
     </div>
   );
 });
 
 ScheduledTasks.displayName = 'ScheduledTasks';
 
+// ---------------------------------------------------------------------------
+// List row
+// ---------------------------------------------------------------------------
+
+type RoutineRowProps = {
+  task: ScheduledTask;
+  projects: Project[];
+  selected: boolean;
+  styles: ReturnType<typeof useStyles>;
+  onSelect: (taskId: string) => void;
+  onRunNow: (task: ScheduledTask) => Promise<void>;
+  onStartEdit: (task: ScheduledTask) => void;
+  onRequestDelete: (task: ScheduledTask) => void;
+};
+
+const stopPropagation = (e: React.SyntheticEvent) => e.stopPropagation();
+
+const RoutineRow = memo(
+  ({ task, projects, selected, styles, onSelect, onRunNow, onStartEdit, onRequestDelete }: RoutineRowProps) => {
+    const [menuOpen, setMenuOpen] = useState(false);
+    const handleClick = useCallback(() => onSelect(task.id), [onSelect, task.id]);
+    const handleKeyDown = useCallback(
+      (e: React.KeyboardEvent) => {
+        if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
+          e.preventDefault();
+          onSelect(task.id);
+        }
+      },
+      [onSelect, task.id]
+    );
+    const handleMenuOpenChange = useCallback((_e: unknown, data: { open: boolean }) => setMenuOpen(data.open), []);
+    const handleRunNow = useCallback(() => void onRunNow(task), [onRunNow, task]);
+    const handleEdit = useCallback(() => onStartEdit(task), [onStartEdit, task]);
+    const handleDelete = useCallback(() => onRequestDelete(task), [onRequestDelete, task]);
+    const attention = rowAttention(task);
+    const project = projectLabel(task, projects);
+
+    return (
+      // div+role rather than <button>: the row hosts the "…" menu button, and
+      // nesting buttons inside a button is invalid markup.
+      <div
+        role="button"
+        tabIndex={0}
+        className={mergeClasses(styles.row, selected && styles.rowSelected)}
+        onClick={handleClick}
+        onKeyDown={handleKeyDown}
+      >
+        <span className={styles.rowTop}>
+          <span className={styles.rowTitle}>{task.name}</span>
+          {attention && <Badge color={attention.color}>{attention.label}</Badge>}
+          <span
+            role="presentation"
+            className={mergeClasses(styles.rowMenu, 'routine-row-menu', menuOpen && styles.rowMenuOpen)}
+            onClick={stopPropagation}
+          >
+            <Menu open={menuOpen} onOpenChange={handleMenuOpenChange} positioning={{ position: 'below', align: 'end' }}>
+              <MenuTrigger disableButtonEnhancement>
+                <IconButton aria-label="Routine actions" icon={<MoreHorizontal20Regular />} size="sm" />
+              </MenuTrigger>
+              <MenuPopover>
+                <MenuList>
+                  <MenuItem icon={<Play20Regular />} onClick={handleRunNow}>
+                    Run now
+                  </MenuItem>
+                  <MenuItem icon={<Edit20Regular />} onClick={handleEdit}>
+                    Edit
+                  </MenuItem>
+                  <MenuDivider />
+                  <MenuItem icon={<Delete20Regular />} className={styles.dangerMenuItem} onClick={handleDelete}>
+                    Delete…
+                  </MenuItem>
+                </MenuList>
+              </MenuPopover>
+            </Menu>
+          </span>
+        </span>
+        <span className={styles.rowMeta}>
+          {scheduleLabel(task.schedule)}
+          {project ? ` · ${project}` : ''}
+        </span>
+      </div>
+    );
+  }
+);
+RoutineRow.displayName = 'RoutineRow';
+
+// ---------------------------------------------------------------------------
+// Detail
+// ---------------------------------------------------------------------------
+
 type RoutineDetailProps = {
   styles: ReturnType<typeof useStyles>;
   task: ScheduledTask;
   projects: Project[];
   machines: Parameters<typeof getProfileMenuLabel>[1];
-  sandboxContext: ComponentProps<typeof SandboxPicker>['context'];
-  isEditing: boolean;
-  editForm: RoutineFormState | null;
-  editError: string | null;
-  saving: boolean;
   busy: boolean;
   onRunNow: (task: ScheduledTask) => Promise<void>;
   onStartEdit: (task: ScheduledTask) => void;
-  onDelete: (task: ScheduledTask) => Promise<void>;
-  onToggle: (task: ScheduledTask, enabled: boolean) => Promise<ScheduledTask>;
-  onEditChange: (value: RoutineFormState) => void;
-  onSaveEdit: (task: ScheduledTask) => Promise<void>;
-  onCancelEdit: () => void;
+  onRequestDelete: (task: ScheduledTask) => void;
+  onToggle: (task: ScheduledTask, enabled: boolean) => void;
   onOpenSession: (task: ScheduledTask, run: ScheduledTaskRun) => Promise<void>;
-  onAllowTool: (task: ScheduledTask, toolName: string) => Promise<void>;
-  onAllowMcpTool: (task: ScheduledTask, tool: ScheduledTaskAllowedMcpTool) => Promise<void>;
-  onRevokeTool: (task: ScheduledTask, toolName: string) => Promise<void>;
-  onRevokeMcpTool: (task: ScheduledTask, tool: ScheduledTaskAllowedMcpTool) => Promise<void>;
 };
 
 const RoutineDetail = ({
@@ -498,81 +868,211 @@ const RoutineDetail = ({
   task,
   projects,
   machines,
-  sandboxContext,
-  isEditing,
-  editForm,
-  editError,
-  saving,
   busy,
   onRunNow,
   onStartEdit,
-  onDelete,
+  onRequestDelete,
   onToggle,
-  onEditChange,
-  onSaveEdit,
-  onCancelEdit,
   onOpenSession,
-  onAllowTool,
-  onAllowMcpTool,
-  onRevokeTool,
-  onRevokeMcpTool,
-}: RoutineDetailProps) => (
-  <div>
-    <div className={styles.taskTop}>
-      <div>
-        <div className={styles.taskName}>{task.name}</div>
-        <div className={styles.muted}>{formatSchedule(task)}</div>
-        <div className={styles.muted}>{formatProject(task, projects)}</div>
-        <div className={styles.muted}>
-          {task.profileName ? getProfileMenuLabel(task.profileName, machines) : 'Default sandbox'}
+}: RoutineDetailProps) => {
+  const project = projectLabel(task, projects);
+  const sandbox = task.profileName ? getProfileMenuLabel(task.profileName, machines) : 'Default sandbox';
+  const allowedToolNames = task.allowedToolNames ?? [];
+  const allowedMcpTools = task.allowedMcpTools ?? [];
+  const runs = (task.history ?? []).slice(0, 5);
+
+  return (
+    <>
+      {/* Header band — title + actions, like every other detail page. */}
+      <div className={styles.bandHeader}>
+        <div className={styles.bandTitleRow}>
+          <span className={styles.bandTitle}>{task.name}</span>
+          {!task.enabled && <Badge color="default">Paused</Badge>}
+          <div className={styles.bandSpacer} />
+          <Button size="sm" leftIcon={<Play20Regular />} onClick={() => void onRunNow(task)} isDisabled={busy}>
+            Run now
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => onStartEdit(task)}>
+            Edit
+          </Button>
+          <Menu positioning={{ position: 'below', align: 'end' }}>
+            <MenuTrigger disableButtonEnhancement>
+              <IconButton aria-label="More actions" icon={<MoreHorizontal20Regular />} size="sm" />
+            </MenuTrigger>
+            <MenuPopover>
+              <MenuList>
+                <MenuItem className={styles.dangerMenuItem} onClick={() => onRequestDelete(task)}>
+                  Delete routine…
+                </MenuItem>
+              </MenuList>
+            </MenuPopover>
+          </Menu>
         </div>
       </div>
-      <Switch
-        checked={task.enabled}
-        label={task.enabled ? 'Active' : 'Paused'}
-        onChange={(_, data) => void onToggle(task, data.checked)}
-      />
-    </div>
-    <div className={styles.row}>
-      <Button size="small" onClick={() => void onRunNow(task)} disabled={busy}>
-        Run now
-      </Button>
-      <Button size="small" appearance="secondary" onClick={() => onStartEdit(task)}>
-        Edit
-      </Button>
-      <Button size="small" appearance="secondary" onClick={() => void onDelete(task)}>
-        Delete
-      </Button>
-    </div>
-    {isEditing && editForm ? (
-      <div className={styles.section} aria-label={`Edit ${task.name}`}>
-        <div className={styles.runHeading}>Edit routine</div>
-        <RoutineForm
-          styles={styles}
-          value={editForm}
-          projects={projects}
-          sandboxContext={sandboxContext}
-          machines={machines}
-          submitLabel="Save changes"
-          error={editError}
-          showEnabled
-          busy={saving}
-          onChange={onEditChange}
-          onSubmit={() => void onSaveEdit(task)}
-          onCancel={onCancelEdit}
-        />
+
+      {/* Centered body: instructions + runs (content) | properties rail. */}
+      <div className={styles.detailBody}>
+        <div className={styles.detailBodyInner}>
+          <div className={styles.split}>
+            <div className={styles.main}>
+              <div className={styles.section}>
+                <span className={styles.sectionTitle}>Instructions</span>
+                <p className={styles.instructions}>{task.instructions}</p>
+              </div>
+
+              <div className={styles.section} aria-label={`${task.name} recent runs`}>
+                <span className={styles.sectionTitle}>Recent runs</span>
+                {runs.length === 0 && <Caption1 className={styles.muted}>No runs yet.</Caption1>}
+                {runs.map((run) => (
+                  <RunItem key={run.id} styles={styles} task={task} run={run} onOpenSession={onOpenSession} />
+                ))}
+              </div>
+            </div>
+
+            <aside className={styles.aside} aria-label={`${task.name} properties`}>
+              <div className={styles.prop}>
+                <span className={styles.sectionTitle}>Status</span>
+                <Switch
+                  checked={task.enabled}
+                  label={task.enabled ? 'Active' : 'Paused'}
+                  onChange={(_, data) => onToggle(task, data.checked)}
+                />
+              </div>
+
+              <div className={styles.prop}>
+                <span className={styles.sectionTitle}>Schedule</span>
+                <div className={styles.propText}>
+                  <span>{scheduleLabel(task.schedule)}</span>
+                  {task.enabled && task.nextRunAt && <span>Next {formatTimestamp(task.nextRunAt)}</span>}
+                </div>
+              </div>
+
+              <div className={styles.prop}>
+                <span className={styles.sectionTitle}>Project</span>
+                <div className={styles.propText}>
+                  <span>{project ?? 'No project'}</span>
+                </div>
+              </div>
+
+              <div className={styles.prop}>
+                <span className={styles.sectionTitle}>Sandbox</span>
+                <div className={styles.propText}>
+                  <span>{sandbox}</span>
+                </div>
+              </div>
+
+              <div className={styles.prop}>
+                <span className={styles.sectionTitle}>Details</span>
+                <div className={styles.propText}>
+                  <span>Created {formatTimestamp(task.createdAt)}</span>
+                  {task.updatedAt !== task.createdAt && <span>Updated {formatTimestamp(task.updatedAt)}</span>}
+                </div>
+              </div>
+
+              {(allowedToolNames.length > 0 || allowedMcpTools.length > 0) && (
+                <div className={styles.prop} aria-label={`${task.name} always allowed tools`}>
+                  <span className={styles.sectionTitle}>Allowed tools</span>
+                  {allowedToolNames.map((toolName) => (
+                    <div key={toolName} className={styles.toolItem}>
+                      <code className={styles.mono}>{toolName}</code>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => void scheduledTaskApi.revokeTool(task.id, toolName)}
+                      >
+                        Revoke
+                      </Button>
+                    </div>
+                  ))}
+                  {allowedMcpTools.map((tool) => (
+                    <div key={`${tool.serverLabel}\u0000${tool.toolName}`} className={styles.toolItem}>
+                      <code className={styles.mono}>
+                        {tool.serverLabel} / {tool.toolName}
+                      </code>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => void scheduledTaskApi.revokeMcpTool(task.id, tool)}
+                      >
+                        Revoke
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </aside>
+          </div>
+        </div>
       </div>
-    ) : null}
-    <AllowedToolsPanel styles={styles} task={task} onRevokeTool={onRevokeTool} onRevokeMcpTool={onRevokeMcpTool} />
-    <RunHistory
-      styles={styles}
-      task={task}
-      onOpenSession={onOpenSession}
-      onAllowTool={onAllowTool}
-      onAllowMcpTool={onAllowMcpTool}
-    />
-  </div>
-);
+    </>
+  );
+};
+
+type RunItemProps = {
+  styles: ReturnType<typeof useStyles>;
+  task: ScheduledTask;
+  run: ScheduledTaskRun;
+  onOpenSession: (task: ScheduledTask, run: ScheduledTaskRun) => Promise<void>;
+};
+
+const RunItem = memo(({ styles, task, run, onOpenSession }: RunItemProps) => {
+  const status = RUN_STATUS[run.status];
+  const waiting = isWaitingForApproval(run);
+  const pendingToolLabel =
+    run.pendingApprovalKind === 'mcp'
+      ? run.pendingApprovalServerLabel && run.pendingApprovalToolName
+        ? `${run.pendingApprovalServerLabel} / ${run.pendingApprovalToolName}`
+        : null
+      : (run.pendingApprovalToolName ?? null);
+
+  const handleOpen = useCallback(() => void onOpenSession(task, run), [onOpenSession, task, run]);
+  const handleAllow = useCallback(() => {
+    if (run.pendingApprovalKind === 'mcp') {
+      if (run.pendingApprovalServerLabel && run.pendingApprovalToolName) {
+        void scheduledTaskApi.allowMcpTool(task.id, {
+          serverLabel: run.pendingApprovalServerLabel,
+          toolName: run.pendingApprovalToolName,
+        });
+      }
+    } else if (run.pendingApprovalToolName) {
+      void scheduledTaskApi.allowTool(task.id, run.pendingApprovalToolName);
+    }
+  }, [run, task.id]);
+
+  return (
+    <div className={styles.runItem}>
+      <div className={styles.runSummary}>
+        <Badge color={status.color}>{status.label}</Badge>
+        <Caption1 className={styles.muted}>{formatRunTime(run)}</Caption1>
+        {run.sessionId && (
+          <Button size="sm" variant="ghost" leftIcon={<Open20Regular />} onClick={handleOpen}>
+            Open session
+          </Button>
+        )}
+      </div>
+      {waiting && (
+        <div className={styles.runSummary}>
+          <Caption1 className={styles.muted}>
+            {pendingToolLabel
+              ? `Waiting on “${pendingToolLabel}” — approve it in the session.`
+              : 'Waiting on a tool approval — approve it in the session.'}
+          </Caption1>
+          {pendingToolLabel && (
+            <Button size="sm" variant="ghost" onClick={handleAllow}>
+              Always allow
+            </Button>
+          )}
+        </div>
+      )}
+      {run.reason && <Caption1 className={styles.muted}>{run.reason}</Caption1>}
+    </div>
+  );
+});
+RunItem.displayName = 'RunItem';
+
+// ---------------------------------------------------------------------------
+// Form
+// ---------------------------------------------------------------------------
 
 type RoutineFormProps = {
   styles: ReturnType<typeof useStyles>;
@@ -603,7 +1103,6 @@ const RoutineForm = ({
   onSubmit,
   onCancel,
 }: RoutineFormProps) => {
-  const selectedProject = projects.find((project) => project.id === value.projectId);
   const setField = <K extends keyof RoutineFormState>(field: K, fieldValue: RoutineFormState[K]) => {
     onChange({ ...value, [field]: fieldValue });
   };
@@ -613,21 +1112,21 @@ const RoutineForm = ({
       <Field label="Name">
         <Input
           value={value.name}
-          onChange={(_, data) => setField('name', data.value)}
+          onChange={(e) => setField('name', e.target.value)}
           placeholder="Morning code review"
         />
       </Field>
       <Field label="Instructions">
         <Textarea
           value={value.instructions}
-          onChange={(_, data) => setField('instructions', data.value)}
+          onChange={(e) => setField('instructions', e.target.value)}
           placeholder="Review yesterday's changes and summarize any risks."
-          resize="vertical"
+          rows={4}
         />
       </Field>
-      <Field label="Project">
-        <Select value={value.projectId} onChange={(event) => setField('projectId', event.currentTarget.value)}>
-          <option value="">No project · new session workspace</option>
+      <Field label="Project" hint="Without a project, each run gets a fresh session workspace.">
+        <Select value={value.projectId} onChange={(e) => setField('projectId', e.currentTarget.value)}>
+          <option value="">No project</option>
           {projects.map((project) => (
             <option key={project.id} value={project.id}>
               {project.label}
@@ -635,37 +1134,20 @@ const RoutineForm = ({
           ))}
         </Select>
       </Field>
-      {!selectedProject ? (
-        <div className={styles.helperText}>
-          No project selected. Omni creates a fresh session workspace when this routine runs.
-        </div>
-      ) : null}
-      <Field label="Sandbox profile">
+      <Field label="Sandbox">
         <div className={styles.sandboxRow}>
           <SandboxPicker
             value={value.profileName}
             onChange={(profileName) => setField('profileName', profileName)}
             context={sandboxContext}
           />
-          <span className={styles.muted}>{getProfileMenuLabel(value.profileName, machines)}</span>
+          <span className={styles.helperText}>{getProfileMenuLabel(value.profileName, machines)}</span>
         </div>
       </Field>
-      <Field label="Approvals">
-        <Select
-          value={value.permissionMode}
-          onChange={(event) => setField('permissionMode', event.currentTarget.value as ScheduledTaskPermissionMode)}
-        >
-          <option value="ask">Ask when required</option>
-        </Select>
-      </Field>
-      <div className={styles.helperText}>
-        Uses the agent&apos;s built-in safe tools. Function tools can be always allowed by tool name; MCP tools can be
-        always allowed only for a specific server and tool pair.
-      </div>
       <Field label="Schedule">
         <Select
           value={value.scheduleKind}
-          onChange={(event) => setField('scheduleKind', event.currentTarget.value as ScheduleKind)}
+          onChange={(e) => setField('scheduleKind', e.currentTarget.value as ScheduleKind)}
         >
           <option value="manual">Manual</option>
           <option value="hourly">Hourly</option>
@@ -674,14 +1156,14 @@ const RoutineForm = ({
           <option value="weekly">Weekly</option>
         </Select>
       </Field>
-      {value.scheduleKind !== 'manual' && value.scheduleKind !== 'hourly' ? (
+      {value.scheduleKind !== 'manual' && value.scheduleKind !== 'hourly' && (
         <Field label="Time">
-          <Input type="time" value={value.time} onChange={(_, data) => setField('time', data.value)} />
+          <Input type="time" value={value.time} onChange={(e) => setField('time', e.target.value)} />
         </Field>
-      ) : null}
-      {value.scheduleKind === 'weekly' ? (
+      )}
+      {value.scheduleKind === 'weekly' && (
         <Field label="Day">
-          <Select value={value.dayOfWeek} onChange={(event) => setField('dayOfWeek', event.currentTarget.value)}>
+          <Select value={value.dayOfWeek} onChange={(e) => setField('dayOfWeek', e.currentTarget.value)}>
             <option value="1">Monday</option>
             <option value="2">Tuesday</option>
             <option value="3">Wednesday</option>
@@ -691,159 +1173,40 @@ const RoutineForm = ({
             <option value="0">Sunday</option>
           </Select>
         </Field>
-      ) : null}
-      {showEnabled ? (
+      )}
+      {showEnabled && (
         <Switch
           checked={value.enabled}
           label={value.enabled ? 'Active' : 'Paused'}
           onChange={(_, data) => setField('enabled', data.checked)}
         />
-      ) : null}
-      {error ? <div className={styles.muted}>{error}</div> : null}
-      <div className={styles.row}>
-        <Button
-          appearance="primary"
-          onClick={onSubmit}
-          disabled={busy || !value.name.trim() || !value.instructions.trim()}
-        >
+      )}
+      <div className={styles.helperText}>
+        Runs ask before using tools. When a run is waiting on a specific tool, you can always-allow it for this routine
+        from its run entry.
+      </div>
+      {error && (
+        <MessageBar intent="error">
+          <MessageBarBody>{error}</MessageBarBody>
+        </MessageBar>
+      )}
+      <div className={styles.formButtons}>
+        <Button onClick={onSubmit} isDisabled={busy || !value.name.trim() || !value.instructions.trim()}>
           {submitLabel}
         </Button>
-        {onCancel ? (
-          <Button appearance="secondary" onClick={onCancel} disabled={busy}>
+        {onCancel && (
+          <Button variant="ghost" onClick={onCancel} isDisabled={busy}>
             Cancel
           </Button>
-        ) : null}
+        )}
       </div>
     </div>
   );
 };
 
-type RunHistoryProps = {
-  styles: ReturnType<typeof useStyles>;
-  task: ScheduledTask;
-  onOpenSession: (task: ScheduledTask, run: ScheduledTaskRun) => Promise<void>;
-  onAllowTool: (task: ScheduledTask, toolName: string) => Promise<void>;
-  onAllowMcpTool: (task: ScheduledTask, tool: ScheduledTaskAllowedMcpTool) => Promise<void>;
-};
-
-const RunHistory = ({ styles, task, onOpenSession, onAllowTool, onAllowMcpTool }: RunHistoryProps) => (
-  <div className={styles.runHistory} aria-label={`${task.name} recent runs`}>
-    <div className={styles.runHeading}>Recent runs</div>
-    {(task.history ?? []).length === 0 ? <div className={styles.muted}>No runs yet.</div> : null}
-    {(task.history ?? []).slice(0, 5).map((run) => (
-      <div key={run.id} className={mergeClasses(styles.runItem, isWaitingForApproval(run) && styles.approvalRunItem)}>
-        <div className={styles.runSummary}>
-          <span className={mergeClasses(styles.statusPill, isWaitingForApproval(run) && styles.approvalStatusPill)}>
-            Status: {formatRunStatus(run.status)}
-          </span>
-          <span className={styles.muted}>{formatRunTime(run)}</span>
-        </div>
-        {isWaitingForApproval(run) ? (
-          <div className={styles.helperText}>
-            {run.pendingApprovalKind === 'mcp'
-              ? run.pendingApprovalServerLabel && run.pendingApprovalToolName
-                ? `Waiting on MCP tool “${run.pendingApprovalServerLabel} / ${run.pendingApprovalToolName}”. You can always allow this exact server and tool pair for future runs; approve the current request in the session.`
-                : 'Waiting on an MCP approval. Approve the current request in the session.'
-              : run.pendingApprovalToolName
-                ? `Waiting on function tool “${run.pendingApprovalToolName}”. You can always allow it for future runs; approve the current request in the session.`
-                : 'Waiting on a function tool approval. Approve the current request in the session.'}
-          </div>
-        ) : null}
-        {run.reason ? <div className={styles.muted}>Reason: {run.reason}</div> : null}
-        <div className={styles.runMeta}>
-          {run.sessionId ? (
-            <span className={styles.muted}>
-              Session: <code className={styles.mono}>{shortId(run.sessionId)}</code>
-            </span>
-          ) : null}
-          {run.runId ? (
-            <span className={styles.muted}>
-              Run: <code className={styles.mono}>{shortId(run.runId)}</code>
-            </span>
-          ) : null}
-          {run.sessionId ? (
-            <Button size="small" appearance="subtle" onClick={() => void onOpenSession(task, run)}>
-              Open session
-            </Button>
-          ) : null}
-          {isWaitingForApproval(run) && run.pendingApprovalKind !== 'mcp' && run.pendingApprovalToolName ? (
-            <Button
-              size="small"
-              appearance="subtle"
-              onClick={() => void onAllowTool(task, run.pendingApprovalToolName!)}
-            >
-              Always allow for this routine
-            </Button>
-          ) : null}
-          {isWaitingForApproval(run) &&
-          run.pendingApprovalKind === 'mcp' &&
-          run.pendingApprovalServerLabel &&
-          run.pendingApprovalToolName ? (
-            <Button
-              size="small"
-              appearance="subtle"
-              onClick={() =>
-                void onAllowMcpTool(task, {
-                  serverLabel: run.pendingApprovalServerLabel!,
-                  toolName: run.pendingApprovalToolName!,
-                })
-              }
-            >
-              Always allow this MCP tool for this routine
-            </Button>
-          ) : null}
-        </div>
-      </div>
-    ))}
-  </div>
-);
-
-type AllowedToolsPanelProps = {
-  styles: ReturnType<typeof useStyles>;
-  task: ScheduledTask;
-  onRevokeTool: (task: ScheduledTask, toolName: string) => Promise<void>;
-  onRevokeMcpTool: (task: ScheduledTask, tool: ScheduledTaskAllowedMcpTool) => Promise<void>;
-};
-
-const AllowedToolsPanel = ({ styles, task, onRevokeTool, onRevokeMcpTool }: AllowedToolsPanelProps) => {
-  const allowedToolNames = task.allowedToolNames ?? [];
-  const allowedMcpTools = task.allowedMcpTools ?? [];
-  return (
-    <>
-      <div className={styles.allowedTools} aria-label={`${task.name} always allowed function tools`}>
-        <div className={styles.runHeading}>Always allowed function tools</div>
-        {allowedToolNames.length === 0 ? (
-          <div className={styles.muted}>No function tools are always allowed for this routine.</div>
-        ) : null}
-        {allowedToolNames.map((toolName) => (
-          <div key={toolName} className={styles.allowedToolItem}>
-            <code className={styles.mono}>{toolName}</code>
-            <Button size="small" appearance="subtle" onClick={() => void onRevokeTool(task, toolName)}>
-              Revoke
-            </Button>
-          </div>
-        ))}
-      </div>
-      <div className={styles.allowedTools} aria-label={`${task.name} always allowed MCP tools`}>
-        <div className={styles.runHeading}>Always allowed MCP tools</div>
-        <div className={styles.helperText}>MCP approvals are scoped to the exact server label and tool name.</div>
-        {allowedMcpTools.length === 0 ? (
-          <div className={styles.muted}>No MCP server and tool pairs are always allowed for this routine.</div>
-        ) : null}
-        {allowedMcpTools.map((tool) => (
-          <div key={`${tool.serverLabel}\u0000${tool.toolName}`} className={styles.allowedToolItem}>
-            <code className={styles.mono}>
-              {tool.serverLabel} / {tool.toolName}
-            </code>
-            <Button size="small" appearance="subtle" onClick={() => void onRevokeMcpTool(task, tool)}>
-              Revoke
-            </Button>
-          </div>
-        ))}
-      </div>
-    </>
-  );
-};
+// ---------------------------------------------------------------------------
+// Form <-> task mapping
+// ---------------------------------------------------------------------------
 
 function buildSchedule(kind: ScheduleKind, time: string, dayOfWeek: number): ScheduledTaskSchedule {
   if (kind === 'manual') {
@@ -924,38 +1287,4 @@ function baseFormState(
     permissionMode: task.permissionMode ?? 'ask',
     enabled: task.enabled,
   };
-}
-
-function formatProject(task: ScheduledTask, projects: Project[]): string {
-  if (!task.projectId) {
-    return 'No project';
-  }
-  return projects.find((project) => project.id === task.projectId)?.label ?? 'Unknown project';
-}
-
-function lastRunLabel(run: ScheduledTask['history'][number]): string {
-  return `Last ${formatRunStatus(run.status)} ${new Date(run.startedAt).toLocaleString()}`;
-}
-
-function formatRunStatus(status: ScheduledTaskRun['status']): string {
-  if (status === 'waiting_for_approval') {
-    return 'Waiting for approval';
-  }
-  return status.charAt(0).toUpperCase() + status.slice(1);
-}
-
-function isWaitingForApproval(run: ScheduledTaskRun): boolean {
-  return run.status === 'waiting_for_approval';
-}
-
-function formatRunTime(run: ScheduledTaskRun): string {
-  const started = new Date(run.startedAt).toLocaleString();
-  if (!run.completedAt) {
-    return `Started ${started}`;
-  }
-  return `Started ${started} · Completed ${new Date(run.completedAt).toLocaleString()}`;
-}
-
-function shortId(id: string): string {
-  return id.length > 12 ? id.slice(0, 8) : id;
 }

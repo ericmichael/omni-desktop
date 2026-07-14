@@ -67,7 +67,7 @@ describe('runMigrations', () => {
         expect(t.phase).toBe('idle');
       }
       // Fall-through means schemaVersion ends up at the current version.
-      expect(store.get('schemaVersion')).toBe(26);
+      expect(store.get('schemaVersion')).toBe(28);
     });
   });
 
@@ -426,7 +426,7 @@ describe('runMigrations', () => {
         projects: [{ id: 'p1', label: 'A', workspaceDir: '/tmp/w' }],
       });
       expect(() => runMigrations(store, makeDeps())).not.toThrow();
-      expect(store.get('schemaVersion')).toBe(26);
+      expect(store.get('schemaVersion')).toBe(28);
     });
 
     it('v21 → v22 maps docker→devbox, drops legacy sandbox keys, strips Project.sandbox', () => {
@@ -443,7 +443,7 @@ describe('runMigrations', () => {
       });
       runMigrations(store, makeDeps());
       // v21→v22 → falls through to v22→v23 (sticky profile seeding).
-      expect(store.get('schemaVersion')).toBe(26);
+      expect(store.get('schemaVersion')).toBe(28);
       expect(store.get('defaultProfileName')).toBe('devbox');
       expect(store.get('sandboxBackend')).toBeUndefined();
       expect(store.get('sandboxProfiles')).toBeUndefined();
@@ -489,7 +489,7 @@ describe('runMigrations', () => {
       const deps = makeDeps();
       runMigrations(store, deps);
 
-      expect(store.get('schemaVersion')).toBe(26);
+      expect(store.get('schemaVersion')).toBe(28);
       expect(deps.writeProjectContextBrief).not.toHaveBeenCalled();
     });
 
@@ -510,7 +510,7 @@ describe('runMigrations', () => {
         expect(t).not.toHaveProperty('supervisorSessionId');
       }
       // Falls through to v23, the current head.
-      expect(store.get('schemaVersion')).toBe(26);
+      expect(store.get('schemaVersion')).toBe(28);
     });
 
     it('v18 → v19 backfills installedBundles from existing skillSources', () => {
@@ -533,7 +533,7 @@ describe('runMigrations', () => {
       });
       runMigrations(store, makeDeps());
 
-      expect(store.get('schemaVersion')).toBe(26);
+      expect(store.get('schemaVersion')).toBe(28);
       const bundles = store.get('installedBundles') as Record<string, { skillNames: string[] }>;
       expect(Object.keys(bundles).sort()).toEqual([
         'anthropics/skills:creative-skills',
@@ -565,7 +565,7 @@ describe('runMigrations', () => {
         codeTabs: [],
       });
       runMigrations(store, makeDeps());
-      expect(store.get('schemaVersion')).toBe(26);
+      expect(store.get('schemaVersion')).toBe(28);
       // v23 seeds chatProfileName; v26 folds it onto the reserved chat tab.
       const chatTab = (store.get('codeTabs', []) as Array<Record<string, unknown>>).find((t) => t.id === 'chat')!;
       expect(chatTab.profileName).toBe('devbox');
@@ -649,7 +649,7 @@ describe('runMigrations', () => {
       });
       runMigrations(store, makeDeps({ newSessionId: () => '11111111-2222-4333-8444-555555555555' }));
 
-      expect(store.get('schemaVersion')).toBe(26);
+      expect(store.get('schemaVersion')).toBe(28);
       // The reminted chat session id lands on the reserved chat tab (v26).
       const tabs = store.get('codeTabs', []) as Array<Record<string, unknown>>;
       const byId = (id: string) => tabs.find((t) => t.id === id)!;
@@ -677,7 +677,7 @@ describe('runMigrations', () => {
     it('v23 → v24 is a no-op when there are no sessions to migrate', () => {
       const store = makeStore({ schemaVersion: 23, tickets: [], projects: [] });
       runMigrations(store, makeDeps());
-      expect(store.get('schemaVersion')).toBe(26);
+      expect(store.get('schemaVersion')).toBe(28);
       expect(store.get('chatSessionId')).toBeUndefined();
       // v26 still synthesizes the reserved chat record with a minted session.
       const chatTab = (store.get('codeTabs', []) as Array<Record<string, unknown>>).find((t) => t.id === 'chat')!;
@@ -693,9 +693,11 @@ describe('runMigrations', () => {
         codeLayoutMode: 'deck',
       });
       runMigrations(store, makeDeps());
-      expect(store.get('schemaVersion')).toBe(26);
-      expect(store.get('layoutMode')).toBe('spaces');
-      expect(store.get('codeLayoutMode')).toBe('tile');
+      expect(store.get('schemaVersion')).toBe(28);
+      // v20 lands on 'spaces'; v27 folds it into 'chat' in the same run.
+      expect(store.get('layoutMode')).toBe('chat');
+      // v20 lands on 'tile'; v27 flips to 'focus' — no deck columns here.
+      expect(store.get('codeLayoutMode')).toBe('focus');
     });
 
     it('v19 → v20 also converts intermediate "os" and "spaces" values', () => {
@@ -707,9 +709,9 @@ describe('runMigrations', () => {
         codeLayoutMode: 'spaces',
       });
       runMigrations(store, makeDeps());
-      expect(store.get('schemaVersion')).toBe(26);
-      expect(store.get('layoutMode')).toBe('spaces');
-      expect(store.get('codeLayoutMode')).toBe('tile');
+      expect(store.get('schemaVersion')).toBe(28);
+      expect(store.get('layoutMode')).toBe('chat');
+      expect(store.get('codeLayoutMode')).toBe('focus');
     });
 
     it('v19 → v20 leaves other layoutMode and codeLayoutMode values alone', () => {
@@ -721,7 +723,7 @@ describe('runMigrations', () => {
         codeLayoutMode: 'focus',
       });
       runMigrations(store, makeDeps());
-      expect(store.get('schemaVersion')).toBe(26);
+      expect(store.get('schemaVersion')).toBe(28);
       expect(store.get('layoutMode')).toBe('projects');
       expect(store.get('codeLayoutMode')).toBe('focus');
     });
@@ -765,7 +767,7 @@ describe('runMigrations', () => {
       expect(t1.description).toBe('Existing body.\n\n**Done when:** redirect works\n**Out of scope:** password reset');
       expect('shaping' in t1).toBe(false);
       expect(tickets.find((t) => t.id === 't2')!.description).toBe('Untouched.');
-      expect(store.get('schemaVersion')).toBe(26);
+      expect(store.get('schemaVersion')).toBe(28);
     });
 
     it("folds inbox shaping into the note and collapses 'shaped' to 'new' with a fresh createdAt", () => {
@@ -824,7 +826,7 @@ describe('runMigrations', () => {
       expect(store.get('chatSessionId')).toBeUndefined();
       expect(store.get('chatProfileName')).toBeUndefined();
       expect(store.get('chatContainerId')).toBeUndefined();
-      expect(store.get('schemaVersion')).toBe(26);
+      expect(store.get('schemaVersion')).toBe(28);
     });
 
     it('mints a session id and seeds the profile from the default when the keys are absent', () => {
@@ -855,7 +857,82 @@ describe('runMigrations', () => {
       expect(tabs).toHaveLength(1);
       expect(tabs[0]!.sessionId).toBe('keep-me');
       expect(store.get('chatSessionId')).toBeUndefined();
-      expect(store.get('schemaVersion')).toBe(26);
+      expect(store.get('schemaVersion')).toBe(28);
+    });
+  });
+
+  describe('v26 → v27: chat/spaces tab merge', () => {
+    it("folds layoutMode 'spaces' into 'chat'", () => {
+      const store = makeStore({
+        schemaVersion: 26,
+        layoutMode: 'spaces',
+        codeTabs: [],
+      });
+      runMigrations(store, makeDeps());
+      expect(store.get('layoutMode')).toBe('chat');
+      expect(store.get('schemaVersion')).toBe(28);
+    });
+
+    it('stamps activatedAt on every pre-merge tab (eager-launch parity)', () => {
+      const store = makeStore({
+        schemaVersion: 26,
+        codeTabs: [
+          { id: 'chat', projectId: null, sessionId: 's1', createdAt: 50 },
+          { id: 'tab-1', projectId: 'p1', createdAt: 60 },
+          { id: 'tab-2', projectId: null, createdAt: 70, activatedAt: 99 },
+        ],
+      });
+      runMigrations(store, makeDeps());
+      const tabs = store.get('codeTabs') as Array<Record<string, unknown>>;
+      expect(tabs.map((t) => t.activatedAt)).toEqual([50, 60, 99]);
+    });
+
+    it('defaults codeLayoutMode to focus when the install had no deck columns', () => {
+      const store = makeStore({
+        schemaVersion: 26,
+        codeTabs: [{ id: 'chat', projectId: null, sessionId: 's1', createdAt: 1 }],
+      });
+      runMigrations(store, makeDeps());
+      expect(store.get('codeLayoutMode')).toBe('focus');
+    });
+
+    it('leaves the stored layout untouched when deck columns exist', () => {
+      const store = makeStore({
+        schemaVersion: 26,
+        codeTabs: [
+          { id: 'chat', projectId: null, sessionId: 's1', createdAt: 1 },
+          { id: 'tab-1', projectId: 'p1', createdAt: 2 },
+        ],
+      });
+      runMigrations(store, makeDeps());
+      expect(store.get('codeLayoutMode')).toBeUndefined();
+    });
+
+    it('is idempotent — a >=28 store is left alone', () => {
+      const store = makeStore({
+        schemaVersion: 28,
+        layoutMode: 'chat',
+        codeTabs: [{ id: 'tab-1', projectId: null, createdAt: 5, activatedAt: 5 }],
+      });
+      runMigrations(store, makeDeps());
+      expect(store.get('schemaVersion')).toBe(28);
+      expect((store.get('codeTabs') as Array<Record<string, unknown>>)[0]!.activatedAt).toBe(5);
+    });
+  });
+
+  describe('v27 → v28: plan-week retirement', () => {
+    it('strips weeklyReviewDay and lastWeeklyReviewAt', () => {
+      const store = makeStore({
+        schemaVersion: 27,
+        weeklyReviewDay: 5,
+        lastWeeklyReviewAt: 1234,
+        codeTabs: [{ id: 'tab-1', projectId: null, createdAt: 5, activatedAt: 5 }],
+      });
+      runMigrations(store, makeDeps());
+      expect(store.get('schemaVersion')).toBe(28);
+      expect(store.get('weeklyReviewDay')).toBeUndefined();
+      expect(store.get('lastWeeklyReviewAt')).toBeUndefined();
+      expect((store.get('codeTabs') as Array<Record<string, unknown>>)[0]!.activatedAt).toBe(5);
     });
   });
 });

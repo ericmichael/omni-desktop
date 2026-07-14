@@ -1,6 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite';
 
-import { DEFAULT_COLUMNS as SHARED_DEFAULT_COLUMNS, defaultColumnId } from './defaults.js';
+import { DEFAULT_COLUMNS as SHARED_DEFAULT_COLUMNS, defaultColumnId, positionalCategory } from './defaults.js';
 import { commentId } from './ids.js';
 import type { ProjectsRepo } from './repo.js';
 import { nowTimestamp, toIso } from './timestamps.js';
@@ -261,6 +261,9 @@ export function migrateFromJson(repo: ProjectsRepo, db: DatabaseSync, data: Json
           gate: col.gate ? 1 : 0,
           max_concurrent: col.maxConcurrent ?? null,
           workflow: col.workflow == null ? null : JSON.stringify(col.workflow),
+          // Legacy JSON stores never carried a category — seed positionally
+          // (same rule as the SQLite v15 backfill).
+          category: positionalCategory(i, columns.length),
         });
       }
     }

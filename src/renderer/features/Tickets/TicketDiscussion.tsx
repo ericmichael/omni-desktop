@@ -1,39 +1,33 @@
 import { makeStyles, tokens } from '@fluentui/react-components';
 import { Bot20Regular, Person20Regular, Send20Regular } from '@fluentui/react-icons';
 import { nanoid } from 'nanoid';
-import { memo, useCallback, useRef, useState } from 'react';
+import { memo, useCallback, useState } from 'react';
 
-import { Body1, IconButton, Textarea } from '@/renderer/ds';
+import { formatTimestamp } from '@/lib/format-time';
+import { IconButton, Textarea } from '@/renderer/ds';
 import type { Ticket, TicketComment } from '@/shared/types';
 
 import { ticketApi } from './state';
 
+/**
+ * The ticket's comment thread, inlined under the description in the Overview
+ * (the GitHub issue shape) — comments flow with the page scroll and the
+ * composer sits at the end of the thread.
+ */
 const useStyles = makeStyles({
   root: {
-    display: 'flex',
-    flexDirection: 'column',
-    height: '100%',
-  },
-  thread: {
-    flex: '1 1 0',
-    minHeight: 0,
-    overflowY: 'auto',
-    padding: tokens.spacingVerticalL,
     display: 'flex',
     flexDirection: 'column',
     gap: tokens.spacingVerticalM,
   },
   empty: {
-    flex: '1 1 0',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
+    fontSize: tokens.fontSizeBase200,
     color: tokens.colorNeutralForeground3,
+    fontStyle: 'italic',
   },
   comment: {
     display: 'flex',
     gap: tokens.spacingHorizontalS,
-    maxWidth: '42rem',
   },
   avatar: {
     width: '28px',
@@ -79,34 +73,16 @@ const useStyles = makeStyles({
     whiteSpace: 'pre-wrap',
     lineHeight: tokens.lineHeightBase300,
   },
-  inputBar: {
+  composer: {
     display: 'flex',
-    alignItems: 'center',
+    alignItems: 'flex-end',
     gap: tokens.spacingHorizontalS,
-    padding: tokens.spacingVerticalS,
-    paddingLeft: tokens.spacingHorizontalL,
-    paddingRight: tokens.spacingHorizontalS,
-    borderTopWidth: '1px',
-    borderTopStyle: 'solid',
-    borderTopColor: tokens.colorNeutralStroke1,
-    flexShrink: 0,
   },
-  inputField: {
+  composerField: {
     flex: '1 1 0',
     minWidth: 0,
   },
 });
-
-function formatTime(ts: number): string {
-  const d = new Date(ts);
-  const now = new Date();
-  const isToday = d.toDateString() === now.toDateString();
-  const time = d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
-  if (isToday) {
-    return time;
-  }
-  return `${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} ${time}`;
-}
 
 const CommentRow = memo(({ comment }: { comment: TicketComment }) => {
   const styles = useStyles();
@@ -124,7 +100,7 @@ const CommentRow = memo(({ comment }: { comment: TicketComment }) => {
       <div className={styles.commentBody}>
         <div className={styles.commentMeta}>
           <span className={styles.commentAuthor}>{isAgent ? 'Agent' : 'You'}</span>
-          <span className={styles.commentTime}>{formatTime(comment.createdAt)}</span>
+          <span className={styles.commentTime}>{formatTimestamp(comment.createdAt)}</span>
         </div>
         <div className={styles.commentContent}>{comment.content}</div>
       </div>
@@ -133,11 +109,10 @@ const CommentRow = memo(({ comment }: { comment: TicketComment }) => {
 });
 CommentRow.displayName = 'CommentRow';
 
-export const TicketDiscussionTab = memo(({ ticket }: { ticket: Ticket }) => {
+export const TicketDiscussion = memo(({ ticket }: { ticket: Ticket }) => {
   const styles = useStyles();
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
-  const threadRef = useRef<HTMLDivElement>(null);
   const comments = ticket.comments ?? [];
 
   const handleChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -163,10 +138,6 @@ export const TicketDiscussionTab = memo(({ ticket }: { ticket: Ticket }) => {
         comments: [...(ticket.comments ?? []), comment],
       });
       setDraft('');
-      // Scroll to bottom after new comment
-      requestAnimationFrame(() => {
-        threadRef.current?.scrollTo({ top: threadRef.current.scrollHeight, behavior: 'smooth' });
-      });
     } finally {
       setSending(false);
     }
@@ -185,25 +156,19 @@ export const TicketDiscussionTab = memo(({ ticket }: { ticket: Ticket }) => {
   return (
     <div className={styles.root}>
       {comments.length === 0 ? (
-        <div className={styles.empty}>
-          <Body1>No comments yet</Body1>
-        </div>
+        <span className={styles.empty}>No comments yet.</span>
       ) : (
-        <div ref={threadRef} className={styles.thread}>
-          {comments.map((c) => (
-            <CommentRow key={c.id} comment={c} />
-          ))}
-        </div>
+        comments.map((c) => <CommentRow key={c.id} comment={c} />)
       )}
 
-      <div className={styles.inputBar}>
+      <div className={styles.composer}>
         <Textarea
           value={draft}
           onChange={handleChange}
           onKeyDown={handleKeyDown}
           placeholder="Add a comment..."
           rows={1}
-          className={styles.inputField}
+          className={styles.composerField}
         />
         <IconButton
           aria-label="Send comment"
@@ -216,4 +181,4 @@ export const TicketDiscussionTab = memo(({ ticket }: { ticket: Ticket }) => {
     </div>
   );
 });
-TicketDiscussionTab.displayName = 'TicketDiscussionTab';
+TicketDiscussion.displayName = 'TicketDiscussion';

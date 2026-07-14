@@ -1,31 +1,26 @@
 import { makeStyles, mergeClasses, shorthands, tokens } from '@fluentui/react-components';
-import { Add20Regular, Navigation20Regular } from '@fluentui/react-icons';
+import { Navigation20Regular } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
-import { memo, useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 
+import { useIsDesktop } from '@/renderer/common/use-is-desktop';
 import { IconButton, TopAppBar } from '@/renderer/ds';
-import { InboxView } from '@/renderer/features/Inbox/InboxView';
-import { $quickCaptureOpen } from '@/renderer/features/Inbox/QuickCapture';
 import { $milestones } from '@/renderer/features/Initiatives/state';
 import { PageView } from '@/renderer/features/Pages/PageView';
 import { $pages, pageApi } from '@/renderer/features/Pages/state';
 import { persistedStoreApi } from '@/renderer/services/store';
 import { $glassEnabled } from '@/renderer/theme/use-glass';
+import type { ProjectId } from '@/shared/types';
 
 import { MilestoneDetail } from './MilestoneDetail';
-import { ProjectActions, ProjectPage } from './ProjectPage';
-import { ProjectsDashboard } from './ProjectsDashboard';
+import { ProjectHome } from './ProjectHome';
+import { ProjectPagesTab } from './ProjectPagesTab';
+import { ProjectSettings } from './ProjectSettings';
 import { TicketsSidebar } from './Sidebar';
-import {
-  $activeWipTickets,
-  $ticketsView,
-  $wipDialogPendingProfileName,
-  $wipDialogPendingTicket,
-  ticketApi,
-} from './state';
+import { $ticketsView, type ProjectTab, ticketApi } from './state';
 import { TicketAutopilotLaunchDialog } from './TicketAutopilotLaunchDialog';
 import { TicketDetail } from './TicketDetail';
-import { WipLimitDialog } from './WipLimitDialog';
+import { WorkAllView } from './WorkAllView';
 import { WorkItemsList } from './WorkItemsList';
 
 const useStyles = makeStyles({
@@ -73,32 +68,19 @@ const useStyles = makeStyles({
     flex: '1 1 0',
     minHeight: 0,
   },
-  desktopContent: {
-    display: 'block',
-    height: '100%',
-  },
-  mobileContent: {
+  content: {
     height: '100%',
   },
 });
 
-/* ---------- Desktop breakpoint (matches SM_BREAKPOINT = 640px) ---------- */
-
-const DESKTOP_MQ = '(min-width: 640px)';
-const subscribeMQ = (cb: () => void) => {
-  const mql = window.matchMedia(DESKTOP_MQ);
-  mql.addEventListener('change', cb);
-  return () => mql.removeEventListener('change', cb);
-};
-const getIsDesktop = () => window.matchMedia(DESKTOP_MQ).matches;
-const getIsDesktopServer = () => true;
-
-function useIsDesktop() {
-  return useSyncExternalStore(subscribeMQ, getIsDesktop, getIsDesktopServer);
-}
-
 /* ---------- Main export ---------- */
 
+/**
+ * The Work tab: all projects and their tasks. Lands on the global all-work
+ * list; the sidebar picks a project (shell with Home · Work · Docs ·
+ * Settings tabs); detail views render inside the shell. Home and Inbox are
+ * separate rail tabs.
+ */
 export const Tickets = memo(() => {
   const styles = useStyles();
   const persistedStore = useStore(persistedStoreApi.$atom);
@@ -115,13 +97,21 @@ export const Tickets = memo(() => {
     () => (view.type === 'ticket' ? (tickets.find((ticket) => ticket.id === view.ticketId) ?? null) : null),
     [view, tickets]
   );
-  const activeProject = useMemo(() => {
-    const projectId =
-      view.type === 'project' || view.type === 'page' || view.type === 'milestone' || view.type === 'board'
-        ? view.projectId
-        : activeTicket?.projectId;
-    return projectId ? (persistedStore.projects.find((project) => project.id === projectId) ?? null) : null;
-  }, [view, activeTicket?.projectId, persistedStore.projects]);
+  // The project every project-scoped view hangs off (ticket views resolve
+  // through the ticket record).
+  const shellProjectId: ProjectId | null = useMemo(() => {
+    if (view.type === 'project' || view.type === 'page' || view.type === 'milestone') {
+      return view.projectId;
+    }
+    if (view.type === 'ticket') {
+      return activeTicket?.projectId ?? null;
+    }
+    return null;
+  }, [view, activeTicket?.projectId]);
+  const activeProject = useMemo(
+    () => (shellProjectId ? (persistedStore.projects.find((project) => project.id === shellProjectId) ?? null) : null),
+    [shellProjectId, persistedStore.projects]
+  );
 
   useEffect(() => {
     if (isDesktop) {
@@ -131,14 +121,11 @@ export const Tickets = memo(() => {
 
   // The TopAppBar is the only header on mobile, so it titles the current view.
   const mobileHeaderTitle = useMemo(() => {
-    if (view.type === 'dashboard') {
-      return 'Home';
-    }
-    if (view.type === 'inbox') {
-      return view.selectedItemId ? 'Inbox Item' : 'Inbox';
+    if (view.type === 'all') {
+      return 'Work';
     }
     if (view.type === 'ticket') {
-      return activeTicket?.title || 'Ticket';
+      return activeTicket?.title || 'Task';
     }
     if (view.type === 'page') {
       return pages[view.pageId]?.title || 'Untitled';
@@ -146,74 +133,31 @@ export const Tickets = memo(() => {
     if (view.type === 'milestone') {
       return milestones[view.milestoneId]?.title || 'Milestone';
     }
-    if (view.type === 'board') {
-      return 'Board';
-    }
     if (view.type === 'project') {
+      // Sub-pages title themselves; only Home carries the project name.
+      if (view.tab === 'board') {
+        return 'Tasks';
+      }
+      if (view.tab === 'pages') {
+        return 'Docs';
+      }
+      if (view.tab === 'settings') {
+        return 'Settings';
+      }
       return activeProject?.label || 'Project';
     }
-    return 'Projects';
+    return 'Work';
   }, [view, pages, milestones, activeTicket?.title, activeProject?.label]);
 
   const handleBack = useCallback(() => {
-    if (view.type === 'page') {
-      const page = pages[view.pageId];
-      if (page?.parentId) {
-        // Navigate to parent page
-        const parent = pages[page.parentId];
-        if (parent?.isRoot) {
-          ticketApi.goToProject(view.projectId);
-        } else {
-          ticketApi.goToPage(page.parentId, view.projectId);
-        }
-        return;
-      }
-      ticketApi.goToProject(view.projectId);
-      return;
-    }
-    if (view.type === 'milestone') {
-      ticketApi.goToProject(view.projectId);
-      return;
-    }
-    if (view.type === 'board') {
-      ticketApi.goToProject(view.projectId);
-      return;
-    }
-    ticketApi.goToDashboard();
-  }, [view, pages]);
-
-  const handleTicketBack = useCallback(() => {
-    ticketApi.goBackToPrevious(activeTicket?.projectId);
-  }, [activeTicket?.projectId]);
-
-  const handleInboxBack = useCallback(() => {
-    ticketApi.goToInbox();
-  }, []);
-
-  const handleInboxHomeBack = useCallback(() => {
-    ticketApi.goToDashboard();
-  }, []);
+    ticketApi.goBackToPrevious(shellProjectId ?? undefined);
+  }, [shellProjectId]);
 
   const handleOpenMobileNav = useCallback(() => setMobileNavOpen(true), []);
   const handleCloseMobileNav = useCallback(() => setMobileNavOpen(false), []);
-  const handleAddInboxItem = useCallback(() => {
-    $quickCaptureOpen.set(true);
-  }, []);
-  const mobileBackHandler =
-    view.type === 'dashboard'
-      ? undefined
-      : view.type === 'inbox'
-        ? view.selectedItemId
-          ? handleInboxBack
-          : handleInboxHomeBack
-        : view.type === 'ticket'
-          ? handleTicketBack
-          : handleBack;
+  const mobileBackHandler = view.type === 'all' ? undefined : handleBack;
   const mobileNavButton = (
     <IconButton aria-label="Open navigation" icon={<Navigation20Regular />} size="sm" onClick={handleOpenMobileNav} />
-  );
-  const mobileAddInboxButton = (
-    <IconButton aria-label="Add inbox item" icon={<Add20Regular />} size="sm" onClick={handleAddInboxItem} />
   );
 
   // Keyboard shortcut: Cmd/Ctrl+N → new page in current project
@@ -221,15 +165,7 @@ export const Tickets = memo(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'n') {
         const projectId =
-          view.type === 'project'
-            ? view.projectId
-            : view.type === 'page'
-              ? view.projectId
-              : view.type === 'milestone'
-                ? view.projectId
-                : view.type === 'board'
-                  ? view.projectId
-                  : null;
+          view.type === 'project' || view.type === 'page' || view.type === 'milestone' ? view.projectId : null;
         if (!projectId) {
           return;
         }
@@ -257,6 +193,43 @@ export const Tickets = memo(() => {
     return () => window.removeEventListener('keydown', handler);
   }, [view]);
 
+  // There is no project tab bar (the Basecamp model): the project home is
+  // the hub, and every sub-page — Tasks board, Docs, Settings, details —
+  // takes over the full content plane with a breadcrumb as the way back up.
+  const content = (() => {
+    if (view.type === 'project') {
+      const tab: ProjectTab = view.tab;
+      if (tab === 'home') {
+        return <ProjectHome projectId={view.projectId} />;
+      }
+      if (tab === 'board') {
+        return <WorkItemsList projectId={view.projectId} pageTitle="Tasks" hideChrome={!isDesktop} />;
+      }
+      if (tab === 'pages') {
+        return <ProjectPagesTab projectId={view.projectId} />;
+      }
+      return <ProjectSettings projectId={view.projectId} />;
+    }
+    if (view.type === 'page') {
+      return <PageView key={view.pageId} pageId={view.pageId} projectId={view.projectId} />;
+    }
+    if (view.type === 'milestone') {
+      return <MilestoneDetail milestoneId={view.milestoneId} projectId={view.projectId} hideChrome={!isDesktop} />;
+    }
+    if (view.type === 'ticket') {
+      return (
+        <TicketDetail
+          key={view.ticketId}
+          ticketId={view.ticketId}
+          onClose={handleBack}
+          closeBehavior="back"
+          hideTitleBar={!isDesktop}
+        />
+      );
+    }
+    return null;
+  })();
+
   return (
     <div className={mergeClasses(styles.root, isGlass && styles.rootGlass)}>
       {/* Desktop: sidebar always visible */}
@@ -271,66 +244,15 @@ export const Tickets = memo(() => {
             title={mobileHeaderTitle}
             onBack={mobileBackHandler}
             leading={mobileNavButton}
-            actions={
-              view.type === 'inbox' && !view.selectedItemId ? (
-                mobileAddInboxButton
-              ) : view.type === 'project' ? (
-                <ProjectActions projectId={view.projectId} />
-              ) : undefined
-            }
             className={isGlass ? 'omni-glass-mobile-top-app-bar' : 'bg-surface-raised'}
           />
         </div>
 
-        {/* Content — only mount one layout to avoid duplicate stateful editors */}
         <div className={mergeClasses(styles.contentArea, isGlass && styles.contentAreaGlass)}>
-          {isDesktop ? (
-            <div className={styles.desktopContent}>
-              {view.type === 'inbox' && <InboxView selectedItemId={view.selectedItemId} />}
-              {view.type === 'project' && <ProjectPage projectId={view.projectId} />}
-              {view.type === 'page' && <PageView key={view.pageId} pageId={view.pageId} projectId={view.projectId} />}
-              {view.type === 'milestone' && (
-                <MilestoneDetail milestoneId={view.milestoneId} projectId={view.projectId} />
-              )}
-              {view.type === 'board' && (
-                <WorkItemsList
-                  projectId={view.projectId}
-                  title="Board"
-                  contextLabel={activeProject?.label}
-                  onBack={handleBack}
-                />
-              )}
-              {view.type === 'ticket' && (
-                <TicketDetail
-                  key={view.ticketId}
-                  ticketId={view.ticketId}
-                  onClose={handleTicketBack}
-                  closeBehavior="back"
-                />
-              )}
-              {view.type === 'dashboard' && <ProjectsDashboard />}
-            </div>
-          ) : (
-            <div className={styles.mobileContent}>
-              {view.type === 'inbox' && <InboxView selectedItemId={view.selectedItemId} hideChrome />}
-              {view.type === 'ticket' && (
-                <TicketDetail
-                  key={view.ticketId}
-                  ticketId={view.ticketId}
-                  onClose={handleTicketBack}
-                  closeBehavior="back"
-                  hideTitleBar
-                />
-              )}
-              {view.type === 'page' && <PageView key={view.pageId} pageId={view.pageId} projectId={view.projectId} />}
-              {view.type === 'milestone' && (
-                <MilestoneDetail milestoneId={view.milestoneId} projectId={view.projectId} hideChrome />
-              )}
-              {view.type === 'board' && <WorkItemsList projectId={view.projectId} hideChrome />}
-              {view.type === 'project' && <ProjectPage projectId={view.projectId} />}
-              {view.type === 'dashboard' && <ProjectsDashboard />}
-            </div>
-          )}
+          <div className={styles.content}>
+            {view.type === 'all' && <WorkAllView />}
+            {content}
+          </div>
         </div>
       </div>
 
@@ -343,48 +265,8 @@ export const Tickets = memo(() => {
         />
       )}
 
-      <WipLimitOverlay />
       <TicketAutopilotLaunchDialog />
     </div>
   );
 });
 Tickets.displayName = 'Tickets';
-
-/** Renders the WIP limit dialog when a pending ticket is set. */
-const WipLimitOverlay = memo(() => {
-  const pendingTicket = useStore($wipDialogPendingTicket);
-  const activeTickets = useStore($activeWipTickets);
-
-  const handleDrop = useCallback((_droppedTicketId: string) => {
-    const pending = $wipDialogPendingTicket.get();
-    const profileName = $wipDialogPendingProfileName.get();
-    $wipDialogPendingTicket.set(null);
-    $wipDialogPendingProfileName.set(undefined);
-    // After stopping the dropped ticket, start the pending one
-    if (pending) {
-      // Small delay to let the stop propagate
-      setTimeout(() => {
-        void ticketApi.startSupervisor(pending.id, { profileName });
-      }, 500);
-    }
-  }, []);
-
-  const handleCancel = useCallback(() => {
-    $wipDialogPendingTicket.set(null);
-    $wipDialogPendingProfileName.set(undefined);
-  }, []);
-
-  if (!pendingTicket) {
-    return null;
-  }
-
-  return (
-    <WipLimitDialog
-      pendingTicket={pendingTicket}
-      activeTickets={activeTickets}
-      onDrop={handleDrop}
-      onCancel={handleCancel}
-    />
-  );
-});
-WipLimitOverlay.displayName = 'WipLimitOverlay';

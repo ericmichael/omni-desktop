@@ -122,7 +122,7 @@ export const KanbanColumn = memo(({ column, tickets, onNewTicket }: KanbanColumn
         <div className={styles.headerLabel}>
           <Body1>{column.label}</Body1>
           {column.gate && (
-            <span className={styles.gateIcon} title="Gated — only a human can advance tickets past this column">
+            <span className={styles.gateIcon} title="Gated — only a human can advance tasks past this column">
               &#x1F512;
             </span>
           )}

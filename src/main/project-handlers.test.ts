@@ -35,7 +35,6 @@ const EXPECTED_CHANNELS = [
   'project:apply-code-tab-source-changes',
   'project:detect-code-tab-pull-request',
   'project:detect-code-tab-pull-requests',
-  'project:detect-chat-pull-requests',
   'project:merge-ticket',
   'project:detect-pull-request',
   'project:read-context',
@@ -72,7 +71,6 @@ const makeManager = () => ({
   applyCodeTabSourceChanges: vi.fn(async () => ({ ok: true, mergeCommitSha: 'apply' })),
   detectCodeTabPullRequest: vi.fn(async () => null),
   detectCodeTabPullRequests: vi.fn(async () => []),
-  detectChatPullRequests: vi.fn(async () => []),
   readContext: vi.fn(() => ''),
   writeContext: vi.fn(),
   listProjectFiles: vi.fn(() => []),
@@ -234,13 +232,5 @@ describe('registerProjectHandlers', () => {
     registerProjectHandlers(ipc, () => mgr as never);
     ipc.invoke('project:detect-code-tab-pull-requests', 'tab1');
     expect(mgr.detectCodeTabPullRequests).toHaveBeenCalledWith('tab1');
-  });
-
-  it('project:detect-chat-pull-requests delegates with no args', () => {
-    const ipc = new StubIpc();
-    const mgr = makeManager();
-    registerProjectHandlers(ipc, () => mgr as never);
-    ipc.invoke('project:detect-chat-pull-requests');
-    expect(mgr.detectChatPullRequests).toHaveBeenCalledWith();
   });
 });

@@ -3,24 +3,19 @@ import { Add20Regular, ArrowDown20Regular, ArrowUp20Regular, Delete20Filled } fr
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useMemo, useState } from 'react';
 
-import {
-  AnimatedDialog,
-  Button,
-  DialogBody,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  IconButton,
-  Input,
-  Switch,
-  Textarea,
-} from '@/renderer/ds';
-import type { Column, ProjectId } from '@/shared/types';
+import { CATEGORY_LABELS, columnCategory, validatePipelineCategories } from '@/lib/pipeline-category';
+import { Button, IconButton, Input, Select, Switch, Textarea } from '@/renderer/ds';
+import type { Column, ColumnCategory, ProjectId } from '@/shared/types';
 
 import { $pipeline, ticketApi } from './state';
 import { getColumnColors } from './ticket-constants';
 
 const useStyles = makeStyles({
+  root: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalM,
+  },
   columnCard: {
     borderRadius: tokens.borderRadiusMedium,
     ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
@@ -51,13 +46,6 @@ const useStyles = makeStyles({
       fontSize: tokens.fontSizeBase200,
     },
   },
-  bodyColumn: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalM,
-    maxHeight: '60vh',
-    overflowY: 'auto',
-  },
   helpText: {
     fontSize: tokens.fontSizeBase300,
     color: tokens.colorNeutralForeground2,
@@ -79,7 +67,23 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     gap: '4px',
   },
+  saveRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+    paddingTop: tokens.spacingVerticalS,
+  },
+  dirtyHint: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorPaletteYellowForeground1,
+  },
+  categoryError: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorPaletteRedForeground1,
+  },
 });
+
+const CATEGORIES: ColumnCategory[] = ['todo', 'doing', 'done'];
 
 const linesToText = (values: string[] | undefined): string => values?.join('\n') ?? '';
 const textToLines = (value: string): string[] | undefined => {
@@ -108,6 +112,7 @@ const ColumnEditor = memo(
     onDescriptionChange,
     onWorkflowChange,
     onRename,
+    onCategoryChange,
     onMoveUp,
     onMoveDown,
     onRemoveColumn,
@@ -121,6 +126,7 @@ const ColumnEditor = memo(
     onDescriptionChange: (columnId: string, value: string) => void;
     onWorkflowChange: (columnId: string, patch: NonNullable<Column['workflow']>) => void;
     onRename: (columnId: string, label: string) => void;
+    onCategoryChange: (columnId: string, category: ColumnCategory) => void;
     onMoveUp: (index: number) => void;
     onMoveDown: (index: number) => void;
     onRemoveColumn: (columnId: string) => void;
@@ -193,6 +199,10 @@ const ColumnEditor = memo(
         onWorkflowChange(column.id, { recommendedSkills: textToSkills(e.target.value) }),
       [column.id, onWorkflowChange]
     );
+    const handleCategoryChange = useCallback(
+      (e: React.ChangeEvent<HTMLSelectElement>) => onCategoryChange(column.id, e.target.value as ColumnCategory),
+      [column.id, onCategoryChange]
+    );
 
     return (
       <div className={styles.columnCard}>
@@ -241,6 +251,21 @@ const ColumnEditor = memo(
           </div>
         </div>
 
+        <div className={styles.fieldRow}>
+          <label className={styles.fieldLabel}>Category</label>
+          <Select
+            aria-label={`Status category for ${column.label}`}
+            value={columnCategory(column, index, total)}
+            onChange={handleCategoryChange}
+            size="sm"
+          >
+            {CATEGORIES.map((cat) => (
+              <option key={cat} value={cat}>
+                {CATEGORY_LABELS[cat]}
+              </option>
+            ))}
+          </Select>
+        </div>
         <div className={styles.fieldRow}>
           <label className={styles.fieldLabel}>Max concurrent</label>
           <Input
@@ -309,240 +334,232 @@ const ColumnEditor = memo(
 );
 ColumnEditor.displayName = 'ColumnEditor';
 
-export const PipelineSettingsDialog = memo(
-  ({ projectId, open, onClose }: { projectId: ProjectId; open: boolean; onClose: () => void }) => {
-    const styles = useStyles();
-    const pipeline = useStore($pipeline);
+/**
+ * Inline pipeline (column) editor for the project Settings tab. Edits a local
+ * draft — column changes are structural (running agents key off column ids),
+ * so nothing is written until the user explicitly saves.
+ */
+export const PipelineEditor = memo(({ projectId }: { projectId: ProjectId }) => {
+  const styles = useStyles();
+  const pipeline = useStore($pipeline);
 
-    // Deep-clone columns for local editing
-    const [editColumns, setEditColumns] = useState<Column[] | null>(null);
+  const [editColumns, setEditColumns] = useState<Column[] | null>(null);
+  const [saving, setSaving] = useState(false);
 
-    // Reset local state when dialog opens
-    const columns = useMemo(() => {
-      if (!open || !pipeline) {
-        return null;
-      }
-      return structuredClone(pipeline.columns);
-    }, [open, pipeline]);
+  // Reset the draft whenever the saved pipeline changes identity.
+  const columns = useMemo(() => (pipeline ? structuredClone(pipeline.columns) : null), [pipeline]);
+  const [prevColumns, setPrevColumns] = useState(columns);
+  if (columns !== prevColumns) {
+    setPrevColumns(columns);
+    setEditColumns(columns);
+  }
 
-    // Sync reset: when columns ref changes (dialog open/pipeline change), reset edit state
-    const [prevColumns, setPrevColumns] = useState(columns);
-    if (columns !== prevColumns) {
-      setPrevColumns(columns);
-      setEditColumns(columns);
+  const isDirty = useMemo(() => {
+    if (!editColumns || !pipeline) {
+      return false;
     }
+    return JSON.stringify(editColumns) !== JSON.stringify(pipeline.columns);
+  }, [editColumns, pipeline]);
 
-    const isDirty = useMemo(() => {
-      if (!editColumns || !pipeline) {
-        return false;
-      }
-      return JSON.stringify(editColumns) !== JSON.stringify(pipeline.columns);
-    }, [editColumns, pipeline]);
-
-    const handleMaxConcurrentChange = useCallback((columnId: string, value: number | undefined) => {
-      setEditColumns((prev) => {
-        if (!prev) {
-          return prev;
-        }
-        return prev.map((col) => {
-          if (col.id !== columnId) {
-            return col;
-          }
-          return { ...col, maxConcurrent: value };
-        });
-      });
-    }, []);
-
-    const handleGateChange = useCallback((columnId: string, checked: boolean) => {
-      setEditColumns((prev) => {
-        if (!prev) {
-          return prev;
-        }
-        return prev.map((col) => (col.id !== columnId ? col : { ...col, gate: checked }));
-      });
-    }, []);
-
-    const handleDescriptionChange = useCallback((columnId: string, value: string) => {
-      setEditColumns((prev) => {
-        if (!prev) {
-          return prev;
-        }
-        return prev.map((col) => (col.id !== columnId ? col : { ...col, description: value || undefined }));
-      });
-    }, []);
-
-    const handleWorkflowChange = useCallback((columnId: string, patch: NonNullable<Column['workflow']>) => {
-      setEditColumns((prev) => {
-        if (!prev) {
-          return prev;
-        }
-        return prev.map((col) => {
-          if (col.id !== columnId) {
-            return col;
-          }
-          const workflow = { ...(col.workflow ?? {}), ...patch };
-          for (const key of Object.keys(workflow) as (keyof typeof workflow)[]) {
-            const value = workflow[key];
-            if (value === undefined || value === '' || (Array.isArray(value) && value.length === 0)) {
-              delete workflow[key];
-            }
-          }
-          return { ...col, workflow: Object.keys(workflow).length > 0 ? workflow : undefined };
-        });
-      });
-    }, []);
-
-    const handleRename = useCallback((columnId: string, label: string) => {
-      setEditColumns((prev) => {
-        if (!prev) {
-          return prev;
-        }
-        return prev.map((col) => (col.id === columnId ? { ...col, label } : col));
-      });
-    }, []);
-
-    const handleMoveUp = useCallback((index: number) => {
-      setEditColumns((prev) => {
-        if (!prev || index <= 0) {
-          return prev;
-        }
-        const next = [...prev];
-        [next[index - 1], next[index]] = [next[index]!, next[index - 1]!];
-        return next;
-      });
-    }, []);
-
-    const handleMoveDown = useCallback((index: number) => {
-      setEditColumns((prev) => {
-        if (!prev || index >= prev.length - 1) {
-          return prev;
-        }
-        const next = [...prev];
-        [next[index], next[index + 1]] = [next[index + 1]!, next[index]!];
-        return next;
-      });
-    }, []);
-
-    const handleRemoveColumn = useCallback((columnId: string) => {
-      setEditColumns((prev) => {
-        if (!prev || prev.length <= 2) {
-          return prev; // Must keep at least 2 columns (first + last)
-        }
-        return prev.filter((col) => col.id !== columnId);
-      });
-    }, []);
-
-    const [newColumnLabel, setNewColumnLabel] = useState('');
-    const handleNewColumnLabelChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-      setNewColumnLabel(e.target.value);
-    }, []);
-
-    const handleAddColumn = useCallback(() => {
-      const trimmed = newColumnLabel.trim();
-      if (!trimmed) {
-        return;
-      }
-      const id = trimmed
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '_')
-        .replace(/^_|_$/g, '');
-      if (!id) {
-        return;
-      }
-      setEditColumns((prev) => {
-        if (!prev) {
-          return prev;
-        }
-        // Check for duplicate ID
-        if (prev.some((col) => col.id === id)) {
-          return prev;
-        }
-        // Insert before the last column (terminal)
-        const newCol: Column = { id, label: trimmed };
-        const copy = [...prev];
-        copy.splice(copy.length - 1, 0, newCol);
-        return copy;
-      });
-      setNewColumnLabel('');
-    }, [newColumnLabel]);
-
-    const handleAddColumnKeyDown = useCallback(
-      (e: React.KeyboardEvent) => {
-        if (e.key === 'Enter') {
-          handleAddColumn();
-        }
-      },
-      [handleAddColumn]
+  const handleMaxConcurrentChange = useCallback((columnId: string, value: number | undefined) => {
+    setEditColumns(
+      (prev) => prev?.map((col) => (col.id !== columnId ? col : { ...col, maxConcurrent: value })) ?? prev
     );
+  }, []);
 
-    const handleSave = useCallback(async () => {
-      if (!editColumns) {
-        return;
+  const handleGateChange = useCallback((columnId: string, checked: boolean) => {
+    setEditColumns((prev) => prev?.map((col) => (col.id !== columnId ? col : { ...col, gate: checked })) ?? prev);
+  }, []);
+
+  const handleDescriptionChange = useCallback((columnId: string, value: string) => {
+    setEditColumns(
+      (prev) => prev?.map((col) => (col.id !== columnId ? col : { ...col, description: value || undefined })) ?? prev
+    );
+  }, []);
+
+  const handleWorkflowChange = useCallback((columnId: string, patch: NonNullable<Column['workflow']>) => {
+    setEditColumns((prev) => {
+      if (!prev) {
+        return prev;
       }
+      return prev.map((col) => {
+        if (col.id !== columnId) {
+          return col;
+        }
+        const workflow = { ...(col.workflow ?? {}), ...patch };
+        for (const key of Object.keys(workflow) as (keyof typeof workflow)[]) {
+          const value = workflow[key];
+          if (value === undefined || value === '' || (Array.isArray(value) && value.length === 0)) {
+            delete workflow[key];
+          }
+        }
+        return { ...col, workflow: Object.keys(workflow).length > 0 ? workflow : undefined };
+      });
+    });
+  }, []);
+
+  const handleRename = useCallback((columnId: string, label: string) => {
+    setEditColumns((prev) => prev?.map((col) => (col.id === columnId ? { ...col, label } : col)) ?? prev);
+  }, []);
+
+  const handleCategoryChange = useCallback((columnId: string, category: ColumnCategory) => {
+    setEditColumns((prev) => prev?.map((col) => (col.id === columnId ? { ...col, category } : col)) ?? prev);
+  }, []);
+
+  const handleMoveUp = useCallback((index: number) => {
+    setEditColumns((prev) => {
+      if (!prev || index <= 0) {
+        return prev;
+      }
+      const next = [...prev];
+      [next[index - 1], next[index]] = [next[index]!, next[index - 1]!];
+      return next;
+    });
+  }, []);
+
+  const handleMoveDown = useCallback((index: number) => {
+    setEditColumns((prev) => {
+      if (!prev || index >= prev.length - 1) {
+        return prev;
+      }
+      const next = [...prev];
+      [next[index], next[index + 1]] = [next[index + 1]!, next[index]!];
+      return next;
+    });
+  }, []);
+
+  const handleRemoveColumn = useCallback((columnId: string) => {
+    setEditColumns((prev) => {
+      if (!prev || prev.length <= 2) {
+        return prev; // Must keep at least 2 columns (first + last)
+      }
+      return prev.filter((col) => col.id !== columnId);
+    });
+  }, []);
+
+  const [newColumnLabel, setNewColumnLabel] = useState('');
+  const handleNewColumnLabelChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    setNewColumnLabel(e.target.value);
+  }, []);
+
+  const handleAddColumn = useCallback(() => {
+    const trimmed = newColumnLabel.trim();
+    if (!trimmed) {
+      return;
+    }
+    const id = trimmed
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_|_$/g, '');
+    if (!id) {
+      return;
+    }
+    setEditColumns((prev) => {
+      if (!prev || prev.some((col) => col.id === id)) {
+        return prev;
+      }
+      // Insert before the last column (terminal)
+      const newCol: Column = { id, label: trimmed, category: 'doing' };
+      const copy = [...prev];
+      copy.splice(copy.length - 1, 0, newCol);
+      return copy;
+    });
+    setNewColumnLabel('');
+  }, [newColumnLabel]);
+
+  const handleAddColumnKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === 'Enter') {
+        handleAddColumn();
+      }
+    },
+    [handleAddColumn]
+  );
+
+  const handleDiscard = useCallback(() => {
+    setEditColumns(pipeline ? structuredClone(pipeline.columns) : null);
+  }, [pipeline]);
+
+  const handleSave = useCallback(async () => {
+    if (!editColumns) {
+      return;
+    }
+    setSaving(true);
+    try {
       await ticketApi.updateProject(projectId, { pipeline: { columns: editColumns } });
       await ticketApi.getPipeline(projectId);
-      onClose();
-    }, [editColumns, projectId, onClose]);
-
-    if (!editColumns) {
-      return null;
+    } finally {
+      setSaving(false);
     }
+  }, [editColumns, projectId]);
 
-    return (
-      <AnimatedDialog open={open} onClose={onClose}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>Pipeline Settings</DialogHeader>
-          <DialogBody className={styles.bodyColumn}>
-            <p className={styles.helpText}>
-              First column is the backlog. Last column is terminal (completed). Columns in between are active work
-              stages.
-            </p>
-            {editColumns.map((col, i) => (
-              <ColumnEditor
-                key={col.id}
-                column={col}
-                index={i}
-                total={editColumns.length}
-                onMaxConcurrentChange={handleMaxConcurrentChange}
-                onGateChange={handleGateChange}
-                onDescriptionChange={handleDescriptionChange}
-                onWorkflowChange={handleWorkflowChange}
-                onRename={handleRename}
-                onMoveUp={handleMoveUp}
-                onMoveDown={handleMoveDown}
-                onRemoveColumn={handleRemoveColumn}
-                isRemovable={editColumns.length > 2}
-              />
-            ))}
-            <div className={styles.addRow}>
-              <Input
-                size="sm"
-                value={newColumnLabel}
-                onChange={handleNewColumnLabelChange}
-                placeholder="Add column..."
-                onKeyDown={handleAddColumnKeyDown}
-                className={styles.flex1}
-              />
-              <IconButton
-                aria-label="Add column"
-                icon={<Add20Regular />}
-                size="sm"
-                onClick={handleAddColumn}
-                isDisabled={!newColumnLabel.trim()}
-              />
-            </div>
-          </DialogBody>
-          <DialogFooter>
-            <Button variant="ghost" onClick={onClose}>
-              Cancel
-            </Button>
-            <Button onClick={handleSave} isDisabled={!isDirty}>
-              Save
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </AnimatedDialog>
-    );
+  if (!editColumns) {
+    return null;
   }
-);
-PipelineSettingsDialog.displayName = 'PipelineSettingsDialog';
+
+  const categoryError = (() => {
+    const validity = validatePipelineCategories(editColumns);
+    return validity.isErr() ? validity.error : null;
+  })();
+
+  return (
+    <div className={styles.root}>
+      <p className={styles.helpText}>
+        Columns are the stages agents move work through. Each column&apos;s category (To do / Doing / Done) is how tasks
+        group in global views — the last column must be the Done one.
+      </p>
+      {editColumns.map((col, i) => (
+        <ColumnEditor
+          key={col.id}
+          column={col}
+          index={i}
+          total={editColumns.length}
+          onMaxConcurrentChange={handleMaxConcurrentChange}
+          onGateChange={handleGateChange}
+          onDescriptionChange={handleDescriptionChange}
+          onWorkflowChange={handleWorkflowChange}
+          onRename={handleRename}
+          onCategoryChange={handleCategoryChange}
+          onMoveUp={handleMoveUp}
+          onMoveDown={handleMoveDown}
+          onRemoveColumn={handleRemoveColumn}
+          isRemovable={editColumns.length > 2}
+        />
+      ))}
+      <div className={styles.addRow}>
+        <Input
+          size="sm"
+          value={newColumnLabel}
+          onChange={handleNewColumnLabelChange}
+          placeholder="Add column..."
+          onKeyDown={handleAddColumnKeyDown}
+          className={styles.flex1}
+        />
+        <IconButton
+          aria-label="Add column"
+          icon={<Add20Regular />}
+          size="sm"
+          onClick={handleAddColumn}
+          isDisabled={!newColumnLabel.trim()}
+        />
+      </div>
+      {isDirty && categoryError && (
+        <div role="alert" className={styles.categoryError}>
+          {categoryError}
+        </div>
+      )}
+      {isDirty && (
+        <div className={styles.saveRow}>
+          <Button onClick={handleSave} isDisabled={saving || categoryError !== null}>
+            {saving ? 'Saving…' : 'Save pipeline'}
+          </Button>
+          <Button variant="ghost" onClick={handleDiscard} isDisabled={saving}>
+            Discard
+          </Button>
+          <span className={styles.dirtyHint}>Unsaved pipeline changes</span>
+        </div>
+      )}
+    </div>
+  );
+});
+PipelineEditor.displayName = 'PipelineEditor';

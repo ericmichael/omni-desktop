@@ -11,7 +11,7 @@ import {
 import { Copy20Regular } from '@fluentui/react-icons';
 import { memo, useCallback, useEffect } from 'react';
 
-import type { ToastLevel } from '@/renderer/features/Toast/state';
+import type { ToastAction, ToastLevel } from '@/renderer/features/Toast/state';
 import { $toasts, removeToast } from '@/renderer/features/Toast/state';
 
 const copyToClipboard = async (text: string): Promise<void> => {
@@ -54,6 +54,7 @@ export const ToastContainer = memo(() => {
       title: string;
       description?: string;
       copyText?: string;
+      action?: ToastAction;
       durationMs: number;
     }) => {
       dispatchToast(
@@ -64,6 +65,18 @@ export const ToastContainer = memo(() => {
             {toastData.copyText && (
               <Button size="small" icon={<Copy20Regular />} onClick={() => void copyToClipboard(toastData.copyText!)}>
                 Copy error
+              </Button>
+            )}
+            {toastData.action && (
+              <Button
+                size="small"
+                appearance="primary"
+                onClick={() => {
+                  dismissToast(toastData.id);
+                  toastData.action!.onClick();
+                }}
+              >
+                {toastData.action.label}
               </Button>
             )}
             <Button size="small" onClick={() => dismissToast(toastData.id)}>

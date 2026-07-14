@@ -184,3 +184,68 @@ describe('v14 inbox status tightening', () => {
     ).toThrow(/CHECK constraint/);
   });
 });
+
+describe('v15 pipeline column categories', () => {
+  const insertColumn = (id: string, projectId: string, label: string, sortOrder: number): void => {
+    db.prepare('INSERT INTO pipeline_columns (id, project_id, label, sort_order) VALUES (?, ?, ?, ?)').run(
+      id,
+      projectId,
+      label,
+      sortOrder
+    );
+  };
+
+  const categoriesOf = (projectId: string): string[] =>
+    (
+      db
+        .prepare('SELECT category FROM pipeline_columns WHERE project_id = ? ORDER BY sort_order')
+        .all(projectId) as Array<{ category: string }>
+    ).map((r) => r.category);
+
+  it('backfills first → todo, last → done, middle → doing', () => {
+    migrateTo(15);
+    db.prepare("INSERT INTO projects (id, label, slug) VALUES ('proj_1', 'P', 'p')").run();
+    insertColumn('proj_1__backlog', 'proj_1', 'Backlog', 0);
+    insertColumn('proj_1__spec', 'proj_1', 'Spec', 1);
+    insertColumn('proj_1__impl', 'proj_1', 'Implementation', 2);
+    insertColumn('proj_1__review', 'proj_1', 'Review', 3);
+    insertColumn('proj_1__done', 'proj_1', 'Completed', 4);
+
+    runMigrations(db);
+
+    expect(categoriesOf('proj_1')).toEqual(['todo', 'doing', 'doing', 'doing', 'done']);
+  });
+
+  it('backfills a two-column pipeline as todo → done', () => {
+    migrateTo(15);
+    db.prepare("INSERT INTO projects (id, label, slug) VALUES ('proj_2', 'P2', 'p2')").run();
+    insertColumn('proj_2__a', 'proj_2', 'A', 0);
+    insertColumn('proj_2__b', 'proj_2', 'B', 1);
+
+    runMigrations(db);
+
+    expect(categoriesOf('proj_2')).toEqual(['todo', 'done']);
+  });
+
+  it('backfills a single-column pipeline as done (last wins)', () => {
+    migrateTo(15);
+    db.prepare("INSERT INTO projects (id, label, slug) VALUES ('proj_3', 'P3', 'p3')").run();
+    insertColumn('proj_3__only', 'proj_3', 'Only', 0);
+
+    runMigrations(db);
+
+    expect(categoriesOf('proj_3')).toEqual(['done']);
+  });
+
+  it('rejects invalid categories after the migration', () => {
+    runMigrations(db);
+    db.prepare("INSERT INTO projects (id, label, slug) VALUES ('proj_4', 'P4', 'p4')").run();
+    expect(() =>
+      db
+        .prepare(
+          "INSERT INTO pipeline_columns (id, project_id, label, sort_order, category) VALUES (?, ?, ?, 0, 'bogus')"
+        )
+        .run('proj_4__x', 'proj_4', 'X')
+    ).toThrow(/CHECK constraint/);
+  });
+});

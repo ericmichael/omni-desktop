@@ -69,7 +69,7 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-async function renderBanner(scope: { kind: 'chat' } | { kind: 'code-tab'; tabId: string }): Promise<HTMLSpanElement> {
+async function renderBanner(scope: { kind: 'code-tab'; tabId: string }): Promise<HTMLSpanElement> {
   await act(async () => {
     root.render(<PullRequestBanner scope={scope} />);
     await Promise.resolve();
@@ -93,17 +93,6 @@ describe('PullRequestBanner PR links', () => {
 
     expect(invokeMock).toHaveBeenCalledWith('project:detect-code-tab-pull-requests', 'tab_123');
     expect(requestPreviewOpenMock).toHaveBeenCalledWith(pullRequest.url, 'tab_123');
-  });
-
-  it('keeps chat pull requests untargeted', async () => {
-    const badge = await renderBanner({ kind: 'chat' });
-
-    act(() => {
-      badge.click();
-    });
-
-    expect(invokeMock).toHaveBeenCalledWith('project:detect-chat-pull-requests');
-    expect(requestPreviewOpenMock).toHaveBeenCalledWith(pullRequest.url);
   });
 });
 

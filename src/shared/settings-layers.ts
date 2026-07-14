@@ -67,7 +67,6 @@ export const SETTINGS_LAYERS: Partial<Record<StoreKey, KeyClass>> = {
   voicePersonas: { layer: 'user', scope: 'global' },
   activeVoicePersonaId: { layer: 'user', scope: 'global' },
   voiceToggleHotkey: { layer: 'user', scope: 'global' },
-  weeklyReviewDay: { layer: 'user', scope: 'global' },
   browserProfiles: { layer: 'user', scope: 'global' },
   browserHistory: { layer: 'user', scope: 'global' },
   browserBookmarks: { layer: 'user', scope: 'global' },
@@ -79,7 +78,6 @@ export const SETTINGS_LAYERS: Partial<Record<StoreKey, KeyClass>> = {
   activeTicketId: { layer: 'user', scope: 'team' },
   wipLimit: { layer: 'user', scope: 'team' },
   browserTabsets: { layer: 'user', scope: 'team' },
-  lastWeeklyReviewAt: { layer: 'user', scope: 'team' },
   onboardingComplete: { layer: 'user', scope: 'team' },
   defaultProfileName: { layer: 'user', scope: 'team' },
 

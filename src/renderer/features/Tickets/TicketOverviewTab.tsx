@@ -1,4 +1,4 @@
-import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
+import { makeStyles, mergeClasses, shorthands, tokens } from '@fluentui/react-components';
 import { Dismiss20Regular, Edit20Regular, Warning20Filled } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useMemo, useState } from 'react';
@@ -6,17 +6,65 @@ import Markdown from 'react-markdown';
 
 import { Badge, Button, IconButton, SectionLabel, Select, Textarea } from '@/renderer/ds';
 import { $milestones } from '@/renderer/features/Initiatives/state';
-import type { Ticket, TicketPriority } from '@/shared/types';
+import { $members } from '@/renderer/features/Teams/state';
+import { AssigneePicker } from '@/renderer/features/Tickets/AssigneePicker';
+import type { MilestoneId, Ticket, TicketPriority } from '@/shared/types';
 
 import { $pipeline, $tickets, ticketApi } from './state';
 import { getColumnColors, PHASE_LABELS, RESOLUTION_COLORS, RESOLUTION_LABELS } from './ticket-constants';
+import { TicketDiscussion } from './TicketDiscussion';
 
 const useStyles = makeStyles({
+  /* Content + properties split (the Linear/GitHub issue idiom): the
+     description is the star in the main column; every field lives in a
+     compact rail on the right. Stacks on narrow panes. */
   root: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: tokens.spacingHorizontalXXL,
+    width: '100%',
+    maxWidth: '56rem',
+    marginLeft: 'auto',
+    marginRight: 'auto',
+    '@media (max-width: 760px)': {
+      flexDirection: 'column',
+    },
+  },
+  rootStacked: {
+    flexDirection: 'column',
+    maxWidth: '42rem',
+  },
+  main: {
+    flex: '1 1 0',
+    minWidth: 0,
     display: 'flex',
     flexDirection: 'column',
     gap: tokens.spacingVerticalXXL,
-    maxWidth: '42rem',
+    '@media (max-width: 760px)': {
+      width: '100%',
+      flex: '0 0 auto',
+    },
+  },
+  aside: {
+    width: '240px',
+    flexShrink: 0,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalL,
+    '@media (max-width: 760px)': {
+      width: '100%',
+    },
+  },
+  asideStacked: {
+    width: '100%',
+  },
+  prop: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '4px',
+  },
+  propControl: {
+    width: '100%',
   },
   section: {
     display: 'flex',
@@ -99,44 +147,12 @@ const useStyles = makeStyles({
     gap: '6px',
   },
   noBlockers: {
-    fontSize: tokens.fontSizeBase300,
+    fontSize: tokens.fontSizeBase200,
     color: tokens.colorNeutralForeground3,
-    '@media (min-width: 640px)': {
-      fontSize: tokens.fontSizeBase200,
-    },
   },
   infoText: {
-    fontSize: tokens.fontSizeBase300,
+    fontSize: tokens.fontSizeBase200,
     color: tokens.colorNeutralForeground2,
-    '@media (min-width: 640px)': {
-      fontSize: tokens.fontSizeBase200,
-    },
-  },
-  tokenRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalL,
-    fontSize: tokens.fontSizeBase300,
-    color: tokens.colorNeutralForeground2,
-    '@media (min-width: 640px)': {
-      fontSize: tokens.fontSizeBase200,
-    },
-  },
-  detailSection: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '4px',
-  },
-  detailRow: {
-    display: 'flex',
-    flexWrap: 'wrap',
-    columnGap: tokens.spacingHorizontalL,
-    rowGap: '4px',
-    fontSize: tokens.fontSizeBase300,
-    color: tokens.colorNeutralForeground2,
-    '@media (min-width: 640px)': {
-      fontSize: tokens.fontSizeBase200,
-    },
   },
   metaRow: {
     display: 'flex',
@@ -144,17 +160,27 @@ const useStyles = makeStyles({
     alignItems: 'center',
     gap: tokens.spacingHorizontalS,
   },
+  detailRow: {
+    display: 'flex',
+    flexDirection: 'column',
+    rowGap: '2px',
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
+  },
 });
 
 type TicketOverviewTabProps = {
   ticket: Ticket;
+  /** Panel context (Code deck): stack the rail under the description. */
+  compact?: boolean;
 };
 
-export const TicketOverviewTab = memo(({ ticket }: TicketOverviewTabProps) => {
+export const TicketOverviewTab = memo(({ ticket, compact }: TicketOverviewTabProps) => {
   const styles = useStyles();
   const tickets = useStore($tickets);
   const pipeline = useStore($pipeline);
   const milestones = useStore($milestones);
+  const members = useStore($members);
   const [editingDescription, setEditingDescription] = useState(false);
   const [editDescription, setEditDescription] = useState('');
 
@@ -165,7 +191,13 @@ export const TicketOverviewTab = memo(({ ticket }: TicketOverviewTabProps) => {
     return pipeline.columns.find((c) => c.id === ticket.columnId);
   }, [ticket, pipeline]);
 
-  const milestone = ticket.milestoneId ? milestones[ticket.milestoneId] : undefined;
+  const projectMilestones = useMemo(
+    () =>
+      Object.values(milestones).filter(
+        (m) => m.projectId === ticket.projectId && (m.status === 'active' || m.id === ticket.milestoneId)
+      ),
+    [milestones, ticket.projectId, ticket.milestoneId]
+  );
 
   const blockerTickets = useMemo(() => {
     return ticket.blockedBy.flatMap((id) => {
@@ -193,6 +225,13 @@ export const TicketOverviewTab = memo(({ ticket }: TicketOverviewTabProps) => {
   const handlePriorityChange = useCallback(
     (e: React.ChangeEvent<HTMLSelectElement>) => {
       void ticketApi.updateTicket(ticket.id, { priority: e.target.value as TicketPriority });
+    },
+    [ticket.id]
+  );
+
+  const handleMilestoneChange = useCallback(
+    (e: React.ChangeEvent<HTMLSelectElement>) => {
+      void ticketApi.moveTicketToMilestone(ticket.id, (e.target.value || undefined) as MilestoneId | undefined);
     },
     [ticket.id]
   );
@@ -257,37 +296,95 @@ export const TicketOverviewTab = memo(({ ticket }: TicketOverviewTabProps) => {
   }, [ticket.id]);
 
   return (
-    <div className={styles.root}>
-      {ticket.cleanupPending && ticket.worktreePath && (
-        <div className={styles.cleanupBanner}>
-          <div className={styles.cleanupBannerHeader}>
-            <Warning20Filled />
-            Worktree has uncommitted changes — cleanup deferred
-          </div>
-          <div className={styles.cleanupBannerBody}>
-            This ticket is resolved, but its worktree still has unsaved work. Commit or discard the changes, then click
-            below to remove the worktree.
-          </div>
-          <div className={styles.cleanupBannerPath}>{ticket.worktreePath}</div>
-          {cleanupError && (
-            <div className={styles.cleanupBannerBody} role="alert">
-              {cleanupError}
+    <div className={mergeClasses(styles.root, compact && styles.rootStacked)}>
+      {/* ── Main column: the ticket's content ── */}
+      <div className={styles.main}>
+        {ticket.cleanupPending && ticket.worktreePath && (
+          <div className={styles.cleanupBanner}>
+            <div className={styles.cleanupBannerHeader}>
+              <Warning20Filled />
+              Worktree has uncommitted changes — cleanup deferred
             </div>
-          )}
-          <div className={styles.cleanupBannerActions}>
-            <Button size="sm" onClick={handleFinalizeCleanup} isDisabled={cleanupBusy}>
-              {cleanupBusy ? 'Cleaning up…' : 'Clean up worktree'}
-            </Button>
+            <div className={styles.cleanupBannerBody}>
+              This task is resolved, but its worktree still has unsaved work. Commit or discard the changes, then click
+              below to remove the worktree.
+            </div>
+            <div className={styles.cleanupBannerPath}>{ticket.worktreePath}</div>
+            {cleanupError && (
+              <div className={styles.cleanupBannerBody} role="alert">
+                {cleanupError}
+              </div>
+            )}
+            <div className={styles.cleanupBannerActions}>
+              <Button size="sm" onClick={handleFinalizeCleanup} isDisabled={cleanupBusy}>
+                {cleanupBusy ? 'Cleaning up…' : 'Clean up worktree'}
+              </Button>
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Status metadata */}
-      <div className={styles.section}>
-        <SectionLabel>Status</SectionLabel>
-        <div className={styles.metaRow}>
+        <div className={styles.section}>
+          <div className={styles.labelRow}>
+            <SectionLabel>Description</SectionLabel>
+            {!editingDescription && (
+              <IconButton
+                aria-label="Edit description"
+                icon={<Edit20Regular />}
+                size="sm"
+                onClick={handleStartEditDescription}
+              />
+            )}
+          </div>
+          {editingDescription ? (
+            <div className={styles.section}>
+              <Textarea
+                value={editDescription}
+                onChange={handleEditDescriptionChange}
+                onKeyDown={handleDescriptionKeyDown}
+                autoFocus
+                rows={5}
+                maxHeight={400}
+                placeholder="Task description..."
+              />
+              <div className={styles.editActions}>
+                <Button size="sm" onClick={handleSaveDescription}>
+                  Save
+                </Button>
+                <Button size="sm" variant="ghost" onClick={handleCancelEditDescription}>
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          ) : ticket.description ? (
+            <div
+              className={`prose prose-invert prose-sm max-w-none ${styles.descriptionMarkdown} prose-code:before:content-none prose-code:after:content-none [&_code]:bg-surface-raised [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_pre]:bg-surface-raised [&_pre]:rounded-lg [&_pre]:p-3 [&_pre_code]:bg-transparent [&_pre_code]:px-0 [&_pre_code]:py-0`}
+            >
+              <Markdown>{ticket.description}</Markdown>
+            </div>
+          ) : (
+            <button onClick={handleStartEditDescription} className={styles.tapToAdd}>
+              Tap to add description
+            </button>
+          )}
+        </div>
+
+        <div className={styles.section}>
+          <SectionLabel>Discussion</SectionLabel>
+          <TicketDiscussion ticket={ticket} />
+        </div>
+      </div>
+
+      {/* ── Properties rail ── */}
+      <aside className={mergeClasses(styles.aside, compact && styles.asideStacked)} aria-label="Task properties">
+        <div className={styles.prop}>
+          <SectionLabel>Status</SectionLabel>
           {pipeline && (
-            <Select size="sm" value={ticket.columnId ?? ''} onChange={handleColumnChange} className="w-40">
+            <Select
+              size="sm"
+              value={ticket.columnId ?? ''}
+              onChange={handleColumnChange}
+              className={styles.propControl}
+            >
               {pipeline.columns.map((col) => (
                 <option key={col.id} value={col.id}>
                   {col.label}
@@ -298,149 +395,124 @@ export const TicketOverviewTab = memo(({ ticket }: TicketOverviewTabProps) => {
           {/* Skip the resolution badge when it would just repeat the column
               dropdown's label (e.g. "Completed" next to "Completed"). */}
           {ticket.resolution && RESOLUTION_LABELS[ticket.resolution] !== currentColumn?.label && (
-            <Badge color={RESOLUTION_COLORS[ticket.resolution]}>{RESOLUTION_LABELS[ticket.resolution]}</Badge>
-          )}
-          {milestone && (
-            <Badge color="purple" truncate>
-              {milestone.title}
-            </Badge>
+            <div className={styles.metaRow}>
+              <Badge color={RESOLUTION_COLORS[ticket.resolution]}>{RESOLUTION_LABELS[ticket.resolution]}</Badge>
+            </div>
           )}
         </div>
-      </div>
 
-      {/* Description */}
-      <div className={styles.section}>
-        <div className={styles.labelRow}>
-          <SectionLabel>Description</SectionLabel>
-          {!editingDescription && (
-            <IconButton
-              aria-label="Edit description"
-              icon={<Edit20Regular />}
-              size="sm"
-              onClick={handleStartEditDescription}
-            />
-          )}
+        <div className={styles.prop}>
+          <SectionLabel>Priority</SectionLabel>
+          <Select size="sm" value={ticket.priority} onChange={handlePriorityChange} className={styles.propControl}>
+            <option value="low">Low</option>
+            <option value="medium">Medium</option>
+            <option value="high">High</option>
+            <option value="critical">Critical</option>
+          </Select>
         </div>
-        {editingDescription ? (
-          <div className={styles.section}>
-            <Textarea
-              value={editDescription}
-              onChange={handleEditDescriptionChange}
-              onKeyDown={handleDescriptionKeyDown}
-              autoFocus
-              rows={5}
-              maxHeight={400}
-              placeholder="Ticket description..."
-            />
-            <div className={styles.editActions}>
-              <Button size="sm" onClick={handleSaveDescription}>
-                Save
-              </Button>
-              <Button size="sm" variant="ghost" onClick={handleCancelEditDescription}>
-                Cancel
-              </Button>
+
+        {(projectMilestones.length > 0 || ticket.milestoneId) && (
+          <div className={styles.prop}>
+            <SectionLabel>Milestone</SectionLabel>
+            <Select
+              size="sm"
+              value={ticket.milestoneId ?? ''}
+              onChange={handleMilestoneChange}
+              className={styles.propControl}
+            >
+              <option value="">No milestone</option>
+              {projectMilestones.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.title || 'Untitled milestone'}
+                </option>
+              ))}
+            </Select>
+          </div>
+        )}
+
+        {members.length > 0 && (
+          <div className={styles.prop}>
+            <SectionLabel>Assignee</SectionLabel>
+            <div className={styles.metaRow}>
+              <AssigneePicker ticketId={ticket.id} assignee={ticket.assignee} />
             </div>
           </div>
-        ) : ticket.description ? (
-          <div
-            className={`prose prose-invert prose-sm max-w-none ${styles.descriptionMarkdown} prose-code:before:content-none prose-code:after:content-none [&_code]:bg-surface-raised [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_pre]:bg-surface-raised [&_pre]:rounded-lg [&_pre]:p-3 [&_pre_code]:bg-transparent [&_pre_code]:px-0 [&_pre_code]:py-0`}
-          >
-            <Markdown>{ticket.description}</Markdown>
+        )}
+
+        <div className={styles.prop}>
+          <SectionLabel>Blocked By</SectionLabel>
+          {blockerTickets.length > 0 && (
+            <div className={styles.blockerList}>
+              {blockerTickets.map((blocker) => (
+                <div key={blocker.id} className={styles.blockerRow}>
+                  <Badge
+                    color="default"
+                    style={{
+                      color: getColumnColors(blocker.columnId ?? 'backlog').badgeColor,
+                      backgroundColor: getColumnColors(blocker.columnId ?? 'backlog').badgeBg,
+                    }}
+                  >
+                    {blocker.columnId ?? 'backlog'}
+                  </Badge>
+                  <span className={styles.blockerTitle}>{blocker.title}</span>
+                  <IconButton
+                    aria-label={`Remove blocker ${blocker.title}`}
+                    icon={<Dismiss20Regular />}
+                    size="sm"
+                    onClick={() => handleRemoveBlocker(blocker.id)}
+                  />
+                </div>
+              ))}
+            </div>
+          )}
+          {availableBlockers.length > 0 && (
+            <Select size="sm" value="" onChange={handleAddBlocker} className={styles.propControl}>
+              <option value="">Add dependency...</option>
+              {availableBlockers.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.title}
+                </option>
+              ))}
+            </Select>
+          )}
+          {blockerTickets.length === 0 && availableBlockers.length === 0 && (
+            <p className={styles.noBlockers}>No tasks available to block on</p>
+          )}
+        </div>
+
+        {/* Autopilot status — hidden entirely when idle; raw phase values never
+            render (PHASE_LABELS holds the human wording). */}
+        {(ticket.autopilot || (ticket.phase && ticket.phase !== 'idle')) && (
+          <div className={styles.prop}>
+            <SectionLabel>Autopilot</SectionLabel>
+            <div className={styles.infoText}>
+              {ticket.autopilot && <p>On</p>}
+              {ticket.phase && ticket.phase !== 'idle' && PHASE_LABELS[ticket.phase] && (
+                <p>{PHASE_LABELS[ticket.phase]}</p>
+              )}
+            </div>
           </div>
-        ) : (
-          <button onClick={handleStartEditDescription} className={styles.tapToAdd}>
-            Tap to add description
-          </button>
         )}
-      </div>
 
-      {/* Priority */}
-      <div className={styles.section}>
-        <SectionLabel>Priority</SectionLabel>
-        <Select size="sm" value={ticket.priority} onChange={handlePriorityChange} className="w-full sm:w-40">
-          <option value="low">Low</option>
-          <option value="medium">Medium</option>
-          <option value="high">High</option>
-          <option value="critical">Critical</option>
-        </Select>
-      </div>
-
-      {/* Dependencies */}
-      <div className={styles.section}>
-        <SectionLabel>Blocked By</SectionLabel>
-        {blockerTickets.length > 0 && (
-          <div className={styles.blockerList}>
-            {blockerTickets.map((blocker) => (
-              <div key={blocker.id} className={styles.blockerRow}>
-                <Badge
-                  color="default"
-                  style={{
-                    color: getColumnColors(blocker.columnId ?? 'backlog').badgeColor,
-                    backgroundColor: getColumnColors(blocker.columnId ?? 'backlog').badgeBg,
-                  }}
-                >
-                  {blocker.columnId ?? 'backlog'}
-                </Badge>
-                <span className={styles.blockerTitle}>{blocker.title}</span>
-                <IconButton
-                  aria-label={`Remove blocker ${blocker.title}`}
-                  icon={<Dismiss20Regular />}
-                  size="sm"
-                  onClick={() => handleRemoveBlocker(blocker.id)}
-                />
-              </div>
-            ))}
+        {ticket.tokenUsage && (
+          <div className={styles.prop}>
+            <SectionLabel>Token Usage</SectionLabel>
+            <div className={styles.detailRow}>
+              <span>In: {ticket.tokenUsage.inputTokens.toLocaleString()}</span>
+              <span>Out: {ticket.tokenUsage.outputTokens.toLocaleString()}</span>
+              <span>Total: {ticket.tokenUsage.totalTokens.toLocaleString()}</span>
+            </div>
           </div>
         )}
-        {availableBlockers.length > 0 && (
-          <Select size="sm" value="" onChange={handleAddBlocker} className="w-full sm:w-60">
-            <option value="">Add dependency...</option>
-            {availableBlockers.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.title}
-              </option>
-            ))}
-          </Select>
-        )}
-        {blockerTickets.length === 0 && availableBlockers.length === 0 && (
-          <p className={styles.noBlockers}>No tickets available to block on</p>
-        )}
-      </div>
 
-      {/* Autopilot status — hidden entirely when idle; raw phase values never
-          render (PHASE_LABELS holds the human wording). */}
-      {(ticket.autopilot || (ticket.phase && ticket.phase !== 'idle')) && (
-        <div className={styles.section}>
-          <SectionLabel>Autopilot</SectionLabel>
-          <div className={styles.infoText}>
-            {ticket.autopilot && <p>On</p>}
-            {ticket.phase && ticket.phase !== 'idle' && PHASE_LABELS[ticket.phase] && (
-              <p>{PHASE_LABELS[ticket.phase]}</p>
-            )}
+        <div className={styles.prop}>
+          <SectionLabel>Details</SectionLabel>
+          <div className={styles.detailRow}>
+            <span>Created {new Date(ticket.createdAt).toLocaleDateString()}</span>
+            <span>Updated {new Date(ticket.updatedAt).toLocaleDateString()}</span>
           </div>
         </div>
-      )}
-
-      {/* Token usage */}
-      {ticket.tokenUsage && (
-        <div className={styles.section}>
-          <SectionLabel>Token Usage</SectionLabel>
-          <div className={styles.tokenRow}>
-            <span>In: {ticket.tokenUsage.inputTokens.toLocaleString()}</span>
-            <span>Out: {ticket.tokenUsage.outputTokens.toLocaleString()}</span>
-            <span>Total: {ticket.tokenUsage.totalTokens.toLocaleString()}</span>
-          </div>
-        </div>
-      )}
-
-      {/* Timestamps */}
-      <div className={styles.detailSection}>
-        <SectionLabel>Details</SectionLabel>
-        <div className={styles.detailRow}>
-          <span>Created {new Date(ticket.createdAt).toLocaleDateString()}</span>
-          <span>Updated {new Date(ticket.updatedAt).toLocaleDateString()}</span>
-        </div>
-      </div>
+      </aside>
     </div>
   );
 });

@@ -48,15 +48,14 @@ const useStyles = makeStyles({
 });
 
 /**
- * Which surface's container to probe for pull requests. ``chat`` targets the
- * singleton chat session; ``code-tab`` targets a deck column's tab.
+ * Which surface's container to probe for pull requests — a deck column's tab
+ * (project-backed OR a projectless chat column; main resolves the sources
+ * either way).
  */
-export type PullRequestBannerScope = { kind: 'chat' } | { kind: 'code-tab'; tabId: string };
+export type PullRequestBannerScope = { kind: 'code-tab'; tabId: string };
 
 const detect = (scope: PullRequestBannerScope): Promise<ContainerPullRequest[]> =>
-  scope.kind === 'chat'
-    ? emitter.invoke('project:detect-chat-pull-requests')
-    : emitter.invoke('project:detect-code-tab-pull-requests', scope.tabId);
+  emitter.invoke('project:detect-code-tab-pull-requests', scope.tabId);
 
 /**
  * Merge a poll result into the displayed PR list. The main process already
@@ -94,7 +93,7 @@ export const PullRequestBanner = memo(({ scope, floating }: { scope: PullRequest
   const styles = useStyles();
   const [prs, setPrs] = useState<ContainerPullRequest[]>([]);
 
-  const key = scope.kind === 'chat' ? 'chat' : scope.tabId;
+  const key = scope.tabId;
   const poll = useCallback(() => {
     detect(scope)
       .then((next) => setPrs((prev) => mergePollResult(prev, next)))
@@ -118,7 +117,7 @@ export const PullRequestBanner = memo(({ scope, floating }: { scope: PullRequest
   if (prs.length === 0) {
     return null;
   }
-  const tabId = scope.kind === 'code-tab' ? scope.tabId : undefined;
+  const tabId = scope.tabId;
   return (
     <div className={mergeClasses(styles.banner, floating && styles.floating)}>
       <span className={styles.label}>Pull request{prs.length > 1 ? 's' : ''}</span>

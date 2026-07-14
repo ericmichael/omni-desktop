@@ -60,6 +60,7 @@ const resetStore = (patch: Partial<StoreData> = {}) => {
     defaultProfileName: 'host',
     projects: [],
     codeTabs: [],
+    chatConversations: [],
     activeCodeTabId: null,
     availableSandboxProfiles: undefined,
     ...patch,
@@ -189,23 +190,10 @@ describe('code tab sandbox profile resolution', () => {
   });
 });
 
-describe('reserved chat record guards', () => {
+describe('chat columns and conversation archival', () => {
   beforeEach(() => {
     vi.resetModules();
     resetStore();
-  });
-
-  const chatTab = (): CodeTab => tab({ id: 'chat', projectId: null, sessionId: 'chat-sess' });
-
-  it('addTab does not reuse the chat record as a blank tab', async () => {
-    resetStore({ codeTabs: [chatTab()] });
-    const { codeApi } = await import('./state');
-
-    const created = await codeApi.addTab();
-
-    expect(created.id).not.toBe('chat');
-    expect(store.codeTabs).toHaveLength(2);
-    expect(store.codeTabs.some((t) => t.id === 'chat')).toBe(true);
   });
 
   it('addTab creates a fresh tab instead of reusing an existing blank session', async () => {
@@ -242,24 +230,112 @@ describe('reserved chat record guards', () => {
     expect(store.codeTabs.find((item) => item.id === 'routine-tab')).toMatchObject({ routineId: 'routine-1' });
   });
 
-  it('removeTab is a no-op for the chat record', async () => {
-    resetStore({ codeTabs: [chatTab(), tab({ id: 'tab-1' })] });
+  it('removeTab archives an activated chat column instead of deleting its snapshot', async () => {
+    resetStore({
+      codeTabs: [tab({ id: 'chat-tab', projectId: null, sessionId: 'sess-1', activatedAt: 5, containerId: 'cont-1' })],
+      chatConversations: [{ sessionId: 'sess-1', title: 'Plan my week', lastActiveAt: 1 }],
+    });
     const { codeApi } = await import('./state');
 
-    await codeApi.removeTab('chat');
+    await codeApi.removeTab('chat-tab');
 
-    expect(store.codeTabs.map((t) => t.id)).toEqual(['chat', 'tab-1']);
+    expect(store.codeTabs).toHaveLength(0);
+    expect(invoke).not.toHaveBeenCalledWith('snapshot:delete', 'sess-1');
+    expect(store.chatConversations[0]).toMatchObject({
+      sessionId: 'sess-1',
+      title: 'Plan my week',
+      profileName: 'host',
+      containerId: 'cont-1',
+    });
   });
 
-  it('reorderTabs preserves the chat record when given the deck-filtered list', async () => {
-    const a = tab({ id: 'tab-a' });
-    const b = tab({ id: 'tab-b' });
-    resetStore({ codeTabs: [chatTab(), a, b] });
+  it('removeTab deletes the snapshot of an un-activated chat column and of project tabs', async () => {
+    resetStore({
+      codeTabs: [
+        tab({ id: 'fresh-chat', projectId: null, sessionId: 'sess-fresh' }),
+        tab({ id: 'proj-tab', projectId: 'p1', sessionId: 'sess-proj' }),
+      ],
+    });
     const { codeApi } = await import('./state');
 
-    // The deck reorders its filtered view (no chat record).
+    await codeApi.removeTab('fresh-chat');
+    await codeApi.removeTab('proj-tab');
+
+    expect(invoke).toHaveBeenCalledWith('snapshot:delete', 'sess-fresh');
+    expect(invoke).toHaveBeenCalledWith('snapshot:delete', 'sess-proj');
+    expect(store.chatConversations).toHaveLength(0);
+  });
+
+  it('setTabActivated stamps once and never re-stamps', async () => {
+    resetStore({ codeTabs: [tab({ id: 'chat-tab', projectId: null, activatedAt: 42 })] });
+    const { codeApi } = await import('./state');
+
+    await codeApi.setTabActivated('chat-tab');
+
+    expect(store.codeTabs[0]?.activatedAt).toBe(42);
+  });
+
+  it('setTabSessionId resets a chat column to the lazy state on a fresh conversation', async () => {
+    resetStore({ codeTabs: [tab({ id: 'chat-tab', projectId: null, sessionId: 'old', activatedAt: 5 })] });
+    const { codeApi } = await import('./state');
+
+    await codeApi.setTabSessionId('chat-tab', 'new');
+
+    expect(store.codeTabs[0]).toMatchObject({ sessionId: 'new' });
+    expect(store.codeTabs[0]?.activatedAt).toBeUndefined();
+  });
+
+  it('addTabForConversation activates an existing column showing that session', async () => {
+    resetStore({ codeTabs: [tab({ id: 'chat-tab', projectId: null, sessionId: 'sess-1' })] });
+    const { codeApi } = await import('./state');
+
+    const opened = await codeApi.addTabForConversation({ sessionId: 'sess-1', title: 'x', lastActiveAt: 1 });
+
+    expect(opened.id).toBe('chat-tab');
+    expect(store.codeTabs).toHaveLength(1);
+    expect(store.activeCodeTabId).toBe('chat-tab');
+  });
+
+  it('addTabForConversation rebuilds a column from an archived entry', async () => {
+    resetStore();
+    const { codeApi } = await import('./state');
+
+    const opened = await codeApi.addTabForConversation({
+      sessionId: 'sess-1',
+      title: 'x',
+      lastActiveAt: 1,
+      profileName: 'devbox',
+      containerId: 'cont-9',
+    });
+
+    expect(opened).toMatchObject({
+      projectId: null,
+      sessionId: 'sess-1',
+      profileName: 'devbox',
+      containerId: 'cont-9',
+    });
+    expect(opened.activatedAt).toBeTypeOf('number');
+  });
+
+  it('deleteConversation removes the entry and its snapshot', async () => {
+    resetStore({ chatConversations: [{ sessionId: 'sess-1', title: 'x', lastActiveAt: 1 }] });
+    const { codeApi } = await import('./state');
+
+    await codeApi.deleteConversation('sess-1');
+
+    expect(store.chatConversations).toHaveLength(0);
+    expect(invoke).toHaveBeenCalledWith('snapshot:delete', 'sess-1');
+  });
+
+  it('reorderTabs preserves records missing from a filtered input list', async () => {
+    const a = tab({ id: 'tab-a' });
+    const b = tab({ id: 'tab-b' });
+    const app = tab({ id: 'app-tab', customAppId: 'browser' });
+    resetStore({ codeTabs: [app, a, b] });
+    const { codeApi } = await import('./state');
+
     await codeApi.reorderTabs([b, a]);
 
-    expect(store.codeTabs.map((t) => t.id)).toEqual(['chat', 'tab-b', 'tab-a']);
+    expect(store.codeTabs.map((t) => t.id)).toEqual(['app-tab', 'tab-b', 'tab-a']);
   });
 });

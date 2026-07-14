@@ -3,10 +3,9 @@
  * App) and consumed by deck chrome (column headers, Focus session list) so a
  * column's state is glanceable without reading its transcript.
  *
- * Keyed by the same scope string as voice recording (the Code tab id, or
- * CHAT_VOICE_SCOPE for the Chat tab — published there too, harmlessly: the
- * Chat surface has no consumer). Same pattern as `$recordingScope` in
- * `voice-recording.ts`.
+ * Keyed by the same scope string as voice recording (the code tab id — chat
+ * columns included; they're ordinary tabs). Same pattern as `$recordingScope`
+ * in `voice-recording.ts`.
  */
 import { map } from 'nanostores';
 

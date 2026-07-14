@@ -25,27 +25,27 @@ const ctx = (codeTabs: CodeTab[] = []) => ({
 });
 
 describe('paletteColumns', () => {
-  it('excludes the reserved chat record and app columns', () => {
+  it('includes chat columns and excludes app columns', () => {
     const tabs = [
-      tab({ id: 'chat' }),
+      tab({ id: 'chat-col' }),
       tab({ id: 'a', projectId: 'p1' }),
       tab({ id: 'b', customAppId: 'browser' }),
       tab({ id: 'c' }),
     ];
-    expect(paletteColumns(tabs).map((t) => t.id)).toEqual(['a', 'c']);
+    expect(paletteColumns(tabs).map((t) => t.id)).toEqual(['chat-col', 'a', 'c']);
   });
 });
 
 describe('buildCommands', () => {
   it('includes navigation, session, layout, and per-column commands', () => {
-    const c = ctx([tab({ id: 'chat' }), tab({ id: 'a', projectId: 'p1' })]);
+    const c = ctx([tab({ id: 'a', projectId: 'p1' }), tab({ id: 'b', customAppId: 'browser' })]);
     const commands = buildCommands(c);
     const ids = commands.map((cmd) => cmd.id);
     expect(ids).toEqual(
       expect.arrayContaining([
+        'nav-home',
+        'nav-work',
         'nav-chat',
-        'nav-spaces',
-        'nav-projects',
         'nav-inbox',
         'nav-settings',
         'add-inbox-item',
@@ -55,7 +55,8 @@ describe('buildCommands', () => {
         'column-a',
       ])
     );
-    expect(ids).not.toContain('column-chat');
+    expect(ids).not.toContain('nav-spaces');
+    expect(ids).not.toContain('column-b');
   });
 
   it('labels the layout toggle by the current mode and numbers column hints', () => {
@@ -71,8 +72,10 @@ describe('buildCommands', () => {
   it('runs the bound actions', () => {
     const c = ctx([tab({ id: 'a', projectId: 'p1' })]);
     const commands = buildCommands(c);
-    commands.find((cmd) => cmd.id === 'nav-projects')!.run();
-    expect(c.navigate).toHaveBeenCalledWith('projects');
+    commands.find((cmd) => cmd.id === 'nav-work')!.run();
+    expect(c.navigate).toHaveBeenCalledWith('work');
+    commands.find((cmd) => cmd.id === 'nav-home')!.run();
+    expect(c.navigate).toHaveBeenCalledWith('home');
     commands.find((cmd) => cmd.id === 'nav-inbox')!.run();
     expect(c.goToInbox).toHaveBeenCalled();
     commands.find((cmd) => cmd.id === 'add-inbox-item')!.run();
@@ -97,6 +100,6 @@ describe('filterCommands', () => {
 
   it('matches keywords', () => {
     expect(filterCommands(commands, 'kanban board').map((c) => c.id)).toEqual([]);
-    expect(filterCommands(commands, 'board').map((c) => c.id)).toEqual(['nav-projects']);
+    expect(filterCommands(commands, 'board').map((c) => c.id)).toEqual(['nav-work']);
   });
 });

@@ -463,7 +463,7 @@ export class RPCClient {
     return this.call('get_session_history', { session_id: sessionId });
   }
 
-  async listSessions(): Promise<
+  async listSessions(opts?: { limit: number; offset?: number }): Promise<
     Array<{
       id: string;
       created_at: string;
@@ -473,7 +473,27 @@ export class RPCClient {
       last_message?: unknown;
     }>
   > {
-    return this.call('list_sessions', {});
+    if (!opts) {
+      return this.call('list_sessions', {});
+    }
+    try {
+      return await this.call('list_sessions', { limit: opts.limit, offset: opts.offset ?? 0 });
+    } catch {
+      // Released runtimes predating pagination reject unknown params
+      // (JSON-RPC -32602). Fall back to the full listing and cap locally.
+      const all = await this.call<
+        Array<{
+          id: string;
+          created_at: string;
+          archived: boolean;
+          message_count: number;
+          first_message?: unknown;
+          last_message?: unknown;
+        }>
+      >('list_sessions', {});
+      const start = opts.offset ?? 0;
+      return all.slice(start, start + opts.limit);
+    }
   }
 
   async deleteSession(sessionId: string): Promise<boolean> {

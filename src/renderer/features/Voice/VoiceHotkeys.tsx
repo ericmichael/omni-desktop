@@ -21,7 +21,6 @@ import { persistedStoreApi } from '@/renderer/services/store';
 import { isLocalVoiceCapable } from '@/renderer/services/voice-client';
 import {
   $hoveredVoiceScope,
-  CHAT_VOICE_SCOPE,
   getVoiceMic,
   GLOBAL_VOICE_SCOPE,
   startOrArmVoiceMic,
@@ -32,13 +31,10 @@ const hotkeyOptions = { enableOnFormTags: true, preventDefault: true, keydown: t
 // Press shorter than this is a tap (toggle); longer is a hold (push-to-talk).
 const TAP_MS = 250;
 
-/** Column/chat scope for the primary hotkey, given the current view. */
+/** Column scope for the primary hotkey, given the current view. */
 function resolveColumnScope(): string | null {
   const store = persistedStoreApi.get();
   if (store.layoutMode === 'chat') {
-    return CHAT_VOICE_SCOPE;
-  }
-  if (store.layoutMode === 'spaces') {
     return $hoveredVoiceScope.get() ?? store.activeCodeTabId;
   }
   return null;

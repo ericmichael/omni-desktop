@@ -12,6 +12,7 @@
  * renderer writes on mount and the client-tool handler reads.
  */
 
+import type { SessionItem } from '@/renderer/omniagents-ui/components/SessionList';
 import type { MessageItem } from '@/shared/chat-types';
 
 /**
@@ -115,6 +116,13 @@ export type SessionController = {
   notify: (content: string, source: string) => Promise<unknown>;
   /** Start a fresh conversation (mints a new session id, no sandbox restart). */
   newSession: () => void;
+  /**
+   * List the agent server's stored sessions. Feeds the Focus sidebar's
+   * Recent section — the same source the old conversations drawer read.
+   * Optional so bare test/tool controllers don't have to fake a session
+   * store; consumers must guard.
+   */
+  listSessions?: () => Promise<SessionItem[]>;
 };
 
 /**

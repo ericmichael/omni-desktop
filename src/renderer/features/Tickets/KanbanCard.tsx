@@ -180,7 +180,7 @@ export const KanbanCard = memo(({ ticket, isOverlay }: { ticket: Ticket; isOverl
           )}
           {unresolvedBlockers > 0 && (
             <Tooltip
-              content={`Blocked by ${unresolvedBlockers} ticket${unresolvedBlockers === 1 ? '' : 's'}`}
+              content={`Blocked by ${unresolvedBlockers} task${unresolvedBlockers === 1 ? '' : 's'}`}
               relationship="label"
               withArrow
             >
@@ -194,7 +194,7 @@ export const KanbanCard = memo(({ ticket, isOverlay }: { ticket: Ticket; isOverl
         {canStart(phase) && (
           <div className={styles.actions}>
             <IconButton icon={<Open20Regular />} size="sm" onClick={handleOpen} aria-label="Chat" />
-            <IconButton icon={<Play20Filled />} size="sm" onClick={handleStart} aria-label="Autopilot" />
+            <IconButton icon={<Play20Filled />} size="sm" onClick={handleStart} aria-label="Start agent" />
           </div>
         )}
       </div>

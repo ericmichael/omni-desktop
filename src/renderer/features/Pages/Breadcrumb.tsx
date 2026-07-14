@@ -1,65 +1,37 @@
-import { makeStyles, tokens } from '@fluentui/react-components';
-import { ChevronRight12Regular } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
-import { memo, useCallback, useMemo } from 'react';
+import { Fragment, memo, useCallback, useMemo } from 'react';
 
+import { Breadcrumb, BreadcrumbButton, BreadcrumbDivider, BreadcrumbItem } from '@/renderer/ds';
 import { ticketApi } from '@/renderer/features/Tickets/state';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { PageId, ProjectId } from '@/shared/types';
 
 import { $pages } from './state';
 
-const useStyles = makeStyles({
-  root: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '2px',
-    flexWrap: 'wrap',
-    paddingBottom: tokens.spacingVerticalXS,
-  },
-  crumb: {
-    fontSize: tokens.fontSizeBase200,
-    color: tokens.colorNeutralForeground3,
-    cursor: 'pointer',
-    border: 'none',
-    backgroundColor: 'transparent',
-    padding: '2px 4px',
-    borderRadius: '4px',
-    ':hover': {
-      color: tokens.colorNeutralForeground2,
-      backgroundColor: tokens.colorSubtleBackgroundHover,
-    },
-  },
-  crumbCurrent: {
-    fontSize: tokens.fontSizeBase200,
-    color: tokens.colorNeutralForeground1,
-    padding: '2px 4px',
-    fontWeight: tokens.fontWeightMedium,
-  },
-  separator: {
-    color: tokens.colorNeutralForeground4,
-    flexShrink: 0,
-  },
-});
-
 type BreadcrumbProps = {
   projectId: ProjectId;
   pageId: PageId;
 };
 
+/**
+ * Ancestors-only breadcrumb for a doc page: "{Project} › Docs › [parents…]".
+ * Same Fluent Breadcrumb as every other sub-page header; the page's own
+ * title renders big underneath (the editable title input).
+ */
 export const PageBreadcrumb = memo(({ projectId, pageId }: BreadcrumbProps) => {
-  const styles = useStyles();
   const pages = useStore($pages);
   const store = useStore(persistedStoreApi.$atom);
 
   const project = useMemo(() => store.projects.find((p) => p.id === projectId), [store.projects, projectId]);
 
-  // Walk parentId chain to build breadcrumb trail. Skip root pages — the
-  // project crumb already represents them (root page title is kept in sync
-  // with project.label, so including it would render the project name twice).
+  // Walk parentId chain to build the ancestor trail (excluding this page —
+  // it titles itself below the crumb). Skip root pages: the Docs crumb
+  // already represents them (root page title is kept in sync with
+  // project.label, so including it would render the project name twice).
   const trail = useMemo(() => {
     const crumbs: { id: PageId; title: string }[] = [];
-    let current = pages[pageId];
+    const self = pages[pageId];
+    let current = self?.parentId ? pages[self.parentId] : undefined;
     while (current) {
       if (!current.isRoot) {
         crumbs.unshift({ id: current.id, title: current.title });
@@ -70,7 +42,11 @@ export const PageBreadcrumb = memo(({ projectId, pageId }: BreadcrumbProps) => {
   }, [pages, pageId]);
 
   const handleProjectClick = useCallback(() => {
-    ticketApi.goToProject(projectId);
+    ticketApi.goToProject(projectId, 'home');
+  }, [projectId]);
+
+  const handleDocsClick = useCallback(() => {
+    ticketApi.goToProject(projectId, 'pages');
   }, [projectId]);
 
   const handleCrumbClick = useCallback(
@@ -85,26 +61,23 @@ export const PageBreadcrumb = memo(({ projectId, pageId }: BreadcrumbProps) => {
   }
 
   return (
-    <nav className={styles.root}>
-      <button type="button" className={styles.crumb} onClick={handleProjectClick}>
-        {project.label}
-      </button>
-      {trail.map((crumb, i) => {
-        const isLast = i === trail.length - 1;
-        return (
-          <span key={crumb.id} style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
-            <ChevronRight12Regular className={styles.separator} />
-            {isLast ? (
-              <span className={styles.crumbCurrent}>{crumb.title}</span>
-            ) : (
-              <button type="button" className={styles.crumb} onClick={() => handleCrumbClick(crumb.id)}>
-                {crumb.title}
-              </button>
-            )}
-          </span>
-        );
-      })}
-    </nav>
+    <Breadcrumb size="small" aria-label="Location">
+      <BreadcrumbItem>
+        <BreadcrumbButton onClick={handleProjectClick}>{project.label}</BreadcrumbButton>
+      </BreadcrumbItem>
+      <BreadcrumbDivider />
+      <BreadcrumbItem>
+        <BreadcrumbButton onClick={handleDocsClick}>Docs</BreadcrumbButton>
+      </BreadcrumbItem>
+      {trail.map((crumb) => (
+        <Fragment key={crumb.id}>
+          <BreadcrumbDivider />
+          <BreadcrumbItem>
+            <BreadcrumbButton onClick={() => handleCrumbClick(crumb.id)}>{crumb.title}</BreadcrumbButton>
+          </BreadcrumbItem>
+        </Fragment>
+      ))}
+    </Breadcrumb>
   );
 });
 PageBreadcrumb.displayName = 'PageBreadcrumb';

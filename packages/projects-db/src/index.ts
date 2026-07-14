@@ -50,8 +50,8 @@ export { columnId, commentId, inboxId, milestoneId, pageId, projectId, taskId, t
 export { fromIso, nowTimestamp, toIso } from './timestamps.js';
 
 // Defaults
-export type { ColumnDef } from './defaults.js';
-export { DEFAULT_COLUMNS, defaultColumnId, logicalColumnId, SIMPLE_COLUMNS } from './defaults.js';
+export type { ColumnCategory, ColumnDef } from './defaults.js';
+export { DEFAULT_COLUMNS, defaultColumnId, logicalColumnId, positionalCategory, SIMPLE_COLUMNS } from './defaults.js';
 
 // Page filesystem
 export {

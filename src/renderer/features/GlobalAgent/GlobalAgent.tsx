@@ -89,8 +89,8 @@ export const GlobalAgent = memo(() => {
 
   // Mount once active (opened or background-activated by the global voice
   // hotkey); stays mounted so the session + mic persist. `open` only toggles
-  // visibility. Only in Tile mode.
-  if (store.layoutMode !== 'spaces' || !active) {
+  // visibility. Only on the Chat tab (the deck).
+  if (store.layoutMode !== 'chat' || !active) {
     return null;
   }
 

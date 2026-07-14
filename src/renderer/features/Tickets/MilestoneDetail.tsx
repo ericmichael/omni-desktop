@@ -24,7 +24,6 @@ import {
   MenuTrigger,
 } from '@/renderer/ds';
 import { $milestones, milestoneApi } from '@/renderer/features/Initiatives/state';
-import { persistedStoreApi } from '@/renderer/services/store';
 import type { MilestoneId, ProjectId } from '@/shared/types';
 
 import { MilestoneForm } from './MilestoneForm';
@@ -67,12 +66,7 @@ type MilestoneDetailProps = {
 export const MilestoneDetail = memo(({ milestoneId, projectId, hideChrome }: MilestoneDetailProps) => {
   const styles = useStyles();
   const milestones = useStore($milestones);
-  const store = useStore(persistedStoreApi.$atom);
   const milestone = milestones[milestoneId];
-  const project = useMemo(
-    () => store.projects.find((entry) => entry.id === projectId) ?? null,
-    [store.projects, projectId]
-  );
 
   const [editOpen, setEditOpen] = useState(false);
   const openEdit = useCallback(() => setEditOpen(true), []);
@@ -84,7 +78,7 @@ export const MilestoneDetail = memo(({ milestoneId, projectId, hideChrome }: Mil
   }, [milestoneId]);
 
   const handleBack = useCallback(() => {
-    ticketApi.goToProject(projectId);
+    ticketApi.goToProject(projectId, 'board');
   }, [projectId]);
 
   const handleComplete = useCallback(() => {
@@ -101,7 +95,7 @@ export const MilestoneDetail = memo(({ milestoneId, projectId, hideChrome }: Mil
 
   const handleDelete = useCallback(() => {
     void milestoneApi.removeMilestone(milestoneId);
-    ticketApi.goToProject(projectId);
+    ticketApi.goToProject(projectId, 'board');
   }, [milestoneId, projectId]);
 
   if (!milestone) {
@@ -125,10 +119,9 @@ export const MilestoneDetail = memo(({ milestoneId, projectId, hideChrome }: Mil
     return { text, cls };
   })();
 
+  // Project name lives in the breadcrumb root now — the eyebrow only carries
+  // milestone metadata.
   const eyebrowParts: React.ReactNode[] = [];
-  if (project) {
-    eyebrowParts.push(<span key="project">{project.label}</span>);
-  }
   if (milestone.status !== 'active') {
     eyebrowParts.push(<span key="status">{milestone.status}</span>);
   }
@@ -193,9 +186,9 @@ export const MilestoneDetail = memo(({ milestoneId, projectId, hideChrome }: Mil
     <div className={styles.root}>
       <WorkItemsList
         projectId={projectId}
-        title={milestone.title}
+        pageTitle={milestone.title}
+        crumbMiddle={[{ label: 'Tasks', onClick: handleBack }]}
         contextLabel={eyebrow}
-        onBack={handleBack}
         rightActions={overflowMenu}
         hideChrome={hideChrome}
       />

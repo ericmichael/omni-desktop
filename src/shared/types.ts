@@ -49,7 +49,7 @@ export type WindowProps = {
 /**
  * Data stored in the electron store.
  */
-export type LayoutMode = 'chat' | 'spaces' | 'projects' | 'dashboards' | 'routines' | 'settings' | 'gallery';
+export type LayoutMode = 'home' | 'inbox' | 'work' | 'chat' | 'dashboards' | 'routines' | 'settings' | 'gallery';
 export type OmniTheme =
   | 'omni'
   | 'teams-light'
@@ -197,18 +197,30 @@ export type StoreData = {
   inboxItems: InboxItem[];
   tasks: Task[];
   tickets: Ticket[];
-  /** Maximum active tickets across all projects (cognitive WIP limit). Default: 3. */
+  /**
+   * Autopilot dispatch concurrency: the max tickets auto-dispatch will run
+   * at once across all projects. Manual starts are never gated by this.
+   * Default: 3.
+   */
   wipLimit: number;
-  /** Day of week for the weekly review prompt (0=Sun, 1=Mon, ..., 6=Sat). Default: 1 (Monday). */
-  weeklyReviewDay: number;
-  /** Timestamp (ms) of last completed weekly review. Null if never done. */
-  lastWeeklyReviewAt: number | null;
   scheduledTasks: ScheduledTask[];
+  /**
+   * Background-actor outcomes for Home's "While you were away" feed,
+   * newest-first. Appended by main-process managers via
+   * `appendActivityEvent`; capped and time-pruned on every write.
+   */
+  activityLog: ActivityEvent[];
+  /** Growth hints (Home's one-slot suggestions) the user dismissed, by id. */
+  dismissedHomeHints: string[];
   schemaVersion: number;
-  // Chat session identity lives on the reserved ``codeTabs`` entry
-  // (``CHAT_TAB_ID``) since v26; the legacy ``chatSessionId`` /
-  // ``chatProfileName`` / ``chatContainerId`` keys are folded in on boot.
   codeTabs: CodeTab[];
+  /**
+   * Closed chat conversations (projectless session columns), newest-first.
+   * Each entry is fully resumable: ``sessionId`` deterministically keys the
+   * scratch workspace dir, the snapshot, and the agent server session.
+   * Capped by the pruning helper — pruned entries' snapshots are deleted.
+   */
+  chatConversations: ChatConversation[];
   activeCodeTabId: CodeTabId | null;
   codeLayoutMode: CodeLayoutMode;
   /** Optional background image (data URL) rendered behind the Code Deck. */
@@ -399,6 +411,26 @@ export type ScheduledTask = {
   history: ScheduledTaskRun[];
 };
 
+/**
+ * One entry in Home's "While you were away" feed: something a background
+ * actor (routine run, ticket agent) finished without the user watching.
+ * Outcomes only — transient attention states (approvals, gates) live in the
+ * Needs-you rollup, never here, so the feed can't go stale.
+ */
+export type ActivityEvent = {
+  id: string;
+  /** When the event happened (ms). */
+  at: number;
+  kind: 'routine_run_finished' | 'agent_run_finished' | 'run_failed';
+  /** What ran — the routine's name or the ticket's title. */
+  title: string;
+  /** One-line result summary, when the actor reported one. */
+  outcome?: string;
+  projectId?: ProjectId;
+  /** Exactly one deep-link target. */
+  link: { type: 'ticket'; ticketId: TicketId } | { type: 'routine'; taskId: string };
+};
+
 export type ScheduledTaskInput = {
   name: string;
   description?: string;
@@ -575,10 +607,25 @@ export const schema: Schema<StoreData> = {
   layoutMode: {
     type: 'string',
     // 'code' and 'os' are pre-v20 names for 'spaces'; 'more' is the retired
-    // mobile overflow page. Kept so existing stores load before the renderer's
-    // migrateLayoutMode pass converts them.
-    enum: ['chat', 'spaces', 'os', 'code', 'projects', 'dashboards', 'routines', 'settings', 'more', 'gallery'],
-    default: 'chat',
+    // mobile overflow page; 'projects' is the pre-split container tab. Kept
+    // so existing stores load before the renderer's migrateLayoutMode pass
+    // converts them.
+    enum: [
+      'home',
+      'inbox',
+      'work',
+      'chat',
+      'spaces',
+      'os',
+      'code',
+      'projects',
+      'dashboards',
+      'routines',
+      'settings',
+      'more',
+      'gallery',
+    ],
+    default: 'home',
   },
   theme: {
     type: 'string',
@@ -619,14 +666,6 @@ export const schema: Schema<StoreData> = {
   wipLimit: {
     type: 'number',
     default: 3,
-  },
-  weeklyReviewDay: {
-    type: 'number',
-    default: 1,
-  },
-  lastWeeklyReviewAt: {
-    type: ['number', 'null'],
-    default: null,
   },
   scheduledTasks: {
     type: 'array',
@@ -678,6 +717,28 @@ export const schema: Schema<StoreData> = {
       ],
     },
   },
+  activityLog: {
+    type: 'array',
+    default: [],
+    items: {
+      type: 'object',
+      properties: {
+        id: { type: 'string' },
+        at: { type: 'number' },
+        kind: { type: 'string', enum: ['routine_run_finished', 'agent_run_finished', 'run_failed'] },
+        title: { type: 'string' },
+        outcome: { type: 'string' },
+        projectId: { type: 'string' },
+        link: { type: 'object' },
+      },
+      required: ['id', 'at', 'kind', 'title', 'link'],
+    },
+  },
+  dismissedHomeHints: {
+    type: 'array',
+    default: [],
+    items: { type: 'string' },
+  },
   schemaVersion: {
     type: 'number',
     default: 0,
@@ -700,8 +761,24 @@ export const schema: Schema<StoreData> = {
         profileName: { type: 'string' },
         containerId: { type: 'string' },
         createdAt: { type: 'number' },
+        activatedAt: { type: 'number' },
       },
       required: ['id', 'createdAt'],
+    },
+  },
+  chatConversations: {
+    type: 'array',
+    default: [],
+    items: {
+      type: 'object',
+      properties: {
+        sessionId: { type: 'string' },
+        title: { type: 'string' },
+        lastActiveAt: { type: 'number' },
+        profileName: { type: 'string' },
+        containerId: { type: 'string' },
+      },
+      required: ['sessionId', 'title', 'lastActiveAt'],
     },
   },
   activeCodeTabId: {
@@ -713,6 +790,9 @@ export const schema: Schema<StoreData> = {
     // 'deck' and 'spaces' are pre-v20 names for 'tile'; kept so existing
     // stores load before the v19→v20 migration runs. Migration converts them.
     enum: ['tile', 'spaces', 'deck', 'focus'],
+    // Still 'tile' so a migrated store's absent key keeps meaning the old
+    // default; the v27 migration stamps 'focus' explicitly for installs
+    // without deck columns (and fresh stores hit that path on first boot).
     default: 'tile',
   },
   codeDeckBackground: {
@@ -1259,10 +1339,9 @@ export type AgentProcessStartOptions = {
    * the snapshot key, so each conversation gets its own workspace state.
    *
    * Caller eagerly generates this when starting a fresh conversation
-   * (uuid) and persists on the owning ``CodeTab.sessionId`` (the Chat tab
-   * uses the reserved ``CHAT_TAB_ID`` record), then passes it both here AND as the
-   * ``sessionId`` prop to OmniAgentsApp so the agent server uses the
-   * same id for its session.
+   * (uuid) and persists on the owning ``CodeTab.sessionId``, then passes it
+   * both here AND as the ``sessionId`` prop to OmniAgentsApp so the agent
+   * server uses the same id for its session.
    */
   sessionId?: string;
   /**
@@ -1341,21 +1420,37 @@ export type CodeTab = {
    */
   containerId?: string;
   createdAt: number;
+  /**
+   * When the user first expressed intent in this column (first message sent
+   * or project attached). Chat-mode columns (projectless, no routine, no
+   * custom app) don't launch their sandbox until this is set — creating a
+   * column is free; the boot happens on intent. Project/routine columns
+   * ignore it (they launch eagerly, as before).
+   */
+  activatedAt?: number;
 };
 
 /**
- * Reserved id for the Chat tab's session record in ``codeTabs``. The value
- * intentionally equals the chat process id and ``CHAT_VOICE_SCOPE`` so process
- * keying, voice scoping, activity publishing, status polling, and snapshot GC
- * all treat chat as just another column with no special-casing.
- *
- * The chat record is a normal projectless ``CodeTab``; the Spaces deck filters
- * it out (chat renders full-screen behind the Chat nav tab) and ``codeApi``
- * guards it against removal/reuse.
+ * A chat-mode column: a projectless agent session running in a
+ * per-conversation scratch workspace (``<workspace>/Sessions/<sessionId>``)
+ * with ``surface: 'chat'`` variables. Purely derived — any tab the user
+ * hasn't bound to a project, routine, or app is a chat column.
  */
-export const CHAT_TAB_ID = 'chat';
+export const isChatColumn = (tab: Pick<CodeTab, 'projectId' | 'routineId' | 'customAppId'>): boolean =>
+  !tab.projectId && !tab.routineId && !tab.customAppId;
 
-export const isChatTab = (tab: Pick<CodeTab, 'id'>): boolean => tab.id === CHAT_TAB_ID;
+/** A closed chat conversation, resumable from the Focus sidebar's Recent list. */
+export type ChatConversation = {
+  /** Scratch-dir key, snapshot key, and agent server session id — all one id. */
+  sessionId: string;
+  /** First user message (truncated) — display label in Recent. */
+  title: string;
+  lastActiveAt: number;
+  /** Sticky profile of the column that owned it, for faithful resume. */
+  profileName?: string;
+  /** Last container id, for warm reattach on resume. */
+  containerId?: string;
+};
 
 // #endregion
 
@@ -1399,6 +1494,13 @@ export type TokenUsage = {
 // --- Pipeline & columns ---
 
 /**
+ * Human-facing status category (Jira-style). The column graph stays the
+ * agent's custom state machine; the category is the universal state global
+ * views group by. Valid pipelines read `todo* doing* done` in column order.
+ */
+export type ColumnCategory = 'todo' | 'doing' | 'done';
+
+/**
  * A single column in the kanban pipeline. Visual milestones for the supervisor.
  */
 export type Column = {
@@ -1412,6 +1514,12 @@ export type Column = {
   gate?: boolean;
   /** DB-backed workflow metadata used by humans, agents, and project tools. */
   workflow?: ColumnWorkflowContract;
+  /**
+   * Status category. Optional only because legacy in-store pipelines predate
+   * it — readers resolve through `categoryOf()` in `@/lib/pipeline-category`,
+   * which falls back to the positional rule (first=todo, last=done).
+   */
+  category?: ColumnCategory;
 };
 
 export type ColumnWorkflowContract = {
@@ -2642,10 +2750,12 @@ type ProjectIpcEvents = Namespaced<
     'apply-code-tab-source-changes': (tabId: CodeTabId, sourceId: string) => PrMergeResult;
     /** Detect an open PR for one source's branch in a code tab's container. Null when none. */
     'detect-code-tab-pull-request': (tabId: CodeTabId, sourceId: string) => ContainerPullRequest | null;
-    /** Detect open PRs across all of a code tab's sources (deck banner, multi-source). */
+    /**
+     * Detect open PRs across a code tab's sources (deck banner). For
+     * projectless (chat) columns the tab's live process workspace dir is the
+     * single implicit source, so this returns 0 or 1 entries.
+     */
     'detect-code-tab-pull-requests': (tabId: CodeTabId) => ContainerPullRequest[];
-    /** Detect open PRs for the singleton chat session's workspace (0 or 1). */
-    'detect-chat-pull-requests': () => ContainerPullRequest[];
     // Supervisor operations
     'ensure-supervisor-infra': (ticketId: TicketId) => void;
     'start-supervisor': (ticketId: TicketId, profileName?: string) => void;
@@ -2669,7 +2779,6 @@ type ProjectIpcEvents = Namespaced<
      */
     'detect-pull-request': (ticketId: TicketId, sourceId: string) => ContainerPullRequest | null;
     'set-auto-dispatch': (projectId: ProjectId, enabled: boolean) => void;
-    'get-active-wip-tickets': () => Ticket[];
     // Context file operations (replaces project.brief)
     'read-context': (projectId: ProjectId) => string;
     'write-context': (projectId: ProjectId, content: string) => void;

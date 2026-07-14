@@ -3,7 +3,7 @@ import { atom, computed, map } from 'nanostores';
 
 import { STATUS_POLL_INTERVAL_MS } from '@/renderer/constants';
 import { milestoneApi } from '@/renderer/features/Initiatives/state';
-import { pageApi } from '@/renderer/features/Pages/state';
+import { $pages, pageApi } from '@/renderer/features/Pages/state';
 import { projectsApi } from '@/renderer/features/Projects/state';
 import { emitter, ipc } from '@/renderer/services/ipc';
 import { persistedStoreApi } from '@/renderer/services/store';
@@ -74,63 +74,108 @@ export const $activeMilestoneId = atom<MilestoneId | 'all'>('all');
 export const $assigneeFilter = atom<'all' | 'me' | 'unassigned' | string>('all');
 
 /**
- * Which tickets view is active: dashboard, project detail, inbox, or ticket detail.
+ * Tabs of the project shell. Every project-scoped surface hangs off one of
+ * these; detail views (page / milestone / ticket) are separate view types
+ * that render inside the shell with the matching tab highlighted.
  */
-export type TicketsView =
-  | { type: 'dashboard' }
-  | { type: 'project'; projectId: ProjectId }
-  | { type: 'inbox'; selectedItemId?: string }
-  | { type: 'ticket'; ticketId: TicketId }
-  | { type: 'page'; pageId: PageId; projectId: ProjectId }
-  | { type: 'milestone'; milestoneId: MilestoneId; projectId: ProjectId }
-  | { type: 'board'; projectId: ProjectId };
-
-export const $ticketsView = atom<TicketsView>({ type: 'dashboard' });
+export type ProjectTab = 'home' | 'board' | 'pages' | 'settings';
 
 /**
- * Captures the view the user was on before the current one, so detail views
- * (PageView, MilestoneDetail, etc.) can offer a contextual back button.
+ * Which Work-tab view is active: the global all-work list, the project shell
+ * (with tab), or a project-scoped detail view. Home and Inbox are separate
+ * rail tabs with their own state — they are not Work views.
  */
-export const $previousTicketsView = atom<TicketsView | null>(null);
+export type TicketsView =
+  | { type: 'all' }
+  | { type: 'project'; projectId: ProjectId; tab: ProjectTab }
+  | { type: 'ticket'; ticketId: TicketId }
+  | { type: 'page'; pageId: PageId; projectId: ProjectId }
+  | { type: 'milestone'; milestoneId: MilestoneId; projectId: ProjectId };
 
-const replayTicketsView = (view: TicketsView | null, fallbackProjectId?: ProjectId): void => {
-  if (!view) {
-    if (fallbackProjectId) {
-      ticketApi.goToProject(fallbackProjectId);
-      return;
-    }
-    ticketApi.goToDashboard();
-    return;
+export const $ticketsView = atom<TicketsView>({ type: 'all' });
+
+/** The project a view is scoped to, or null for the global all-work view.
+ *  Ticket views don't carry a projectId — callers resolve it from the ticket. */
+export function viewProjectId(view: TicketsView): ProjectId | null {
+  if (view.type === 'project' || view.type === 'page' || view.type === 'milestone') {
+    return view.projectId;
   }
+  return null;
+}
 
+/**
+ * Navigation history — a real stack, not a single slot, so task → task →
+ * back works. Every forward navigation pushes the outgoing view; back pops.
+ * Bounded so a long session can't grow it unboundedly.
+ */
+const MAX_HISTORY = 50;
+export const $ticketsHistory = atom<TicketsView[]>([]);
+
+const pushHistory = (view: TicketsView): void => {
+  const stack = $ticketsHistory.get();
+  $ticketsHistory.set([...stack.slice(-(MAX_HISTORY - 1)), view]);
+};
+
+/**
+ * Make `view` current: run its data fetches and set the atom. Shared by
+ * forward navigation (which pushes history first) and back (which pops).
+ * Also raises the Work rail tab, so cross-tab jumps (Home card → task) need
+ * no extra wiring at the call site.
+ */
+const applyTicketsView = (view: TicketsView): void => {
+  if (persistedStoreApi.$atom.get().layoutMode !== 'work') {
+    persistedStoreApi.setKey('layoutMode', 'work');
+  }
+  $ticketsView.set(view);
   switch (view.type) {
-    case 'inbox':
-      ticketApi.goToInbox(view.selectedItemId);
-      break;
-    case 'dashboard':
-      ticketApi.goToDashboard();
-      break;
     case 'project':
-      ticketApi.goToProject(view.projectId);
+      $activeMilestoneId.set('all');
+      void ticketApi.fetchTickets(view.projectId);
+      void ticketApi.getPipeline(view.projectId);
+      void milestoneApi.fetchMilestones(view.projectId);
+      void pageApi.fetchPages(view.projectId);
       break;
     case 'page':
-      ticketApi.goToPage(view.pageId, view.projectId);
+      void pageApi.fetchPages(view.projectId);
       break;
     case 'milestone':
-      ticketApi.goToMilestone(view.milestoneId, view.projectId);
+      void ticketApi.fetchTickets(view.projectId);
+      void milestoneApi.fetchMilestones(view.projectId);
       break;
-    case 'board':
-      ticketApi.goToBoard(view.projectId);
-      break;
-    case 'ticket':
-      if (fallbackProjectId) {
-        ticketApi.goToProject(fallbackProjectId);
-      } else {
-        ticketApi.goToDashboard();
+    case 'ticket': {
+      persistedStoreApi.setKey('activeTicketId', view.ticketId);
+      // Hydrate `$tickets` so TicketDetail can find the ticket even when
+      // entering from a path that didn't run fetchTickets (e.g. Home click).
+      // Use the broadcast snapshot for the synchronous initial render, then
+      // refresh from the source of truth.
+      const inMemory = $tickets.get()[view.ticketId];
+      if (!inMemory) {
+        const persisted = persistedStoreApi.$atom.get().tickets.find((t) => t.id === view.ticketId);
+        if (persisted) {
+          $tickets.setKey(view.ticketId, persisted);
+        }
       }
+      const projectId = (
+        $tickets.get()[view.ticketId] ?? persistedStoreApi.$atom.get().tickets.find((t) => t.id === view.ticketId)
+      )?.projectId;
+      if (projectId) {
+        void ticketApi.fetchTickets(projectId);
+      }
+      break;
+    }
+    case 'all':
       break;
   }
 };
+
+const navigateTo = (view: TicketsView): void => {
+  pushHistory($ticketsView.get());
+  applyTicketsView(view);
+};
+
+/** For external navigation plumbing (app-history's popstate handler): record
+ *  the view being left so in-app Back buttons stay coherent. */
+export const pushTicketsHistory = pushHistory;
 
 /**
  * Supervisor chat messages, keyed by ticket ID.
@@ -174,17 +219,6 @@ export const $activeTickets = computed([$tickets, $tasks], (ticketMap, taskMap) 
   });
 });
 
-/**
- * Active WIP tickets across all projects (for WIP limit enforcement).
- */
-export const $activeWipTickets = atom<Ticket[]>([]);
-
-/**
- * When set, the WIP limit dialog is shown for this pending ticket.
- * Set by startSupervisor when the WIP limit is hit. Cleared by dialog actions.
- */
-export const $wipDialogPendingTicket = atom<Ticket | null>(null);
-export const $wipDialogPendingProfileName = atom<string | undefined>(undefined);
 export const $autopilotLaunchTicketId = atom<TicketId | null>(null);
 
 export const ticketApi = {
@@ -192,6 +226,24 @@ export const ticketApi = {
   addProject: projectsApi.addProject,
   updateProject: projectsApi.updateProject,
   removeProject: projectsApi.removeProject,
+
+  /**
+   * Single write path for renaming a project. The project label and its root
+   * page title are the same user-visible name, so every rename surface
+   * (shell header, root page title input) goes through here to keep both in
+   * sync in one place.
+   */
+  renameProject: async (projectId: ProjectId, label: string): Promise<void> => {
+    const trimmed = label.trim();
+    if (!trimmed) {
+      return;
+    }
+    await projectsApi.updateProject(projectId, { label: trimmed });
+    const rootPage = Object.values($pages.get()).find((p) => p.projectId === projectId && p.isRoot);
+    if (rootPage && rootPage.title !== trimmed) {
+      await pageApi.updatePage(rootPage.id, { title: trimmed });
+    }
+  },
 
   // Git (delegated to shared Projects module)
   checkGitRepo: projectsApi.checkGitRepo,
@@ -315,22 +367,7 @@ export const ticketApi = {
   startSupervisor: async (ticketId: TicketId, opts?: { profileName?: string }): Promise<void> => {
     // Clear old messages when starting a fresh supervisor session
     $supervisorMessages.setKey(ticketId, []);
-    try {
-      await emitter.invoke('project:start-supervisor', ticketId, opts?.profileName);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (msg.startsWith('WIP_LIMIT:')) {
-        // Fetch active tickets and show the WIP dialog
-        await ticketApi.fetchActiveWipTickets();
-        const ticket = $tickets.get()[ticketId] ?? persistedStoreApi.$atom.get().tickets.find((t) => t.id === ticketId);
-        if (ticket) {
-          $wipDialogPendingTicket.set(ticket);
-          $wipDialogPendingProfileName.set(opts?.profileName);
-        }
-        return;
-      }
-      throw err;
-    }
+    await emitter.invoke('project:start-supervisor', ticketId, opts?.profileName);
   },
   stopSupervisor: (ticketId: TicketId): Promise<void> => {
     return emitter.invoke('project:stop-supervisor', ticketId);
@@ -371,12 +408,6 @@ export const ticketApi = {
   setAutoDispatch: (projectId: ProjectId, enabled: boolean): Promise<void> => {
     return emitter.invoke('project:set-auto-dispatch', projectId, enabled);
   },
-  fetchActiveWipTickets: async (): Promise<Ticket[]> => {
-    const tickets = await emitter.invoke('project:get-active-wip-tickets');
-    $activeWipTickets.set(tickets);
-    return tickets;
-  },
-
   // Artifacts
   listArtifacts: (ticketId: TicketId, dirPath?: string): Promise<ArtifactFileEntry[]> => {
     return emitter.invoke('project:list-artifacts', ticketId, dirPath);
@@ -423,68 +454,39 @@ export const ticketApi = {
   },
 
   // Navigation
-  goToDashboard: (): void => {
-    $previousTicketsView.set($ticketsView.get());
-    $ticketsView.set({ type: 'dashboard' });
+  goToAllWork: (): void => {
+    navigateTo({ type: 'all' });
   },
-  goToInbox: (selectedItemId?: string): void => {
-    $previousTicketsView.set($ticketsView.get());
-    $ticketsView.set({ type: 'inbox', selectedItemId });
-  },
-  goToProject: (projectId: ProjectId): void => {
-    $previousTicketsView.set($ticketsView.get());
-    $ticketsView.set({ type: 'project', projectId });
-    $activeMilestoneId.set('all');
-    void ticketApi.fetchTickets(projectId);
-    void ticketApi.getPipeline(projectId);
-    void milestoneApi.fetchMilestones(projectId);
-    void pageApi.fetchPages(projectId);
+  goToProject: (projectId: ProjectId, tab: ProjectTab = 'home'): void => {
+    navigateTo({ type: 'project', projectId, tab });
   },
   goToPage: (pageId: PageId, projectId: ProjectId): void => {
-    $previousTicketsView.set($ticketsView.get());
-    $ticketsView.set({ type: 'page', pageId, projectId });
-    void pageApi.fetchPages(projectId);
+    navigateTo({ type: 'page', pageId, projectId });
   },
   goToMilestone: (milestoneId: MilestoneId, projectId: ProjectId): void => {
-    $previousTicketsView.set($ticketsView.get());
-    $ticketsView.set({ type: 'milestone', milestoneId, projectId });
-    void ticketApi.fetchTickets(projectId);
-    void milestoneApi.fetchMilestones(projectId);
+    navigateTo({ type: 'milestone', milestoneId, projectId });
   },
+  /** Sugar for the shell's Work tab — keeps existing call sites terse. */
   goToBoard: (projectId: ProjectId): void => {
-    $previousTicketsView.set($ticketsView.get());
-    $ticketsView.set({ type: 'board', projectId });
-    $activeMilestoneId.set('all');
-    void ticketApi.fetchTickets(projectId);
-    void ticketApi.getPipeline(projectId);
-    void milestoneApi.fetchMilestones(projectId);
+    ticketApi.goToProject(projectId, 'board');
   },
   goToTicket: (ticketId: TicketId): void => {
-    $previousTicketsView.set($ticketsView.get());
-    $ticketsView.set({ type: 'ticket', ticketId });
-    persistedStoreApi.setKey('activeTicketId', ticketId);
-    // Hydrate `$tickets` so TicketDetail can find the ticket even when entering
-    // from a path that didn't run fetchTickets (e.g. dashboard click). Use the
-    // broadcast snapshot for the synchronous initial render, then refresh
-    // from the source of truth.
-    const inMemory = $tickets.get()[ticketId];
-    if (!inMemory) {
-      const persisted = persistedStoreApi.$atom.get().tickets.find((t) => t.id === ticketId);
-      if (persisted) {
-        $tickets.setKey(ticketId, persisted);
-      }
-    }
-    const projectId = ($tickets.get()[ticketId] ?? persistedStoreApi.$atom.get().tickets.find((t) => t.id === ticketId))
-      ?.projectId;
-    if (projectId) {
-      void ticketApi.fetchTickets(projectId);
-    }
+    navigateTo({ type: 'ticket', ticketId });
   },
   setActiveTicket: (ticketId: TicketId): void => {
     persistedStoreApi.setKey('activeTicketId', ticketId);
   },
   goBackToPrevious: (fallbackProjectId?: ProjectId): void => {
-    replayTicketsView($previousTicketsView.get(), fallbackProjectId);
+    const stack = $ticketsHistory.get();
+    const previous = stack[stack.length - 1];
+    if (previous) {
+      $ticketsHistory.set(stack.slice(0, -1));
+      applyTicketsView(previous);
+      return;
+    }
+    applyTicketsView(
+      fallbackProjectId ? { type: 'project', projectId: fallbackProjectId, tab: 'home' } : { type: 'all' }
+    );
   },
 };
 
@@ -556,8 +558,9 @@ const listen = () => {
     // 1. The current project view in the Projects tab
     const projectIds = new Set<ProjectId>();
     const view = $ticketsView.get();
-    if (view.type === 'project' || view.type === 'page' || view.type === 'milestone' || view.type === 'board') {
-      projectIds.add(view.projectId);
+    const viewProject = viewProjectId(view);
+    if (viewProject) {
+      projectIds.add(viewProject);
     }
 
     // 2. Any projects with ticket-linked Code tabs open

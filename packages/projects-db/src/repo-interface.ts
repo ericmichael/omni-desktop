@@ -23,6 +23,7 @@
  * `_change_seq` table polled by db-change-watcher). Postgres uses LISTEN/
  * NOTIFY instead, so it doesn't belong in the shared data contract.
  */
+import type { ColumnCategory } from './defaults.js';
 import type {
   ColumnRow,
   CommentRow,
@@ -46,6 +47,12 @@ export interface ColumnSyncInput {
   gate?: boolean;
   maxConcurrent?: number | null;
   workflow?: unknown;
+  /**
+   * Status category. Optional so agent-facing callers (MCP `update_pipeline`)
+   * never need to know about categories — when omitted, the repo applies the
+   * positional rule: last column → 'done', first → 'todo', rest → 'doing'.
+   */
+  category?: ColumnCategory;
 }
 
 /**

@@ -7,16 +7,13 @@ import {
   tokens,
 } from '@fluentui/react-components';
 import {
-  ArrowLeft20Regular,
   ArrowMaximize20Regular,
   ArrowMinimize20Regular,
   BranchFork20Regular,
   Chat20Regular,
-  Checkmark16Regular,
   Delete20Regular,
   Dismiss20Regular,
   Edit20Regular,
-  Flag20Regular,
   MoreHorizontal20Filled,
   Play20Filled,
   ReOrderDotsVertical20Regular,
@@ -24,12 +21,14 @@ import {
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { isDoneColumn } from '@/lib/pipeline-category';
 import type { SelectTabData } from '@/renderer/ds';
 import {
   Badge,
   Body1,
   Button,
   Caption1,
+  ConfirmDialog,
   IconButton,
   Input,
   Menu,
@@ -43,17 +42,15 @@ import {
   Tab,
   TabList,
 } from '@/renderer/ds';
-import { $milestones } from '@/renderer/features/Initiatives/state';
-import { AssigneePicker } from '@/renderer/features/Tickets/AssigneePicker';
 import { openTicketInCode } from '@/renderer/services/navigation';
 import { persistedStoreApi } from '@/renderer/services/store';
-import type { GitRepoInfo, MilestoneId, TicketId, TicketPhase, TicketResolution } from '@/shared/types';
+import type { GitRepoInfo, TicketId, TicketPhase, TicketResolution } from '@/shared/types';
 import { firstSource } from '@/shared/types';
 
+import { ProjectPageHeader } from './ProjectPageHeader';
 import { $pipeline, $tickets, ticketApi } from './state';
 import { RESOLUTION_LABELS } from './ticket-constants';
 import { TicketArtifactsTab } from './TicketArtifactsTab';
-import { TicketDiscussionTab } from './TicketDiscussionTab';
 import { TicketOverviewTab } from './TicketOverviewTab';
 import { TicketPRTab } from './TicketPRTab';
 
@@ -85,6 +82,42 @@ const useStyles = makeStyles({
     flex: '1 1 0',
     justifyContent: 'flex-start',
     ':hover > .editIcon': { opacity: 1 },
+  },
+  /* Page-context editable title (matches ProjectPageHeader's Title3 scale). */
+  pageTitleBtn: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+    flex: '0 1 auto',
+    minWidth: 0,
+    padding: 0,
+    border: 'none',
+    backgroundColor: 'transparent',
+    cursor: 'pointer',
+    textAlign: 'left',
+    color: tokens.colorNeutralForeground1,
+    ':hover > .editIcon': { opacity: 1 },
+  },
+  pageTitleText: {
+    fontSize: tokens.fontSizeBase600,
+    fontWeight: tokens.fontWeightSemibold,
+    lineHeight: tokens.lineHeightBase600,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  pageTitleInput: {
+    flex: '1 1 0',
+    minWidth: 0,
+    padding: 0,
+    border: 'none',
+    backgroundColor: 'transparent',
+    fontSize: tokens.fontSizeBase600,
+    fontWeight: tokens.fontWeightSemibold,
+    lineHeight: tokens.lineHeightBase600,
+    color: tokens.colorNeutralForeground1,
+    fontFamily: 'inherit',
+    ':focus': { outline: 'none' },
   },
   titleText: {
     overflow: 'hidden',
@@ -172,8 +205,9 @@ const useStyles = makeStyles({
   },
 });
 
-type TicketTab = 'Overview' | 'Discussion' | 'PR' | 'Artifacts';
-const TABS: TicketTab[] = ['Overview', 'Discussion', 'PR', 'Artifacts'];
+/* Discussion lives inline in the Overview (GitHub issue shape), not a tab. */
+type TicketTab = 'Overview' | 'PR' | 'Artifacts';
+const TABS: TicketTab[] = ['Overview', 'PR', 'Artifacts'];
 
 type DragHandleProps = {
   attributes: Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -205,14 +239,8 @@ export const TicketDetail = memo(
     const styles = useStyles();
     const tickets = useStore($tickets);
     const pipeline = useStore($pipeline);
-    const milestones = useStore($milestones);
     const store = useStore(persistedStoreApi.$atom);
     const ticket = tickets[ticketId];
-    const projectMilestones = useMemo(
-      () => Object.values(milestones).filter((m) => m.projectId === ticket?.projectId),
-      [milestones, ticket?.projectId]
-    );
-    const currentMilestone = ticket?.milestoneId ? milestones[ticket.milestoneId] : undefined;
     const project = useMemo(
       () => store.projects.find((p) => p.id === ticket?.projectId) ?? null,
       [store.projects, ticket?.projectId]
@@ -293,6 +321,12 @@ export const TicketDetail = memo(
       [handleSaveTitle]
     );
 
+    const handleGoToBoard = useCallback(() => {
+      if (ticket?.projectId) {
+        ticketApi.goToProject(ticket.projectId, 'board');
+      }
+    }, [ticket?.projectId]);
+
     const handleOpenChat = useCallback(() => {
       void openTicketInCode(ticketId);
     }, [ticketId]);
@@ -301,16 +335,18 @@ export const TicketDetail = memo(
       ticketApi.requestStartSupervisor(ticketId);
     }, [ticketId]);
 
+    const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+    const handleRequestDelete = useCallback(() => setDeleteConfirmOpen(true), []);
+    const handleCloseDelete = useCallback(() => setDeleteConfirmOpen(false), []);
     const handleDelete = useCallback(() => {
-      ticketApi.removeTicket(ticketId);
+      void ticketApi.removeTicket(ticketId);
     }, [ticketId]);
 
     const isTerminalColumn = useMemo(() => {
       if (!pipeline || !ticket) {
         return false;
       }
-      const terminalId = pipeline.columns[pipeline.columns.length - 1]?.id;
-      return ticket.columnId === terminalId;
+      return isDoneColumn(pipeline, ticket.columnId);
     }, [pipeline, ticket]);
 
     const handleResolve = useCallback(
@@ -328,18 +364,10 @@ export const TicketDetail = memo(
       void ticketApi.updateTicket(ticketId, { archivedAt: undefined });
     }, [ticketId]);
 
-    const handleSelectMilestone = useCallback(
-      (milestoneId: MilestoneId | undefined) => {
-        void ticketApi.moveTicketToMilestone(ticketId, milestoneId);
-      },
-      [ticketId]
-    );
-
     const handleTabSelect = useCallback((_e: unknown, data: SelectTabData) => {
       setCurrentTab(data.value as TicketTab);
     }, []);
 
-    const handleClearMilestone = useCallback(() => handleSelectMilestone(undefined), [handleSelectMilestone]);
     const handleBranchChange = useCallback((event: React.ChangeEvent<HTMLSelectElement>) => {
       setEditBranch(event.target.value);
     }, []);
@@ -377,109 +405,107 @@ export const TicketDetail = memo(
     if (!ticket) {
       return (
         <div className={styles.notFound}>
-          <Body1>Ticket not found</Body1>
+          <Body1>Task not found</Body1>
         </div>
       );
     }
 
     const phase = ticket.phase;
 
-    const milestoneMenu = (
-      <Menu positioning={{ position: 'below', align: 'end' }}>
-        <MenuTrigger disableButtonEnhancement>
-          <Button size="sm" variant="ghost" leftIcon={<Flag20Regular />} aria-label="Change milestone">
-            {currentMilestone?.title ?? 'No milestone'}
-          </Button>
-        </MenuTrigger>
-        <MenuPopover>
-          <MenuList>
-            <MenuItem
-              icon={!ticket.milestoneId ? <Checkmark16Regular /> : <span style={{ width: 16 }} />}
-              onClick={handleClearMilestone}
-            >
-              No milestone
-            </MenuItem>
-            {projectMilestones.length > 0 && <MenuDivider />}
-            {projectMilestones.map((m) => (
-              <MilestoneMenuItem
-                key={m.id}
-                milestoneId={m.id}
-                title={m.title || 'Untitled milestone'}
-                selected={ticket.milestoneId === m.id}
-                onSelect={handleSelectMilestone}
-              />
-            ))}
-          </MenuList>
-        </MenuPopover>
-      </Menu>
-    );
-
     return (
       <div className={styles.root}>
-        {!hideTitleBar && (
-          <div className={styles.titleBar}>
-            {onClose && closeBehavior === 'back' && (
-              <IconButton aria-label="Back" icon={<ArrowLeft20Regular />} size="sm" onClick={onClose} />
-            )}
-            {dragHandleProps && (
-              <FluentButton
-                appearance="subtle"
-                shape="circular"
-                size="small"
-                icon={<ReOrderDotsVertical20Regular />}
-                aria-label="Reorder"
-                className={styles.dragHandle}
-                {...dragHandleProps.attributes}
-                {...dragHandleProps.listeners}
-              />
-            )}
+        {!hideTitleBar &&
+          (onClose && closeBehavior === 'back' && ticket.projectId ? (
+            /* Work-tab page context: the standard sub-page header — small
+               ancestors-only breadcrumb (Project › Tasks) above the real,
+               click-to-rename page title, with the ticket controls on the
+               title row. */
+            <ProjectPageHeader
+              projectId={ticket.projectId}
+              middle={[{ label: 'Tasks', onClick: handleGoToBoard }]}
+              title={
+                editingTitle ? (
+                  <input
+                    aria-label="Task title"
+                    className={styles.pageTitleInput}
+                    value={editTitle}
+                    onChange={handleEditTitleChange}
+                    onBlur={handleSaveTitle}
+                    onKeyDown={handleTitleKeyDown}
+                    autoFocus
+                  />
+                ) : (
+                  <button
+                    type="button"
+                    className={styles.pageTitleBtn}
+                    onClick={handleStartEditTitle}
+                    title="Rename task"
+                  >
+                    <span className={styles.pageTitleText}>{ticket.title}</span>
+                    <Edit20Regular className={mergeClasses(styles.editIcon, 'editIcon')} />
+                  </button>
+                )
+              }
+              actions={<PhaseStatus phase={phase} onChat={handleOpenChat} onAutopilot={handleStartAutopilot} />}
+            />
+          ) : (
+            /* Panel context (Code deck side panel): compact single row. */
+            <div className={styles.titleBar}>
+              {dragHandleProps && (
+                <FluentButton
+                  appearance="subtle"
+                  shape="circular"
+                  size="small"
+                  icon={<ReOrderDotsVertical20Regular />}
+                  aria-label="Reorder"
+                  className={styles.dragHandle}
+                  {...dragHandleProps.attributes}
+                  {...dragHandleProps.listeners}
+                />
+              )}
 
-            {editingTitle ? (
-              <Input
-                type="text"
-                value={editTitle}
-                onChange={handleEditTitleChange}
-                onBlur={handleSaveTitle}
-                onKeyDown={handleTitleKeyDown}
-                autoFocus
-                size="sm"
-                className={styles.titleInput}
-              />
-            ) : (
-              <FluentButton
-                appearance="transparent"
-                size="small"
-                onClick={handleStartEditTitle}
-                className={styles.titleBtn}
-              >
-                <Subtitle2 className={styles.titleText}>{ticket.title}</Subtitle2>
-                <Edit20Regular className={mergeClasses(styles.editIcon, 'editIcon')} />
-              </FluentButton>
-            )}
+              {editingTitle ? (
+                <Input
+                  type="text"
+                  value={editTitle}
+                  onChange={handleEditTitleChange}
+                  onBlur={handleSaveTitle}
+                  onKeyDown={handleTitleKeyDown}
+                  autoFocus
+                  size="sm"
+                  className={styles.titleInput}
+                />
+              ) : (
+                <FluentButton
+                  appearance="transparent"
+                  size="small"
+                  onClick={handleStartEditTitle}
+                  className={styles.titleBtn}
+                >
+                  <Subtitle2 className={styles.titleText}>{ticket.title}</Subtitle2>
+                  <Edit20Regular className={mergeClasses(styles.editIcon, 'editIcon')} />
+                </FluentButton>
+              )}
 
-            {milestoneMenu}
+              <PhaseStatus phase={phase} onChat={handleOpenChat} onAutopilot={handleStartAutopilot} />
 
-            <AssigneePicker ticketId={ticketId} assignee={ticket.assignee} />
+              {onToggleExpand && (
+                <IconButton
+                  aria-label={isExpanded ? 'Collapse' : 'Expand'}
+                  icon={isExpanded ? <ArrowMinimize20Regular /> : <ArrowMaximize20Regular />}
+                  size="sm"
+                  onClick={onToggleExpand}
+                />
+              )}
+              {onClose && closeBehavior === 'close' && (
+                <IconButton aria-label="Close" icon={<Dismiss20Regular />} size="sm" onClick={onClose} />
+              )}
+            </div>
+          ))}
 
-            <PhaseStatus phase={phase} onChat={handleOpenChat} onAutopilot={handleStartAutopilot} />
-
-            {onToggleExpand && (
-              <IconButton
-                aria-label={isExpanded ? 'Collapse' : 'Expand'}
-                icon={isExpanded ? <ArrowMinimize20Regular /> : <ArrowMaximize20Regular />}
-                size="sm"
-                onClick={onToggleExpand}
-              />
-            )}
-            {onClose && closeBehavior === 'close' && (
-              <IconButton aria-label="Close" icon={<Dismiss20Regular />} size="sm" onClick={onClose} />
-            )}
-          </div>
-        )}
-
-        {/* Mobile: the TopAppBar owns back + title, so surface the title bar's
-            remaining affordances (milestone, assignee, chat/autopilot) in a
-            compact row. Rename swaps the row for the title input. */}
+        {/* Mobile: the TopAppBar owns back + title; this row carries the
+            agent actions (fields live in the Overview's properties rail).
+            Rename swaps the row for the title input. */}
         {hideTitleBar && (
           <div className={styles.mobileActionBar}>
             {editingTitle ? (
@@ -495,8 +521,6 @@ export const TicketDetail = memo(
               />
             ) : (
               <>
-                {milestoneMenu}
-                <AssigneePicker ticketId={ticketId} assignee={ticket.assignee} />
                 <div className={styles.mobileActionSpacer} />
                 <PhaseStatus phase={phase} onChat={handleOpenChat} onAutopilot={handleStartAutopilot} />
               </>
@@ -517,13 +541,13 @@ export const TicketDetail = memo(
           {!compact && (
             <Menu positioning={{ position: 'below', align: 'end', fallbackPositions: ['above-end'] }}>
               <MenuTrigger>
-                <IconButton aria-label="Ticket menu" icon={<MoreHorizontal20Filled />} size="sm" />
+                <IconButton aria-label="Task menu" icon={<MoreHorizontal20Filled />} size="sm" />
               </MenuTrigger>
               <MenuPopover>
                 <MenuList>
                   {hideTitleBar && (
                     <MenuItem icon={<Edit20Regular />} onClick={handleStartEditTitle}>
-                      Rename ticket
+                      Rename task
                     </MenuItem>
                   )}
                   {gitInfo?.isGitRepo && (
@@ -543,15 +567,15 @@ export const TicketDetail = memo(
                     <>
                       <MenuDivider />
                       {ticket.archivedAt ? (
-                        <MenuItem onClick={handleUnarchive}>Unarchive ticket</MenuItem>
+                        <MenuItem onClick={handleUnarchive}>Unarchive task</MenuItem>
                       ) : (
-                        <MenuItem onClick={handleArchive}>Archive ticket</MenuItem>
+                        <MenuItem onClick={handleArchive}>Archive task</MenuItem>
                       )}
                     </>
                   )}
                   <MenuDivider />
-                  <MenuItem icon={<Delete20Regular />} onClick={handleDelete}>
-                    Delete ticket
+                  <MenuItem icon={<Delete20Regular />} onClick={handleRequestDelete}>
+                    Delete task
                   </MenuItem>
                 </MenuList>
               </MenuPopover>
@@ -591,8 +615,8 @@ export const TicketDetail = memo(
               {ticket.worktreePath
                 ? 'Clean up the active worktree before switching modes.'
                 : editUseWorktree
-                  ? 'Autopilot works in its own branch + worktree, isolated from the main checkout.'
-                  : 'Autopilot works directly in the project checkout. Only one direct-mode ticket can run at a time.'}
+                  ? 'The agent works in its own branch + worktree, isolated from the main checkout.'
+                  : 'The agent works directly in the project checkout. Only one direct-mode task can run at a time.'}
             </Caption1>
             <div className={styles.branchGroup}>
               <Button size="sm" onClick={handleSaveBranch}>
@@ -608,12 +632,7 @@ export const TicketDetail = memo(
         {/* Tab content */}
         {activeTab === 'Overview' && (
           <div className={styles.overviewScroll}>
-            <TicketOverviewTab ticket={ticket} />
-          </div>
-        )}
-        {activeTab === 'Discussion' && (
-          <div className={styles.tabPane}>
-            <TicketDiscussionTab ticket={ticket} />
+            <TicketOverviewTab ticket={ticket} compact={compact} />
           </div>
         )}
         {activeTab === 'PR' && (
@@ -626,29 +645,25 @@ export const TicketDetail = memo(
             <TicketArtifactsTab ticketId={ticketId} />
           </div>
         )}
+
+        <ConfirmDialog
+          open={deleteConfirmOpen}
+          onClose={handleCloseDelete}
+          onConfirm={handleDelete}
+          title={
+            !ticket.title || ticket.title === 'Untitled'
+              ? 'Delete this untitled task?'
+              : `Delete task "${ticket.title}"?`
+          }
+          description="This action cannot be undone."
+          confirmLabel="Delete"
+          destructive
+        />
       </div>
     );
   }
 );
 TicketDetail.displayName = 'TicketDetail';
-
-type MilestoneMenuItemProps = {
-  milestoneId: MilestoneId;
-  title: string;
-  selected: boolean;
-  onSelect: (milestoneId: MilestoneId) => void;
-};
-
-const MilestoneMenuItem = memo(({ milestoneId, title, selected, onSelect }: MilestoneMenuItemProps) => {
-  const handleSelect = useCallback(() => onSelect(milestoneId), [milestoneId, onSelect]);
-
-  return (
-    <MenuItem icon={selected ? <Checkmark16Regular /> : <span style={{ width: 16 }} />} onClick={handleSelect}>
-      {title}
-    </MenuItem>
-  );
-});
-MilestoneMenuItem.displayName = 'MilestoneMenuItem';
 
 type ResolutionMenuItemProps = {
   resolution: TicketResolution;
@@ -709,7 +724,7 @@ const PhaseStatus = memo(
           Chat
         </Button>
         <Button size="sm" leftIcon={<Play20Filled />} onClick={onAutopilot}>
-          Autopilot
+          Start agent
         </Button>
       </div>
     );

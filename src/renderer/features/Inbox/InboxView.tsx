@@ -1,15 +1,35 @@
-import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
-import { Add20Regular, ArchiveRegular, MailInbox20Regular, TimerRegular } from '@fluentui/react-icons';
+import { makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
+import {
+  Add20Regular,
+  ArrowCounterclockwise20Regular,
+  Delete20Regular,
+  MoreHorizontal20Regular,
+  TimerRegular,
+} from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 
-import { IconButton, type SelectTabData, Tab, TabList } from '@/renderer/ds';
+import { useIsDesktop } from '@/renderer/common/use-is-desktop';
+import {
+  Button,
+  EmptyState,
+  IconButton,
+  Menu,
+  MenuItem,
+  MenuList,
+  MenuPopover,
+  MenuTrigger,
+  PageHeader,
+  type SelectTabData,
+  Tab,
+  TabList,
+} from '@/renderer/ds';
 import { $quickCaptureOpen } from '@/renderer/features/Inbox/QuickCapture';
-import { ticketApi } from '@/renderer/features/Tickets/state';
+import { $glassEnabled } from '@/renderer/theme/use-glass';
 import type { InboxItem, InboxItemId } from '@/shared/types';
 
 import { InboxItemDetail } from './InboxItemDetail';
-import { $activeInbox, $inboxItems, $laterInbox, $promotedInbox } from './state';
+import { $activeInbox, $inboxItems, $inboxView, $laterInbox, $promotedInbox, inboxApi } from './state';
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -18,69 +38,95 @@ import { $activeInbox, $inboxItems, $laterInbox, $promotedInbox } from './state'
 const useStyles = makeStyles({
   root: {
     display: 'flex',
-    flexDirection: 'column',
     width: '100%',
     height: '100%',
   },
-  header: {
+  rootGlass: {
+    backgroundColor: 'transparent',
+  },
+  listPane: {
     display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalM,
-    paddingLeft: tokens.spacingHorizontalL,
-    paddingRight: tokens.spacingHorizontalL,
-    paddingTop: tokens.spacingVerticalM,
-    paddingBottom: tokens.spacingVerticalS,
-    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke2),
+    flexDirection: 'column',
+    width: '100%',
+    height: '100%',
+    '@media (min-width: 640px)': {
+      width: '320px',
+      flexShrink: 0,
+      borderRight: `1px solid ${tokens.colorNeutralStroke1}`,
+    },
+  },
+  listPaneGlass: {
+    backgroundColor: tokens.colorNeutralBackground2,
+    backdropFilter: 'var(--glass-blur)',
+    WebkitBackdropFilter: 'var(--glass-blur)',
+  },
+  detailPane: {
+    flex: '1 1 0',
+    minWidth: 0,
+    display: 'none',
+    '@media (min-width: 640px)': {
+      display: 'block',
+    },
+  },
+  detailPaneGlass: {
+    backgroundColor: tokens.colorNeutralBackground1,
+    backdropFilter: 'var(--glass-blur)',
+    WebkitBackdropFilter: 'var(--glass-blur)',
+  },
+  tabRow: {
+    paddingLeft: tokens.spacingHorizontalS,
+    borderBottom: `1px solid ${tokens.colorNeutralStroke1}`,
     flexShrink: 0,
   },
-  headerIcon: { color: tokens.colorBrandForeground1 },
-  title: {
-    fontSize: tokens.fontSizeBase500,
-    fontWeight: tokens.fontWeightSemibold,
-    color: tokens.colorNeutralForeground1,
-  },
-  spacer: { flex: '1 1 0' },
-  tabs: { flexShrink: 0 },
-  mobileFilters: {
-    paddingLeft: tokens.spacingHorizontalS,
-    paddingRight: tokens.spacingHorizontalS,
-    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke2),
-  },
-  mobileTabs: {
-    width: '100%',
-  },
-  filterTab: {
-    flex: '1 1 0',
-    justifyContent: 'center',
+  tabCount: {
+    marginLeft: '6px',
+    fontSize: tokens.fontSizeBase100,
+    color: tokens.colorNeutralForeground3,
   },
   body: {
     flex: '1 1 0',
     minHeight: 0,
     overflowY: 'auto',
   },
-  empty: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    height: '100%',
-    color: tokens.colorNeutralForeground3,
-    fontSize: tokens.fontSizeBase300,
-  },
   row: {
     display: 'flex',
     alignItems: 'flex-start',
-    gap: tokens.spacingHorizontalM,
+    gap: tokens.spacingHorizontalS,
     paddingLeft: tokens.spacingHorizontalL,
-    paddingRight: tokens.spacingHorizontalL,
-    paddingTop: tokens.spacingVerticalS,
-    paddingBottom: tokens.spacingVerticalS,
-    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke2),
+    paddingRight: tokens.spacingHorizontalS,
+    paddingTop: '8px',
+    paddingBottom: '8px',
     backgroundColor: 'transparent',
     border: 'none',
     width: '100%',
     textAlign: 'left',
     cursor: 'pointer',
     ':hover': { backgroundColor: tokens.colorSubtleBackgroundHover },
+    ':focus-visible': {
+      outlineWidth: '2px',
+      outlineStyle: 'solid',
+      outlineColor: tokens.colorBrandStroke1,
+      outlineOffset: '-2px',
+    },
+    '&:hover .inbox-row-menu': { opacity: 1 },
+    '&:focus-within .inbox-row-menu': { opacity: 1 },
+  },
+  rowMenu: {
+    display: 'flex',
+    alignItems: 'center',
+    flexShrink: 0,
+    opacity: 0,
+    transitionProperty: 'opacity',
+    transitionDuration: tokens.durationFaster,
+  },
+  rowMenuOpen: {
+    opacity: 1,
+  },
+  dangerMenuItem: {
+    color: tokens.colorPaletteRedForeground1,
+  },
+  rowSelected: {
+    backgroundColor: tokens.colorSubtleBackgroundSelected,
   },
   rowMain: {
     flex: '1 1 0',
@@ -91,7 +137,6 @@ const useStyles = makeStyles({
   },
   rowTitle: {
     fontSize: tokens.fontSizeBase300,
-    fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
     overflow: 'hidden',
     textOverflow: 'ellipsis',
@@ -104,26 +149,6 @@ const useStyles = makeStyles({
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
   },
-  rowMeta: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-    fontSize: tokens.fontSizeBase100,
-    color: tokens.colorNeutralForeground3,
-    marginTop: '2px',
-  },
-  badge: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: '4px',
-    padding: '1px 6px',
-    borderRadius: tokens.borderRadiusCircular,
-    backgroundColor: tokens.colorNeutralBackground3,
-  },
-  laterBadge: {
-    backgroundColor: tokens.colorPaletteYellowBackground2,
-    color: tokens.colorPaletteYellowForeground2,
-  },
 });
 
 // ---------------------------------------------------------------------------
@@ -132,141 +157,144 @@ const useStyles = makeStyles({
 
 type InboxTab = 'active' | 'later' | 'archive';
 
-export const InboxView = memo(
-  ({ selectedItemId, hideChrome = false }: { selectedItemId?: InboxItemId; hideChrome?: boolean }) => {
-    const styles = useStyles();
-    const active = useStore($activeInbox);
-    const later = useStore($laterInbox);
-    const promoted = useStore($promotedInbox);
-    const itemsById = useStore($inboxItems);
+const EMPTY_COPY: Record<InboxTab, { title: string; description?: string }> = {
+  active: { title: 'Inbox is empty', description: 'Capture anything and triage it here.' },
+  later: { title: 'Nothing parked for later' },
+  archive: { title: 'Nothing archived yet', description: 'Items promoted to tasks or projects are kept here.' },
+};
 
-    const [tab, setTab] = useState<InboxTab>('active');
-    const [selectedId, setSelectedId] = useState<InboxItemId | null>(null);
+/**
+ * The rail-level Inbox tab. Master-detail on desktop (list pane + detail
+ * pane); on mobile the detail replaces the list. The open item lives in
+ * `$inboxView` (set here and by cross-tab jumps like Home's inbox strip),
+ * so there is exactly one source of truth for "which item is open".
+ */
+export const InboxView = memo(() => {
+  const styles = useStyles();
+  const isDesktop = useIsDesktop();
+  const isGlass = useStore($glassEnabled);
+  const active = useStore($activeInbox);
+  const later = useStore($laterInbox);
+  const promoted = useStore($promotedInbox);
+  const itemsById = useStore($inboxItems);
+  const view = useStore($inboxView);
 
-    // Resolve the selected item every render so edits made through IPC flow
-    // back in via store:changed without having to reset local state.
-    const selectedItem = useMemo(() => (selectedId ? (itemsById[selectedId] ?? null) : null), [selectedId, itemsById]);
+  const [tab, setTab] = useState<InboxTab>('active');
 
-    const visible = tab === 'active' ? active : tab === 'later' ? later : promoted;
+  // Resolve the selected item every render so edits made through IPC flow
+  // back in via store:changed without having to reset local state.
+  const explicitSelection = useMemo(
+    () => (view.selectedItemId ? (itemsById[view.selectedItemId] ?? null) : null),
+    [view.selectedItemId, itemsById]
+  );
 
-    useEffect(() => {
-      if (selectedItemId === undefined) {
-        return;
-      }
+  const visible = tab === 'active' ? active : tab === 'later' ? later : promoted;
 
-      const item = itemsById[selectedItemId] ?? null;
-      setSelectedId(item?.id ?? null);
-      if (!item) {
-        return;
-      }
-      if (item.promotedTo) {
-        setTab('archive');
-        return;
-      }
-      if (item.status === 'later') {
-        setTab('later');
-        return;
-      }
-      setTab('active');
-    }, [selectedItemId, itemsById]);
+  // Desktop auto-selects the first item so the pane is never blank;
+  // mobile requires an explicit tap (the list is the landing view).
+  const selectedItem = explicitSelection ?? (isDesktop ? (visible[0] ?? null) : null);
 
-    useEffect(() => {
-      if (!selectedItem || selectedItemId !== undefined) {
-        return;
-      }
-      if (selectedItem.promotedTo) {
-        setTab('archive');
-      } else if (selectedItem.status === 'later') {
-        setTab('later');
-      } else {
-        setTab('active');
-      }
-    }, [selectedItem, selectedItemId]);
-
-    const handleBack = useCallback(() => {
-      if (selectedItemId) {
-        ticketApi.goToInbox();
-        return;
-      }
-      setSelectedId(null);
-    }, [selectedItemId]);
-
-    const handleAdd = useCallback(() => {
-      $quickCaptureOpen.set(true);
-    }, []);
-    const handleTabSelect = useCallback((_event: unknown, data: SelectTabData) => {
-      setTab(data.value as InboxTab);
-    }, []);
-    const handleOpenItem = useCallback((id: InboxItemId) => setSelectedId(id), []);
-
-    // Detail view takes over the panel when an item is selected.
-    //
-    // Keying on `selectedItem.id` forces a full remount when the user navigates
-    // to a different item. Without the key, InboxItemDetail held per-item edit
-    // buffers in component-local state tied to a prop, so switching items
-    // either (a) silently dropped unsaved edits, or (b) wrote the previous
-    // item's draft onto the newly-selected item via a stale `onBlur` closure.
-    // Remount gives every item a fresh component lifecycle and makes the
-    // buffers structurally incapable of crossing item boundaries.
-    if (selectedItem) {
-      return <InboxItemDetail key={selectedItem.id} item={selectedItem} onBack={handleBack} hideHeader={hideChrome} />;
+  // Keep the tab in sync with wherever the selected item lives, so backing
+  // out of a detail lands on the list that contains it.
+  useEffect(() => {
+    if (!selectedItem) {
+      return;
     }
+    if (selectedItem.promotedTo) {
+      setTab('archive');
+    } else if (selectedItem.status === 'later') {
+      setTab('later');
+    } else {
+      setTab('active');
+    }
+  }, [selectedItem]);
 
-    return (
-      <div className={styles.root}>
-        {!hideChrome && (
-          <div className={styles.header}>
-            <MailInbox20Regular className={styles.headerIcon} />
-            <span className={styles.title}>Inbox</span>
-            <div className={styles.spacer} />
-            <IconButton aria-label="Add item" icon={<Add20Regular />} size="sm" onClick={handleAdd} />
-            <TabList selectedValue={tab} onTabSelect={handleTabSelect} size="small" className={styles.tabs}>
-              <Tab value="active">Inbox {active.length}</Tab>
-              <Tab value="later">Later {later.length}</Tab>
-              <Tab value="archive">Archive {promoted.length}</Tab>
-            </TabList>
-          </div>
-        )}
+  const handleBack = useCallback(() => {
+    $inboxView.set({ selectedItemId: null });
+  }, []);
 
-        {hideChrome && (
-          <div className={styles.mobileFilters}>
-            <TabList
-              selectedValue={tab}
-              onTabSelect={handleTabSelect}
-              size="small"
-              appearance="subtle"
-              className={styles.mobileTabs}
-            >
-              <Tab value="active" className={styles.filterTab}>
-                Inbox {active.length}
-              </Tab>
-              <Tab value="later" className={styles.filterTab}>
-                Later {later.length}
-              </Tab>
-              <Tab value="archive" className={styles.filterTab}>
-                Archive {promoted.length}
-              </Tab>
-            </TabList>
-          </div>
-        )}
+  const handleAdd = useCallback(() => {
+    $quickCaptureOpen.set(true);
+  }, []);
+  const handleTabSelect = useCallback((_event: unknown, data: SelectTabData) => {
+    setTab(data.value as InboxTab);
+  }, []);
+  const handleOpenItem = useCallback((id: InboxItemId) => $inboxView.set({ selectedItemId: id }), []);
+
+  // Mobile: the detail takes over the whole tab.
+  //
+  // Keying on `selectedItem.id` forces a full remount when the user navigates
+  // to a different item. Without the key, InboxItemDetail held per-item edit
+  // buffers in component-local state tied to a prop, so switching items
+  // either (a) silently dropped unsaved edits, or (b) wrote the previous
+  // item's draft onto the newly-selected item via a stale `onBlur` closure.
+  // Remount gives every item a fresh component lifecycle and makes the
+  // buffers structurally incapable of crossing item boundaries.
+  if (!isDesktop && selectedItem) {
+    return <InboxItemDetail key={selectedItem.id} item={selectedItem} onBack={handleBack} showBack />;
+  }
+
+  return (
+    <div className={mergeClasses(styles.root, isGlass && styles.rootGlass)}>
+      <div className={mergeClasses(styles.listPane, isGlass && styles.listPaneGlass)}>
+        <PageHeader
+          title="Inbox"
+          actions={<IconButton aria-label="Add item" icon={<Add20Regular />} size="sm" onClick={handleAdd} />}
+        />
+
+        <div className={styles.tabRow}>
+          <TabList selectedValue={tab} onTabSelect={handleTabSelect} size="small" appearance="subtle">
+            <Tab value="active">
+              Inbox
+              {active.length > 0 && <span className={styles.tabCount}>{active.length}</span>}
+            </Tab>
+            <Tab value="later">
+              Later
+              {later.length > 0 && <span className={styles.tabCount}>{later.length}</span>}
+            </Tab>
+            <Tab value="archive">Archive</Tab>
+          </TabList>
+        </div>
 
         <div className={styles.body}>
-          {visible.length === 0 ? (
-            <div className={styles.empty}>
-              {tab === 'active'
-                ? 'Your inbox is empty. Nice work.'
-                : tab === 'later'
-                  ? 'Nothing parked for later.'
-                  : 'No promoted items yet.'}
-            </div>
-          ) : (
-            visible.map((item) => <InboxRow key={item.id} item={item} styles={styles} onOpen={handleOpenItem} />)
-          )}
+          {/* Desktop leaves an empty list blank — the detail pane carries the
+              empty state; showing it twice side by side reads as a glitch. */}
+          {visible.length === 0
+            ? !isDesktop && <EmptyState title={EMPTY_COPY[tab].title} description={EMPTY_COPY[tab].description} />
+            : visible.map((item) => (
+                <InboxRow
+                  key={item.id}
+                  item={item}
+                  selected={selectedItem?.id === item.id}
+                  styles={styles}
+                  onOpen={handleOpenItem}
+                />
+              ))}
         </div>
       </div>
-    );
-  }
-);
+
+      <div className={mergeClasses(styles.detailPane, isGlass && styles.detailPaneGlass)}>
+        {selectedItem ? (
+          <InboxItemDetail key={selectedItem.id} item={selectedItem} onBack={handleBack} showBack={false} />
+        ) : (
+          // Auto-select means no selection implies an empty list — carry the
+          // list's empty copy here, like the Routines tab does.
+          <EmptyState
+            title={EMPTY_COPY[tab].title}
+            description={EMPTY_COPY[tab].description}
+            action={
+              tab === 'active' ? (
+                <Button size="sm" leftIcon={<Add20Regular />} onClick={handleAdd}>
+                  Add item
+                </Button>
+              ) : undefined
+            }
+          />
+        )}
+      </div>
+    </div>
+  );
+});
 InboxView.displayName = 'InboxView';
 
 // ---------------------------------------------------------------------------
@@ -275,32 +303,73 @@ InboxView.displayName = 'InboxView';
 
 type InboxRowProps = {
   item: InboxItem;
+  selected: boolean;
   styles: ReturnType<typeof useStyles>;
   onOpen: (id: InboxItemId) => void;
 };
 
-const InboxRow = memo(({ item, styles, onOpen }: InboxRowProps) => {
+const stopPropagation = (e: React.SyntheticEvent) => e.stopPropagation();
+
+const InboxRow = memo(({ item, selected, styles, onOpen }: InboxRowProps) => {
+  const [menuOpen, setMenuOpen] = useState(false);
   const handleOpen = useCallback(() => onOpen(item.id), [item.id, onOpen]);
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
+        e.preventDefault();
+        onOpen(item.id);
+      }
+    },
+    [item.id, onOpen]
+  );
+  const handleMenuOpenChange = useCallback((_e: unknown, data: { open: boolean }) => setMenuOpen(data.open), []);
+  const handleDefer = useCallback(() => void inboxApi.defer(item.id), [item.id]);
+  const handleReactivate = useCallback(() => void inboxApi.reactivate(item.id), [item.id]);
+  const handleDrop = useCallback(() => void inboxApi.remove(item.id), [item.id]);
 
   return (
-    <button type="button" className={styles.row} onClick={handleOpen}>
+    // div+role rather than <button>: the row hosts the "…" menu button, and
+    // nesting buttons inside a button is invalid markup.
+    <div
+      role="button"
+      tabIndex={0}
+      className={mergeClasses(styles.row, selected && styles.rowSelected)}
+      onClick={handleOpen}
+      onKeyDown={handleKeyDown}
+    >
       <div className={styles.rowMain}>
         <span className={styles.rowTitle}>{item.title}</span>
         {item.note && <span className={styles.rowNote}>{item.note}</span>}
-        <div className={styles.rowMeta}>
-          {item.status === 'later' && (
-            <span className={`${styles.badge} ${styles.laterBadge}`}>
-              <TimerRegular style={{ width: 12, height: 12 }} /> Later
-            </span>
-          )}
-          {item.promotedTo && (
-            <span className={styles.badge}>
-              <ArchiveRegular style={{ width: 12, height: 12 }} /> Promoted to {item.promotedTo.kind}
-            </span>
-          )}
-        </div>
       </div>
-    </button>
+      <span
+        role="presentation"
+        className={mergeClasses(styles.rowMenu, 'inbox-row-menu', menuOpen && styles.rowMenuOpen)}
+        onClick={stopPropagation}
+      >
+        <Menu open={menuOpen} onOpenChange={handleMenuOpenChange} positioning={{ position: 'below', align: 'end' }}>
+          <MenuTrigger disableButtonEnhancement>
+            <IconButton aria-label="Item actions" icon={<MoreHorizontal20Regular />} size="sm" />
+          </MenuTrigger>
+          <MenuPopover>
+            <MenuList>
+              {!item.promotedTo &&
+                (item.status === 'later' ? (
+                  <MenuItem icon={<ArrowCounterclockwise20Regular />} onClick={handleReactivate}>
+                    Reactivate
+                  </MenuItem>
+                ) : (
+                  <MenuItem icon={<TimerRegular />} onClick={handleDefer}>
+                    Defer to later
+                  </MenuItem>
+                ))}
+              <MenuItem icon={<Delete20Regular />} onClick={handleDrop} className={styles.dangerMenuItem}>
+                Drop
+              </MenuItem>
+            </MenuList>
+          </MenuPopover>
+        </Menu>
+      </span>
+    </div>
   );
 });
 InboxRow.displayName = 'InboxRow';

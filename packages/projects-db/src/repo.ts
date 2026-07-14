@@ -1,6 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite';
 
-import { defaultColumnId } from './defaults.js';
+import { defaultColumnId, positionalCategory } from './defaults.js';
 import type { ColumnSyncInput, ColumnSyncResult } from './repo-interface.js';
 import { tx, txDeferred } from './tx.js';
 import type {
@@ -155,7 +155,8 @@ export class ProjectsRepo {
       row.sort_order,
       row.gate,
       row.max_concurrent,
-      row.workflow
+      row.workflow,
+      row.category
     );
     this.bumpChangeSeq();
   }
@@ -177,7 +178,8 @@ export class ProjectsRepo {
           row.sort_order,
           row.gate,
           row.max_concurrent,
-          row.workflow
+          row.workflow,
+          row.category
         );
       }
       this.bumpChangeSeq();
@@ -216,6 +218,7 @@ export class ProjectsRepo {
       gate: d.gate ? 1 : 0,
       max_concurrent: d.maxConcurrent ?? null,
       workflow: d.workflow == null ? null : JSON.stringify(d.workflow),
+      category: d.category ?? positionalCategory(i, defs.length),
     }));
 
     const result: ColumnSyncResult = { inserted: [], removed: [], remappedTickets: [] };
@@ -256,7 +259,8 @@ export class ProjectsRepo {
           row.sort_order,
           row.gate,
           row.max_concurrent,
-          row.workflow
+          row.workflow,
+          row.category
         );
       }
 
@@ -770,12 +774,13 @@ function prepareStatements(db: DatabaseSync) {
     // Pipeline columns
     listColumns: db.prepare('SELECT * FROM pipeline_columns WHERE project_id = ? ORDER BY sort_order'),
     upsertColumn: db.prepare(`
-      INSERT INTO pipeline_columns (id, project_id, label, description, sort_order, gate, max_concurrent, workflow)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO pipeline_columns (id, project_id, label, description, sort_order, gate, max_concurrent, workflow, category)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         label = excluded.label, description = excluded.description,
         sort_order = excluded.sort_order, gate = excluded.gate,
-        max_concurrent = excluded.max_concurrent, workflow = excluded.workflow
+        max_concurrent = excluded.max_concurrent, workflow = excluded.workflow,
+        category = excluded.category
     `),
     deleteColumnsForProject: db.prepare('DELETE FROM pipeline_columns WHERE project_id = ?'),
     deleteColumnById: db.prepare('DELETE FROM pipeline_columns WHERE id = ?'),

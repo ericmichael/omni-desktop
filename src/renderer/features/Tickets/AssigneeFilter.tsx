@@ -1,9 +1,17 @@
-import { Menu, MenuItem, MenuList, MenuPopover, MenuTrigger } from '@fluentui/react-components';
 import { Filter20Regular } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback } from 'react';
 
-import { Button } from '@/renderer/ds';
+import {
+  Button,
+  Menu,
+  type MenuCheckedValueChangeData,
+  MenuDivider,
+  MenuItemRadio,
+  MenuList,
+  MenuPopover,
+  MenuTrigger,
+} from '@/renderer/ds';
 import { $currentPrincipal, $members } from '@/renderer/features/Teams/state';
 import { $assigneeFilter } from '@/renderer/features/Tickets/state';
 
@@ -17,10 +25,11 @@ export const AssigneeFilter = memo(function AssigneeFilter() {
   const filter = useStore($assigneeFilter);
   const me = useStore($currentPrincipal);
 
-  const setAll = useCallback(() => $assigneeFilter.set('all'), []);
-  const setMine = useCallback(() => $assigneeFilter.set('me'), []);
-  const setUnassigned = useCallback(() => $assigneeFilter.set('unassigned'), []);
-  const setMember = useCallback((id: string) => () => $assigneeFilter.set(id), []);
+  const handleCheckedChange = useCallback((_e: unknown, data: MenuCheckedValueChangeData) => {
+    if (data.name === 'assignee') {
+      $assigneeFilter.set(data.checkedItems[0] ?? 'all');
+    }
+  }, []);
 
   // No teams → nothing to filter by.
   if (members.length === 0) {
@@ -39,7 +48,7 @@ export const AssigneeFilter = memo(function AssigneeFilter() {
             'Assignee');
 
   return (
-    <Menu>
+    <Menu checkedValues={{ assignee: [filter] }} onCheckedValueChange={handleCheckedChange}>
       <MenuTrigger disableButtonEnhancement>
         <Button size="sm" variant="ghost" leftIcon={<Filter20Regular />}>
           {label}
@@ -47,13 +56,22 @@ export const AssigneeFilter = memo(function AssigneeFilter() {
       </MenuTrigger>
       <MenuPopover>
         <MenuList>
-          <MenuItem onClick={setAll}>All assignees</MenuItem>
-          {me ? <MenuItem onClick={setMine}>Assigned to me</MenuItem> : null}
-          <MenuItem onClick={setUnassigned}>Unassigned</MenuItem>
+          <MenuItemRadio name="assignee" value="all">
+            All assignees
+          </MenuItemRadio>
+          {me ? (
+            <MenuItemRadio name="assignee" value="me">
+              Assigned to me
+            </MenuItemRadio>
+          ) : null}
+          <MenuItemRadio name="assignee" value="unassigned">
+            Unassigned
+          </MenuItemRadio>
+          <MenuDivider />
           {members.map((m) => (
-            <MenuItem key={m.userId} onClick={setMember(m.userId)}>
+            <MenuItemRadio key={m.userId} name="assignee" value={m.userId}>
               {m.displayName ?? m.email ?? m.userId}
-            </MenuItem>
+            </MenuItemRadio>
           ))}
         </MenuList>
       </MenuPopover>

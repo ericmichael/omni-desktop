@@ -11,6 +11,7 @@ import { BrowserView } from '@/renderer/features/Browser/BrowserView';
 import { ConsoleStarted } from '@/renderer/features/Console/ConsoleRunning';
 import { OmniAgentsApp } from '@/renderer/omniagents-ui';
 import type { ClientToolCallHandler } from '@/renderer/omniagents-ui/App';
+import type { PendingMessage } from '@/renderer/omniagents-ui/ChatShell';
 import {
   emitColumnRunEnd,
   emitColumnRunStarted,
@@ -53,6 +54,8 @@ type CodeWorkspaceLayoutProps = {
   greeting?: string;
   /** One-tap example tasks shown on the empty conversation. */
   suggestions?: ReadonlyArray<{ label: string; prompt: string }>;
+  /** Messages queued pre-launch; the app flushes them once its RPC connects. */
+  pendingMessages?: PendingMessage[];
   isGlass?: boolean;
   /**
    * When provided, this layout hosts a column-scoped workspace and all its
@@ -456,6 +459,7 @@ export const CodeWorkspaceLayout = memo(
     dockTargetId,
     greeting,
     suggestions,
+    pendingMessages,
     isGlass,
     tabId,
     agentWorkspaceDir,
@@ -558,6 +562,7 @@ export const CodeWorkspaceLayout = memo(
               uiUrl={uiSrc}
               greeting={greeting}
               suggestions={suggestions}
+              pendingMessages={pendingMessages}
               sessionId={sessionId}
               onSessionChange={onSessionChange}
               variables={variables}

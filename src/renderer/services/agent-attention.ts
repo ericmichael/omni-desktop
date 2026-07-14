@@ -12,7 +12,7 @@
 import { codeApi } from '@/renderer/features/Code/state';
 import { $columnActivity, type ColumnActivity } from '@/renderer/services/column-activity';
 import { persistedStoreApi } from '@/renderer/services/store';
-import { CHAT_TAB_ID, type CodeTabId } from '@/shared/types';
+import type { CodeTabId } from '@/shared/types';
 
 const updateBadge = (activity: Record<string, ColumnActivity>): void => {
   if (typeof navigator.setAppBadge !== 'function') {
@@ -24,23 +24,23 @@ const updateBadge = (activity: Record<string, ColumnActivity>): void => {
 
 /** Human label for a column-activity scope — shared with the SR status center. */
 export const columnLabelFor = (scope: string): string => {
-  if (scope === CHAT_TAB_ID) {
-    return 'Chat';
-  }
   const store = persistedStoreApi.get();
   const tab = (store.codeTabs ?? []).find((t) => t.id === scope);
   const project = store.projects.find((p) => p.id === tab?.projectId);
-  return project?.label ?? 'Agent session';
+  if (project) {
+    return project.label;
+  }
+  // Chat column: its conversation title, once the first message named it.
+  const title = tab?.sessionId
+    ? (store.chatConversations ?? []).find((c) => c.sessionId === tab.sessionId)?.title
+    : undefined;
+  return title ?? 'Agent session';
 };
 
 const focusScope = (scope: string): void => {
   window.focus();
-  if (scope === CHAT_TAB_ID) {
-    void persistedStoreApi.setKey('layoutMode', 'chat');
-    return;
-  }
   void codeApi.setActiveTab(scope as CodeTabId);
-  void persistedStoreApi.setKey('layoutMode', 'spaces');
+  void persistedStoreApi.setKey('layoutMode', 'chat');
 };
 
 const canNotify = (): boolean =>

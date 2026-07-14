@@ -25,9 +25,9 @@ export const SettingsModalWipLimit = memo(() => {
 
   return (
     <div className={styles.root}>
-      <SectionLabel>WIP Limit</SectionLabel>
+      <SectionLabel>Autopilot concurrency</SectionLabel>
       <p className={styles.hint}>
-        Maximum active tickets across all projects. Keeps you focused by forcing a choice when you try to start more.
+        Maximum tickets autopilot will run at once across all projects. Starting work yourself is never blocked.
       </p>
       <Select value={String(wipLimit)} onChange={handleChange} className={styles.select}>
         {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => (

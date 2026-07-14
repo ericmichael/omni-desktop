@@ -1,3 +1,4 @@
+import { formatTimestamp } from '@/lib/format-time';
 import { emitter } from '@/renderer/services/ipc';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { CodeTab, ScheduledTask } from '@/shared/types';
@@ -89,7 +90,7 @@ export function formatSchedule(task: ScheduledTask): string {
   if (!task.enabled) {
     return 'Paused';
   }
-  const next = task.nextRunAt ? ` · next ${new Date(task.nextRunAt).toLocaleString()}` : '';
+  const next = task.nextRunAt ? ` · next ${formatTimestamp(task.nextRunAt)}` : '';
   const schedule = task.schedule;
   if (schedule.kind === 'manual') {
     return 'Manual';

@@ -98,7 +98,7 @@ async function ensureColumn(request: Extract<RoutineBridgeRequest, { kind: 'ensu
   // run fires unattended and shouldn't yank the layout out from under them. The
   // tab is still created so the run streams the moment they switch to it.
   if (activate) {
-    await persistedStoreApi.setKey('layoutMode', 'spaces');
+    await persistedStoreApi.setKey('layoutMode', 'chat');
   }
 }
 

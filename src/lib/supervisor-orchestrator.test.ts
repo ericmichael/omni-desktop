@@ -172,6 +172,23 @@ describe('SupervisorOrchestrator integration', () => {
       expect(startSpy).toHaveBeenCalledWith('t-ready');
     });
 
+    it('autoDispatchTick stops dispatching once active tickets reach wipLimit', async () => {
+      const ctx = makePm({
+        autoDispatch: true,
+        wipLimit: 1,
+        tickets: [{ id: 't-ready', columnId: 'backlog' }, { id: 't-active' }],
+      });
+      const { pm } = ctx;
+      const active = seedMachine(ctx, 't-active');
+      active.phase = 'running';
+      const startSpy = vi.fn(async () => {});
+      (orch(pm) as unknown as { startSupervisor: typeof startSpy }).startSupervisor = startSpy;
+
+      await orch(pm).autoDispatchTick();
+
+      expect(startSpy).not.toHaveBeenCalled();
+    });
+
     it('autoDispatchTick reverts the column move when startSupervisor rejects (bug #2)', async () => {
       const ctx = makePm({
         autoDispatch: true,
@@ -524,7 +541,7 @@ describe('SupervisorOrchestrator integration', () => {
       expect(err).toMatch(/concurrency limit/i);
     });
 
-    it('rejects when WIP limit is reached', () => {
+    it('never gates a manual start on the WIP limit', () => {
       const ctx = makePm({
         source: LOCAL_SOURCE,
         wipLimit: 1,
@@ -533,18 +550,7 @@ describe('SupervisorOrchestrator integration', () => {
       const { pm } = ctx;
       const active = seedMachine(ctx, 't-active');
       active.phase = 'running';
-      const err = orch(pm).validateDispatchPreflight('t1');
-      expect(err).toBe('WIP_LIMIT:1');
-    });
-
-    it('does not count the ticket itself toward WIP (retry case)', () => {
-      const ctx = makePm({
-        source: LOCAL_SOURCE,
-        wipLimit: 1,
-        tickets: [{ id: 't1', phase: 'running' }],
-      });
-      const { pm } = ctx;
-      // t1 retrying its own dispatch: WIP count excludes self, so it's allowed.
+      // wipLimit paces autopilot only — humans start work freely.
       expect(orch(pm).validateDispatchPreflight('t1')).toBeNull();
     });
 

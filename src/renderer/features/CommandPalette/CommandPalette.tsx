@@ -10,11 +10,13 @@
  */
 import { makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
 import { useStore } from '@nanostores/react';
+import { atom } from 'nanostores';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useHotkeys } from 'react-hotkeys-hook';
 
 import { codeApi } from '@/renderer/features/Code/state';
 import { $quickCaptureOpen } from '@/renderer/features/Inbox/QuickCapture';
+import { goToInbox } from '@/renderer/features/Inbox/state';
 import { ticketApi } from '@/renderer/features/Tickets/state';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { CodeTab, LayoutMode } from '@/shared/types';
@@ -102,10 +104,16 @@ const useStyles = makeStyles({
 
 const HOTKEY_OPTS = { enableOnFormTags: true, preventDefault: true } as const;
 
+/**
+ * Whether the palette is open. An atom (not component state) so other
+ * surfaces can summon it — Home's jump box is a visible alias for ⌘K.
+ */
+export const $commandPaletteOpen = atom(false);
+
 export const CommandPalette = memo(() => {
   const styles = useStyles();
   const store = useStore(persistedStoreApi.$atom);
-  const [open, setOpen] = useState(false);
+  const open = useStore($commandPaletteOpen);
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -116,12 +124,11 @@ export const CommandPalette = memo(() => {
 
   const activateColumn = useCallback((tabId: string) => {
     codeApi.setActiveTab(tabId);
-    persistedStoreApi.setKey('layoutMode', 'spaces');
+    persistedStoreApi.setKey('layoutMode', 'chat');
   }, []);
 
-  const goToInbox = useCallback(() => {
-    persistedStoreApi.setKey('layoutMode', 'projects');
-    ticketApi.goToInbox();
+  const handleGoToInbox = useCallback(() => {
+    goToInbox();
   }, []);
 
   const addInboxItem = useCallback(() => {
@@ -140,7 +147,7 @@ export const CommandPalette = memo(() => {
         .replace(/[^a-z0-9]+/g, '-')
         .replace(/^-|-$/g, '') || 'project';
     void ticketApi.addProject({ label, slug, sources: [] }).then((project) => {
-      persistedStoreApi.setKey('layoutMode', 'projects');
+      // goToProject raises the Work rail tab itself.
       ticketApi.goToProject(project.id);
     });
   }, []);
@@ -164,16 +171,16 @@ export const CommandPalette = memo(() => {
         resolveTabLabel,
         navigate,
         activateColumn,
-        goToInbox,
+        goToInbox: handleGoToInbox,
         addInboxItem,
         createProject,
         newSession: () => {
           void codeApi.addTab();
-          persistedStoreApi.setKey('layoutMode', 'spaces');
+          persistedStoreApi.setKey('layoutMode', 'chat');
         },
         setDeckLayout: (mode) => {
           codeApi.setLayoutMode(mode);
-          persistedStoreApi.setKey('layoutMode', 'spaces');
+          persistedStoreApi.setKey('layoutMode', 'chat');
         },
       }),
     [
@@ -182,7 +189,7 @@ export const CommandPalette = memo(() => {
       resolveTabLabel,
       navigate,
       activateColumn,
-      goToInbox,
+      handleGoToInbox,
       addInboxItem,
       createProject,
     ]
@@ -191,7 +198,7 @@ export const CommandPalette = memo(() => {
   const filtered = useMemo(() => filterCommands(commands, query), [commands, query]);
 
   const close = useCallback(() => {
-    setOpen(false);
+    $commandPaletteOpen.set(false);
     setQuery('');
     setActiveIndex(0);
   }, []);
@@ -208,7 +215,7 @@ export const CommandPalette = memo(() => {
     [filtered, close]
   );
 
-  useHotkeys('mod+k', () => setOpen((v) => !v), HOTKEY_OPTS, []);
+  useHotkeys('mod+k', () => $commandPaletteOpen.set(!$commandPaletteOpen.get()), HOTKEY_OPTS, []);
 
   // mod+1…9: jump to the Nth deck column directly.
   useHotkeys(

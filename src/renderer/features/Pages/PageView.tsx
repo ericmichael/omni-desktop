@@ -1,13 +1,10 @@
 import { makeStyles, mergeClasses, shorthands, Skeleton, SkeletonItem, tokens } from '@fluentui/react-components';
-import { ArrowLeft20Regular } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
 import { useSelector } from '@xstate/react';
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 
-import { IconButton } from '@/renderer/ds';
 import { NotebookView } from '@/renderer/features/Notebooks/NotebookView';
 import { acquirePageEditor, releasePageEditor } from '@/renderer/features/Pages/page-editor-registry';
-import { ticketApi } from '@/renderer/features/Tickets/state';
 import { $glassEnabled } from '@/renderer/theme/use-glass';
 import type { PageId, ProjectId } from '@/shared/types';
 
@@ -73,24 +70,10 @@ const useStyles = makeStyles({
     alignItems: 'center',
     gap: tokens.spacingHorizontalM,
   },
-  titleInputLarge: {
-    flex: 1,
-    fontSize: '32px',
-    fontWeight: tokens.fontWeightBold,
-    border: 'none',
-    backgroundColor: 'transparent',
-    padding: '0',
-    outline: 'none',
-    color: tokens.colorNeutralForeground1,
-    lineHeight: '1.2',
-    '::placeholder': {
-      color: tokens.colorNeutralForeground4,
-    },
-  },
   titleInput: {
     flex: 1,
     fontSize: tokens.fontSizeBase600,
-    fontWeight: tokens.fontWeightBold,
+    fontWeight: tokens.fontWeightSemibold,
     border: 'none',
     backgroundColor: 'transparent',
     padding: '0',
@@ -100,6 +83,15 @@ const useStyles = makeStyles({
     '::placeholder': {
       color: tokens.colorNeutralForeground4,
     },
+  },
+  /* The context page's title is fixed — renaming the project lives in the
+     Home hero and the sidebar menu, not in a page title input. */
+  titleStatic: {
+    flex: 1,
+    fontSize: tokens.fontSizeBase600,
+    fontWeight: tokens.fontWeightSemibold,
+    lineHeight: tokens.lineHeightBase600,
+    color: tokens.colorNeutralForeground1,
   },
   /* Subtle save affordance — appears briefly, never demands attention. */
   saveIndicator: {
@@ -220,31 +212,11 @@ type PageViewProps = {
   projectId: ProjectId;
 };
 
-const navigateUpPageHierarchy = (pageId: PageId, projectId: ProjectId, pages: ReturnType<typeof $pages.get>) => {
-  const page = pages[pageId];
-  if (!page?.parentId) {
-    ticketApi.goToProject(projectId);
-    return;
-  }
-
-  const parent = pages[page.parentId];
-  if (parent?.isRoot) {
-    ticketApi.goToProject(projectId);
-    return;
-  }
-
-  ticketApi.goToPage(page.parentId, projectId);
-};
-
 const DocPageView = memo(({ pageId, projectId }: PageViewProps) => {
   const styles = useStyles();
   const pages = useStore($pages);
   const isGlass = useStore($glassEnabled);
   const page = pages[pageId];
-
-  const handleBack = useCallback(() => {
-    navigateUpPageHierarchy(pageId, projectId, pages);
-  }, [pageId, projectId, pages]);
 
   // -------------------------------------------------------------------------
   // Per-page editor actor.
@@ -320,18 +292,12 @@ const DocPageView = memo(({ pageId, projectId }: PageViewProps) => {
     }
   }, [page]);
 
-  // -------------------------------------------------------------------------
-  // Title save — for root pages, also update the project label.
-  // -------------------------------------------------------------------------
   const handleTitleBlur = useCallback(() => {
     const trimmed = title.trim();
-    if (trimmed && page && trimmed !== page.title) {
+    if (trimmed && page && !page.isRoot && trimmed !== page.title) {
       void pageApi.updatePage(pageId, { title: trimmed });
-      if (page.isRoot) {
-        void ticketApi.updateProject(projectId, { label: trimmed });
-      }
     }
-  }, [title, page, pageId, projectId]);
+  }, [title, page, pageId]);
 
   const handleTitleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -365,47 +331,54 @@ const DocPageView = memo(({ pageId, projectId }: PageViewProps) => {
   // Agent-authored documents often open with an H1 that repeats the page
   // title; rendering the title input above it shows the same heading twice.
   // Let the document's own H1 be the visible title in that case (the row
-  // reappears as soon as the leading H1 stops matching).
+  // reappears as soon as the leading H1 stops matching). The context page's
+  // fixed "Context" title never collides with body H1s, so it always shows.
   const firstLine = (content ?? '').trimStart().split('\n', 1)[0] ?? '';
   const leadingH1 = /^#\s+(.+?)\s*$/.exec(firstLine)?.[1];
-  const contentLeadsWithTitle = !!leadingH1 && leadingH1.trim().toLowerCase() === page.title.trim().toLowerCase();
+  const contentLeadsWithTitle =
+    !page.isRoot && !!leadingH1 && leadingH1.trim().toLowerCase() === page.title.trim().toLowerCase();
 
   return (
     <div className={mergeClasses(styles.root, isGlass && styles.rootGlass)} data-slot="page-view">
-      {/* Header: Back + Breadcrumb + Title + save affordance */}
-      {(!page.isRoot || !contentLeadsWithTitle || !!saveLabel) && (
-        <div className={styles.header}>
-          {!page.isRoot && (
-            <div className={styles.backRow}>
-              <IconButton aria-label="Back" icon={<ArrowLeft20Regular />} size="sm" onClick={handleBack} />
-              <PageBreadcrumb projectId={projectId} pageId={pageId} />
-            </div>
-          )}
-          {!contentLeadsWithTitle && (
-            <div className={styles.titleRow}>
-              <input
-                aria-label="Page title"
-                className={page.isRoot ? styles.titleInputLarge : styles.titleInput}
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                onBlur={handleTitleBlur}
-                onKeyDown={handleTitleKeyDown}
-                placeholder="Untitled"
-              />
-              <span className={styles.saveIndicator} aria-live="polite">
-                {saveLabel}
-              </span>
-            </div>
-          )}
-          {contentLeadsWithTitle && saveLabel && (
-            <div className={styles.titleRow}>
-              <span className={styles.saveIndicator} aria-live="polite">
-                {saveLabel}
-              </span>
-            </div>
-          )}
+      {/* Header: the standard sub-page recipe — ancestors-only breadcrumb
+          above the page title. The context page (root) titles itself
+          "Context"; renaming the project lives on Home, not here. */}
+      <div className={styles.header}>
+        <div className={styles.backRow}>
+          <PageBreadcrumb projectId={projectId} pageId={pageId} />
         </div>
-      )}
+        {page.isRoot ? (
+          <div className={styles.titleRow}>
+            <span className={styles.titleStatic}>Context</span>
+            <span className={styles.saveIndicator} aria-live="polite">
+              {saveLabel}
+            </span>
+          </div>
+        ) : !contentLeadsWithTitle ? (
+          <div className={styles.titleRow}>
+            <input
+              aria-label="Page title"
+              className={styles.titleInput}
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              onBlur={handleTitleBlur}
+              onKeyDown={handleTitleKeyDown}
+              placeholder="Untitled"
+            />
+            <span className={styles.saveIndicator} aria-live="polite">
+              {saveLabel}
+            </span>
+          </div>
+        ) : (
+          saveLabel && (
+            <div className={styles.titleRow}>
+              <span className={styles.saveIndicator} aria-live="polite">
+                {saveLabel}
+              </span>
+            </div>
+          )
+        )}
+      </div>
 
       {/* External-change banner */}
       {showConflict && (
@@ -471,19 +444,12 @@ const NotebookPageView = memo(({ pageId, projectId }: PageViewProps) => {
     }
   }, [page]);
 
-  const handleBack = useCallback(() => {
-    navigateUpPageHierarchy(pageId, projectId, pages);
-  }, [pageId, projectId, pages]);
-
   const handleTitleBlur = useCallback(() => {
     const trimmed = title.trim();
-    if (trimmed && page && trimmed !== page.title) {
+    if (trimmed && page && !page.isRoot && trimmed !== page.title) {
       void pageApi.updatePage(pageId, { title: trimmed });
-      if (page.isRoot) {
-        void ticketApi.updateProject(projectId, { label: trimmed });
-      }
     }
-  }, [title, page, pageId, projectId]);
+  }, [title, page, pageId]);
 
   const handleTitleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -502,22 +468,23 @@ const NotebookPageView = memo(({ pageId, projectId }: PageViewProps) => {
   return (
     <div className={styles.root}>
       <div className={styles.header}>
-        {!page.isRoot && (
-          <div className={styles.backRow}>
-            <IconButton aria-label="Back" icon={<ArrowLeft20Regular />} size="sm" onClick={handleBack} />
-            <PageBreadcrumb projectId={projectId} pageId={pageId} />
-          </div>
-        )}
+        <div className={styles.backRow}>
+          <PageBreadcrumb projectId={projectId} pageId={pageId} />
+        </div>
         <div className={styles.titleRow}>
-          <input
-            aria-label="Page title"
-            className={page.isRoot ? styles.titleInputLarge : styles.titleInput}
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            onBlur={handleTitleBlur}
-            onKeyDown={handleTitleKeyDown}
-            placeholder="Untitled"
-          />
+          {page.isRoot ? (
+            <span className={styles.titleStatic}>Context</span>
+          ) : (
+            <input
+              aria-label="Page title"
+              className={styles.titleInput}
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              onBlur={handleTitleBlur}
+              onKeyDown={handleTitleKeyDown}
+              placeholder="Untitled"
+            />
+          )}
         </div>
       </div>
       <div className={styles.notebookBody}>

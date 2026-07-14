@@ -150,14 +150,14 @@ export const TicketForm = memo(({ projectId, onClose }: { projectId: ProjectId; 
   return (
     <div className={styles.root}>
       <Input
-        aria-label="Ticket title"
+        aria-label="Task title"
         value={title}
         onChange={handleTitleChange}
-        placeholder="Ticket title..."
+        placeholder="Task title..."
         className="w-full"
       />
       <Textarea
-        aria-label="Ticket description"
+        aria-label="Task description"
         value={description}
         onChange={handleDescriptionChange}
         placeholder="Description (optional)..."

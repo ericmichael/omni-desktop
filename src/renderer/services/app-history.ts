@@ -11,7 +11,7 @@
  * stores, so the (async, IPC round-trip) store echo arrives with a key we
  * already recorded and is not pushed again.
  */
-import { $previousTicketsView, $ticketsView, type TicketsView } from '@/renderer/features/Tickets/state';
+import { $ticketsView, pushTicketsHistory, type TicketsView } from '@/renderer/features/Tickets/state';
 import { $initialized, persistedStoreApi } from '@/renderer/services/store';
 import type { LayoutMode } from '@/shared/types';
 
@@ -22,9 +22,10 @@ type AppHistoryState = {
 };
 
 const TAB_TITLES: Record<LayoutMode, string> = {
+  home: 'Home',
+  inbox: 'Inbox',
+  work: 'Work',
   chat: 'Chat',
-  spaces: 'Spaces',
-  projects: 'Projects',
   dashboards: 'Dashboards',
   routines: 'Routines',
   settings: 'Settings',
@@ -41,6 +42,27 @@ const keyOf = (state: AppHistoryState): string => JSON.stringify([state.layoutMo
 
 /** History entries persist across reloads — an old entry may carry a retired mode. */
 const isValidMode = (mode: unknown): mode is LayoutMode => typeof mode === 'string' && mode in TAB_TITLES;
+
+/**
+ * History entries also persist across app versions — migrate retired view
+ * shapes (pre-shell `board` views, `project` views without a tab) instead of
+ * letting them land in `$ticketsView` malformed.
+ */
+const normalizeTicketsView = (view: TicketsView): TicketsView => {
+  const legacy = view as unknown as { type: string; projectId?: string; tab?: unknown };
+  if (legacy.type === 'board' && legacy.projectId) {
+    return { type: 'project', projectId: legacy.projectId, tab: 'board' };
+  }
+  // 'dashboard' and 'inbox' moved to their own rail tabs; an old Work-view
+  // entry carrying them lands on the all-work list.
+  if (legacy.type === 'dashboard' || legacy.type === 'inbox') {
+    return { type: 'all' };
+  }
+  if (view.type === 'project' && !legacy.tab) {
+    return { type: 'project', projectId: view.projectId, tab: 'home' };
+  }
+  return view;
+};
 
 let lastKey = '';
 let lastPushAt = 0;
@@ -67,8 +89,8 @@ const applyHistoryState = (state: AppHistoryState): void => {
   }
   // Keep the in-app contextual Back buttons coherent: the view being left
   // becomes "previous" for them too.
-  $previousTicketsView.set($ticketsView.get());
-  $ticketsView.set(state.ticketsView);
+  pushTicketsHistory($ticketsView.get());
+  $ticketsView.set(normalizeTicketsView(state.ticketsView));
   syncTitle(state.layoutMode);
 };
 

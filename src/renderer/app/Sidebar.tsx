@@ -2,16 +2,20 @@ import { makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
 import {
   Beaker24Filled,
   Beaker24Regular,
+  CalendarClock24Filled,
+  CalendarClock24Regular,
   Chat24Filled,
   Chat24Regular,
-  ColumnTriple24Filled,
-  ColumnTriple24Regular,
   DataBarVertical24Filled,
   DataBarVertical24Regular,
-  Rocket24Filled,
-  Rocket24Regular,
+  Home24Filled,
+  Home24Regular,
+  MailInbox24Filled,
+  MailInbox24Regular,
   Settings24Filled,
   Settings24Regular,
+  TaskListSquareLtr24Filled,
+  TaskListSquareLtr24Regular,
 } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
 import type { KeyboardEvent } from 'react';
@@ -20,7 +24,6 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExterna
 import { OmniLogo } from '@/renderer/common/AsciiLogo';
 import { CounterBadge } from '@/renderer/ds';
 import { $activeInboxCount } from '@/renderer/features/Inbox/state';
-import { ticketApi } from '@/renderer/features/Tickets/state';
 import { emitter } from '@/renderer/services/ipc';
 import { persistedStoreApi } from '@/renderer/services/store';
 import { $glassEnabled } from '@/renderer/theme/use-glass';
@@ -37,21 +40,22 @@ const ALL_TABS: {
   pinBottom?: boolean;
   devOnly?: boolean;
 }[] = [
+  { value: 'home', label: 'Home', icon: <Home24Regular />, iconActive: <Home24Filled />, alwaysVisible: true },
+  {
+    value: 'inbox',
+    label: 'Inbox',
+    icon: <MailInbox24Regular />,
+    iconActive: <MailInbox24Filled />,
+    alwaysVisible: true,
+  },
+  {
+    value: 'work',
+    label: 'Work',
+    icon: <TaskListSquareLtr24Regular />,
+    iconActive: <TaskListSquareLtr24Filled />,
+    alwaysVisible: true,
+  },
   { value: 'chat', label: 'Chat', icon: <Chat24Regular />, iconActive: <Chat24Filled />, alwaysVisible: true },
-  {
-    value: 'spaces',
-    label: 'Spaces',
-    icon: <ColumnTriple24Regular />,
-    iconActive: <ColumnTriple24Filled />,
-    alwaysVisible: true,
-  },
-  {
-    value: 'projects',
-    label: 'Projects',
-    icon: <Rocket24Regular />,
-    iconActive: <Rocket24Filled />,
-    alwaysVisible: true,
-  },
   {
     value: 'dashboards',
     label: 'Dashboards',
@@ -62,8 +66,8 @@ const ALL_TABS: {
   {
     value: 'routines',
     label: 'Routines',
-    icon: <DataBarVertical24Regular />,
-    iconActive: <DataBarVertical24Filled />,
+    icon: <CalendarClock24Regular />,
+    iconActive: <CalendarClock24Filled />,
     alwaysVisible: true,
   },
   { value: 'gallery', label: 'Gallery', icon: <Beaker24Regular />, iconActive: <Beaker24Filled />, devOnly: true },
@@ -73,8 +77,8 @@ const ALL_TABS: {
     icon: <Settings24Regular />,
     iconActive: <Settings24Filled />,
     alwaysVisible: true,
-    // Desktop pins Settings at the rail's bottom; the mobile bar shows it inline
-    // as the fourth tab (the one-row "More" page is gone).
+    // Desktop pins Settings at the rail's bottom; the mobile bar shows it
+    // inline as the last tab (the one-row "More" page is gone).
     pinBottom: true,
   },
 ];
@@ -308,12 +312,11 @@ export const Sidebar = memo(() => {
   const isGlass = useStore($glassEnabled);
   const isBrandedRail = store.theme === 'utrgv' && !isGlass;
 
+  // Rail clicks switch tabs only — every tab resumes exactly where it was
+  // (MainContent keeps panels mounted for the same reason).
   const setMode = useCallback(
     (mode: LayoutMode) => () => {
       persistedStoreApi.setKey('layoutMode', mode);
-      if (mode === 'projects') {
-        ticketApi.goToDashboard();
-      }
     },
     []
   );
@@ -398,7 +401,7 @@ export const Sidebar = memo(() => {
         {isActive && <div className={styles.indicator} />}
         <span className={styles.iconWrap}>
           {isActive ? tab.iconActive : tab.icon}
-          {tab.value === 'projects' && openInboxCount > 0 && (
+          {tab.value === 'inbox' && openInboxCount > 0 && (
             <CounterBadge count={openInboxCount} size="small" color="brand" className={styles.badge} />
           )}
         </span>

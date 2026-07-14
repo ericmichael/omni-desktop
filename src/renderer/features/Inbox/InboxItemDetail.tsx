@@ -1,29 +1,39 @@
 import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
-import {
-  ArchiveRegular,
-  ArrowCounterclockwise20Regular,
-  ArrowLeft20Regular,
-  Delete20Regular,
-  MoreHorizontal20Filled,
-  Rocket20Regular,
-  TimerRegular,
-} from '@fluentui/react-icons';
+import { ArrowLeft20Regular, Delete20Regular, MoreHorizontal20Filled, Rocket20Regular } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
 import type { ChangeEvent } from 'react';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { IconButton, Menu, MenuItem, MenuList, MenuPopover, MenuTrigger } from '@/renderer/ds';
+import { formatTimestamp } from '@/lib/format-time';
+import {
+  Button,
+  IconButton,
+  Menu,
+  MenuItem,
+  MenuList,
+  MenuPopover,
+  MenuTrigger,
+  MessageBar,
+  MessageBarBody,
+  SectionLabel,
+  Select,
+} from '@/renderer/ds';
+import { ticketApi } from '@/renderer/features/Tickets/state';
+import { toast } from '@/renderer/features/Toast/state';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { InboxItem, ProjectId } from '@/shared/types';
 
 import { inboxApi } from './state';
 
 /**
- * Detail view for a single inbox item. Opens in place of the list when the
- * user clicks a row. Auto-saves title/note on blur. Action buttons
- * at the bottom cover the rest of the lifecycle (defer, promote, drop).
+ * Detail view for a single inbox item. On desktop it fills the right pane
+ * next to the list; on mobile (`showBack`) it replaces the list and gets a
+ * back header. Standard detail anatomy, matching the ticket Overview: the
+ * title (with the triage actions on its row) above a content + properties
+ * split — the note on the left, Status / Project / Details in the right
+ * rail. Auto-saves title/note on blur.
  *
- * Promoted tombstones render read-only — no edits, just a "this became X" label.
+ * Promoted tombstones render read-only — no edits, just a "this became X" banner.
  */
 
 const useStyles = makeStyles({
@@ -32,7 +42,6 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     height: '100%',
     width: '100%',
-    backgroundColor: tokens.colorNeutralBackground1,
   },
   header: {
     display: 'flex',
@@ -58,46 +67,94 @@ const useStyles = makeStyles({
     fontSize: tokens.fontSizeBase300,
     ':hover': { backgroundColor: tokens.colorSubtleBackgroundHover },
   },
-  spacer: { flex: '1 1 0' },
-  meta: {
+  /* Header band — mirrors ProjectPageHeader's geometry (the ticket page's
+     header), with the tab-row border standing in for the tabs it lacks. */
+  pageHeader: {
     display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-    fontSize: tokens.fontSizeBase200,
-    color: tokens.colorNeutralForeground3,
-  },
-  badge: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: '4px',
-    padding: '2px 8px',
-    borderRadius: tokens.borderRadiusCircular,
-    backgroundColor: tokens.colorNeutralBackground3,
-    fontSize: tokens.fontSizeBase100,
-  },
-  laterBadge: {
-    backgroundColor: tokens.colorPaletteYellowBackground2,
-    color: tokens.colorPaletteYellowForeground2,
+    flexDirection: 'column',
+    gap: '2px',
+    paddingLeft: tokens.spacingHorizontalL,
+    paddingRight: tokens.spacingHorizontalL,
+    paddingTop: tokens.spacingVerticalL,
+    paddingBottom: tokens.spacingVerticalS,
+    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
+    flexShrink: 0,
   },
   body: {
     flex: '1 1 0',
     minHeight: 0,
     overflowY: 'auto',
-    paddingLeft: tokens.spacingHorizontalXXL,
-    paddingRight: tokens.spacingHorizontalXXL,
-    paddingTop: tokens.spacingVerticalXL,
-    paddingBottom: tokens.spacingVerticalXL,
+    padding: tokens.spacingVerticalXXL,
+  },
+  bodyInner: {
+    width: '100%',
+    maxWidth: '56rem',
+    marginLeft: 'auto',
+    marginRight: 'auto',
     display: 'flex',
     flexDirection: 'column',
-    gap: tokens.spacingVerticalXL,
+    gap: tokens.spacingVerticalL,
+  },
+  /* Content + properties rail — same split as the ticket Overview. The pane
+     sits next to the 320px inbox list, so stack a bit earlier than the
+     ticket page does. */
+  split: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: tokens.spacingHorizontalXXL,
+    '@media (max-width: 1000px)': {
+      flexDirection: 'column',
+    },
+  },
+  main: {
+    flex: '1 1 0',
+    minWidth: 0,
+    '@media (max-width: 1000px)': {
+      width: '100%',
+      flex: '0 0 auto',
+    },
+  },
+  aside: {
+    width: '240px',
+    flexShrink: 0,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalL,
+    '@media (max-width: 1000px)': {
+      width: '100%',
+    },
+  },
+  prop: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '4px',
+  },
+  propControl: {
+    width: '100%',
+  },
+  detailRow: {
+    display: 'flex',
+    flexDirection: 'column',
+    rowGap: '2px',
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
+  },
+  titleRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
   },
   titleInput: {
-    width: '100%',
+    flex: '1 1 0',
+    minWidth: 0,
     backgroundColor: 'transparent',
     border: 'none',
-    fontSize: '28px',
+    padding: 0,
+    fontSize: tokens.fontSizeBase600,
     fontWeight: tokens.fontWeightSemibold,
+    lineHeight: tokens.lineHeightBase600,
     color: tokens.colorNeutralForeground1,
+    fontFamily: 'inherit',
     ':focus': { outline: 'none' },
     '::placeholder': { color: tokens.colorNeutralForeground3 },
   },
@@ -107,6 +164,7 @@ const useStyles = makeStyles({
     resize: 'vertical',
     backgroundColor: 'transparent',
     border: 'none',
+    padding: 0,
     fontSize: tokens.fontSizeBase300,
     color: tokens.colorNeutralForeground2,
     fontFamily: 'inherit',
@@ -114,106 +172,19 @@ const useStyles = makeStyles({
     ':focus': { outline: 'none' },
     '::placeholder': { color: tokens.colorNeutralForeground3 },
   },
-  section: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalM,
-  },
-  sectionLabel: {
-    fontSize: tokens.fontSizeBase200,
-    fontWeight: tokens.fontWeightSemibold,
-    color: tokens.colorNeutralForeground2,
-    textTransform: 'uppercase',
-    letterSpacing: '0.05em',
-  },
-  field: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalXS,
-  },
-  fieldLabel: {
-    fontSize: tokens.fontSizeBase200,
-    color: tokens.colorNeutralForeground3,
-  },
-  input: {
-    width: '100%',
-    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
-    borderRadius: tokens.borderRadiusMedium,
-    backgroundColor: tokens.colorNeutralBackground1,
-    padding: '8px 12px',
-    fontSize: tokens.fontSizeBase300,
-    color: tokens.colorNeutralForeground1,
-    fontFamily: 'inherit',
-    ':focus': { outline: 'none', ...shorthands.borderColor(tokens.colorBrandStroke1) },
-  },
-  textarea: {
-    minHeight: '60px',
-    resize: 'vertical',
-  },
-  projectRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-  },
-  select: {
-    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
-    borderRadius: tokens.borderRadiusMedium,
-    backgroundColor: tokens.colorNeutralBackground1,
-    padding: '6px 10px',
-    fontSize: tokens.fontSizeBase300,
-    color: tokens.colorNeutralForeground1,
-  },
-  actionsBar: {
-    flexShrink: 0,
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-    paddingLeft: tokens.spacingHorizontalL,
-    paddingRight: tokens.spacingHorizontalL,
-    paddingTop: tokens.spacingVerticalM,
-    paddingBottom: tokens.spacingVerticalM,
-    ...shorthands.borderTop('1px', 'solid', tokens.colorNeutralStroke2),
-    backgroundColor: tokens.colorNeutralBackground2,
-  },
-  primaryBtn: {
-    flex: '1 1 0',
-    minWidth: 0,
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: '6px',
-    padding: '8px 14px',
-    borderRadius: tokens.borderRadiusMedium,
-    backgroundColor: tokens.colorBrandBackground,
-    color: tokens.colorNeutralForegroundOnBrand,
-    ...shorthands.border('1px', 'solid', tokens.colorBrandBackground),
-    fontSize: tokens.fontSizeBase300,
-    fontWeight: tokens.fontWeightSemibold,
-    cursor: 'pointer',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    ':hover': { backgroundColor: tokens.colorBrandBackgroundHover },
-  },
   dangerMenuItem: {
     color: tokens.colorPaletteRedForeground1,
-  },
-  readonlyBanner: {
-    padding: tokens.spacingVerticalM,
-    backgroundColor: tokens.colorNeutralBackground2,
-    borderRadius: tokens.borderRadiusMedium,
-    color: tokens.colorNeutralForeground2,
-    fontSize: tokens.fontSizeBase200,
   },
 });
 
 export type InboxItemDetailProps = {
   item: InboxItem;
   onBack: () => void;
-  hideHeader?: boolean;
+  /** Mobile: render the back header (the detail replaced the list). */
+  showBack?: boolean;
 };
 
-export const InboxItemDetail = memo(({ item, onBack, hideHeader = false }: InboxItemDetailProps) => {
+export const InboxItemDetail = memo(({ item, onBack, showBack = true }: InboxItemDetailProps) => {
   const styles = useStyles();
   const store = useStore(persistedStoreApi.$atom);
 
@@ -294,13 +265,16 @@ export const InboxItemDetail = memo(({ item, onBack, hideHeader = false }: Inbox
   // Actions
   // -------------------------------------------------------------------------
 
-  const handleDefer = useCallback(() => {
-    void inboxApi.defer(item.id);
-  }, [item.id]);
-
-  const handleReactivate = useCallback(() => {
-    void inboxApi.reactivate(item.id);
-  }, [item.id]);
+  const handleStatusChange = useCallback(
+    (event: ChangeEvent<HTMLSelectElement>) => {
+      if (event.target.value === 'later') {
+        void inboxApi.defer(item.id);
+      } else {
+        void inboxApi.reactivate(item.id);
+      }
+    },
+    [item.id]
+  );
 
   const handleTitleChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
     setTitle(event.target.value);
@@ -320,10 +294,17 @@ export const InboxItemDetail = memo(({ item, onBack, hideHeader = false }: Inbox
   const handlePromoteToTicket = useCallback(() => {
     const projectId = item.projectId ?? store.projects.find((p) => p.isPersonal)?.id ?? store.projects[0]?.id;
     if (!projectId) {
-      console.warn('[Inbox] No project available to promote to');
+      toast.warning('No project to promote into', 'Create a project first, then promote this item.');
       return;
     }
-    void inboxApi.promoteToTicket(item.id, { projectId });
+    const projectLabel = store.projects.find((p) => p.id === projectId)?.label ?? 'project';
+    void inboxApi.promoteToTicket(item.id, { projectId }).then((ticket) => {
+      // Say where it went and offer the jump — the item itself just moved to
+      // the Archive tab, which is otherwise silent.
+      toast.success(`Promoted to task in ${projectLabel}`, undefined, {
+        action: { label: 'Open', onClick: ticketApi.goToTicket.bind(null, ticket.id) },
+      });
+    });
   }, [item.id, item.projectId, store.projects]);
 
   const handlePromoteToProject = useCallback(() => {
@@ -336,7 +317,7 @@ export const InboxItemDetail = memo(({ item, onBack, hideHeader = false }: Inbox
   }, [item.id, onBack]);
 
   // -------------------------------------------------------------------------
-  // Keyboard: Escape → back
+  // Keyboard: Escape → back (mobile) / deselect (desktop)
   // -------------------------------------------------------------------------
 
   useEffect(() => {
@@ -349,120 +330,130 @@ export const InboxItemDetail = memo(({ item, onBack, hideHeader = false }: Inbox
     return () => window.removeEventListener('keydown', onKey);
   }, [onBack]);
 
-  // -------------------------------------------------------------------------
-  // Status badge + metadata
-  // -------------------------------------------------------------------------
-
-  const statusBadge = useMemo(() => {
-    if (item.promotedTo) {
-      return (
-        <span className={styles.badge}>
-          <ArchiveRegular style={{ width: 12, height: 12 }} /> Promoted to {item.promotedTo.kind}
-        </span>
-      );
-    }
-    if (item.status === 'later') {
-      return (
-        <span className={`${styles.badge} ${styles.laterBadge}`}>
-          <TimerRegular style={{ width: 12, height: 12 }} /> Later
-        </span>
-      );
-    }
-    return <span className={styles.badge}>New</span>;
-  }, [item.status, item.promotedTo, styles]);
+  const capturedLabel = useMemo(() => `Captured ${formatTimestamp(item.createdAt)}`, [item.createdAt]);
 
   return (
     <div className={styles.root}>
-      {!hideHeader && (
+      {showBack && (
         <div className={styles.header}>
           <button type="button" className={styles.backBtn} onClick={onBack} aria-label="Back">
             <ArrowLeft20Regular />
             Back
           </button>
-          <div className={styles.spacer} />
-          <div className={styles.meta}>{statusBadge}</div>
         </div>
       )}
 
-      {/* Body */}
-      <div className={styles.body}>
-        {isArchived && (
-          <div className={styles.readonlyBanner}>
-            This item was promoted to a {item.promotedTo!.kind} on {new Date(item.promotedTo!.at).toLocaleString()}.
-            It&apos;s kept as a tombstone for undo and audit. Edits are disabled.
-          </div>
-        )}
-
-        <input
-          type="text"
-          className={styles.titleInput}
-          value={title}
-          onChange={handleTitleChange}
-          onBlur={saveTitleNote}
-          placeholder="Untitled"
-          readOnly={isArchived}
-        />
-
-        <textarea
-          className={styles.noteInput}
-          value={note}
-          onChange={handleNoteChange}
-          onBlur={saveTitleNote}
-          placeholder="Add a note — what does done look like? Anything out of scope?"
-          readOnly={isArchived}
-        />
-
-        {/* Project association */}
-        <div className={styles.projectRow}>
-          <span className={styles.fieldLabel}>Project:</span>
-          <select
-            className={styles.select}
-            value={item.projectId ?? ''}
-            onChange={handleProjectChange}
-            disabled={isArchived}
-          >
-            <option value="">No project</option>
-            {store.projects.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.label}
-              </option>
-            ))}
-          </select>
+      {/* Header band — same geometry as the ticket page's ProjectPageHeader:
+          full-bleed title row with the triage actions at the right. */}
+      <div className={styles.pageHeader}>
+        <div className={styles.titleRow}>
+          <input
+            type="text"
+            className={styles.titleInput}
+            value={title}
+            onChange={handleTitleChange}
+            onBlur={saveTitleNote}
+            placeholder="Untitled"
+            readOnly={isArchived}
+            aria-label="Item title"
+          />
+          {!isArchived && (
+            <>
+              <Button size="sm" leftIcon={<Rocket20Regular />} onClick={handlePromoteToTicket}>
+                Promote to task
+              </Button>
+              <Menu positioning={{ position: 'below', align: 'end' }}>
+                <MenuTrigger disableButtonEnhancement>
+                  <IconButton aria-label="More actions" icon={<MoreHorizontal20Filled />} size="sm" />
+                </MenuTrigger>
+                <MenuPopover>
+                  <MenuList>
+                    <MenuItem icon={<Rocket20Regular />} onClick={handlePromoteToProject}>
+                      Promote to project
+                    </MenuItem>
+                    <MenuItem icon={<Delete20Regular />} onClick={handleDrop} className={styles.dangerMenuItem}>
+                      Drop
+                    </MenuItem>
+                  </MenuList>
+                </MenuPopover>
+              </Menu>
+            </>
+          )}
         </div>
       </div>
 
-      {/* Actions */}
-      {!isArchived && (
-        <div className={styles.actionsBar}>
-          <button type="button" className={styles.primaryBtn} onClick={handlePromoteToTicket}>
-            <Rocket20Regular /> Promote to ticket
-          </button>
-          <Menu positioning={{ position: 'above', align: 'end' }}>
-            <MenuTrigger disableButtonEnhancement>
-              <IconButton aria-label="More actions" icon={<MoreHorizontal20Filled />} size="sm" />
-            </MenuTrigger>
-            <MenuPopover>
-              <MenuList>
-                {item.status === 'later' ? (
-                  <MenuItem icon={<ArrowCounterclockwise20Regular />} onClick={handleReactivate}>
-                    Reactivate
-                  </MenuItem>
-                ) : (
-                  <MenuItem icon={<TimerRegular />} onClick={handleDefer}>
-                    Defer to later
-                  </MenuItem>
-                )}
-                <MenuItem icon={<Rocket20Regular />} onClick={handlePromoteToProject}>
-                  Promote to project
-                </MenuItem>
-                <MenuItem icon={<Delete20Regular />} onClick={handleDrop} className={styles.dangerMenuItem}>
-                  Drop
-                </MenuItem>
-              </MenuList>
-            </MenuPopover>
-          </Menu>
+      {/* Scrollable content — centered like the ticket Overview. */}
+      <div className={styles.body}>
+        <div className={styles.bodyInner}>
+          {isArchived && (
+            <MessageBar intent="info">
+              <MessageBarBody>
+                Promoted to a {item.promotedTo!.kind} on {new Date(item.promotedTo!.at).toLocaleDateString()} — kept for
+                history. Editing is disabled.
+              </MessageBarBody>
+            </MessageBar>
+          )}
+
+          {/* Content + properties rail — same split as the ticket Overview. */}
+          <div className={styles.split}>
+            <div className={styles.main}>
+              <textarea
+                className={styles.noteInput}
+                value={note}
+                onChange={handleNoteChange}
+                onBlur={saveTitleNote}
+                placeholder="Add a note — what does done look like? Anything out of scope?"
+                readOnly={isArchived}
+              />
+            </div>
+
+            <aside className={styles.aside} aria-label="Item properties">
+              {!isArchived && (
+                <div className={styles.prop}>
+                  <SectionLabel>Status</SectionLabel>
+                  <Select
+                    size="sm"
+                    className={styles.propControl}
+                    value={item.status}
+                    onChange={handleStatusChange}
+                    aria-label="Status"
+                  >
+                    <option value="new">Inbox</option>
+                    <option value="later">Later</option>
+                  </Select>
+                </div>
+              )}
+
+              <div className={styles.prop}>
+                <SectionLabel>Project</SectionLabel>
+                <Select
+                  size="sm"
+                  className={styles.propControl}
+                  value={item.projectId ?? ''}
+                  onChange={handleProjectChange}
+                  disabled={isArchived}
+                  aria-label="Project"
+                >
+                  <option value="">No project</option>
+                  {store.projects.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.label}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+
+              <div className={styles.prop}>
+                <SectionLabel>Details</SectionLabel>
+                <div className={styles.detailRow}>
+                  <span>{capturedLabel}</span>
+                  {item.updatedAt !== item.createdAt && <span>Updated {formatTimestamp(item.updatedAt)}</span>}
+                </div>
+              </div>
+            </aside>
+          </div>
         </div>
-      )}
+      </div>
     </div>
   );
 });

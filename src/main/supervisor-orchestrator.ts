@@ -32,6 +32,7 @@ import fs from 'fs/promises';
 import { nanoid } from 'nanoid';
 import path from 'path';
 
+import { columnCategory, isDoneColumn } from '@/lib/pipeline-category';
 import type { IWindowSender } from '@/lib/project-manager-deps';
 import { claimsCollide, decideWorktreeAction, resolveWorkspaceClaim } from '@/lib/worktree';
 import type { AppControlManager } from '@/main/app-control-manager';
@@ -48,6 +49,7 @@ import { createWorktree, generateWorktreeName, isWorktreeDirty, removeWorktree }
 import { requireLocalWorkspaceDir } from '@/shared/project-source';
 import { isActivePhase, type TicketPhase } from '@/shared/ticket-phase';
 import type {
+  ActivityEvent,
   CodeTabId,
   ColumnId,
   Page,
@@ -125,6 +127,11 @@ export interface SupervisorOrchestratorStore {
   deletePersistedTask?(taskId: TaskId): void;
   /** Host-side omni-code config directory (e.g. ~/.config/omni_code on macOS/Linux). */
   getOmniConfigDir(): string;
+  /**
+   * Record a background-actor outcome for Home's "While you were away" feed.
+   * Optional so older test fakes keep working.
+   */
+  appendActivity?(event: ActivityEvent): void;
 }
 
 // ---------------------------------------------------------------------------
@@ -280,6 +287,22 @@ export class SupervisorOrchestrator {
       onPhaseChange: (tid, phase) => {
         this.deps.host.updateTicket(tid, { phase, phaseChangedAt: Date.now() });
         this.deps.sendToWindow('project:phase', tid, phase);
+        // Terminal outcomes feed Home's "While you were away". Transient
+        // attention (gates, approvals) stays out — the Needs-you rollup
+        // owns live states, the feed owns finished ones.
+        if (phase === 'completed' || phase === 'error') {
+          const ticket = this.deps.host.getTicketById(tid);
+          if (ticket) {
+            this.deps.store.appendActivity?.({
+              id: nanoid(),
+              at: Date.now(),
+              kind: phase === 'completed' ? 'agent_run_finished' : 'run_failed',
+              title: ticket.title,
+              projectId: ticket.projectId,
+              link: { type: 'ticket', ticketId: tid },
+            });
+          }
+        }
       },
     });
   }
@@ -538,8 +561,7 @@ export class SupervisorOrchestrator {
 
   /**
    * All tickets currently in an active supervisor phase across every project.
-   * Used by the "Right Now" view and for WIP-limit enforcement in
-   * `validateDispatchPreflight`.
+   * Paces the autopilot dispatcher against `wipLimit` in `autoDispatchTick`.
    */
   getActiveWipTickets(): Ticket[] {
     const principal = this.deps.store.getCurrentPrincipal?.();
@@ -1273,15 +1295,8 @@ export class SupervisorOrchestrator {
       return `"${collision.title}" is already running in this workspace — stop it first.${hint}`;
     }
 
-    // WIP limit check (cognitive limit, cross-project)
-    const wipLimit = this.deps.store.getWipLimit();
-    const activeWip = this.getActiveWipTickets();
-    // Don't count the ticket itself if it's already active (e.g. retrying)
-    const wipCount = activeWip.filter((t) => t.id !== ticketId).length;
-    if (wipCount >= wipLimit) {
-      return `WIP_LIMIT:${wipLimit}`;
-    }
-
+    // No WIP-limit gate here: humans are never blocked from starting work.
+    // `wipLimit` paces the autopilot dispatcher only (see autoDispatchTick).
     return null;
   }
 
@@ -1327,6 +1342,12 @@ export class SupervisorOrchestrator {
         break;
       }
 
+      // wipLimit paces the robot, not the human: autopilot won't push the
+      // active-ticket count past it, but manual starts are never gated.
+      if (this.getActiveWipTickets().length >= this.deps.store.getWipLimit()) {
+        break;
+      }
+
       // Find the next eligible ticket (priority-sorted, not blocked, in backlog)
       const nextTicket = this.deps.host.getNextTicket(project.id);
       if (!nextTicket) {
@@ -1340,9 +1361,9 @@ export class SupervisorOrchestrator {
       }
 
       const pipeline = this.deps.host.getPipeline(project.id);
-      const firstColumnId = pipeline.columns[0]?.id;
-      const terminalColumnId = pipeline.columns[pipeline.columns.length - 1]?.id;
-      const firstActiveColumn = pipeline.columns.find((c) => c.id !== firstColumnId && c.id !== terminalColumnId);
+      const firstActiveColumn = pipeline.columns.find(
+        (c, i) => columnCategory(c, i, pipeline.columns.length) === 'doing'
+      );
       const dispatchColumnId = firstActiveColumn?.id ?? nextTicket.columnId;
 
       if (!this.canStartSupervisor(project.id, dispatchColumnId)) {
@@ -1413,10 +1434,9 @@ export class SupervisorOrchestrator {
       for (const blockerId of ticket.blockedBy) {
         const blocker = this.deps.host.getTicketById(blockerId);
         if (blocker) {
-          // Only include if blocker is not in a terminal column
+          // Only include if blocker isn't shipped ('done'-category column).
           const blockerPipeline = this.deps.host.getPipeline(blocker.projectId);
-          const lastCol = blockerPipeline.columns[blockerPipeline.columns.length - 1];
-          if (blocker.columnId !== lastCol?.id) {
+          if (!isDoneColumn(blockerPipeline, blocker.columnId)) {
             blockerTitles.push(blocker.title);
           }
         }

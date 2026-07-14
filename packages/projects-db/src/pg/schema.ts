@@ -553,4 +553,34 @@ ALTER TABLE inbox_items DROP CONSTRAINT inbox_items_status_check;
 ALTER TABLE inbox_items ADD CONSTRAINT inbox_items_status_check CHECK (status IN ('new','later'));
 `,
   },
+  {
+    version: 15,
+    sql: `
+-- Jira-style status category per pipeline column (mirrors SQLite v15).
+-- Backfill order: 'done' first so single-column pipelines land on 'done',
+-- then 'todo' for remaining pipeline heads. RLS is FORCEd on this table and
+-- the migration session has no tenant GUC, so row security is disabled
+-- around the data fix (same pattern as v12).
+ALTER TABLE pipeline_columns ADD COLUMN category TEXT NOT NULL DEFAULT 'doing'
+  CHECK(category IN ('todo','doing','done'));
+
+ALTER TABLE pipeline_columns DISABLE ROW LEVEL SECURITY;
+
+UPDATE pipeline_columns SET category = 'done' WHERE id IN (
+  SELECT id FROM (
+    SELECT id, ROW_NUMBER() OVER (PARTITION BY project_id ORDER BY sort_order DESC, id DESC) AS rn
+    FROM pipeline_columns
+  ) ranked WHERE rn = 1
+);
+
+UPDATE pipeline_columns SET category = 'todo' WHERE category <> 'done' AND id IN (
+  SELECT id FROM (
+    SELECT id, ROW_NUMBER() OVER (PARTITION BY project_id ORDER BY sort_order ASC, id ASC) AS rn
+    FROM pipeline_columns
+  ) ranked WHERE rn = 1
+);
+
+ALTER TABLE pipeline_columns ENABLE ROW LEVEL SECURITY;
+`,
+  },
 ];

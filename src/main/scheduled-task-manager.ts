@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 
 import type Store from 'electron-store';
 
+import { appendActivityEvent } from '@/lib/activity-log';
 import { mostRecentMissedScheduledTaskRun, nextScheduledTaskRun } from '@/lib/scheduled-task-schedule';
 import type { RoutineBridge } from '@/main/routine-bridge';
 import type { IIpcListener } from '@/shared/ipc-listener';
@@ -438,6 +439,24 @@ export class ScheduledTaskManager {
           : run
       );
       const clearRunning = Boolean(finishedRun?.sessionId && task.runningSessionId === finishedRun.sessionId);
+      // Written before patchTask so its store:changed broadcast carries both.
+      const now = this.now();
+      this.store.set(
+        'activityLog',
+        appendActivityEvent(
+          this.store.get('activityLog'),
+          {
+            id: randomUUID(),
+            at: now,
+            kind: status === 'completed' ? 'routine_run_finished' : 'run_failed',
+            title: task.name,
+            ...(reason && reason !== 'completed' ? { outcome: reason } : {}),
+            ...(task.projectId ? { projectId: task.projectId } : {}),
+            link: { type: 'routine', taskId },
+          },
+          now
+        )
+      );
       this.patchTask(taskId, {
         ...(clearRunning ? { runningSessionId: undefined } : {}),
         history,

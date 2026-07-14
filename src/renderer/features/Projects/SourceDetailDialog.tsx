@@ -171,10 +171,10 @@ export const SourceDetailDialog = memo(
             </div>
 
             <div className={styles.section}>
-              <span className={styles.sectionTitle}>Linked Tickets</span>
+              <span className={styles.sectionTitle}>Linked tasks</span>
               <div className={styles.panel}>
                 {relatedTickets.length === 0 ? (
-                  <span className={styles.empty}>No tickets have linked PRs for this source.</span>
+                  <span className={styles.empty}>No tasks have linked PRs for this source.</span>
                 ) : (
                   relatedTickets.map((ticket) => (
                     <TicketRow key={ticket.id} ticket={ticket} onOpen={handleOpenTicket} />

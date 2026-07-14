@@ -25,6 +25,7 @@ import {
   ArrowSync20Regular,
   BranchFork20Regular,
   Chat20Regular,
+  FolderOpen20Regular,
   Globe20Regular,
   MoreHorizontal20Regular,
   ReOrderDotsVertical20Regular,
@@ -62,7 +63,7 @@ import {
 } from '@/renderer/features/Tickets/TicketControls';
 import { type TicketPanel, TicketPanelOverlay } from '@/renderer/features/Tickets/TicketPanelOverlay';
 import { $columnActivity, activityStatusText } from '@/renderer/services/column-activity';
-import { persistedStoreApi } from '@/renderer/services/store';
+import { $initialized, persistedStoreApi } from '@/renderer/services/store';
 import { ENTER_ANIMATE, ENTER_INITIAL, FADE_DURATION_S, SPRING_GENTLE, SPRING_STANDARD } from '@/renderer/theme/motion';
 import { $glassEnabled } from '@/renderer/theme/use-glass';
 import type { AppHandleScope } from '@/shared/app-control-types';
@@ -70,16 +71,29 @@ import { makeAppHandleId } from '@/shared/app-control-types';
 import type { AppDescriptor, AppId, CustomAppEntry } from '@/shared/app-registry';
 import { buildAppRegistry } from '@/shared/app-registry';
 import type { AutoLaunchPhase } from '@/shared/machines/auto-launch.machine';
-import type { CodeLayoutMode, CodeTab, CodeTabId, ProjectId, TicketId, TicketResolution } from '@/shared/types';
-import { firstSource, isChatTab, projectHasRepoSource } from '@/shared/types';
+import type {
+  ChatConversation,
+  CodeLayoutMode,
+  CodeTab,
+  CodeTabId,
+  ProjectId,
+  TicketId,
+  TicketResolution,
+} from '@/shared/types';
+import { firstSource, isChatColumn, projectHasRepoSource } from '@/shared/types';
 
 import { AppIcon } from './AppIcon';
+import { AttachProjectMenu } from './AttachProjectMenu';
 import { CodeTabContent } from './CodeTabContent';
 import { ColumnAura } from './ColumnAura';
 import { $codeTabPhases, $codeTabStatuses, codeApi } from './state';
+import { useRecentConversations } from './use-recent-conversations';
 
 /** Sentinel customAppId meaning "show the app launcher picker". */
 const APP_LAUNCHER_ID = '__launcher__';
+
+/** Recent conversations shown before (and added per) "Show more". */
+const RECENT_PAGE_SIZE = 10;
 
 const BROWSER_APP_ID = 'browser';
 const BROWSER_START_URL = 'https://duckduckgo.com';
@@ -530,23 +544,6 @@ const useStyles = makeStyles({
     outline: 'none',
     ':focus': { ...shorthands.borderColor(tokens.colorBrandStroke1) },
   },
-  dragHandle: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    width: '20px',
-    height: '20px',
-    marginLeft: '-4px',
-    borderRadius: tokens.borderRadiusMedium,
-    color: tokens.colorNeutralForeground3,
-    border: 'none',
-    backgroundColor: 'transparent',
-    cursor: 'grab',
-    transitionProperty: 'color, background-color, opacity',
-    transitionDuration: tokens.durationFaster,
-    ':hover': { color: tokens.colorNeutralForeground1, backgroundColor: tokens.colorSubtleBackgroundHover },
-    ':focus-visible': { outline: `2px solid ${tokens.colorStrokeFocus2}`, outlineOffset: '1px' },
-  },
   dragHandleA11y: {
     position: 'absolute',
     width: '1px',
@@ -739,6 +736,39 @@ const useStyles = makeStyles({
   },
   focusSidebarCount: { fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 },
   focusSidebarList: { flex: '1 1 0', minHeight: 0, overflowY: 'auto', paddingTop: '4px', paddingBottom: '4px' },
+  /* "Show more" row at the end of a truncated Recent section. */
+  focusSidebarShowMore: {
+    display: 'block',
+    width: '100%',
+    textAlign: 'left',
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalM,
+    paddingTop: '6px',
+    paddingBottom: '6px',
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
+    border: 'none',
+    backgroundColor: 'transparent',
+    cursor: 'pointer',
+    ':hover': { color: tokens.colorNeutralForeground1, backgroundColor: tokens.colorSubtleBackgroundHover },
+    ':focus-visible': {
+      outline: `2px solid ${tokens.colorStrokeFocus2}`,
+      outlineOffset: '-2px',
+      borderRadius: tokens.borderRadiusMedium,
+    },
+  },
+  /* "Recent" section label inside the sidebar scroll (below the open columns). */
+  focusSidebarSubheader: {
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalM,
+    paddingTop: tokens.spacingVerticalM,
+    paddingBottom: tokens.spacingVerticalXS,
+    fontSize: tokens.fontSizeBase200,
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground3,
+    textTransform: 'uppercase',
+    letterSpacing: '0.05em',
+  },
   focusContent: { flex: '1 1 0', minWidth: 0, minHeight: 0 },
   metaBadge: {
     display: 'flex',
@@ -876,8 +906,8 @@ const CodeDeckHeader = memo(
             <SegmentedControl
               value={layoutMode}
               options={[
-                { value: 'tile', label: 'Tile', title: 'All sessions side by side' },
                 { value: 'focus', label: 'Focus', title: 'One session at a time, with a session list' },
+                { value: 'tile', label: 'Tile', title: 'All sessions side by side' },
               ]}
               onChange={onLayoutMode}
               layoutId="code-layout-toggle"
@@ -893,7 +923,7 @@ const CodeDeckHeader = memo(
               <MenuList>
                 <MenuItem onClick={onNewSession}>
                   <Chat20Regular style={{ width: 16, height: 16, marginRight: 6, verticalAlign: 'text-bottom' }} />
-                  Session
+                  Chat
                 </MenuItem>
                 <MenuItem onClick={onOpenApps}>
                   <Apps20Regular style={{ width: 16, height: 16, marginRight: 6, verticalAlign: 'text-bottom' }} />
@@ -1452,7 +1482,7 @@ const DeckColumn = memo(
               </button>
             }
           />
-          {tab.projectId && <PullRequestBanner scope={{ kind: 'code-tab', tabId: tab.id }} />}
+          <PullRequestBanner scope={{ kind: 'code-tab', tabId: tab.id }} />
           <div className={styles.flex1MinH0Relative}>
             {children}
             {(tab.ticketId || tab.projectId) && (
@@ -2104,7 +2134,7 @@ const CodeSessionPane = memo(
           onOpenPanel={tab.ticketId || tab.projectId ? setActivePanel : undefined}
           isGlass={isGlass}
         />
-        {tab.projectId && <PullRequestBanner scope={{ kind: 'code-tab', tabId: tab.id }} />}
+        <PullRequestBanner scope={{ kind: 'code-tab', tabId: tab.id }} />
         <div className={styles.flex1MinH0Relative}>
           {content}
           {(tab.ticketId || tab.projectId) && (
@@ -2145,6 +2175,51 @@ const TabContentSlot = memo(({ host }: { host: HTMLDivElement }) => {
 });
 TabContentSlot.displayName = 'TabContentSlot';
 
+/**
+ * One archived conversation in the Focus sidebar's Recent section. Opening it
+ * rebuilds a chat column from the entry (or activates the column already
+ * showing it); deleting destroys the entry AND its workspace snapshot.
+ */
+const RecentConversationRow = memo(
+  ({
+    conversation,
+    onOpen,
+    onDelete,
+  }: {
+    conversation: ChatConversation;
+    onOpen: (conversation: ChatConversation) => void;
+    onDelete: (conversation: ChatConversation) => void;
+  }) => {
+    const styles = useStyles();
+    return (
+      <div className={mergeClasses(styles.focusListItemRow, styles.focusListItemInactive)}>
+        <button type="button" onClick={() => onOpen(conversation)} className={styles.focusListItemContent}>
+          <div className={styles.focusListItemInner}>
+            <span className={styles.focusListItemLabel} title={conversation.title}>
+              {conversation.title}
+            </span>
+          </div>
+        </button>
+        <Menu positioning={{ position: 'below', align: 'end', fallbackPositions: ['above-end'] }}>
+          <MenuTrigger>
+            <SessionActionButton
+              icon={<MoreHorizontal20Regular style={{ width: 16, height: 16 }} />}
+              label="Conversation menu"
+            />
+          </MenuTrigger>
+          <MenuPopover>
+            <MenuList>
+              <MenuItem onClick={() => onOpen(conversation)}>Open</MenuItem>
+              <MenuItem onClick={() => onDelete(conversation)}>Delete conversation</MenuItem>
+            </MenuList>
+          </MenuPopover>
+        </Menu>
+      </div>
+    );
+  }
+);
+RecentConversationRow.displayName = 'RecentConversationRow';
+
 const FocusListItem = memo(
   ({
     tab,
@@ -2171,27 +2246,33 @@ const FocusListItem = memo(
     };
 
     const styles = useStyles();
-    useNowMinute();
-    // Live activity wins over static identity: a column that is working
-    // shows what it's doing; an idle one shows what distinguishes it.
+    // Live activity wins over static identity: a working column shows what
+    // it's doing; ticket/routine columns show their binding. Idle chat
+    // columns show nothing — the title and newest-first order say enough.
     const activity = useStore($columnActivity, { keys: [tab.id] })[tab.id];
     const liveText = activityStatusText(activity);
-    const displaySub = liveText ?? subLabel ?? startedLabel(tab);
+    const displaySub = liveText ?? subLabel ?? null;
     return (
       <div
         ref={setNodeRef}
         style={style}
         className={mergeClasses(styles.focusListItem, isDragging && styles.focusListItemDragging)}
       >
+        {/* The whole row is the drag surface (same idiom as tile column
+            headers): mouse drags after 6px, touch after a long-press, so
+            clicks and the menu still work. The hidden button is the
+            keyboard-accessible reorder handle — visible only when focused. */}
         <div
           className={mergeClasses(
             styles.focusListItemRow,
+            styles.dragSurface,
             isActive ? styles.focusListItemActive : styles.focusListItemInactive
           )}
+          {...listeners}
         >
           <button
             type="button"
-            className={mergeClasses(styles.dragHandle, styles.revealOnHover, 'revealOnHover')}
+            className={styles.dragHandleA11y}
             {...attributes}
             {...listeners}
             aria-label={`Reorder ${label}`}
@@ -2222,7 +2303,7 @@ const FocusListItem = memo(
             </MenuTrigger>
             <MenuPopover>
               <MenuList>
-                <MenuItem onClick={() => onClose(tab.id)}>Delete session</MenuItem>
+                <MenuItem onClick={() => onClose(tab.id)}>Close session</MenuItem>
               </MenuList>
             </MenuPopover>
           </Menu>
@@ -2237,9 +2318,7 @@ export const CodeDeck = memo(() => {
   const styles = useStyles();
   const store = useStore(persistedStoreApi.$atom);
   const statuses = useStore($codeTabStatuses);
-  // The reserved chat record renders full-screen behind the Chat tab, not as
-  // a deck column. (codeApi.reorderTabs preserves filtered-out records.)
-  const tabs = (store.codeTabs ?? []).filter((t) => !isChatTab(t));
+  const tabs = useMemo(() => store.codeTabs ?? [], [store.codeTabs]);
   // One persistent CodeTabContent per session tab, portaled into a stable
   // detached host that the live layout mode's TabContentSlot adopts.
   const sessionTabs = useMemo(() => tabs.filter((t) => !t.customAppId), [tabs]);
@@ -2277,7 +2356,7 @@ export const CodeDeck = memo(() => {
   // Below the snap breakpoint the deck is always a pager (full-width
   // snap-scrolled tile columns) — Focus is a desktop layout, and offering a
   // layout toggle at phone width only added a second way to be lost.
-  const storedLayoutMode = store.codeLayoutMode ?? 'tile';
+  const storedLayoutMode = store.codeLayoutMode ?? 'focus';
   const layoutMode = viewportWidth <= SNAP_SCROLL_WIDTH ? 'tile' : storedLayoutMode;
   const [deckViewportWidth, setDeckViewportWidth] = useState(() => window.innerWidth);
 
@@ -2393,6 +2472,23 @@ export const CodeDeck = memo(() => {
     }
   }, [activeTabId, tabs]);
 
+  // An empty deck lands on a ready-to-type chat column instead of a blank
+  // canvas. Un-activated chat columns are free (lazy launch — no sandbox
+  // until the first message), so minting one on every empty state is safe.
+  const initialized = useStore($initialized);
+  const autoCreatedRef = useRef(false);
+  useEffect(() => {
+    if (!initialized || tabs.length > 0) {
+      autoCreatedRef.current = false;
+      return;
+    }
+    if (autoCreatedRef.current) {
+      return;
+    }
+    autoCreatedRef.current = true;
+    void codeApi.addTab();
+  }, [initialized, tabs.length]);
+
   useEffect(() => {
     setExpandedTabIds((current) => {
       const validIds = new Set(tabs.map((t) => t.id));
@@ -2479,6 +2575,11 @@ export const CodeDeck = memo(() => {
   const customApps = useMemo(() => [SYNTHETIC_BROWSER_APP, ...(store.customApps ?? [])], [store.customApps]);
   const appRegistry = useMemo(() => buildAppRegistry(store.customApps ?? []), [store.customApps]);
 
+  // Conversation titles come from the launcher index ∪ the live session
+  // listing, so open columns are titled even when the conversation predates
+  // the index (migrated or resumed-from-server sessions).
+  const { recent: recentConversations, sessionTitles } = useRecentConversations(tabs);
+
   const resolveLabel = useCallback(
     (tab: CodeTab) => {
       if (tab.customAppId === APP_LAUNCHER_ID) {
@@ -2489,11 +2590,13 @@ export const CodeDeck = memo(() => {
         return app?.label ?? 'App';
       }
       if (!tab.projectId) {
-        return 'New Session';
+        // Chat column: the conversation's title once it has one, else the
+        // fresh-column label.
+        return (tab.sessionId ? sessionTitles.get(tab.sessionId) : undefined) ?? 'New chat';
       }
       return projectMap.get(tab.projectId)?.label ?? 'Unknown';
     },
-    [projectMap, customApps]
+    [projectMap, customApps, sessionTitles]
   );
 
   const resolveTicketTitle = useCallback((tab: CodeTab) => tab.ticketTitle ?? null, []);
@@ -2506,6 +2609,19 @@ export const CodeDeck = memo(() => {
 
   const handleNewSession = useCallback(() => {
     codeApi.addTab();
+  }, []);
+
+  const handleOpenConversation = useCallback((conversation: ChatConversation) => {
+    void codeApi.addTabForConversation(conversation);
+  }, []);
+  const handleDeleteConversation = useCallback((conversation: ChatConversation) => {
+    void codeApi.deleteConversation(conversation.sessionId);
+  }, []);
+  // Recent starts short and grows in pages; the fetch/merge cap (50) bounds
+  // the total either way.
+  const [recentVisible, setRecentVisible] = useState(RECENT_PAGE_SIZE);
+  const handleShowMoreRecent = useCallback(() => {
+    setRecentVisible((count) => count + RECENT_PAGE_SIZE);
   }, []);
 
   const handleOpenApps = useCallback(() => {
@@ -2537,10 +2653,12 @@ export const CodeDeck = memo(() => {
 
   const getTabColumnWidth = useCallback(
     (tab: CodeTab) => {
-      if (!tab.projectId && !tab.customAppId) {
+      // A chat column without a manual width gets a roomier default — prose
+      // reads better wide — but resize/expand behave like any other column.
+      if (isChatColumn(tab) && columnWidths[tab.id] === undefined && !expandedTabIds.has(tab.id)) {
         const availableWidth = deckViewportWidth || viewportWidth;
         if (availableWidth <= SNAP_SCROLL_WIDTH) {
-          return Math.max(280, Math.round(availableWidth * 0.96));
+          return Math.round(availableWidth * 0.92);
         }
         if (availableWidth <= NARROW_DECK_WIDTH) {
           return COLUMN_WIDTH_SMALL;
@@ -2549,7 +2667,7 @@ export const CodeDeck = memo(() => {
       }
       return getColumnWidth(tab.id);
     },
-    [deckViewportWidth, getColumnWidth, viewportWidth]
+    [deckViewportWidth, getColumnWidth, viewportWidth, columnWidths, expandedTabIds]
   );
 
   const handleResizeCommit = useCallback((tabId: CodeTabId, width: number) => {
@@ -2693,17 +2811,39 @@ export const CodeDeck = memo(() => {
   }, [activeTabId]);
 
   const handleNewTabSession = useCallback((tab: CodeTab) => {
+    // A chat column's current conversation is archived (resumable from
+    // Recent) before the column moves on to a fresh session id.
+    if (isChatColumn(tab) && tab.activatedAt && tab.sessionId) {
+      void codeApi.recordConversation(tab.sessionId, {
+        ...(tab.profileName ? { profileName: tab.profileName } : {}),
+        ...(tab.containerId ? { containerId: tab.containerId } : {}),
+      });
+    }
     codeApi.setTabSessionId(tab.id, uuidv4());
   }, []);
 
   const renderSessionActions = useCallback(
     (tab: CodeTab) => (
-      <SessionActionButton
-        icon={<Add20Regular style={{ width: 13, height: 13 }} />}
-        label="New session"
-        onClick={() => handleNewTabSession(tab)}
-        className={mergeClasses(styles.revealOnHover, 'revealOnHover')}
-      />
+      <>
+        {isChatColumn(tab) && (
+          <AttachProjectMenu
+            tabId={tab.id}
+            trigger={
+              <SessionActionButton
+                icon={<FolderOpen20Regular style={{ width: 14, height: 14 }} />}
+                label="Attach project"
+                className={mergeClasses(styles.revealOnHover, 'revealOnHover')}
+              />
+            }
+          />
+        )}
+        <SessionActionButton
+          icon={<Add20Regular style={{ width: 13, height: 13 }} />}
+          label={isChatColumn(tab) ? 'New chat' : 'New session'}
+          onClick={() => handleNewTabSession(tab)}
+          className={mergeClasses(styles.revealOnHover, 'revealOnHover')}
+        />
+      </>
     ),
     [handleNewTabSession, styles.revealOnHover]
   );
@@ -2853,14 +2993,7 @@ export const CodeDeck = memo(() => {
                               <TabContentSlot host={getContentHost(tab.id)} />
                             </DeckColumn>
                           )}
-                          {/* The launch column is transient — no resize until it becomes a session. */}
-                          {(tab.projectId || tab.customAppId) && (
-                            <ColumnResizeHandle
-                              tabId={tab.id}
-                              label={resolveLabel(tab)}
-                              onCommit={handleResizeCommit}
-                            />
-                          )}
+                          <ColumnResizeHandle tabId={tab.id} label={resolveLabel(tab)} onCommit={handleResizeCommit} />
                         </div>
                         {mountedSidecarApp && (
                           <div
@@ -2901,7 +3034,14 @@ export const CodeDeck = memo(() => {
                 <div className={mergeClasses(styles.focusSidebar, isGlass && styles.glassFocusSidebar)}>
                   <div className={mergeClasses(styles.focusSidebarHeader, isGlass && styles.glassFocusSidebarHeader)}>
                     <span className={styles.focusSidebarTitle}>Sessions</span>
-                    {tabs.length > 0 && <span className={styles.focusSidebarCount}>{tabs.length}</span>}
+                    <span className={mergeClasses(styles.flexItemsCenter, styles.gap1)}>
+                      {tabs.length > 0 && <span className={styles.focusSidebarCount}>{tabs.length}</span>}
+                      <SessionActionButton
+                        icon={<Add20Regular style={{ width: 14, height: 14 }} />}
+                        label="New chat"
+                        onClick={handleNewSession}
+                      />
+                    </span>
                   </div>
                   <div className={styles.focusSidebarList}>
                     {tabs.map((tab) => (
@@ -2915,6 +3055,24 @@ export const CodeDeck = memo(() => {
                         onClose={handleClose}
                       />
                     ))}
+                    {recentConversations.length > 0 && (
+                      <>
+                        <div className={styles.focusSidebarSubheader}>Recent</div>
+                        {recentConversations.slice(0, recentVisible).map((conversation) => (
+                          <RecentConversationRow
+                            key={conversation.sessionId}
+                            conversation={conversation}
+                            onOpen={handleOpenConversation}
+                            onDelete={handleDeleteConversation}
+                          />
+                        ))}
+                        {recentConversations.length > recentVisible && (
+                          <button type="button" className={styles.focusSidebarShowMore} onClick={handleShowMoreRecent}>
+                            Show more ({recentConversations.length - recentVisible})
+                          </button>
+                        )}
+                      </>
+                    )}
                   </div>
                 </div>
                 <div className={styles.focusContent}>

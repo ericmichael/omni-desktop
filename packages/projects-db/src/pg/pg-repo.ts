@@ -13,7 +13,7 @@
  */
 import type { Pool, PoolClient } from 'pg';
 
-import { defaultColumnId } from '../defaults.js';
+import { defaultColumnId, positionalCategory } from '../defaults.js';
 import type { ColumnSyncInput, ColumnSyncResult, IProjectsRepo } from '../repo-interface.js';
 import type {
   ColumnRow,
@@ -149,7 +149,7 @@ export class PgProjectsRepo implements IProjectsRepo {
 
   listColumns(projectId: string): Promise<ColumnRow[]> {
     return this.rows<ColumnRow>(
-      'SELECT tenant_id, id, project_id, label, description, sort_order, gate, max_concurrent, workflow::text AS workflow FROM pipeline_columns WHERE project_id = $1 ORDER BY sort_order',
+      'SELECT tenant_id, id, project_id, label, description, sort_order, gate, max_concurrent, workflow::text AS workflow, category FROM pipeline_columns WHERE project_id = $1 ORDER BY sort_order',
       [projectId]
     );
   }
@@ -160,12 +160,13 @@ export class PgProjectsRepo implements IProjectsRepo {
 
   private upsertColumnIn(c: PoolClient, row: ColumnRow): Promise<unknown> {
     return c.query(
-      `INSERT INTO pipeline_columns (tenant_id, id, project_id, label, description, sort_order, gate, max_concurrent, workflow)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb)
+      `INSERT INTO pipeline_columns (tenant_id, id, project_id, label, description, sort_order, gate, max_concurrent, workflow, category)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10)
        ON CONFLICT (id) DO UPDATE SET
          label = EXCLUDED.label, description = EXCLUDED.description,
          sort_order = EXCLUDED.sort_order, gate = EXCLUDED.gate,
-         max_concurrent = EXCLUDED.max_concurrent, workflow = EXCLUDED.workflow`,
+         max_concurrent = EXCLUDED.max_concurrent, workflow = EXCLUDED.workflow,
+         category = EXCLUDED.category`,
       [
         this.tenantId,
         row.id,
@@ -176,6 +177,7 @@ export class PgProjectsRepo implements IProjectsRepo {
         row.gate,
         row.max_concurrent,
         row.workflow,
+        row.category,
       ]
     );
   }
@@ -207,13 +209,14 @@ export class PgProjectsRepo implements IProjectsRepo {
       gate: d.gate ? 1 : 0,
       max_concurrent: d.maxConcurrent ?? null,
       workflow: d.workflow == null ? null : JSON.stringify(d.workflow),
+      category: d.category ?? positionalCategory(i, defs.length),
     }));
     const result: ColumnSyncResult = { inserted: [], removed: [], remappedTickets: [] };
 
     return this.tx(async (c) => {
       const oldRows = (
         await c.query(
-          'SELECT tenant_id, id, project_id, label, description, sort_order, gate, max_concurrent, workflow::text AS workflow FROM pipeline_columns WHERE project_id = $1 ORDER BY sort_order',
+          'SELECT tenant_id, id, project_id, label, description, sort_order, gate, max_concurrent, workflow::text AS workflow, category FROM pipeline_columns WHERE project_id = $1 ORDER BY sort_order',
           [projectId]
         )
       ).rows as ColumnRow[];

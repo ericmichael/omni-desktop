@@ -124,7 +124,7 @@ export const ConnectCloudCard = memo(() => {
               {error ??
                 (cloudMode
                   ? `Signed in as ${cloudMode.account.name ?? cloudMode.account.email ?? cloudMode.account.oid} · sessions sync to the cloud Postgres`
-                  : 'Sign in with Microsoft Entra ID to sync your chat sessions, projects, and tickets with the deployed launcher (and the web UI).')}
+                  : 'Sign in with Microsoft Entra ID to sync your chat sessions, projects, and tasks with the deployed launcher (and the web UI).')}
             </Caption1>
             {/* The chip is how the cloud identifies this device — surface it
                 regardless of link state so the user knows their machine id

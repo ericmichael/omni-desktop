@@ -30,6 +30,8 @@ export type ColumnRow = {
   gate: number;
   max_concurrent: number | null;
   workflow: string | null;
+  /** Status category: 'todo' | 'doing' | 'done'. NOT NULL with DEFAULT 'doing'. */
+  category: string;
 };
 
 export type TicketRow = {

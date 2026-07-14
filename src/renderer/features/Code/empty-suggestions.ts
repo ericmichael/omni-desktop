@@ -11,7 +11,7 @@ export type EmptySuggestion = { label: string; prompt: string };
 export const CHAT_SUGGESTIONS: ReadonlyArray<EmptySuggestion> = [
   {
     label: 'Plan my week',
-    prompt: 'Review my projects and open tickets, then propose a focused plan for this week.',
+    prompt: 'Review my projects and open tasks, then propose a focused plan for this week.',
   },
   {
     label: 'Triage my inbox',

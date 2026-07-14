@@ -1,7 +1,6 @@
 import { $omniInstallProcessStatus } from '@/renderer/features/Omni/state';
 import { toast } from '@/renderer/features/Toast/state';
 import { $agentStatuses } from '@/renderer/services/agent-process';
-import { CHAT_TAB_ID } from '@/shared/types';
 
 /**
  * Subscribe to process status atoms and show toasts for error and notable state changes.
@@ -11,22 +10,14 @@ const REHYDRATE_TITLE = 'Sandbox container was replaced';
 const REHYDRATE_BODY =
   'Your files were restored from a snapshot, but running processes (dev servers, shells) are gone. Restart anything that was running before.';
 
-// Every agent process (the chat record included — it's just the tab with the
-// reserved id) gets the tier-2 rehydrate notice on its running transition.
-// Chat additionally surfaces hard errors as toasts: it's the ambient surface
-// with no column chrome of its own to show them in.
+// Every agent process gets the tier-2 rehydrate notice on its running
+// transition. Hard errors surface in the owning column's own chrome
+// (SessionStatusBanner / error view), so there's no per-process error toast.
 const prevAgentTypes = new Map<string, string>();
 $agentStatuses.listen((statuses) => {
   for (const [processId, status] of Object.entries(statuses)) {
     const prev = prevAgentTypes.get(processId);
     prevAgentTypes.set(processId, status.type);
-
-    if (processId === CHAT_TAB_ID && status.type === 'error' && prev !== 'error') {
-      const full = status.error.message;
-      // Show a short summary in the toast; keep the full error available for Copy.
-      const firstLine = full.split('\n').find((l) => l.trim().length > 0) ?? full;
-      toast.error('Omni Code error', firstLine, { copyText: full });
-    }
 
     // ``reused`` (tier 1) is silent because nothing changed. ``fresh`` (tier 3)
     // is silent because there was no prior runtime state to mourn.

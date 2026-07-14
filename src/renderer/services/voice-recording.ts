@@ -20,9 +20,6 @@ export const $recordingScope = atom<string | null>(null);
  */
 export const $hoveredVoiceScope = atom<string | null>(null);
 
-/** Stable scope id for the Chat tab's single voice surface. */
-export const CHAT_VOICE_SCOPE = 'chat';
-
 /** Stable scope id for the headless global orchestrator's voice surface. */
 export const GLOBAL_VOICE_SCOPE = 'global';
 

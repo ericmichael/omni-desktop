@@ -4,7 +4,6 @@
  * just renders and runs them.
  */
 import type { CodeLayoutMode, CodeTab, LayoutMode } from '@/shared/types';
-import { isChatTab } from '@/shared/types';
 
 export type PaletteCommand = {
   id: string;
@@ -31,18 +30,27 @@ export type PaletteContext = {
 };
 
 /** Session columns the palette can jump to (the deck's view of codeTabs). */
-export const paletteColumns = (codeTabs: CodeTab[]): CodeTab[] =>
-  codeTabs.filter((t) => !isChatTab(t) && !t.customAppId);
+export const paletteColumns = (codeTabs: CodeTab[]): CodeTab[] => codeTabs.filter((t) => !t.customAppId);
 
 export function buildCommands(ctx: PaletteContext): PaletteCommand[] {
   const commands: PaletteCommand[] = [
-    { id: 'nav-chat', label: 'Go to Chat', keywords: 'conversation talk', run: () => ctx.navigate('chat') },
-    { id: 'nav-spaces', label: 'Go to Spaces', keywords: 'deck columns code', run: () => ctx.navigate('spaces') },
     {
-      id: 'nav-projects',
-      label: 'Go to Projects',
-      keywords: 'tickets board home inbox',
-      run: () => ctx.navigate('projects'),
+      id: 'nav-home',
+      label: 'Go to Home',
+      keywords: 'mission control attention needs you running',
+      run: () => ctx.navigate('home'),
+    },
+    {
+      id: 'nav-work',
+      label: 'Go to Work',
+      keywords: 'tasks tickets board projects all work',
+      run: () => ctx.navigate('work'),
+    },
+    {
+      id: 'nav-chat',
+      label: 'Go to Chat',
+      keywords: 'conversation talk deck columns sessions',
+      run: () => ctx.navigate('chat'),
     },
     { id: 'nav-inbox', label: 'Go to Inbox', keywords: 'capture ideas todo triage', run: ctx.goToInbox },
     {
@@ -59,7 +67,7 @@ export function buildCommands(ctx: PaletteContext): PaletteCommand[] {
     },
     { id: 'add-inbox-item', label: 'Add inbox item', keywords: 'capture idea todo quick', run: ctx.addInboxItem },
     { id: 'create-project', label: 'Create project', keywords: 'new workspace initiative', run: ctx.createProject },
-    { id: 'new-session', label: 'New session', keywords: 'create column agent', run: ctx.newSession },
+    { id: 'new-session', label: 'New chat', keywords: 'create column agent session conversation', run: ctx.newSession },
     {
       id: 'toggle-layout',
       label: ctx.codeLayoutMode === 'tile' ? 'Switch deck to Focus layout' : 'Switch deck to Tile layout',

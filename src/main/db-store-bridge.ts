@@ -149,6 +149,9 @@ export function rowToColumn(row: ColumnRow): Column {
   const col: Column = {
     id: row.id as ColumnId,
     label: row.label,
+    // The CHECK constraint guarantees a valid value; guard anyway so a
+    // hand-edited DB degrades to 'doing' instead of poisoning the renderer.
+    category: row.category === 'todo' || row.category === 'done' ? row.category : 'doing',
   };
   if (row.description) {
     col.description = row.description;
@@ -410,6 +413,9 @@ export function columnToRow(col: Column, projectId: string, sortOrder: number): 
     gate: col.gate ? 1 : 0,
     max_concurrent: col.maxConcurrent ?? null,
     workflow: jsonStrOrNull(col.workflow),
+    // Callers (ProjectManager.updateProject) normalize categories before the
+    // write, so this fallback only covers non-pipeline-editing paths.
+    category: col.category ?? 'doing',
   };
 }
 

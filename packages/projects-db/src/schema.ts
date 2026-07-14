@@ -361,4 +361,31 @@ CREATE INDEX idx_inbox_status ON inbox_items(status);
 PRAGMA foreign_keys = ON;
 `,
   },
+  {
+    version: 15,
+    sql: `
+-- Jira-style status category per pipeline column. The custom column graph
+-- stays the agent's state machine; the category is the human-facing
+-- universal state the global Work view groups by.
+-- Backfill order matters: 'done' first so a single-column pipeline lands on
+-- 'done' (preserving the old "last column = shipped" semantics), then 'todo'
+-- for the first column of pipelines that still have a non-done head.
+ALTER TABLE pipeline_columns ADD COLUMN category TEXT NOT NULL DEFAULT 'doing'
+  CHECK(category IN ('todo','doing','done'));
+
+UPDATE pipeline_columns SET category = 'done' WHERE id IN (
+  SELECT id FROM (
+    SELECT id, ROW_NUMBER() OVER (PARTITION BY project_id ORDER BY sort_order DESC, id DESC) AS rn
+    FROM pipeline_columns
+  ) WHERE rn = 1
+);
+
+UPDATE pipeline_columns SET category = 'todo' WHERE category <> 'done' AND id IN (
+  SELECT id FROM (
+    SELECT id, ROW_NUMBER() OVER (PARTITION BY project_id ORDER BY sort_order ASC, id ASC) AS rn
+    FROM pipeline_columns
+  ) WHERE rn = 1
+);
+`,
+  },
 ];

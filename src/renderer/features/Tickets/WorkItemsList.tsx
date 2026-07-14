@@ -2,7 +2,6 @@ import { makeStyles, mergeClasses, shorthands, tokens } from '@fluentui/react-co
 import {
   Add16Regular,
   Archive20Regular,
-  ArrowLeft20Regular,
   ArrowSync20Regular,
   Board20Regular,
   BranchFork16Regular,
@@ -15,8 +14,10 @@ import {
   Play20Filled,
 } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
+import { map } from 'nanostores';
 import { memo, useCallback, useMemo, useState } from 'react';
 
+import { categoryOf } from '@/lib/pipeline-category';
 import {
   Badge,
   Caption1,
@@ -28,9 +29,7 @@ import {
   MenuList,
   MenuPopover,
   MenuTrigger,
-  SectionLabel,
   SegmentedControl,
-  Subtitle2,
 } from '@/renderer/ds';
 import { $milestones } from '@/renderer/features/Initiatives/state';
 import { openTicketInCode } from '@/renderer/services/navigation';
@@ -38,11 +37,24 @@ import { isActivePhase } from '@/shared/ticket-phase';
 import type { Milestone, MilestoneId, ProjectId, Ticket, TicketId } from '@/shared/types';
 
 import { KanbanBoard } from './KanbanBoard';
+import { ProjectPageHeader } from './ProjectPageHeader';
 import { $activeMilestoneId, $pipeline, $tickets, ticketApi } from './state';
-import { PHASE_COLORS, PHASE_LABELS, TICKET_PRIORITY_LABELS } from './ticket-constants';
+import { PHASE_COLORS, PHASE_LABELS, PRIORITY_DOT_COLORS, TICKET_PRIORITY_LABELS } from './ticket-constants';
 
 type ViewMode = 'list' | 'board';
 type VisibilityFilter = 'active' | 'archived' | 'all';
+
+/**
+ * List/board choice per project, session-scoped. A module-level atom instead
+ * of component state so navigating away and back doesn't reset the choice.
+ */
+const $viewModes = map<Record<string, ViewMode>>({});
+
+/** Jump straight to a project's kanban board (the Home tab's Board card). */
+export function openProjectBoard(projectId: ProjectId): void {
+  $viewModes.setKey(projectId, 'board');
+  ticketApi.goToProject(projectId, 'board');
+}
 type TicketRowProps = {
   ticket: Ticket;
   selected: boolean;
@@ -55,13 +67,6 @@ type TicketRowProps = {
   onSelect: (ticketId: TicketId) => void;
   onHoverChange: (ticketId: TicketId | null) => void;
   onRequestDelete: (ticket: Ticket) => void;
-};
-
-const PRIORITY_DOT_COLORS: Record<string, string> = {
-  critical: tokens.colorPaletteRedForeground1,
-  high: tokens.colorPaletteYellowForeground1,
-  medium: tokens.colorPaletteBlueForeground2,
-  low: tokens.colorNeutralForeground3,
 };
 
 const useStyles = makeStyles({
@@ -81,11 +86,8 @@ const useStyles = makeStyles({
     ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
     flexShrink: 0,
   },
-  headerTitle: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '2px',
-    minWidth: 0,
+  pageHeader: {
+    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
   },
   controls: {
     display: 'flex',
@@ -346,7 +348,7 @@ const TicketRow = memo(
         {unresolvedBlockers > 0 && (
           <span
             className={styles.blockedBadge}
-            title={`Blocked by ${unresolvedBlockers} ticket${unresolvedBlockers === 1 ? '' : 's'}`}
+            title={`Blocked by ${unresolvedBlockers} task${unresolvedBlockers === 1 ? '' : 's'}`}
             aria-label={`Blocked by ${unresolvedBlockers}`}
           >
             <LockClosed16Regular />
@@ -385,7 +387,7 @@ const TicketRow = memo(
         {hovered && !ticket.resolution && !isRunning && (
           <span className={styles.cellActions} style={{ opacity: 1 }} onClick={handleStopPropagation}>
             <IconButton icon={<Open20Regular />} size="sm" aria-label="Open in Code" onClick={handleOpenInCode} />
-            <IconButton icon={<Play20Filled />} size="sm" aria-label="Autopilot" onClick={handleAutopilot} />
+            <IconButton icon={<Play20Filled />} size="sm" aria-label="Start agent" onClick={handleAutopilot} />
           </span>
         )}
         <span
@@ -394,7 +396,7 @@ const TicketRow = memo(
         >
           <Menu positioning={{ position: 'below', align: 'end' }}>
             <MenuTrigger disableButtonEnhancement>
-              <IconButton icon={<MoreHorizontal20Regular />} size="sm" aria-label="Ticket actions" />
+              <IconButton icon={<MoreHorizontal20Regular />} size="sm" aria-label="Task actions" />
             </MenuTrigger>
             <MenuPopover>
               <MenuList>
@@ -441,11 +443,14 @@ type WorkItemsListProps = {
   projectId: ProjectId;
   selectedTicketId?: TicketId | null;
   onSelectTicket?: (ticketId: TicketId) => void;
-  title?: string;
+  /** The page title ("Tasks", or a milestone's name). */
+  pageTitle: string;
+  /** Breadcrumb ancestors between the project and this page. */
+  crumbMiddle?: { label: string; onClick: () => void }[];
+  /** Caption line under the title (e.g. milestone metadata). */
   contextLabel?: React.ReactNode;
-  onBack?: () => void;
-  /** Optional actions rendered at the right edge of the header (before the
-   *  view-mode toggle / filter), e.g. a milestone overflow menu. */
+  /** Optional actions rendered at the right edge of the title row (after
+   *  the filter / view-mode toggle), e.g. a milestone overflow menu. */
   rightActions?: React.ReactNode;
   /** Mobile: the TopAppBar already shows back + title, so render only the
    *  count + filter controls in the header row. */
@@ -457,9 +462,9 @@ export const WorkItemsList = memo(
     projectId,
     selectedTicketId,
     onSelectTicket,
-    title = 'Items',
+    pageTitle,
+    crumbMiddle,
     contextLabel,
-    onBack,
     rightActions,
     hideChrome,
   }: WorkItemsListProps) => {
@@ -468,7 +473,8 @@ export const WorkItemsList = memo(
     const pipeline = useStore($pipeline);
     const milestones = useStore($milestones);
     const activeMilestoneId = useStore($activeMilestoneId);
-    const [viewMode, setViewMode] = useState<ViewMode>('list');
+    const viewModes = useStore($viewModes);
+    const viewMode: ViewMode = viewModes[projectId] ?? 'list';
     const [visibilityFilter, setVisibilityFilter] = useState<VisibilityFilter>('active');
     const [hoveredId, setHoveredId] = useState<TicketId | null>(null);
     const [pendingDelete, setPendingDelete] = useState<Ticket | null>(null);
@@ -488,7 +494,7 @@ export const WorkItemsList = memo(
     }, [pendingDelete]);
 
     const pendingIsUntitled = !pendingDelete?.title || pendingDelete.title === 'Untitled';
-    const deleteTitle = pendingIsUntitled ? 'Delete this untitled ticket?' : `Delete ticket "${pendingDelete?.title}"?`;
+    const deleteTitle = pendingIsUntitled ? 'Delete this untitled task?' : `Delete task "${pendingDelete?.title}"?`;
 
     const projectMilestones = useMemo(
       () => Object.values(milestones).filter((m) => m.projectId === projectId),
@@ -552,22 +558,15 @@ export const WorkItemsList = memo(
     );
 
     const toggleView = useCallback(() => {
-      setViewMode((m) => (m === 'list' ? 'board' : 'list'));
-    }, []);
+      $viewModes.setKey(projectId, ($viewModes.get()[projectId] ?? 'list') === 'list' ? 'board' : 'list');
+    }, [projectId]);
 
     const getColumnBadgeColor = (ticket: Ticket): 'blue' | 'green' | 'default' => {
-      if (!pipeline) {
+      if (!pipeline || !ticket.columnId) {
         return 'default';
       }
-      const lastCol = pipeline.columns[pipeline.columns.length - 1];
-      if (ticket.columnId === lastCol?.id) {
-        return 'green';
-      }
-      const firstCol = pipeline.columns[0];
-      if (ticket.columnId === firstCol?.id || !ticket.columnId) {
-        return 'default';
-      }
-      return 'blue';
+      const category = categoryOf(pipeline, ticket.columnId);
+      return category === 'done' ? 'green' : category === 'todo' ? 'default' : 'blue';
     };
 
     const filterControl = (
@@ -582,35 +581,43 @@ export const WorkItemsList = memo(
       />
     );
 
+    const viewToggle = (
+      <IconButton
+        aria-label={viewMode === 'list' ? 'Board view' : 'List view'}
+        icon={viewMode === 'list' ? <Board20Regular /> : <List20Regular />}
+        size="sm"
+        onClick={toggleView}
+      />
+    );
+
     return (
       <div className={styles.root}>
-        <div className={styles.header}>
-          {!hideChrome && onBack ? (
-            <IconButton aria-label="Back" icon={<ArrowLeft20Regular />} size="sm" onClick={onBack} />
-          ) : null}
-          {!hideChrome &&
-            (contextLabel || title !== 'Items' ? (
-              <div className={styles.headerTitle}>
-                {contextLabel ? <Caption1>{contextLabel}</Caption1> : null}
-                <Subtitle2>{title}</Subtitle2>
-              </div>
-            ) : (
-              <SectionLabel>{title}</SectionLabel>
-            ))}
-          {/* Mobile: the filter is the header's main content, so it leads. */}
-          {hideChrome && filterControl}
-          <div className={styles.flex1} />
-          <div className={styles.controls}>
-            {!hideChrome && filterControl}
-            <IconButton
-              aria-label={viewMode === 'list' ? 'Board view' : 'List view'}
-              icon={viewMode === 'list' ? <Board20Regular /> : <List20Regular />}
-              size="sm"
-              onClick={toggleView}
-            />
-            {rightActions}
+        {hideChrome ? (
+          /* Mobile: the TopAppBar titles the page — the filter leads. */
+          <div className={styles.header}>
+            {filterControl}
+            <div className={styles.flex1} />
+            <div className={styles.controls}>
+              {viewToggle}
+              {rightActions}
+            </div>
           </div>
-        </div>
+        ) : (
+          <ProjectPageHeader
+            projectId={projectId}
+            middle={crumbMiddle}
+            title={pageTitle}
+            actions={
+              <>
+                {filterControl}
+                {viewToggle}
+                {rightActions}
+              </>
+            }
+            meta={contextLabel ? <Caption1>{contextLabel}</Caption1> : undefined}
+            className={styles.pageHeader}
+          />
+        )}
 
         {viewMode === 'list' ? (
           <div className={styles.list}>

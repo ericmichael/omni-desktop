@@ -11,7 +11,13 @@
 import { upgradeLegacyInbox } from '@/lib/inbox-migration';
 import { uuidv4 } from '@/lib/uuid';
 import type { ColumnId, InboxItem, Milestone, StoreData, TicketId, TicketPriority } from '@/shared/types';
-import { CHAT_TAB_ID } from '@/shared/types';
+
+/**
+ * v26's reserved chat-record id, kept as a local literal: the constant is
+ * gone from shared/types (v27 dissolved the reserved record into an ordinary
+ * projectless column) but the v26 step still describes the historical shape.
+ */
+const LEGACY_CHAT_TAB_ID = 'chat';
 
 // ---------------------------------------------------------------------------
 // Narrow store interface — anything that implements this can be migrated.
@@ -670,7 +676,7 @@ export function runMigrations(store: IMigrationStore, deps: MigrationDeps): void
   }
 
   // v25 → v26: chat unification. The Chat tab's session identity moves onto a
-  // reserved ``codeTabs`` entry (CHAT_TAB_ID) so chat renders through the
+  // reserved ``codeTabs`` entry (LEGACY_CHAT_TAB_ID) so chat renders through the
   // same column implementation as the Spaces deck. The legacy chatSessionId /
   // chatProfileName / chatContainerId keys fold into the record and are
   // deleted. Existing conversation + container reattach carry over via the
@@ -678,12 +684,12 @@ export function runMigrations(store: IMigrationStore, deps: MigrationDeps): void
   if (version === 25 || (store.get('schemaVersion', 0) as number) === 25) {
     const newSessionId = deps.newSessionId ?? uuidv4;
     const codeTabs = (store.get('codeTabs', []) as Array<Record<string, unknown>>) ?? [];
-    if (!codeTabs.some((t) => t.id === CHAT_TAB_ID)) {
+    if (!codeTabs.some((t) => t.id === LEGACY_CHAT_TAB_ID)) {
       const chatSessionId = store.get('chatSessionId') as string | null | undefined;
       const chatProfileName = store.get('chatProfileName') as string | null | undefined;
       const chatContainerId = store.get('chatContainerId') as string | null | undefined;
       const chatTab: Record<string, unknown> = {
-        id: CHAT_TAB_ID,
+        id: LEGACY_CHAT_TAB_ID,
         projectId: null,
         sessionId: chatSessionId ?? newSessionId(),
         profileName: chatProfileName ?? (store.get('defaultProfileName') as string | undefined) ?? 'host',
@@ -700,11 +706,52 @@ export function runMigrations(store: IMigrationStore, deps: MigrationDeps): void
     store.delete('chatContainerId');
 
     store.set('schemaVersion', 26);
+    // Fall through to v26→v27.
+  }
+
+  // v26 → v27: Chat/Spaces tab merge. The deck now lives behind the Chat tab
+  // and chat is an ordinary projectless column (the v26 reserved record simply
+  // becomes one — its id string stays 'chat', which keeps the process key,
+  // container reattach, and voice scope coherent).
+  if ((store.get('schemaVersion', 0) as number) === 26) {
+    // The 'spaces' layout mode folds into 'chat'.
+    if ((store.get('layoutMode') as string) === 'spaces') {
+      store.set('layoutMode', 'chat');
+    }
+
+    // Every pre-merge tab launched eagerly on mount; stamp activatedAt so the
+    // new lazy-launch gate (chat columns boot on first message) doesn't
+    // strand them un-booted.
+    const codeTabs = (store.get('codeTabs', []) as Array<Record<string, unknown>>) ?? [];
+    store.set(
+      'codeTabs',
+      codeTabs.map((t) => (t.activatedAt ? t : { ...t, activatedAt: (t.createdAt as number) ?? deps.now() })) as never
+    );
+
+    // Focus is the new default landing (it reads like the old Chat tab), but
+    // an install with deck columns open chose multitasking — leave its stored
+    // layout (implicit 'tile' or explicit 'focus') untouched.
+    const hadDeckColumns = codeTabs.some((t) => t.id !== 'chat');
+    if (!hadDeckColumns) {
+      store.set('codeLayoutMode', 'focus');
+    }
+
+    store.set('schemaVersion', 27);
+    // Fall through to v27→v28.
+  }
+
+  // v27 → v28: the plan-week ritual is gone. Pins are plain durable pins
+  // (they always were, mechanically); the review-day schedule and its
+  // last-completed timestamp have no reader left.
+  if ((store.get('schemaVersion', 0) as number) === 27) {
+    store.delete('weeklyReviewDay');
+    store.delete('lastWeeklyReviewAt');
+    store.set('schemaVersion', 28);
     deps.repairProjectRoots?.();
     return;
   }
 
-  if (((store.get('schemaVersion', 0) as number) ?? 0) >= 26) {
+  if (((store.get('schemaVersion', 0) as number) ?? 0) >= 28) {
     // Stale pre-v26 clients (an old PWA tab against a migrated server) can
     // re-mint the legacy chat keys after the fold ran. They're dead weight —
     // sweep them on every boot of the migrated store.

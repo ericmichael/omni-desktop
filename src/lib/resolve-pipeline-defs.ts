@@ -32,5 +32,6 @@ export const resolvePipelineDefs = (input: ResolvePipelineDefsInput): ColumnSync
     gate: c.gate,
     maxConcurrent: c.maxConcurrent,
     workflow: c.workflow,
+    category: c.category,
   }));
 };

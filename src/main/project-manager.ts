@@ -7,12 +7,19 @@ import type { ColumnRow, IProjectsRepo, ProjectsRepo, TicketRemap } from 'omni-p
 import { commentId } from 'omni-projects-db';
 import path from 'path';
 
+import { appendActivityEvent } from '@/lib/activity-log';
 import { getArtifactsDir, getContainerArtifactsDir } from '@/lib/artifacts';
 import { getContainerFilesChanged } from '@/lib/container-files-changed';
 import { detectContainerPullRequest, detectContainerPullRequests } from '@/lib/container-pull-request';
 import { mirrorContainerChangesToHost } from '@/lib/container-sync';
 import { getGitFilesChanged, resolveTicketDiffBase } from '@/lib/git-files-changed';
 import { INBOX_SWEEP_INTERVAL_MS } from '@/lib/inbox-expiry';
+import {
+  doneColumnIds,
+  isDoneColumn,
+  normalizePipelineCategories,
+  validatePipelineCategories,
+} from '@/lib/pipeline-category';
 import type { ProjectManagerDeps } from '@/lib/project-manager-deps';
 import { runMigrations as runSchemaMigrations } from '@/lib/project-migrations';
 import type { ProjectConfigDefaults } from '@/lib/project-to-config';
@@ -79,7 +86,6 @@ import type {
   TicketId,
   TicketPriority,
 } from '@/shared/types';
-import { CHAT_TAB_ID } from '@/shared/types';
 
 const DEFAULT_BRIEF_TEMPLATE = `## Problem
 
@@ -389,6 +395,12 @@ export class ProjectManager {
             }
           : undefined,
         getOmniConfigDir: () => getOmniConfigDir(),
+        // The activity feed is UI-awareness state, not project data — it
+        // stays in the electron store even when a projects repo is present.
+        appendActivity: (event) => {
+          this.store.set('activityLog', appendActivityEvent(this.store.get('activityLog'), event, event.at));
+          this.sendToWindow('store:changed', this.store.store);
+        },
       },
       host: {
         getTicketById: (ticketId) => this.getTicketById(ticketId),
@@ -708,7 +720,14 @@ export class ProjectManager {
     this.setProjects(projects);
     if (this.repo && pipeline) {
       const repo = this.repo;
-      const rows = pipeline.columns.map((col, sortOrder) => columnToRow(col, id, sortOrder));
+      // Category chokepoint: fill missing categories positionally, then
+      // reject shapes the global views can't group (no todo, done not last…).
+      const columns = normalizePipelineCategories(pipeline.columns);
+      const validity = validatePipelineCategories(columns);
+      if (validity.isErr()) {
+        throw new Error(validity.error);
+      }
+      const rows = columns.map((col, sortOrder) => columnToRow(col, id, sortOrder));
       this.cache.columns.set(id, rows);
       this.enqueuePersist(async () => {
         await repo.replaceColumnsForProject(id, rows);
@@ -967,15 +986,18 @@ export class ProjectManager {
     return pipeline.columns[0]?.id ?? 'backlog';
   };
 
-  /** The last column in the pipeline (terminal — stops supervisor). */
+  /** The 'done'-category column (terminal — stops supervisor). Validation
+   *  keeps it last, so the positional fallback inside categoryOf only fires
+   *  for legacy in-store pipelines. */
   private getTerminalColumnId = (projectId: ProjectId): ColumnId => {
     const pipeline = this.getPipeline(projectId);
-    return pipeline.columns[pipeline.columns.length - 1]?.id ?? 'completed';
+    const done = [...doneColumnIds(pipeline)];
+    return done[done.length - 1] ?? pipeline.columns[pipeline.columns.length - 1]?.id ?? 'completed';
   };
 
-  /** Check if a column is the terminal (last) column for a project. */
+  /** Check if a column counts as shipped ('done' category) for a project. */
   private isTerminalColumn = (projectId: ProjectId, columnId: ColumnId): boolean => {
-    return columnId === this.getTerminalColumnId(projectId);
+    return isDoneColumn(this.getPipeline(projectId), columnId);
   };
 
   /** Check if a column is the first (backlog) column for a project. */
@@ -1607,7 +1629,7 @@ export class ProjectManager {
   detectCodeTabPullRequests = async (tabId: CodeTabId): Promise<ContainerPullRequest[]> => {
     const ctx = this.codeTabPrContext(tabId);
     if (!ctx) {
-      return [];
+      return this.detectProjectlessTabPullRequests(tabId);
     }
     const found: ContainerPullRequest[] = [];
     for (const source of ctx.project.sources) {
@@ -1627,39 +1649,40 @@ export class ProjectManager {
   };
 
   /**
-   * Detect open PRs for the singleton chat session's workspace. The chat runs
-   * under the ``"chat"`` process key against ``store.workspaceDir`` (no project,
-   * so a single source mounted at the workspace basename → at most one PR).
-   * Returns an array for a uniform banner contract. Best-effort → empty array.
+   * Detect open PRs for a projectless (chat) column. There's no project
+   * source list — the live process's workspace dir (the conversation's
+   * scratch dir, NOT the store's workspace root) is the single implicit
+   * source, mounted at its basename → at most one PR. Best-effort → [].
    */
-  detectChatPullRequests = async (): Promise<ContainerPullRequest[]> => {
-    const containerId = this.processManager?.getProcessContainerId('chat') ?? null;
+  private detectProjectlessTabPullRequests = async (tabId: CodeTabId): Promise<ContainerPullRequest[]> => {
+    const tab = (
+      (this.store.get('codeTabs') ?? []) as Array<{ id: string; projectId: unknown; sessionId?: string }>
+    ).find((t) => t.id === tabId);
+    if (!tab || tab.projectId) {
+      // Unknown tab, or a project tab whose context lookup failed upstream
+      // (no container yet / project deleted) — nothing to detect.
+      return [];
+    }
+    const containerId = this.processManager?.getProcessContainerId(tabId) ?? null;
     if (!containerId) {
       return [];
     }
-    // The live process's workspace dir, not the store's workspace *root*: the
-    // chat session runs against a per-conversation scratch dir whose basename
-    // is the actual mount name inside the container.
-    const workspaceDir =
-      this.processManager?.getProcessWorkspaceDir('chat') ?? (this.store.get('workspaceDir') as string | undefined);
+    const workspaceDir = this.processManager?.getProcessWorkspaceDir(tabId);
     if (!workspaceDir) {
       return [];
     }
     const mountName = path.basename(workspaceDir) || 'workspace';
     const prs = await detectContainerPullRequests(containerId, mountName);
-    // Scope key = the conversation's sessionId (lives on the reserved chat
-    // record in codeTabs) — a new conversation is a new scope, so a merge
-    // watched in one conversation never badges another.
-    const chatTab = ((this.store.get('codeTabs') ?? []) as Array<{ id: string; sessionId?: string }>).find(
-      (t) => t.id === CHAT_TAB_ID
-    );
+    // Scope key = the conversation's sessionId — a new conversation is a new
+    // scope, so a merge watched in one conversation never badges another.
     const enriched = prs.map((pr) => ({
       ...pr,
       sourceMountName: mountName,
-      ...(chatTab?.sessionId ? { sessionId: chatTab.sessionId } : {}),
+      codeTabId: tabId,
+      ...(tab.sessionId ? { sessionId: tab.sessionId } : {}),
       workspaceDir,
     }));
-    return this.gateAndPersistScopedPullRequests(chatTab?.sessionId, enriched);
+    return this.gateAndPersistScopedPullRequests(tab.sessionId ?? tabId, enriched);
   };
 
   // #endregion

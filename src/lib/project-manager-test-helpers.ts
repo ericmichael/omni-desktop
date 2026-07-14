@@ -44,8 +44,6 @@ const defaultStoreData = (): StoreData =>
     tasks: [],
     tickets: [],
     wipLimit: 100,
-    weeklyReviewDay: 5,
-    lastWeeklyReviewAt: null,
     schemaVersion: 4,
     chatSessionId: null,
     codeTabs: [],

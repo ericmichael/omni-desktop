@@ -126,22 +126,24 @@ export const ChatShell = memo(
                             )}
                           </AnimatePresence>
                           <AnimatePresence>
-                            {phase === 'idle' && onLaunch && (
+                            {phase === 'idle' && (onLaunch || prelaunchExtras) && (
                               <motion.div
-                                className="mt-5 flex items-center gap-2"
+                                className="mt-5 flex items-center justify-center gap-2"
                                 initial={{ opacity: 0 }}
                                 animate={{ opacity: 1 }}
                                 exit={{ opacity: 0 }}
                                 transition={{ duration: 0.3 }}
                               >
-                                <button
-                                  type="button"
-                                  onClick={onLaunch}
-                                  disabled={launchDisabled}
-                                  className="h-9 rounded-full bg-primary px-5 text-sm font-medium text-primary-foreground hover:brightness-110 disabled:opacity-50"
-                                >
-                                  Launch workspace
-                                </button>
+                                {onLaunch && (
+                                  <button
+                                    type="button"
+                                    onClick={onLaunch}
+                                    disabled={launchDisabled}
+                                    className="h-9 rounded-full bg-primary px-5 text-sm font-medium text-primary-foreground hover:brightness-110 disabled:opacity-50"
+                                  >
+                                    Launch workspace
+                                  </button>
+                                )}
                                 {prelaunchExtras}
                               </motion.div>
                             )}

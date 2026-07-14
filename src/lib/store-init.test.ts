@@ -10,16 +10,12 @@ import { migrateLayoutMode, migrateThemeForGlass } from '@/lib/store-init';
 // ---------------------------------------------------------------------------
 
 describe('migrateLayoutMode', () => {
-  it('migrates "work" to "chat"', () => {
-    expect(migrateLayoutMode('work')).toBe('chat');
+  it('migrates the split "projects" tab to "work"', () => {
+    expect(migrateLayoutMode('projects')).toBe('work');
   });
 
   it('migrates "desktop" to "chat"', () => {
     expect(migrateLayoutMode('desktop')).toBe('chat');
-  });
-
-  it('migrates "home" to "chat"', () => {
-    expect(migrateLayoutMode('home')).toBe('chat');
   });
 
   it('migrates unknown mode to "chat"', () => {
@@ -30,24 +26,26 @@ describe('migrateLayoutMode', () => {
     expect(migrateLayoutMode('chat')).toBeNull();
   });
 
-  it('migrates legacy "code" mode to "spaces"', () => {
-    expect(migrateLayoutMode('code')).toBe('spaces');
+  it('migrates legacy "code" mode to "chat"', () => {
+    expect(migrateLayoutMode('code')).toBe('chat');
   });
 
-  it('migrates intermediate "os" mode to "spaces"', () => {
-    expect(migrateLayoutMode('os')).toBe('spaces');
+  it('migrates intermediate "os" mode to "chat"', () => {
+    expect(migrateLayoutMode('os')).toBe('chat');
   });
 
   it('migrates the retired "more" page to "settings"', () => {
     expect(migrateLayoutMode('more')).toBe('settings');
   });
 
-  it('returns null for valid "spaces" mode', () => {
-    expect(migrateLayoutMode('spaces')).toBeNull();
+  it('migrates the merged "spaces" tab to "chat"', () => {
+    expect(migrateLayoutMode('spaces')).toBe('chat');
   });
 
-  it('returns null for valid "projects" mode', () => {
-    expect(migrateLayoutMode('projects')).toBeNull();
+  it('returns null for the rail tabs of the attention-centric IA', () => {
+    expect(migrateLayoutMode('home')).toBeNull();
+    expect(migrateLayoutMode('inbox')).toBeNull();
+    expect(migrateLayoutMode('work')).toBeNull();
   });
 
   it('returns null for valid "dashboards" mode', () => {

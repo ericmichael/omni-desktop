@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { waitFor } from 'xstate';
 
+import { MAX_CHAT_CONVERSATIONS } from '@/lib/chat-conversations';
 import { clearColumnActivity, publishColumnActivity } from '@/renderer/services/column-activity';
 import { forwardRoutineEvent, registerRoutineActor } from '@/renderer/services/routine-bridge';
 import {
@@ -264,7 +265,7 @@ export function App({
   // Publish this column's live activity (thinking / tool line / pending
   // approval) so deck chrome can show a glanceable "now doing X" without
   // reaching into the transcript. Scoped by the same context the voice
-  // system uses (the Code tab id; CHAT_VOICE_SCOPE on the Chat tab).
+  // system uses (the Code tab id).
   const activityScope = useContext(VoiceScopeContext);
   const pendingApproval = useMemo(() => items.some((it) => (it as { type?: string }).type === 'approval'), [items]);
   useEffect(() => {
@@ -1604,6 +1605,9 @@ export function App({
         return handleApprovalRef.current(requestId, decision === 'approve' ? 'yes' : 'no', pending?.kind ?? 'function');
       },
       newSession: () => newSessionRef.current(),
+      // Feeds the Focus sidebar's Recent section — cap at its display size
+      // so a long server-side history isn't serialized on every poll.
+      listSessions: () => client.listSessions({ limit: MAX_CHAT_CONVERSATIONS }),
       notify: (content: string, source: string) =>
         // Deliver as a role="assistant" history item that triggers a run — the
         // exact wakeup the notification flusher uses internally. Uses the

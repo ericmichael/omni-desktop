@@ -1,3 +1,5 @@
+import { tokens } from '@fluentui/react-components';
+
 import type { TicketPhase, TicketPriority, TicketResolution } from '@/shared/types';
 
 export const TICKET_PRIORITY_LABELS: Record<TicketPriority, string> = {
@@ -5,6 +7,14 @@ export const TICKET_PRIORITY_LABELS: Record<TicketPriority, string> = {
   medium: 'Medium',
   high: 'High',
   critical: 'Critical',
+};
+
+/** Fill colors for the priority dot on task rows (lists, board, home). */
+export const PRIORITY_DOT_COLORS: Record<string, string> = {
+  critical: tokens.colorPaletteRedForeground1,
+  high: tokens.colorPaletteYellowForeground1,
+  medium: tokens.colorPaletteBlueForeground2,
+  low: tokens.colorNeutralForeground3,
 };
 
 export type BadgeColor = 'default' | 'blue' | 'green' | 'purple' | 'red' | 'yellow' | 'sky' | 'orange';

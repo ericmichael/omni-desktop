@@ -14,7 +14,6 @@ const EXPECTED_CHANNELS = [
   'project:send-supervisor-message',
   'project:reset-supervisor-session',
   'project:set-auto-dispatch',
-  'project:get-active-wip-tickets',
   'project:get-ticket-workspace',
   'project:get-tasks',
   'project:finalize-ticket-cleanup',
@@ -27,7 +26,6 @@ const makeOrchestrator = () => ({
   sendSupervisorMessage: vi.fn(),
   resetSupervisorSession: vi.fn(),
   setAutoDispatch: vi.fn(),
-  getActiveWipTickets: vi.fn(() => []),
   getTicketWorkspaceLocked: vi.fn(() => '/tmp'),
   listTasks: vi.fn(() => []),
   finalizeTicketCleanup: vi.fn(async () => true),
@@ -89,14 +87,6 @@ describe('registerSupervisorHandlers', () => {
     registerSupervisorHandlers(ipc, () => orch as never);
     ipc.invoke('project:set-auto-dispatch', 'p1', true);
     expect(orch.setAutoDispatch).toHaveBeenCalledWith('p1', true);
-  });
-
-  it('project:get-active-wip-tickets delegates with no args', () => {
-    const ipc = new StubIpc();
-    const orch = makeOrchestrator();
-    registerSupervisorHandlers(ipc, () => orch as never);
-    ipc.invoke('project:get-active-wip-tickets');
-    expect(orch.getActiveWipTickets).toHaveBeenCalledOnce();
   });
 
   it('project:get-tasks delegates with no args', () => {

@@ -48,7 +48,6 @@ export function registerProjectHandlers(ipc: IIpcListener, resolve: (event: unkn
   h('project:apply-code-tab-source-changes', (pm, tabId, sourceId) => pm.applyCodeTabSourceChanges(tabId, sourceId));
   h('project:detect-code-tab-pull-request', (pm, tabId, sourceId) => pm.detectCodeTabPullRequest(tabId, sourceId));
   h('project:detect-code-tab-pull-requests', (pm, tabId) => pm.detectCodeTabPullRequests(tabId));
-  h('project:detect-chat-pull-requests', (pm) => pm.detectChatPullRequests());
 
   // Sync to host + PR detection (per-source — sourceId is one of the project's ProjectSource ids)
   h('project:merge-ticket', (pm, ticketId, sourceId) => pm.mergePrTicket(ticketId, sourceId));

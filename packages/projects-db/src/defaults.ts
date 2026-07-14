@@ -15,6 +15,13 @@ export type ColumnWorkflowContract = {
   autoDispatch?: boolean;
 };
 
+/**
+ * Human-facing status category (Jira-style). The column graph is the agent's
+ * state machine; the category is the universal state the launcher's global
+ * views group by. Every pipeline maps onto: todo* doing* done.
+ */
+export type ColumnCategory = 'todo' | 'doing' | 'done';
+
 export type ColumnDef = {
   logicalId: string;
   label: string;
@@ -22,11 +29,13 @@ export type ColumnDef = {
   gate?: boolean;
   maxConcurrent?: number;
   workflow?: ColumnWorkflowContract;
+  category: ColumnCategory;
 };
 
 export const DEFAULT_COLUMNS: ColumnDef[] = [
   {
     logicalId: 'backlog',
+    category: 'todo',
     label: 'Backlog',
     description: 'Capture unscheduled or unstarted software work.',
     workflow: {
@@ -42,6 +51,7 @@ export const DEFAULT_COLUMNS: ColumnDef[] = [
   },
   {
     logicalId: 'spec',
+    category: 'doing',
     label: 'Spec',
     description: 'Understand the request and produce a decision-complete implementation plan.',
     workflow: {
@@ -60,6 +70,7 @@ export const DEFAULT_COLUMNS: ColumnDef[] = [
   },
   {
     logicalId: 'implementation',
+    category: 'doing',
     label: 'Implementation',
     description: 'Make the planned source changes.',
     workflow: {
@@ -82,6 +93,7 @@ export const DEFAULT_COLUMNS: ColumnDef[] = [
   },
   {
     logicalId: 'review',
+    category: 'doing',
     label: 'Review',
     description: 'Human review gate.',
     gate: true,
@@ -98,6 +110,7 @@ export const DEFAULT_COLUMNS: ColumnDef[] = [
   },
   {
     logicalId: 'pr',
+    category: 'doing',
     label: 'PR',
     description: 'Prepare, update, and shepherd pull request state after human review approval.',
     workflow: {
@@ -119,6 +132,7 @@ export const DEFAULT_COLUMNS: ColumnDef[] = [
   },
   {
     logicalId: 'completed',
+    category: 'done',
     label: 'Completed',
     description: 'Terminal resolved state.',
     workflow: {
@@ -137,6 +151,7 @@ export const DEFAULT_COLUMNS: ColumnDef[] = [
 export const SIMPLE_COLUMNS: ColumnDef[] = [
   {
     logicalId: 'backlog',
+    category: 'todo',
     label: 'Backlog',
     description: 'Capture unstarted ideas, notes, or tasks.',
     workflow: {
@@ -147,6 +162,7 @@ export const SIMPLE_COLUMNS: ColumnDef[] = [
   },
   {
     logicalId: 'review',
+    category: 'doing',
     label: 'Review',
     description: 'Human review or approval.',
     gate: true,
@@ -160,6 +176,7 @@ export const SIMPLE_COLUMNS: ColumnDef[] = [
   },
   {
     logicalId: 'completed',
+    category: 'done',
     label: 'Completed',
     description: 'Terminal state for finished work.',
     workflow: {
@@ -169,6 +186,15 @@ export const SIMPLE_COLUMNS: ColumnDef[] = [
     },
   },
 ];
+
+/**
+ * Positional fallback for columns that don't declare a category: last column
+ * → 'done', first → 'todo', everything between → 'doing'. A single-column
+ * pipeline lands on 'done' (last wins), preserving the historical
+ * "last column = shipped" semantics.
+ */
+export const positionalCategory = (index: number, total: number): ColumnCategory =>
+  index === total - 1 ? 'done' : index === 0 ? 'todo' : 'doing';
 
 /**
  * Compute the SQLite primary-key for a column given its project and

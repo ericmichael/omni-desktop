@@ -3,10 +3,11 @@ import { useStore } from '@nanostores/react';
 import { memo, useEffect, useState } from 'react';
 
 import { Sidebar } from '@/renderer/app/Sidebar';
-import { Chat } from '@/renderer/features/Chat/Chat';
 import { Code } from '@/renderer/features/Code/Code';
 import { Dashboards } from '@/renderer/features/Dashboards/Dashboards';
 import { Gallery } from '@/renderer/features/Gallery/Gallery';
+import { Home } from '@/renderer/features/Home/Home';
+import { InboxView } from '@/renderer/features/Inbox/InboxView';
 import { OnboardingWizard } from '@/renderer/features/Onboarding/OnboardingWizard';
 import { ScheduledTasks } from '@/renderer/features/ScheduledTasks/ScheduledTasks';
 import { SettingsPage } from '@/renderer/features/SettingsModal/SettingsPage';
@@ -90,9 +91,13 @@ export const MainContent = memo(() => {
   }
 
   const panels: { key: LayoutMode; Component: React.ComponentType }[] = [
-    { key: 'chat', Component: Chat },
-    { key: 'spaces', Component: Code },
-    { key: 'projects', Component: Tickets },
+    { key: 'home', Component: Home },
+    { key: 'inbox', Component: InboxView },
+    // Work owns projects, tasks, pages, and milestones (the old Projects tab).
+    { key: 'work', Component: Tickets },
+    // Chat IS the deck since the tab merge: chat columns and work sessions
+    // share one surface (Tile/Focus), so there's a single panel for both.
+    { key: 'chat', Component: Code },
     { key: 'dashboards', Component: Dashboards },
     { key: 'routines', Component: ScheduledTasks },
     { key: 'settings', Component: SettingsPage },
