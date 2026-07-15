@@ -49,7 +49,16 @@ export type WindowProps = {
 /**
  * Data stored in the electron store.
  */
-export type LayoutMode = 'home' | 'inbox' | 'work' | 'chat' | 'dashboards' | 'routines' | 'settings' | 'gallery';
+export type LayoutMode =
+  | 'home'
+  | 'inbox'
+  | 'work'
+  | 'chat'
+  | 'dashboards'
+  | 'routines'
+  | 'plugins'
+  | 'settings'
+  | 'gallery';
 export type OmniTheme =
   | 'omni'
   | 'teams-light'
@@ -621,6 +630,7 @@ export const schema: Schema<StoreData> = {
       'projects',
       'dashboards',
       'routines',
+      'plugins',
       'settings',
       'more',
       'gallery',
@@ -2619,12 +2629,28 @@ export type MarketplaceApp = {
   columnScoped?: boolean;
 };
 
+/**
+ * One entry in a marketplace.json connectors[] array — a pre-configured MCP
+ * server the user can install with one click. `server` is the exact entry
+ * merged into `McpConfig.mcpServers` under key `id`.
+ */
+export type MarketplaceConnector = {
+  /** Stable id; becomes the `McpConfig.mcpServers` key. */
+  id: string;
+  label: string;
+  description: string;
+  /** Fluent icon name resolved via AppIcon's ICON_MAP; optional. */
+  icon?: string;
+  server: McpServerEntry;
+};
+
 export type MarketplaceManifest = {
   name: string;
   owner?: { name?: string; email?: string };
   metadata?: { description?: string; version?: string };
   plugins: MarketplacePlugin[];
   apps?: MarketplaceApp[];
+  connectors?: MarketplaceConnector[];
 };
 
 /**

@@ -12,6 +12,8 @@ import {
   Home24Regular,
   MailInbox24Filled,
   MailInbox24Regular,
+  PuzzlePiece24Filled,
+  PuzzlePiece24Regular,
   Settings24Filled,
   Settings24Regular,
   TaskListSquareLtr24Filled,
@@ -39,8 +41,11 @@ const ALL_TABS: {
   alwaysVisible?: boolean;
   pinBottom?: boolean;
   devOnly?: boolean;
+  /** Hidden on the mobile bar; reachable there via the Settings list. */
+  desktopOnly?: boolean;
 }[] = [
   { value: 'home', label: 'Home', icon: <Home24Regular />, iconActive: <Home24Filled />, alwaysVisible: true },
+  { value: 'chat', label: 'Chat', icon: <Chat24Regular />, iconActive: <Chat24Filled />, alwaysVisible: true },
   {
     value: 'inbox',
     label: 'Inbox',
@@ -55,7 +60,6 @@ const ALL_TABS: {
     iconActive: <TaskListSquareLtr24Filled />,
     alwaysVisible: true,
   },
-  { value: 'chat', label: 'Chat', icon: <Chat24Regular />, iconActive: <Chat24Filled />, alwaysVisible: true },
   {
     value: 'dashboards',
     label: 'Dashboards',
@@ -69,6 +73,16 @@ const ALL_TABS: {
     icon: <CalendarClock24Regular />,
     iconActive: <CalendarClock24Filled />,
     alwaysVisible: true,
+  },
+  {
+    value: 'plugins',
+    label: 'Plugins',
+    icon: <PuzzlePiece24Regular />,
+    iconActive: <PuzzlePiece24Filled />,
+    alwaysVisible: true,
+    // The mobile bar is full at six tabs — mobile reaches Plugins through
+    // the Settings list instead.
+    desktopOnly: true,
   },
   { value: 'gallery', label: 'Gallery', icon: <Beaker24Regular />, iconActive: <Beaker24Filled />, devOnly: true },
   {
@@ -286,6 +300,13 @@ const useStyles = makeStyles({
       display: 'none',
     },
   },
+  /* ── Desktop-only tabs (mobile reaches them via Settings) ── */
+  desktopOnlyItem: {
+    display: 'none',
+    '@media (min-width: 640px)': {
+      display: 'flex',
+    },
+  },
 
   /* ── Spacer + Settings (desktop only) ── */
   spacer: {
@@ -396,7 +417,12 @@ export const Sidebar = memo(() => {
         tabIndex={isActive ? 0 : -1}
         type="button"
         onClick={setMode(tab.value)}
-        className={mergeClasses(styles.item, isActive && styles.itemActive, extraClass)}
+        className={mergeClasses(
+          styles.item,
+          isActive && styles.itemActive,
+          tab.desktopOnly && styles.desktopOnlyItem,
+          extraClass
+        )}
       >
         {isActive && <div className={styles.indicator} />}
         <span className={styles.iconWrap}>

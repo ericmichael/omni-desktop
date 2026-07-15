@@ -155,6 +155,9 @@ async function copyPluginSkills(
 
     const destDir = join(skillsDir, basename(srcDir));
     await rm(destDir, { recursive: true, force: true });
+    // Clear any parked disabled copy too — a name must never exist in both
+    // dirs (install/update while disabled re-enables the skill).
+    await rm(join(getDisabledSkillsDir(configDir), basename(srcDir)), { recursive: true, force: true });
     await cp(srcDir, destDir, { recursive: true });
 
     sourceUpdates[meta.name] = bundleSource;

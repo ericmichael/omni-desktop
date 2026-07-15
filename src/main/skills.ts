@@ -118,7 +118,14 @@ export async function listSkills(configDir: string, store: SkillStore): Promise<
   const sourceMap = store.get('skillSources') ?? {};
   const active = await scanSkillsIn(getSkillsDir(configDir), true, sourceMap);
   const disabled = await scanSkillsIn(getDisabledSkillsDir(configDir), false, sourceMap);
-  return [...active, ...disabled].sort((a, b) => a.name.localeCompare(b.name));
+  // A name can exist in both dirs if an install ran while a disabled copy
+  // was parked. The active copy is the one the runtime sees, so it wins;
+  // duplicate names must never reach the UI (they collide as React keys).
+  const byName = new Map<string, SkillEntry>();
+  for (const entry of [...disabled, ...active]) {
+    byName.set(entry.name, entry);
+  }
+  return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export async function installSkillFromFile(
@@ -146,9 +153,11 @@ export async function installSkillFromFile(
     throw new Error('Invalid .skill file: archive is empty');
   }
 
-  // Move extracted skill folder into the skills directory
+  // Move extracted skill folder into the skills directory. Also clear any
+  // parked disabled copy — a name must never exist in both dirs.
   const destDir = join(skillsDir, topDir);
   await rm(destDir, { recursive: true, force: true });
+  await rm(join(getDisabledSkillsDir(configDir), topDir), { recursive: true, force: true });
   await rename(join(tmpDir, topDir), destDir);
   await rm(tmpDir, { recursive: true, force: true });
 
@@ -206,5 +215,9 @@ export async function setSkillEnabled(configDir: string, name: string, enabled: 
   const dest = join(toDir, name);
 
   await mkdir(toDir, { recursive: true });
+  // A stale copy can be parked at the destination (install-while-disabled);
+  // rename() won't replace a non-empty dir, so clear it — this also repairs
+  // the both-dirs state.
+  await rm(dest, { recursive: true, force: true });
   await rename(src, dest);
 }

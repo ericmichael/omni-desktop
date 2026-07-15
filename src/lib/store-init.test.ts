@@ -55,6 +55,10 @@ describe('migrateLayoutMode', () => {
   it('returns null for valid "settings" mode', () => {
     expect(migrateLayoutMode('settings')).toBeNull();
   });
+
+  it('returns null for valid "plugins" mode', () => {
+    expect(migrateLayoutMode('plugins')).toBeNull();
+  });
 });
 
 // ---------------------------------------------------------------------------

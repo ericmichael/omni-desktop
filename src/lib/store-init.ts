@@ -7,7 +7,16 @@
 
 import type { LayoutMode, OmniTheme } from '@/shared/types';
 
-const VALID_LAYOUT_MODES: LayoutMode[] = ['home', 'inbox', 'work', 'chat', 'dashboards', 'routines', 'settings'];
+const VALID_LAYOUT_MODES: LayoutMode[] = [
+  'home',
+  'inbox',
+  'work',
+  'chat',
+  'dashboards',
+  'routines',
+  'plugins',
+  'settings',
+];
 
 /**
  * Migrate legacy layout modes to current valid modes.

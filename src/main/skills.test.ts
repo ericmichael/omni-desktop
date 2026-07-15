@@ -236,6 +236,16 @@ describe('listSkills', () => {
     const result = await listSkills(configDir, store);
     expect(result).toEqual([]);
   });
+
+  it('dedupes a name present in both dirs — the active copy wins', async () => {
+    await createSkillOnDisk(configDir, 'twice', '---\nname: twice\ndescription: Active copy\n---\n');
+    await createSkillOnDisk(configDir, 'twice', '---\nname: twice\ndescription: Parked copy\n---\n', true);
+
+    const store = createMockStore();
+    const result = await listSkills(configDir, store);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ name: 'twice', description: 'Active copy', enabled: true });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -277,6 +287,18 @@ describe('setSkillEnabled', () => {
     expect(list[0]!.enabled).toBe(true);
   });
 
+  it('repairs the both-dirs state — toggling replaces the stale copy', async () => {
+    await createSkillOnDisk(configDir, 'split', '---\nname: split\ndescription: Active copy\n---\n');
+    await createSkillOnDisk(configDir, 'split', '---\nname: split\ndescription: Parked copy\n---\n', true);
+
+    await setSkillEnabled(configDir, 'split', false);
+
+    expect(existsSync(join(configDir, 'skills', 'split'))).toBe(false);
+    const list = await listSkills(configDir, createMockStore());
+    expect(list).toHaveLength(1);
+    expect(list[0]).toMatchObject({ name: 'split', description: 'Active copy', enabled: false });
+  });
+
   it('disabled skills are invisible to the runtime skills dir', async () => {
     await createSkillOnDisk(configDir, 'hidden', '---\nname: hidden\ndescription: Gone\n---\n');
     await setSkillEnabled(configDir, 'hidden', false);
@@ -314,6 +336,20 @@ describe('installSkillFromFile', () => {
     expect(entry.enabled).toBe(true);
     expect(entry.source).toEqual({ kind: 'file', filename: 'test.skill' });
     expect(existsSync(join(configDir, 'skills', 'test-skill', 'SKILL.md'))).toBe(true);
+  });
+
+  it('clears a parked disabled copy so the name never exists in both dirs', async () => {
+    await createSkillOnDisk(configDir, 'reinstalled', '---\nname: reinstalled\ndescription: Old parked\n---\n', true);
+    const zipPath = join(configDir, 'reinstalled.skill');
+    await createSkillZip(zipPath, 'reinstalled', '---\nname: reinstalled\ndescription: Fresh\n---\n');
+
+    const store = createMockStore();
+    await installSkillFromFile(configDir, zipPath, store);
+
+    expect(existsSync(join(configDir, 'skills-disabled', 'reinstalled'))).toBe(false);
+    const list = await listSkills(configDir, store);
+    expect(list).toHaveLength(1);
+    expect(list[0]).toMatchObject({ name: 'reinstalled', description: 'Fresh', enabled: true });
   });
 
   it('persists source metadata in store', async () => {

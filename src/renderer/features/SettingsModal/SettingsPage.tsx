@@ -1,16 +1,13 @@
 import { makeStyles, mergeClasses, shorthands, tokens } from '@fluentui/react-components';
 import {
-  Apps20Regular,
   ArrowLeft20Regular,
   Branch20Regular,
   Color20Regular,
   Cube20Regular,
   Globe20Regular,
   Keyboard20Regular,
-  Lightbulb20Regular,
   MicSettings20Regular,
   Person20Regular,
-  PlugConnected20Regular,
   PuzzlePiece20Regular,
   Rocket20Regular,
   Settings20Regular,
@@ -20,22 +17,19 @@ import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useState } from 'react';
 
 import { IconButton, ListItem, SectionLabel, Subtitle2 } from '@/renderer/ds';
+import { openPlugins } from '@/renderer/features/Plugins/plugins-nav';
 import { $settingsInitialTab } from '@/renderer/features/SettingsModal/settings-nav';
 import { SettingsModalAccountTab } from '@/renderer/features/SettingsModal/SettingsModalAccountTab';
 import { SettingsModalAiTab } from '@/renderer/features/SettingsModal/SettingsModalAiTab';
 import { SettingsModalAppearanceTab } from '@/renderer/features/SettingsModal/SettingsModalAppearanceTab';
-import { SettingsModalAppsTab } from '@/renderer/features/SettingsModal/SettingsModalAppsTab';
 import { SettingsModalAudioTab } from '@/renderer/features/SettingsModal/SettingsModalAudioTab';
 import { SettingsModalEnvironmentTab } from '@/renderer/features/SettingsModal/SettingsModalEnvironmentTab';
-import { SettingsModalExtensionsTab } from '@/renderer/features/SettingsModal/SettingsModalExtensionsTab';
 import { SettingsModalGeneralTab } from '@/renderer/features/SettingsModal/SettingsModalGeneralTab';
 import { SettingsModalGitTab } from '@/renderer/features/SettingsModal/SettingsModalGitTab';
 import { SettingsModalHotkeysTab } from '@/renderer/features/SettingsModal/SettingsModalHotkeysTab';
-import { SettingsModalMcpTab } from '@/renderer/features/SettingsModal/SettingsModalMcpTab';
 import { SettingsModalNetworkTab } from '@/renderer/features/SettingsModal/SettingsModalNetworkTab';
 import { SettingsModalProjectsTab } from '@/renderer/features/SettingsModal/SettingsModalProjectsTab';
 import { SettingsModalResetButton } from '@/renderer/features/SettingsModal/SettingsModalResetButton';
-import { SettingsModalSkillsTab } from '@/renderer/features/SettingsModal/SettingsModalSkillsTab';
 import { SettingsModalTeamsTab } from '@/renderer/features/SettingsModal/SettingsModalTeamsTab';
 import { SettingsModalWorkspaceTab } from '@/renderer/features/SettingsModal/SettingsModalWorkspaceTab';
 import { $glassEnabled } from '@/renderer/theme/use-glass';
@@ -48,17 +42,13 @@ type SettingsTab =
   | 'Appearance'
   | 'Projects'
   | 'Audio'
-  | 'Apps'
-  | 'Skills'
   | 'Hotkeys'
   | 'Account'
   | 'Teams'
   | 'Workspace'
   | 'Environment'
-  | 'MCP'
   | 'Git'
-  | 'Network'
-  | 'Extensions';
+  | 'Network';
 
 type TabDef = { value: SettingsTab; label: string; icon: React.JSX.Element };
 
@@ -76,8 +66,6 @@ const TAB_GROUPS: ReadonlyArray<{ label: string | null; tabs: ReadonlyArray<TabD
       { value: 'Appearance', label: 'Appearance', icon: <Color20Regular style={iconStyle} /> },
       { value: 'Projects', label: 'Projects', icon: <Rocket20Regular style={iconStyle} /> },
       { value: 'Audio', label: 'Voice & Audio', icon: <MicSettings20Regular style={iconStyle} /> },
-      { value: 'Apps', label: 'Apps', icon: <Apps20Regular style={iconStyle} /> },
-      { value: 'Skills', label: 'Skills', icon: <Lightbulb20Regular style={iconStyle} /> },
       { value: 'Hotkeys', label: 'Hotkeys', icon: <Keyboard20Regular style={iconStyle} /> },
       { value: 'Account', label: 'Account', icon: <Person20Regular style={iconStyle} /> },
       { value: 'Teams', label: 'Teams', icon: <Person20Regular style={iconStyle} /> },
@@ -88,10 +76,8 @@ const TAB_GROUPS: ReadonlyArray<{ label: string | null; tabs: ReadonlyArray<TabD
     tabs: [
       { value: 'Workspace', label: 'Workspace & Sandbox', icon: <Cube20Regular style={iconStyle} /> },
       { value: 'Environment', label: 'Environment', icon: <WindowConsole20Regular style={iconStyle} /> },
-      { value: 'MCP', label: 'MCP Servers', icon: <PlugConnected20Regular style={iconStyle} /> },
       { value: 'Git', label: 'Git', icon: <Branch20Regular style={iconStyle} /> },
       { value: 'Network', label: 'Network', icon: <Globe20Regular style={iconStyle} /> },
-      { value: 'Extensions', label: 'Extensions', icon: <PuzzlePiece20Regular style={iconStyle} /> },
     ],
   },
 ];
@@ -347,6 +333,9 @@ export const SettingsPage = memo(() => {
               ))}
             </div>
           ))}
+          {/* The desktop rail owns Plugins; the mobile bar is full, so this
+              list is mobile's path to it. */}
+          <ListItem icon={<PuzzlePiece20Regular style={iconStyle} />} label="Plugins" onClick={() => openPlugins()} />
         </div>
       )}
 
@@ -372,17 +361,13 @@ export const SettingsPage = memo(() => {
           {shownTab === 'Appearance' && <SettingsModalAppearanceTab />}
           {shownTab === 'Projects' && <SettingsModalProjectsTab />}
           {shownTab === 'Audio' && <SettingsModalAudioTab />}
-          {shownTab === 'Apps' && <SettingsModalAppsTab />}
-          {shownTab === 'Skills' && <SettingsModalSkillsTab />}
           {shownTab === 'Hotkeys' && <SettingsModalHotkeysTab />}
           {shownTab === 'Account' && <SettingsModalAccountTab />}
           {shownTab === 'Teams' && <SettingsModalTeamsTab />}
           {shownTab === 'Workspace' && <SettingsModalWorkspaceTab />}
           {shownTab === 'Environment' && <SettingsModalEnvironmentTab />}
-          {shownTab === 'MCP' && <SettingsModalMcpTab />}
           {shownTab === 'Git' && <SettingsModalGitTab />}
           {shownTab === 'Network' && <SettingsModalNetworkTab />}
-          {shownTab === 'Extensions' && <SettingsModalExtensionsTab />}
           {shownTab === 'General' && (
             <div className={styles.footer}>
               <SettingsModalResetButton />
