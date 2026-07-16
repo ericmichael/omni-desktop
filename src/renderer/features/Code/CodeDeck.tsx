@@ -2816,7 +2816,6 @@ export const CodeDeck = memo(() => {
     if (isChatColumn(tab) && tab.activatedAt && tab.sessionId) {
       void codeApi.recordConversation(tab.sessionId, {
         ...(tab.profileName ? { profileName: tab.profileName } : {}),
-        ...(tab.containerId ? { containerId: tab.containerId } : {}),
       });
     }
     codeApi.setTabSessionId(tab.id, uuidv4());

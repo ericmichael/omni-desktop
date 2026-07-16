@@ -1070,7 +1070,7 @@ function McpUiSurface({
   );
 }
 
-export function ToolCard({ item }: { item: ToolItem }) {
+export function ToolCard({ item, defaultOpen }: { item: ToolItem; defaultOpen?: boolean }) {
   const hasResult = item.status === 'result';
   const toolState = hasResult ? ('output-available' as const) : ('input-available' as const);
 
@@ -1104,13 +1104,40 @@ export function ToolCard({ item }: { item: ToolItem }) {
     }
   }, [item.input]);
 
+  // Self-contained rich bodies name their subject (file path, command,
+  // search term, …), so the parameters are provenance, not information —
+  // tuck them behind a disclosure. Errors keep parameters expanded: what
+  // was *attempted* is the diagnostic payload.
+  const displayType = item.metadata && typeof item.metadata === 'object' ? item.metadata.display_type : undefined;
+  const paramsCollapsed =
+    hasResult && !!richBody && typeof displayType === 'string' && SELF_CONTAINED_DISPLAY_TYPES.has(displayType);
+  const [paramsOpen, setParamsOpen] = useState(false);
+  const toggleParams = useCallback(() => setParamsOpen((v) => !v), []);
+
   return (
     <div className="flex justify-start">
       <div className="w-full min-w-0 max-w-full overflow-hidden">
-        <Tool>
+        <Tool defaultOpen={defaultOpen}>
           <ToolHeader type={`tool-${item.tool}`} state={toolState} title={headerTitle} preview={headerPreview} />
-          <ToolContent>
-            {parsedInput && <ToolInput input={parsedInput} />}
+          {/* When the collapsed-parameters disclosure leads the content, drop
+              the content's own top padding — the header's p-3 already provides
+              the gap, and anything more leaves the small line adrift */}
+          <ToolContent className={parsedInput && paramsCollapsed ? 'pt-0' : undefined}>
+            {parsedInput && paramsCollapsed ? (
+              <div>
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground"
+                  onClick={toggleParams}
+                >
+                  {paramsOpen ? <ChevronUpIcon className="size-3" /> : <ChevronDownIcon className="size-3" />}
+                  {paramsOpen ? 'Hide parameters' : 'Show parameters'}
+                </button>
+                {paramsOpen ? <ToolInput className="mt-2" input={parsedInput} /> : null}
+              </div>
+            ) : parsedInput ? (
+              <ToolInput input={parsedInput} />
+            ) : null}
             {richBody ? (
               <div className="space-y-2">
                 <h4 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">Result</h4>
@@ -1130,6 +1157,21 @@ export function ToolCard({ item }: { item: ToolItem }) {
 }
 
 const COLLAPSIBLE_DISPLAY_TYPES = new Set(['diff', 'file_write', 'file_content', 'search_results', 'command']);
+
+// Display types whose rich body names its own subject (file path in the
+// diff/stats line, `$ command`, search term, URL, …). For these the
+// parameters panel is collapsed by default in ToolCard. `error` is
+// deliberately absent — failed calls keep their inputs visible.
+const SELF_CONTAINED_DISPLAY_TYPES = new Set([
+  'diff',
+  'file_write',
+  'command',
+  'file_content',
+  'directory_listing',
+  'search_results',
+  'web_content',
+  'table',
+]);
 
 function ApprovalCard({
   item,
@@ -1443,6 +1485,9 @@ function fileContentView(metadata: any, plainOutput: string) {
   const meta = metadata?.metadata || {};
   const preview = typeof metadata?.preview === 'string' ? metadata.preview : plainOutput;
   const stats: string[] = [];
+  if (typeof meta?.file_path === 'string' && meta.file_path) {
+    stats.push(meta.file_path);
+  }
   if (typeof meta?.total_file_lines === 'number') {
     stats.push(`${meta.total_file_lines.toLocaleString()} lines total`);
   }
@@ -1465,6 +1510,9 @@ function directoryListingView(metadata: any, plainOutput: string) {
   const meta = metadata?.metadata || {};
   const preview = typeof metadata?.preview === 'string' ? metadata.preview : plainOutput;
   const stats: string[] = [];
+  if (typeof meta?.path === 'string' && meta.path) {
+    stats.push(meta.path);
+  }
   if (typeof meta?.total_entries === 'number') {
     stats.push(`${meta.total_entries.toLocaleString()} entries`);
   }
@@ -1493,6 +1541,15 @@ function searchResultsView(metadata: any, plainOutput: string) {
   const meta = metadata?.metadata || {};
   const preview = typeof metadata?.preview === 'string' ? metadata.preview : plainOutput;
   const stats: string[] = [];
+  const searchTerm =
+    typeof meta?.pattern === 'string' && meta.pattern
+      ? meta.pattern
+      : typeof meta?.query === 'string' && meta.query
+        ? meta.query
+        : '';
+  if (searchTerm) {
+    stats.push(`"${searchTerm}"`);
+  }
   if (typeof meta?.files_with_matches === 'number') {
     stats.push(`${meta.files_with_matches} files with matches`);
   }
@@ -1523,6 +1580,9 @@ function webContentView(metadata: any, plainOutput: string) {
   const stats: string[] = [];
   if (typeof meta?.title === 'string' && meta.title.trim()) {
     stats.push(meta.title);
+  }
+  if (typeof meta?.url === 'string' && meta.url) {
+    stats.push(meta.url);
   }
   if (typeof meta?.elapsed_ms === 'number') {
     stats.push(`${meta.elapsed_ms}ms`);

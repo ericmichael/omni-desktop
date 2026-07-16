@@ -19,6 +19,7 @@ import type { IIpcListener } from '@/shared/ipc-listener';
 import type {
   AgentProcessStartOptions,
   AgentProcessStatus,
+  AgentProcessStopOptions,
   GitCredential,
   IpcRendererEvents,
   Project,
@@ -556,13 +557,13 @@ export class ProcessManager {
     proc.start(startArg);
   };
 
-  stop = async (processId: string): Promise<void> => {
+  stop = async (processId: string, opts?: AgentProcessStopOptions): Promise<void> => {
     const proc = this.processes.get(processId);
     if (!proc) {
       return;
     }
     this.mirrorSources.delete(processId);
-    await proc.stop();
+    await proc.stop(opts);
     this.processes.delete(processId);
     const machineId = this.localSandboxKeys.get(processId);
     if (machineId && this.hostBridge) {
@@ -900,7 +901,7 @@ export function registerProcessHandlers(ipc: IIpcListener, resolve: (event: unkn
   };
 
   h('agent-process:start', (pm, processId, startArg) => pm.start(processId, startArg));
-  h('agent-process:stop', (pm, processId) => pm.stop(processId));
+  h('agent-process:stop', (pm, processId, opts) => pm.stop(processId, opts));
   h('agent-process:rebuild', (pm, processId, rebuildArg) => pm.rebuild(processId, rebuildArg));
   h('agent-process:resize', (pm, processId, cols, rows) => pm.resizePty(processId, cols, rows));
   h('agent-process:get-status', (pm, processId) => pm.getStatus(processId));

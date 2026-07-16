@@ -33,7 +33,7 @@ describe('upsertConversation', () => {
   });
 
   it('merges over the existing entry so partial updates keep prior fields', () => {
-    const list = upsertConversation([conv('a', 10, { title: 'Plan my week', containerId: 'cont-1' })], {
+    const list = upsertConversation([conv('a', 10, { title: 'Plan my week' })], {
       sessionId: 'a',
       lastActiveAt: 50,
       profileName: 'devbox',
@@ -41,7 +41,6 @@ describe('upsertConversation', () => {
     expect(list).toHaveLength(1);
     expect(list[0]).toMatchObject({
       title: 'Plan my week',
-      containerId: 'cont-1',
       profileName: 'devbox',
       lastActiveAt: 50,
     });

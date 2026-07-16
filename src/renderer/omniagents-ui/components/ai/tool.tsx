@@ -98,14 +98,71 @@ export type ToolInputProps = ComponentProps<'div'> & {
   input: ToolPart['input'];
 };
 
-export const ToolInput = ({ className, input, ...props }: ToolInputProps) => (
-  <div className={cn('space-y-2 overflow-hidden', className)} {...props}>
-    <h4 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">Parameters</h4>
-    <div data-slot="tool-input-panel" className="rounded-md bg-muted/50">
-      <CodeBlock code={JSON.stringify(input, null, 2)} language="json" />
+const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const INLINE_STRING_MAX = 120;
+
+/**
+ * Render a single parameter value by type. Strings show bare (no JSON
+ * quoting/escaping); long or multiline strings and nested objects fall
+ * back to a scrollable pre block so one verbose argument (e.g. edit_file's
+ * old_text) doesn't swallow the list.
+ */
+const renderParamValue = (value: unknown): ReactNode => {
+  if (value === null || value === undefined) {
+    return <span className="text-muted-foreground">—</span>;
+  }
+  if (typeof value === 'boolean' || typeof value === 'number') {
+    return <span className="font-mono">{String(value)}</span>;
+  }
+  if (typeof value === 'string') {
+    if (value.includes('\n') || value.length > INLINE_STRING_MAX) {
+      return (
+        <pre className="max-h-32 overflow-auto whitespace-pre-wrap break-words rounded bg-muted px-2 py-1 font-mono text-[11px]">
+          {value}
+        </pre>
+      );
+    }
+    return <span className="break-words font-mono">{value}</span>;
+  }
+  // Arrays and nested objects — per-value JSON fallback
+  let json: string;
+  try {
+    json = JSON.stringify(value, null, 2) ?? String(value);
+  } catch {
+    json = String(value);
+  }
+  return (
+    <pre className="max-h-32 overflow-auto whitespace-pre-wrap break-words rounded bg-muted px-2 py-1 font-mono text-[11px]">
+      {json}
+    </pre>
+  );
+};
+
+export const ToolInput = ({ className, input, ...props }: ToolInputProps) => {
+  const entries = isPlainObject(input) ? Object.entries(input) : null;
+  return (
+    <div className={cn('space-y-2 overflow-hidden', className)} {...props}>
+      <h4 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">Parameters</h4>
+      {entries && entries.length > 0 ? (
+        <dl data-slot="tool-input-panel" className="space-y-1.5 rounded-md bg-muted/50 px-3 py-2">
+          {entries.map(([key, value]) => (
+            <div key={key} className="flex min-w-0 items-baseline gap-3">
+              <dt className="w-32 flex-shrink-0 break-words text-xs text-muted-foreground">{key}</dt>
+              <dd className="min-w-0 flex-1 text-xs">{renderParamValue(value)}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : (
+        // Non-object payloads (arrays, primitives, empty objects) keep the raw JSON view
+        <div data-slot="tool-input-panel" className="rounded-md bg-muted/50">
+          <CodeBlock code={JSON.stringify(input, null, 2)} language="json" />
+        </div>
+      )}
     </div>
-  </div>
-);
+  );
+};
 
 export type ToolOutputProps = ComponentProps<'div'> & {
   output: ToolPart['output'];

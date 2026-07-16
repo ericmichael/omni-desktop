@@ -16,7 +16,15 @@ import {
 } from '@/renderer/services/agent-process';
 import { emitter } from '@/renderer/services/ipc';
 import { persistedStoreApi } from '@/renderer/services/store';
-import type { ChatConversation, CodeLayoutMode, CodeTab, CodeTabId, ProjectId, TicketId } from '@/shared/types';
+import type {
+  AgentProcessStopOptions,
+  ChatConversation,
+  CodeLayoutMode,
+  CodeTab,
+  CodeTabId,
+  ProjectId,
+  TicketId,
+} from '@/shared/types';
 import { isChatColumn } from '@/shared/types';
 
 /**
@@ -59,9 +67,9 @@ export const codeApi = {
     agentProcessApi.start(tabId, arg);
   },
 
-  stopSandbox: async (tabId: CodeTabId) => {
+  stopSandbox: async (tabId: CodeTabId, opts?: AgentProcessStopOptions) => {
     teardownTerminal(tabId);
-    await agentProcessApi.stop(tabId);
+    await agentProcessApi.stop(tabId, opts);
   },
 
   rebuildSandbox: (tabId: CodeTabId, fallbackArg: { workspaceDir: string }) => {
@@ -86,44 +94,57 @@ export const codeApi = {
   },
 
   removeTab: async (tabId: CodeTabId) => {
-    const tab = (persistedStoreApi.getKey('codeTabs') ?? []).find((t) => t.id === tabId);
-    await codeApi.stopSandbox(tabId);
-    await destroyAllTerminalsForTab(tabId);
+    const all = persistedStoreApi.getKey('codeTabs') ?? [];
+    const tab = all.find((t) => t.id === tabId);
+    const archiveAsChat = Boolean(tab && isChatColumn(tab) && tab.activatedAt && tab.sessionId);
 
-    // Clean up per-tab state
-    clearStatus(tabId);
-
-    const phases = { ...$codeTabPhases.get() };
-    delete phases[tabId];
-    $codeTabPhases.set(phases);
-
-    const errors = { ...$codeTabErrors.get() };
-    delete errors[tabId];
-    $codeTabErrors.set(errors);
-
-    const tabs = (persistedStoreApi.getKey('codeTabs') ?? []).filter((t) => t.id !== tabId);
+    // Remove the tab from the store FIRST so the column unmounts immediately
+    // and its chat WebSocket drops — omni serve's graceful SIGTERM drain
+    // waits on open connections, so keeping the column mounted through the
+    // stop would block serve's exit on our own socket.
+    const tabs = all.filter((t) => t.id !== tabId);
     const activeId = persistedStoreApi.getKey('activeCodeTabId');
-
     await persistedStoreApi.setKey('codeTabs', tabs);
     if (activeId === tabId) {
       await persistedStoreApi.setKey('activeCodeTabId', tabs[tabs.length - 1]?.id ?? null);
     }
 
-    if (tab && isChatColumn(tab) && tab.activatedAt && tab.sessionId) {
-      // Closing a live chat column archives the conversation — it stays
-      // resumable from the sidebar's Recent list, so the snapshot must
-      // survive. Destruction is only via "Delete conversation" there.
+    if (archiveAsChat && tab?.sessionId) {
+      // Closing a live chat column archives the TRANSCRIPT to the sidebar's
+      // Recent list (title + profile). The sandbox itself is terminal, same
+      // as a code column: resume relaunches fresh, reseeded from the
+      // conversation's `Sessions/<sessionId>` scratch dir, with the chat
+      // history loaded from omni serve's host-side session store.
       await codeApi.recordConversation(tab.sessionId, {
         ...(tab.profileName ? { profileName: tab.profileName } : {}),
-        ...(tab.containerId ? { containerId: tab.containerId } : {}),
       });
-      return;
     }
 
-    // Cascade: delete the tab's workspace snapshot. Tab is gone for
-    // good (no resume UI for deleted tabs), so the tar is dead weight.
-    if (tab?.sessionId) {
-      void emitter.invoke('snapshot:delete', tab.sessionId);
+    try {
+      // Terminal sockets are also connections into omni serve — close them
+      // BEFORE the stop so the drain doesn't wait on them either.
+      await destroyAllTerminalsForTab(tabId);
+      // Closing is terminal for the sandbox (chat and code alike) — the
+      // snapshot is deleted below, so tell serve to skip persisting one.
+      await codeApi.stopSandbox(tabId, { discardSnapshot: true });
+    } finally {
+      // Clean up per-tab state
+      clearStatus(tabId);
+
+      const phases = { ...$codeTabPhases.get() };
+      delete phases[tabId];
+      $codeTabPhases.set(phases);
+
+      const errors = { ...$codeTabErrors.get() };
+      delete errors[tabId];
+      $codeTabErrors.set(errors);
+
+      // Cascade: delete the tab's workspace snapshot — no closed tab is a
+      // rehydrate target (archived chat resumes fresh; code tabs are gone
+      // for good), so the tar is dead weight.
+      if (tab?.sessionId) {
+        void emitter.invoke('snapshot:delete', tab.sessionId);
+      }
     }
   },
 
@@ -179,8 +200,9 @@ export const codeApi = {
   /**
    * Reopen an archived conversation as a column. If a column already shows
    * this sessionId, it is activated instead of duplicated. The sessionId
-   * deterministically keys the scratch dir, snapshot, and agent session, so
-   * the transcript and workspace resume in full.
+   * deterministically keys the scratch dir and agent session, so the
+   * transcript and scratch-dir files resume; the sandbox itself launches
+   * fresh (closing the column was terminal for it).
    */
   addTabForConversation: async (conversation: ChatConversation): Promise<CodeTab> => {
     const existingTabs = persistedStoreApi.getKey('codeTabs') ?? [];
@@ -195,7 +217,6 @@ export const codeApi = {
       sessionId: conversation.sessionId,
       profileName: conversation.profileName ?? resolveCodeTabProfileName(null),
       profileNameExplicit: Boolean(conversation.profileName),
-      ...(conversation.containerId ? { containerId: conversation.containerId } : {}),
       createdAt: Date.now(),
       activatedAt: Date.now(),
     };

@@ -56,6 +56,7 @@ import {
   ToolInput,
   ToolOutput,
 } from '@/renderer/omniagents-ui/components/ai';
+import { ToolCard } from '@/renderer/omniagents-ui/components/MessageList';
 import { Markdown } from '@/renderer/omniagents-ui/components/promptkit/markdown';
 import {
   PromptInput,
@@ -65,6 +66,7 @@ import {
 import { Button } from '@/renderer/omniagents-ui/components/ui/button';
 import { TooltipProvider } from '@/renderer/omniagents-ui/components/ui/tooltip';
 import { $glassEnabled } from '@/renderer/theme/use-glass';
+import type { ToolItem } from '@/shared/chat-types';
 
 const useStyles = makeStyles({
   // Inner shadcn surface colors (--color-card, --color-muted, --color-secondary, etc.)
@@ -106,6 +108,302 @@ const greet = (name: string) => \`hi \${name}\`;
 - item one
 - item two
 `;
+
+// Fixtures for the rich result bodies rendered from ``RichToolOutput.ui_metadata``
+// (see renderMetadata in MessageList). Shapes mirror what the omniagents /
+// omni-code tools actually emit over the ``tool_result`` event.
+const RICH_TOOL_FIXTURES: { label: string; item: ToolItem }[] = [
+  {
+    label: 'diff (edit_file)',
+    item: {
+      type: 'tool',
+      call_id: 'gallery-diff',
+      tool: 'edit_file',
+      status: 'result',
+      input: JSON.stringify({ file_path: 'src/main/auth.ts', old_text: 'legacyAuth', new_text: 'auth' }),
+      output: 'Updated auth.ts - 2 replacement(s)',
+      metadata: {
+        display_type: 'diff',
+        summary: 'Updated auth.ts (2 replacements)',
+        value: {
+          diff_lines: [
+            '--- a/src/main/auth.ts',
+            '+++ b/src/main/auth.ts',
+            '@@ -12,7 +12,7 @@',
+            " import { session } from '@/shared/session';",
+            '-export const legacyAuth = () => {',
+            '-  return session.verifyCookie();',
+            '+export const auth = () => {',
+            '+  return session.verifyJwt();',
+            ' };',
+          ],
+        },
+        metadata: { file_path: 'src/main/auth.ts', operation: 'edit' },
+      },
+    },
+  },
+  {
+    label: 'diff (apply_patch — multi-file)',
+    item: {
+      type: 'tool',
+      call_id: 'gallery-apply-patch',
+      tool: 'apply_patch',
+      status: 'result',
+      input: JSON.stringify({
+        patch: `*** Begin Patch
+*** Update File: src/main/auth.ts
+@@ export const legacyAuth
+-export const legacyAuth = () => {
+-  return session.verifyCookie();
++export const auth = () => {
++  return session.verifyJwt();
+ };
+*** Add File: src/lib/jwt.ts
++export const signJwt = (payload: object, secret: string) => {
++  return sign(payload, secret, { expiresIn: '1h' });
++};
+*** End Patch`,
+      }),
+      output:
+        'Patch applied successfully.\nAdded 1 files:\n  A src/lib/jwt.ts\nModified 1 files:\n  M src/main/auth.ts',
+      metadata: {
+        display_type: 'diff',
+        summary: 'Applied patch (1 adds, 1 updates, 0 deletes) — 2 file(s) changed',
+        value: {
+          diff_lines: [
+            '--- a/src/main/auth.ts',
+            '+++ b/src/main/auth.ts',
+            '@@ -12,7 +12,7 @@',
+            '-export const legacyAuth = () => {',
+            '-  return session.verifyCookie();',
+            '+export const auth = () => {',
+            '+  return session.verifyJwt();',
+            ' };',
+            '--- /dev/null',
+            '+++ b/src/lib/jwt.ts',
+            '@@ -0,0 +1,3 @@',
+            '+export const signJwt = (payload: object, secret: string) => {',
+            "+  return sign(payload, secret, { expiresIn: '1h' });",
+            '+};',
+          ],
+        },
+        truncated: false,
+        metadata: {
+          operation: 'apply_patch',
+          file_count: 2,
+          additions: 5,
+          deletions: 2,
+          added_files: ['src/lib/jwt.ts'],
+          modified_files: ['src/main/auth.ts'],
+          deleted_files: [],
+          added_count: 1,
+          modified_count: 1,
+          deleted_count: 0,
+          total_changes: 2,
+        },
+      },
+    },
+  },
+  {
+    label: 'file_write (write_file)',
+    item: {
+      type: 'tool',
+      call_id: 'gallery-file-write',
+      tool: 'write_file',
+      status: 'result',
+      input: JSON.stringify({ file_path: 'src/lib/jwt.ts' }),
+      output: 'Created src/lib/jwt.ts (6 lines)',
+      metadata: {
+        display_type: 'file_write',
+        summary: 'Created src/lib/jwt.ts (6 lines)',
+        value: `import { sign } from 'jsonwebtoken';
+
+export const signJwt = (payload: object, secret: string) => {
+  return sign(payload, secret, { expiresIn: '1h' });
+};
+`,
+        metadata: { file_path: 'src/lib/jwt.ts', operation: 'create', language: 'typescript' },
+      },
+    },
+  },
+  {
+    label: 'command — success (bash)',
+    item: {
+      type: 'tool',
+      call_id: 'gallery-command-ok',
+      tool: 'bash',
+      status: 'result',
+      input: JSON.stringify({ command: 'npm run lint' }),
+      output: 'lint passed',
+      metadata: {
+        display_type: 'command',
+        summary: 'npm run lint',
+        value: '> launcher@0.9.0 lint\n> concurrently eslint prettier tsc knip dpdm\n\nAll checks passed.',
+        metadata: { command: 'npm run lint', success: true, exit_code: 0, wall_time_ms: 2143 },
+      },
+    },
+  },
+  {
+    label: 'command — failed (bash)',
+    item: {
+      type: 'tool',
+      call_id: 'gallery-command-fail',
+      tool: 'bash',
+      status: 'result',
+      input: JSON.stringify({ command: 'npm test -- session-filter' }),
+      output: 'tests failed',
+      metadata: {
+        display_type: 'command',
+        summary: 'npm test -- session-filter',
+        metadata: {
+          command: 'npm test -- session-filter',
+          success: false,
+          exit_code: 1,
+          wall_time_ms: 5310,
+          stdout: 'FAIL src/lib/session-filter.test.ts\n  ✕ filters expired sessions (12 ms)',
+          stderr: 'AssertionError: expected 2 sessions, got 3',
+          has_stderr: true,
+        },
+      },
+    },
+  },
+  {
+    label: 'file_content (read_file)',
+    item: {
+      type: 'tool',
+      call_id: 'gallery-file-content',
+      tool: 'read_file',
+      status: 'result',
+      input: JSON.stringify({ file_path: 'src/main/auth.ts', start_line: 1, end_line: 5 }),
+      output: 'Read src/main/auth.ts',
+      metadata: {
+        display_type: 'file_content',
+        summary: 'Read src/main/auth.ts (L1-5)',
+        preview: `import { session } from '@/shared/session';
+
+export const auth = () => {
+  return session.verifyJwt();
+};`,
+        metadata: { file_path: 'src/main/auth.ts', total_file_lines: 412, start_line: 1, end_line: 5 },
+      },
+    },
+  },
+  {
+    label: 'directory_listing (list_directory)',
+    item: {
+      type: 'tool',
+      call_id: 'gallery-dir',
+      tool: 'list_directory',
+      status: 'result',
+      input: JSON.stringify({ path: 'src/main' }),
+      output: '24 entries',
+      metadata: {
+        display_type: 'directory_listing',
+        summary: 'Listed src/main',
+        preview: 'agent-process.ts\nindex.ts\nprocess-manager.ts\nproject-manager.ts\nterminal-proxy.ts\nextensions/',
+        metadata: { path: 'src/main', total_entries: 24, file_count: 19, dir_count: 5 },
+      },
+    },
+  },
+  {
+    label: 'search_results (grep)',
+    item: {
+      type: 'tool',
+      call_id: 'gallery-search',
+      tool: 'grep',
+      status: 'result',
+      input: JSON.stringify({ pattern: 'legacyAuth', path: 'src' }),
+      output: '3 files with matches',
+      metadata: {
+        display_type: 'search_results',
+        summary: 'Searched for "legacyAuth"',
+        preview:
+          'src/main/auth.ts:14:export const legacyAuth = () => {\nsrc/main/index.ts:88:  app.use(legacyAuth());\nsrc/shared/session.ts:31:// TODO: remove once legacyAuth is gone',
+        truncated: true,
+        metadata: { pattern: 'legacyAuth', files_with_matches: 3, files_searched: 1204, elapsed_ms: 87 },
+      },
+    },
+  },
+  {
+    label: 'web_content (web_fetch)',
+    item: {
+      type: 'tool',
+      call_id: 'gallery-web',
+      tool: 'web_fetch',
+      status: 'result',
+      input: JSON.stringify({ url: 'https://example.com/rfc-7519' }),
+      output: 'Fetched page',
+      metadata: {
+        display_type: 'web_content',
+        summary: 'Fetched https://example.com/rfc-7519',
+        preview:
+          'JSON Web Token (JWT) is a compact, URL-safe means of representing claims to be transferred between two parties…',
+        metadata: {
+          title: 'RFC 7519 — JSON Web Token',
+          url: 'https://example.com/rfc-7519',
+          elapsed_ms: 412,
+          link_count: 12,
+        },
+      },
+    },
+  },
+  {
+    label: 'table',
+    item: {
+      type: 'tool',
+      call_id: 'gallery-table',
+      tool: 'query_database',
+      status: 'result',
+      input: JSON.stringify({ sql: 'SELECT * FROM sessions LIMIT 3' }),
+      output: '3 rows',
+      metadata: {
+        display_type: 'table',
+        summary: 'Query returned 3 rows',
+        table: {
+          columns: [{ title: 'id' }, { title: 'user' }, { title: 'expires_at' }],
+          rows: [
+            ['s_01', 'eric', '2026-07-16T18:00:00Z'],
+            ['s_02', 'dana', '2026-07-16T19:30:00Z'],
+            ['s_03', 'kai', '2026-07-17T09:15:00Z'],
+          ],
+        },
+      },
+    },
+  },
+  {
+    label: 'error',
+    item: {
+      type: 'tool',
+      call_id: 'gallery-error',
+      tool: 'read_file',
+      status: 'result',
+      input: JSON.stringify({ file_path: 'src/main/legacy.ts' }),
+      output: 'Error: file not found',
+      metadata: {
+        display_type: 'error',
+        summary: 'File not found: src/main/legacy.ts',
+        preview: "ENOENT: no such file or directory, open 'src/main/legacy.ts'",
+        metadata: { error_type: 'FileNotFoundError' },
+      },
+    },
+  },
+  {
+    label: 'unknown display_type — preview fallback',
+    item: {
+      type: 'tool',
+      call_id: 'gallery-fallback',
+      tool: 'execute_cell',
+      status: 'result',
+      input: JSON.stringify({ cell_index: 3 }),
+      output: 'Out[3]: 42',
+      metadata: {
+        display_type: 'notebook',
+        summary: 'Executed cell 3',
+        preview: 'Out[3]: 42',
+      },
+    },
+  },
+];
 
 const TOOL_STATES: { state: ToolState; label: string }[] = [
   { state: 'input-streaming', label: 'input-streaming' },
@@ -253,6 +551,49 @@ export const Gallery = memo(() => {
                     )}
                   </ToolContent>
                 </Tool>
+              </Variant>
+            ))}
+          </Section>
+
+          <Section title="Tool — parameters (key-value)">
+            <Variant label="Value types: string, multiline string, number, boolean, null, array, nested object">
+              <Tool defaultOpen>
+                <ToolHeader
+                  type="tool-edit_file"
+                  state="input-available"
+                  title="edit_file"
+                  preview="src/main/auth.ts"
+                />
+                <ToolContent>
+                  <ToolInput
+                    input={{
+                      file_path: 'src/main/auth.ts',
+                      old_text: 'export const legacyAuth = () => {\n  return session.verifyCookie();\n};',
+                      new_text: 'export const auth = () => {\n  return session.verifyJwt();\n};',
+                      expected_replacements: 1,
+                      dry_run: false,
+                      encoding: null,
+                      tags: ['auth', 'refactor'],
+                      range: { start_line: 12, end_line: 18 },
+                    }}
+                  />
+                </ToolContent>
+              </Tool>
+            </Variant>
+            <Variant label="Non-object payload — raw JSON fallback">
+              <Tool defaultOpen>
+                <ToolHeader type="tool-run_batch" state="input-available" title="run_batch" />
+                <ToolContent>
+                  <ToolInput input={['npm run lint', 'npm test', 'npm run build']} />
+                </ToolContent>
+              </Tool>
+            </Variant>
+          </Section>
+
+          <Section title="Tool — rich result bodies (display_type)">
+            {RICH_TOOL_FIXTURES.map(({ label, item }) => (
+              <Variant key={label} label={label}>
+                <ToolCard item={item} defaultOpen />
               </Variant>
             ))}
           </Section>

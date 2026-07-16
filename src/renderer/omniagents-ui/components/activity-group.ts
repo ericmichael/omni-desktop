@@ -74,7 +74,7 @@ export function groupItems(items: MessageItem[], currentRunId: string | undefine
 }
 
 const READ_PATTERNS = /^(read|cat|get|fetch|load|view|show|list|ls|glob|grep|search_file|file_content)/i;
-const EDIT_PATTERNS = /^(edit|write|update|set|create|delete|remove|patch|replace|mv|cp|rename)/i;
+const EDIT_PATTERNS = /^(edit|write|update|set|create|delete|remove|patch|apply_patch|replace|mv|cp|rename)/i;
 const COMMAND_PATTERNS = /^(bash|shell|exec|run|command|terminal|cmd|npm|pip|make)/i;
 const SEARCH_PATTERNS = /^(search|find|grep|rg|ripgrep|glob|locate)/i;
 

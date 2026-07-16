@@ -431,9 +431,24 @@ const main = async () => {
     return reply.code(404).send({ error: 'Not found' });
   });
 
-  // Graceful shutdown — clean up all persistent sessions + global managers
+  // Graceful shutdown — clean up all persistent sessions + global managers.
+  // Guarded: a second signal while cleanup is in flight forces an immediate
+  // exit (the serve children were signalled too and finish their own
+  // teardown), and a hard timeout keeps a hung teardown from lingering
+  // forever as an orphaned dev-server process.
+  let shuttingDown = false;
   const shutdown = async () => {
+    if (shuttingDown) {
+      fastify.log.warn('Second signal during shutdown — forcing exit');
+      process.exit(1);
+    }
+    shuttingDown = true;
     fastify.log.info('Shutting down...');
+    const forceExitTimer = setTimeout(() => {
+      fastify.log.error('Shutdown timed out after 30s, forcing exit');
+      process.exit(1);
+    }, 30_000);
+    forceExitTimer.unref();
     await wsHandler.cleanupAllSessions();
     await cleanupGlobalManagers();
     await fastify.close();

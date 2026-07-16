@@ -230,9 +230,9 @@ describe('chat columns and conversation archival', () => {
     expect(store.codeTabs.find((item) => item.id === 'routine-tab')).toMatchObject({ routineId: 'routine-1' });
   });
 
-  it('removeTab archives an activated chat column instead of deleting its snapshot', async () => {
+  it('removeTab archives an activated chat column (transcript only) and deletes its snapshot', async () => {
     resetStore({
-      codeTabs: [tab({ id: 'chat-tab', projectId: null, sessionId: 'sess-1', activatedAt: 5, containerId: 'cont-1' })],
+      codeTabs: [tab({ id: 'chat-tab', projectId: null, sessionId: 'sess-1', activatedAt: 5 })],
       chatConversations: [{ sessionId: 'sess-1', title: 'Plan my week', lastActiveAt: 1 }],
     });
     const { codeApi } = await import('./state');
@@ -240,12 +240,13 @@ describe('chat columns and conversation archival', () => {
     await codeApi.removeTab('chat-tab');
 
     expect(store.codeTabs).toHaveLength(0);
-    expect(invoke).not.toHaveBeenCalledWith('snapshot:delete', 'sess-1');
+    // Close is terminal for the sandbox — chat and code alike. Only the
+    // transcript entry survives in Recent.
+    expect(invoke).toHaveBeenCalledWith('snapshot:delete', 'sess-1');
     expect(store.chatConversations[0]).toMatchObject({
       sessionId: 'sess-1',
       title: 'Plan my week',
       profileName: 'host',
-      containerId: 'cont-1',
     });
   });
 
@@ -305,14 +306,12 @@ describe('chat columns and conversation archival', () => {
       title: 'x',
       lastActiveAt: 1,
       profileName: 'devbox',
-      containerId: 'cont-9',
     });
 
     expect(opened).toMatchObject({
       projectId: null,
       sessionId: 'sess-1',
       profileName: 'devbox',
-      containerId: 'cont-9',
     });
     expect(opened.activatedAt).toBeTypeOf('number');
   });

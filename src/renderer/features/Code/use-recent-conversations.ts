@@ -81,7 +81,7 @@ export function useRecentConversations(tabs: CodeTab[]): {
       }
     }
     // The launcher index wins on conflicts — it carries resume metadata
-    // (profileName/containerId) the live listing doesn't know about.
+    // (profileName) the live listing doesn't know about.
     for (const c of store.chatConversations ?? []) {
       bySession.set(c.sessionId, { ...bySession.get(c.sessionId), ...c });
     }

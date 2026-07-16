@@ -7,6 +7,7 @@ import { emitter, ipc } from '@/renderer/services/ipc';
 import type {
   AgentProcessStartOptions,
   AgentProcessStatus,
+  AgentProcessStopOptions,
   SandboxPauseResult,
   SandboxSwitchResult,
   WithTimestamp,
@@ -73,8 +74,8 @@ export const agentProcessApi = {
     emitter.invoke('agent-process:start', processId, arg);
   },
 
-  stop: async (processId: string) => {
-    await emitter.invoke('agent-process:stop', processId);
+  stop: async (processId: string, opts?: AgentProcessStopOptions) => {
+    await emitter.invoke('agent-process:stop', processId, opts);
     teardownTerminal(processId);
   },
 

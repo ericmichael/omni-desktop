@@ -786,7 +786,6 @@ export const schema: Schema<StoreData> = {
         title: { type: 'string' },
         lastActiveAt: { type: 'number' },
         profileName: { type: 'string' },
-        containerId: { type: 'string' },
       },
       required: ['sessionId', 'title', 'lastActiveAt'],
     },
@@ -1451,15 +1450,13 @@ export const isChatColumn = (tab: Pick<CodeTab, 'projectId' | 'routineId' | 'cus
 
 /** A closed chat conversation, resumable from the Focus sidebar's Recent list. */
 export type ChatConversation = {
-  /** Scratch-dir key, snapshot key, and agent server session id — all one id. */
+  /** Scratch-dir key and agent server session id — all one id. */
   sessionId: string;
   /** First user message (truncated) — display label in Recent. */
   title: string;
   lastActiveAt: number;
   /** Sticky profile of the column that owned it, for faithful resume. */
   profileName?: string;
-  /** Last container id, for warm reattach on resume. */
-  containerId?: string;
 };
 
 // #endregion
@@ -2115,6 +2112,21 @@ type VoiceIpcEvents = Namespaced<
 >;
 
 /**
+ * Options for ``agent-process:stop``.
+ */
+export type AgentProcessStopOptions = {
+  /**
+   * Skip persisting the workspace snapshot during serve's SIGTERM teardown.
+   * Set by terminal closes ("Close session" on a non-chat code column) where
+   * the caller deletes the snapshot tar right after the stop — persisting it
+   * (fingerprint pass + full workspace tar export) would be wasted work.
+   * Best-effort: an older omni-code without the ``sandbox.discard_snapshot``
+   * server function just persists as before.
+   */
+  discardSnapshot?: boolean;
+};
+
+/**
  * Unified agent process API. Main process handles these events, renderer process invokes them.
  * All operations are keyed by a processId — "chat" for the chat tab, CodeTabId for code tabs.
  */
@@ -2122,7 +2134,7 @@ type AgentProcessIpcEvents = Namespaced<
   'agent-process',
   {
     start: (processId: string, arg: AgentProcessStartOptions) => void;
-    stop: (processId: string) => void;
+    stop: (processId: string, opts?: AgentProcessStopOptions) => void;
     rebuild: (processId: string, arg: AgentProcessStartOptions) => void;
     resize: (processId: string, cols: number, rows: number) => void;
     'get-status': (processId: string) => WithTimestamp<AgentProcessStatus>;

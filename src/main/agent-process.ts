@@ -17,6 +17,7 @@ import { downloadWorkspace } from '@/main/workspace-sync';
 import type {
   AgentProcessData,
   AgentProcessStatus,
+  AgentProcessStopOptions,
   LogEntry,
   SandboxPauseResult,
   SandboxSwitchResult,
@@ -212,6 +213,15 @@ const servePayloadToData = (payload: ServeReadyPayload): AgentProcessData => {
 const SERVER_CALL_TIMEOUT_MS = 8_000;
 
 /**
+ * ``sandbox.switch`` runs a full teardown + bring-up serially (workspace tar
+ * export, container stop, container create, rehydrate, init, services — and
+ * possibly an image pull), so it gets minutes, not the default seconds. A
+ * timeout below the real switch duration is worse than useless: the caller
+ * falls back to a cold stop+relaunch that races the still-running switch.
+ */
+const SANDBOX_SWITCH_TIMEOUT_MS = 5 * 60_000;
+
+/**
  * Open a one-shot JSON-RPC WebSocket to omni serve, send one
  * ``server_call`` for *fn*, await the result, then close. Used by
  * lifecycle calls (pause/unpause) that don't need a long-lived control
@@ -221,7 +231,8 @@ const SERVER_CALL_TIMEOUT_MS = 8_000;
 async function oneShotServerCall(
   wsUrl: string,
   fn: string,
-  args: Record<string, unknown> = {}
+  args: Record<string, unknown> = {},
+  timeoutMs: number = SERVER_CALL_TIMEOUT_MS
 ): Promise<SandboxPauseResult> {
   return new Promise<SandboxPauseResult>((resolve) => {
     let settled = false;
@@ -239,10 +250,7 @@ async function oneShotServerCall(
     };
 
     const socket = new WsWebSocket(wsUrl);
-    const timer = setTimeout(
-      () => finish({ ok: false, supported: false, reason: `${fn} timed out` }),
-      SERVER_CALL_TIMEOUT_MS
-    );
+    const timer = setTimeout(() => finish({ ok: false, supported: false, reason: `${fn} timed out` }), timeoutMs);
 
     socket.once('open', () => {
       try {
@@ -394,7 +402,7 @@ export class AgentProcess {
     await this.startServeSession(arg);
   };
 
-  stop = async (): Promise<void> => {
+  stop = async (opts?: AgentProcessStopOptions): Promise<void> => {
     if (this.mode === 'compute') {
       this.updateStatus({ type: 'stopping' });
       if (this.computeSessionId && this.computeClient) {
@@ -438,7 +446,17 @@ export class AgentProcess {
     if (!this.childProcess) {
       return;
     }
+    // Capture the WS URL before flipping status — `stopping` carries no data.
+    const wsUrl =
+      this.status.type === 'running' || this.status.type === 'connecting' ? this.status.data.wsUrl : undefined;
     this.updateStatus({ type: 'stopping' });
+    if (opts?.discardSnapshot && wsUrl) {
+      // Terminal close: the caller deletes the snapshot tar right after this
+      // stop, so tell serve to skip the persist (fingerprint + full workspace
+      // tar export + scrub) in its SIGTERM teardown. Best-effort — on timeout
+      // or an older serve without the function, teardown persists as before.
+      await oneShotServerCall(wsUrl, 'sandbox.discard_snapshot');
+    }
     await this.killProcess();
     this.updateStatus({ type: 'exited' });
   };
@@ -511,7 +529,7 @@ export class AgentProcess {
     // mounted) conversation. Cleared in `finally` regardless of outcome.
     this.updateAgentProcessData({ switching: true });
     try {
-      const res = await oneShotServerCall(wsUrl, 'sandbox.switch', { profile: resolved.path });
+      const res = await oneShotServerCall(wsUrl, 'sandbox.switch', { profile: resolved.path }, SANDBOX_SWITCH_TIMEOUT_MS);
       const raw = res.data ?? {};
       if (!res.ok) {
         const recovered = raw.recovered === 'lost' || raw.recovered === 'rolled_back' ? raw.recovered : undefined;

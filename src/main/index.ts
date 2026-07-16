@@ -675,17 +675,10 @@ app.on('window-all-closed', () => {
 });
 
 /**
- * When the launcher quits, cleanup any running processes.
- * We prevent the default quit, await all cleanup (which uses SIGTERM → SIGKILL internally),
- * then force-exit the app. A hard 15s timeout ensures the app never hangs indefinitely.
+ * Run cleanup with a hard timeout, then exit. Shared by before-quit and the
+ * POSIX signal handlers below.
  */
-app.on('before-quit', (event) => {
-  if (isShuttingDown) {
-    return;
-  }
-
-  event.preventDefault();
-
+function shutdownWithTimeout() {
   // Hard timeout: if cleanup hangs, force-exit the process
   const forceExitTimer = setTimeout(() => {
     console.error('Cleanup timed out after 15s, forcing exit');
@@ -696,7 +689,38 @@ app.on('before-quit', (event) => {
     clearTimeout(forceExitTimer);
     app.exit(0);
   });
+}
+
+/**
+ * When the launcher quits, cleanup any running processes.
+ * We prevent the default quit, await all cleanup (which uses SIGTERM → SIGKILL internally),
+ * then force-exit the app. A hard 15s timeout ensures the app never hangs indefinitely.
+ */
+app.on('before-quit', (event) => {
+  if (isShuttingDown) {
+    return;
+  }
+
+  event.preventDefault();
+  shutdownWithTimeout();
 });
+
+// Ctrl+C in a dev terminal (`npm run dev`) or a plain `kill`: route through
+// the same cleanup as before-quit. Chromium's own signal handling tears the
+// process down without reliably emitting the quit events, so handle the
+// signals in Node land. A second signal while cleanup is in flight forces an
+// immediate exit — the serve children were signalled too (same foreground
+// process group) and finish their own teardown regardless.
+for (const sig of ['SIGINT', 'SIGTERM'] as const) {
+  process.on(sig, () => {
+    if (isShuttingDown) {
+      app.exit(1);
+      return;
+    }
+    console.log(`Received ${sig}, cleaning up...`);
+    shutdownWithTimeout();
+  });
+}
 
 //#endregion
 
