@@ -45,7 +45,7 @@ client:
   user: 'root'
 
 options:
-  image: ghcr.io/ericmichael/omni-code-sandbox-work:latest
+  image: ghcr.io/ericmichael/omni-launcher-devbox@sha256:1cbebbd1648fdabd73fdddb0dc63c425e32cc736ac50a967483799a58c1d2f6e
   exposed_ports: [8080, 6080]
 
 manifest:
