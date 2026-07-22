@@ -62,6 +62,14 @@ export default {
       filter: '*.html',
     },
     {
+      // Launcher-bundled sandbox profiles. Resolved at runtime by
+      // profile-resolver's getBundledProfilesDir() as a sibling of the
+      // bundled bin dir (resources/profiles in packaged apps).
+      from: 'assets/profiles',
+      to: './profiles',
+      filter: '*.yml',
+    },
+    {
       // Local voice sidecar (Option A). Python ONNX deps are provisioned at
       // runtime into a dedicated uv venv by VoiceService; only the script
       // (+ requirements) ships. Built-in persona embeddings (voices/*.emb.npy)

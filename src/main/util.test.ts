@@ -7,10 +7,14 @@
  * are not tested here — they require electron-mock or E2E.
  */
 import path from 'path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { parseProductDescribePayload, setCachedProductRuntimeInfo } from '@/lib/product';
 import {
   getActivateVenvCommand,
+  getCliInstalledPath,
+  getOmniCliPath,
+  getOmniConfigDir,
   getOperatingSystem,
   getShell,
   getTorchPlatform,
@@ -227,5 +231,79 @@ describe('getActivateVenvCommand', () => {
   it('wraps the path in double quotes', () => {
     const cmd = getActivateVenvCommand('/path/with spaces/omni');
     expect(cmd).toContain('"');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Product-keyed paths (omni-code parity)
+//
+// With omni-code as the bundled product, every path resolved through the
+// ProductDefinition / describe --json threading must equal what the
+// pre-refactor hardcoded literals produced. Electron is aliased to the
+// server shim under vitest (see vitest.config.ts), so app.getPath resolves
+// real homedir-based paths.
+// ---------------------------------------------------------------------------
+
+describe('product-keyed paths (omni-code parity)', () => {
+  const isWindows = process.platform === 'win32';
+  const savedEnv: Record<string, string | undefined> = {};
+
+  beforeEach(() => {
+    for (const key of ['OMNI_CLI_PATH', 'OMNI_CODE_DEV_PATH', 'XDG_CONFIG_HOME']) {
+      savedEnv[key] = process.env[key];
+      delete process.env[key];
+    }
+    setCachedProductRuntimeInfo(null);
+  });
+
+  afterEach(() => {
+    for (const [key, value] of Object.entries(savedEnv)) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+    setCachedProductRuntimeInfo(null);
+  });
+
+  it('venv CLI path ends with the historical omni binary name', () => {
+    const expectedTail = isWindows ? path.join('Scripts', 'omni.exe') : path.join('bin', 'omni');
+    expect(getOmniCliPath().endsWith(path.join('.venv', expectedTail))).toBe(true);
+  });
+
+  it('PATH-install location matches the historical omni name', () => {
+    const expectedTail = isWindows ? path.join('omni', 'omni.cmd') : path.join('.local', 'bin', 'omni');
+    expect(getCliInstalledPath().endsWith(expectedTail)).toBe(true);
+  });
+
+  it('config dir pre-describe fallback matches the historical convention', () => {
+    const expectedTail = isWindows ? 'OmniCode' : path.join('.config', 'omni_code');
+    expect(getOmniConfigDir().endsWith(expectedTail)).toBe(true);
+  });
+
+  it('config dir honors XDG_CONFIG_HOME on non-Windows platforms', () => {
+    if (isWindows) {
+      return;
+    }
+    process.env.XDG_CONFIG_HOME = '/custom/xdg';
+    expect(getOmniConfigDir()).toBe(path.join('/custom/xdg', 'omni_code'));
+  });
+
+  it('config dir prefers the config_dir reported by describe --json once cached', () => {
+    setCachedProductRuntimeInfo(
+      parseProductDescribePayload({
+        name: 'omni-code',
+        prog: 'omni',
+        label: 'Omni Code',
+        slug: 'omni_code',
+        version: '0.6.17',
+        config_dir: '/described/config/omni_code',
+        env_prefix: 'OMNI_CODE',
+        update: null,
+        serve_protocol: 1,
+      })
+    );
+    expect(getOmniConfigDir()).toBe('/described/config/omni_code');
   });
 });

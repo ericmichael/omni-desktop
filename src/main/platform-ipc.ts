@@ -10,6 +10,7 @@ import type { IpcListener } from '@electron-toolkit/typed-ipc/main';
 import { ipcMain } from 'electron';
 import type Store from 'electron-store';
 
+import { getProductSlug } from '@/lib/product';
 import type { FetchFn } from '@/main/agent-process';
 import { PlatformClient } from '@/main/platform-client';
 import { isEnterpriseBuild, PLATFORM_URL } from '@/main/platform-mode';
@@ -86,7 +87,7 @@ export function registerPlatformIpc(arg: {
         }
       };
 
-      const policy = await client.getPolicy('omni_code');
+      const policy = await client.getPolicy(getProductSlug());
       return policy.dashboards ?? [];
     } catch (e) {
       console.warn('[Platform] Failed to fetch dashboards:', (e as Error).message);
@@ -116,7 +117,7 @@ export function registerPlatformIpc(arg: {
           store.set('platform', { ...current, accessToken: newToken });
         }
       };
-      await client.getPolicy('omni_code');
+      await client.getPolicy(getProductSlug());
     } catch (e) {
       console.warn('[Platform] Failed to fetch policy:', (e as Error).message);
     }

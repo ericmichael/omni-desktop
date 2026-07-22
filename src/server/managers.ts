@@ -15,6 +15,7 @@ import {
 import { join } from 'path';
 
 import { emptyMcpConfig, emptyModelsConfig, emptyNetworkConfig, parseEnvVars } from '@/lib/agent-config';
+import { getProductSlug } from '@/lib/product';
 import { uuidv4 } from '@/lib/uuid';
 import { ACI_DESKTOP_PROFILE_NAME, ACI_PROFILE_NAME, writeAciProfile } from '@/main/aci-profile';
 import { listRepos as azureListRepos } from '@/main/azure-repos';
@@ -489,7 +490,7 @@ export const wireGlobalHandlers = async (arg: {
                   if (fresh !== stored) {
                     await pgSecret.setUserCodexTokens(principalId, fresh as unknown as Record<string, unknown>);
                   }
-                  const codexPath = join(configDir, '.config', 'omni_code');
+                  const codexPath = join(configDir, '.config', getProductSlug());
                   mkdirSync(codexPath, { recursive: true });
                   const tokenFile = join(codexPath, 'codex.json');
                   writeFileSync(tokenFile, `${JSON.stringify(fresh, null, 2)}\n`, 'utf-8');
@@ -660,7 +661,7 @@ export const wireGlobalHandlers = async (arg: {
     try {
       // Per-tenant config dir in cloud (matches the spawn's XDG_CONFIG_HOME), the
       // shared dir locally — the same dir omni serve's get_config_dir() resolves.
-      const cfgDir = dbUrl ? join(t.configDir, '.config', 'omni_code') : getOmniConfigDir();
+      const cfgDir = dbUrl ? join(t.configDir, '.config', getProductSlug()) : getOmniConfigDir();
       materializeAgentConfig({
         configDir: cfgDir,
         models: t.settings.get('modelsConfig') ?? emptyModelsConfig(),
@@ -1548,7 +1549,7 @@ export const wireGlobalHandlers = async (arg: {
       // SandboxClient; until then the `platform` profile name is selected
       // through the same defaultProfileName setting as every other profile).
       // We still touch the policy endpoint so token refresh stays current.
-      await client.getPolicy('omni_code');
+      await client.getPolicy(getProductSlug());
       autoStartSync();
     } catch (e) {
       console.warn('[Platform] Failed to fetch policy:', (e as Error).message);
@@ -1642,7 +1643,7 @@ export const wireGlobalHandlers = async (arg: {
         }
       };
 
-      const policy = await client.getPolicy('omni_code');
+      const policy = await client.getPolicy(getProductSlug());
       return policy.dashboards ?? [];
     } catch (e) {
       console.warn('[Platform] Failed to fetch dashboards:', (e as Error).message);

@@ -16,6 +16,7 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import { join } from 'node:path';
 
+import { getProductSlug } from '@/lib/product';
 import { getOmniConfigDir } from '@/main/util';
 
 const CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann';
@@ -38,7 +39,8 @@ export type CodexStatus = { signedIn: boolean; accountId?: string };
 /** Server/headless device-flow user code + verification URL for the renderer. */
 export type CodexDeviceCode = { userCode: string; verificationUri: string };
 
-const ORIGINATOR = 'omni_code';
+/** OAuth originator — the hosted product's platform slug (e.g. `omni_code`). */
+const originator = (): string => getProductSlug();
 
 function base64Url(buf: Buffer): string {
   return buf.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -170,7 +172,7 @@ const buildAuthorizeUrl = (challenge: string, state: string): string => {
     id_token_add_organizations: 'true',
     codex_cli_simplified_flow: 'true',
     state,
-    originator: 'omni_code',
+    originator: originator(),
   });
   return `${ISSUER}/oauth/authorize?${params.toString()}`;
 };
@@ -309,7 +311,7 @@ export async function loginWithDeviceFlow(opts: {
   save?: (tokens: CodexTokens) => void | Promise<void>;
   signal?: AbortSignal;
 }): Promise<CodexStatus> {
-  const ua = { 'User-Agent': `omni_code/${ORIGINATOR}`, 'Content-Type': 'application/json' };
+  const ua = { 'User-Agent': `${originator()}/${originator()}`, 'Content-Type': 'application/json' };
   const start = await fetch(`${ISSUER}/api/accounts/deviceauth/usercode`, {
     method: 'POST',
     headers: ua,

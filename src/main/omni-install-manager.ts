@@ -12,9 +12,11 @@ const execFileAsync = promisify(execFile);
 
 import { CommandRunner } from '@/lib/command-runner';
 import { OMNI_CODE_VERSION } from '@/lib/omni-version';
+import { getActiveProduct } from '@/lib/product';
 import { DEFAULT_ENV } from '@/lib/pty-utils';
 import { withResultAsync } from '@/lib/result';
 import { SimpleLogger } from '@/lib/simple-logger';
+import { refreshProductRuntimeInfo } from '@/main/product-runtime';
 import {
   getOmniLogsDir,
   getOmniRuntimeDir,
@@ -27,7 +29,6 @@ import type { IIpcListener } from '@/shared/ipc-listener';
 import type { IpcRendererEvents, LogEntry, OmniInstallProcessStatus, WithTimestamp } from '@/shared/types';
 
 const PYTHON_VERSION = '3.11';
-const EXTRA_INDEX_URL = 'https://pypi.fury.io/ericmichael/';
 const MAX_INSTALL_LOGS = 5;
 
 // Strip common ANSI CSI sequences so the on-disk log is readable in plain
@@ -378,8 +379,8 @@ export class OmniInstallManager {
     const urls = [
       // uv downloads managed Python from this host.
       'https://astral.sh/',
-      // omni-code is published to this private index.
-      'https://pypi.fury.io/ericmichael/',
+      // The product package is published to this index.
+      getActiveProduct().extraIndexUrl,
     ];
     for (const url of urls) {
       try {
@@ -449,7 +450,7 @@ export class OmniInstallManager {
       'venv',
       '--relocatable',
       '--prompt',
-      'omni',
+      getActiveProduct().prog,
       '--python',
       PYTHON_VERSION,
       '--python-preference',
@@ -511,11 +512,14 @@ export class OmniInstallManager {
     // edits are picked up live without reinstalling. Set OMNI_CODE_EDITABLE_PATH
     // to the repo root in .env. Transitive deps (omniagents, etc.) still come
     // from the index.
+    const product = getActiveProduct();
     const editablePath = options.env.OMNI_CODE_EDITABLE_PATH || process.env.OMNI_CODE_EDITABLE_PATH;
-    const target: string[] = editablePath ? ['--editable', editablePath] : [`omni-code==${OMNI_CODE_VERSION}`];
+    const target: string[] = editablePath
+      ? ['--editable', editablePath]
+      : [`${product.packageName}==${OMNI_CODE_VERSION}`];
 
     if (editablePath) {
-      this.log.info(c.yellow(`Dev mode: installing omni-code editable from ${editablePath}\r\n`));
+      this.log.info(c.yellow(`Dev mode: installing ${product.packageName} editable from ${editablePath}\r\n`));
     }
 
     const installArgs = [
@@ -526,12 +530,12 @@ export class OmniInstallManager {
       '--python-preference',
       'only-managed',
       '--extra-index-url',
-      EXTRA_INDEX_URL,
+      product.extraIndexUrl,
       ...(repair ? ['--force-reinstall'] : []),
       ...target,
     ];
 
-    this.log.info(c.cyan('Installing omni-code...\r\n'));
+    this.log.info(c.cyan(`Installing ${product.packageName}...\r\n`));
     this.log.info(`> ${uvPath} ${installArgs.join(' ')}\r\n`);
 
     const result = await withResultAsync(() => this.runCommand(uvPath, installArgs, options));
@@ -540,11 +544,11 @@ export class OmniInstallManager {
       return result.value;
     }
 
-    this.log.error(c.red(`Failed to install omni-code: ${result.error.message}\r\n`));
+    this.log.error(c.red(`Failed to install ${product.packageName}: ${result.error.message}\r\n`));
     this.updateStatus({
       type: 'error',
       error: {
-        message: `Failed to install omni-code==${OMNI_CODE_VERSION} (uv pip install: ${result.error.message})`,
+        message: `Failed to install ${product.packageName}==${OMNI_CODE_VERSION} (uv pip install: ${result.error.message})`,
         context: serializeError(result.error),
       },
     });
@@ -585,7 +589,7 @@ export class OmniInstallManager {
       '--python-preference',
       'only-managed',
       '--extra-index-url',
-      EXTRA_INDEX_URL,
+      getActiveProduct().extraIndexUrl,
       '--editable',
       `${editablePath}[all]`,
     ];
@@ -824,6 +828,12 @@ export class OmniInstallManager {
 
       this.updateStatus({ type: 'completed' });
       this.log.info(c.green.bold('Installation completed successfully\r\n'));
+
+      // Re-introspect the freshly installed product (`<prog> describe --json`)
+      // so identity/config-dir consumers see the new install without a
+      // launcher restart. Fire-and-forget — install success doesn't depend
+      // on introspection.
+      void refreshProductRuntimeInfo();
     } finally {
       this.closeInstallLog();
     }

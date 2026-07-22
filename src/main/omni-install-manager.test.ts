@@ -103,6 +103,10 @@ vi.mock('@/main/util', () => ({
   getOmniRuntimeDir: () => '/tmp/test-runtime',
   getOmniVenvPath: () => '/tmp/test-runtime/.venv',
   getOmniLogsDir: () => '/tmp/test-logs',
+  // Used by the post-install `refreshProductRuntimeInfo` (fire-and-forget).
+  // Points at a path `pathExists` reports missing, so the describe
+  // introspection short-circuits without spawning anything.
+  getOmniCliPath: () => '/tmp/test-cli/omni',
   isFile: vi.fn(async (p: string) => {
     if (p === '/app/bin/uv') {
       return hoisted.uvExists;

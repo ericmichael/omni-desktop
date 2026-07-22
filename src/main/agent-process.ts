@@ -7,9 +7,11 @@ import { shellEnvSync } from 'shell-env';
 import { assert } from 'tsafe';
 import { WebSocket as WsWebSocket } from 'ws';
 
+import { getProductSlug } from '@/lib/product';
 import { DEFAULT_ENV } from '@/lib/pty-utils';
 import { SimpleLogger } from '@/lib/simple-logger';
 import type { IComputeClient } from '@/main/platform-client';
+import { assertServeProtocolSupported } from '@/main/product-runtime';
 import { type ResolvedProfile, resolveProfile } from '@/main/profile-resolver';
 import { getSnapshotStore } from '@/main/snapshot-blob-store';
 import { getOmniCliPath, getOmniConfigDir, isDirectory, pathExists } from '@/main/util';
@@ -178,9 +180,9 @@ export type FetchFn = typeof globalThis.fetch;
 // ---------------------------------------------------------------------------
 
 /**
- * JSON readiness payload printed by ``omni serve`` and consumed here.
- * Shape pinned by the launcher↔omni-code contract; keep aligned with
- * ``omni-code/omni_code/serve_cli.py``.
+ * JSON readiness payload printed by ``<prog> serve`` and consumed here.
+ * Shape pinned by the launcher↔product serve contract (protocol v1);
+ * keep aligned with omniagents ``docs/serve-protocol.md``.
  */
 type ServeReadyPayload = {
   sandbox_url: string;
@@ -529,7 +531,12 @@ export class AgentProcess {
     // mounted) conversation. Cleared in `finally` regardless of outcome.
     this.updateAgentProcessData({ switching: true });
     try {
-      const res = await oneShotServerCall(wsUrl, 'sandbox.switch', { profile: resolved.path }, SANDBOX_SWITCH_TIMEOUT_MS);
+      const res = await oneShotServerCall(
+        wsUrl,
+        'sandbox.switch',
+        { profile: resolved.path },
+        SANDBOX_SWITCH_TIMEOUT_MS
+      );
       const raw = res.data ?? {};
       if (!res.ok) {
         const recovered = raw.recovered === 'lost' || raw.recovered === 'rolled_back' ? raw.recovered : undefined;
@@ -655,6 +662,18 @@ export class AgentProcess {
       this.updateStatus({
         type: 'error',
         error: { message: 'Omni runtime is not installed' },
+      });
+      return;
+    }
+
+    // Verify the installed product speaks the serve protocol this launcher
+    // targets (omniagents docs/serve-protocol.md, v1) before spawning.
+    try {
+      await assertServeProtocolSupported();
+    } catch (protoErr) {
+      this.updateStatus({
+        type: 'error',
+        error: { message: (protoErr as Error).message },
       });
       return;
     }
@@ -865,7 +884,7 @@ export class AgentProcess {
       return;
     }
 
-    const agentSlug = arg.agentSlug ?? 'omni_code';
+    const agentSlug = arg.agentSlug ?? getProductSlug();
 
     try {
       this.log.info(c.cyan(`Requesting sandbox from compute backend (agent: ${agentSlug})...\r\n`));

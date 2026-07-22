@@ -48,6 +48,7 @@ import { createPermissionsManager } from '@/main/permissions-manager';
 import { registerPlatformIpc } from '@/main/platform-ipc';
 import { createPlatformClient } from '@/main/platform-mode';
 import { createProcessManager } from '@/main/process-manager';
+import { refreshProductRuntimeInfo } from '@/main/product-runtime';
 import { backfillProjectConfigs } from '@/main/project-config-backfill';
 import { closeProjectDb, getDb, openProjectDb } from '@/main/project-db';
 import { createProjectManager } from '@/main/project-manager';
@@ -513,6 +514,11 @@ async function cleanup() {
  * Some APIs can only be used after this event occurs.
  */
 app.on('ready', () => {
+  // Introspect the installed product (`<prog> describe --json`) so identity
+  // and config-dir consumers use the product-reported values. Best-effort:
+  // convention-based fallbacks cover the not-yet-installed case.
+  void refreshProductRuntimeInfo();
+
   // Register artifact: protocol handler for serving ticket artifact files
   // URL format: artifact://file/{ticketId}/{relativePath}
   // We use a dummy hostname ("file") because URL spec lowercases hostnames,

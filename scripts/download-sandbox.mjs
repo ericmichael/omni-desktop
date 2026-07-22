@@ -1,10 +1,17 @@
 #!/usr/bin/env node
 
-// Downloads a pre-built omni-sandbox binary from the omni-code GitHub releases.
+// Downloads a pre-built omni-sandbox binary from GitHub releases.
 // Usage:
 //   node scripts/download-sandbox.mjs            # Auto-detect platform, skip if exists
 //   node scripts/download-sandbox.mjs --force    # Force re-download
 //   node scripts/download-sandbox.mjs --version v0.2.0  # Specific version
+//
+// Source repo: OMNI_SANDBOX_REPO env override, defaulting to the standalone
+// `omni-sandbox` repo. The crate moved out of the omni-code monorepo, but the
+// standalone GitHub remote may not exist yet (maintainer's manual step) — so
+// when the preferred repo (or its release asset) is missing we gracefully
+// fall back to the legacy omni-code release assets. Remove the fallback once
+// the omni-sandbox repo publishes releases.
 
 import { execFileSync } from 'node:child_process';
 import { createWriteStream, existsSync, mkdirSync, chmodSync } from 'node:fs';
@@ -17,7 +24,8 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(__dirname, '..');
 const binDir = join(projectRoot, 'assets', 'bin');
 
-const REPO = 'ericmichael/omni-code';
+const REPO = process.env.OMNI_SANDBOX_REPO || 'ericmichael/omni-sandbox';
+const LEGACY_REPO = 'ericmichael/omni-code';
 
 const isWindows = process.platform === 'win32';
 const sandboxBin = isWindows ? 'omni-sandbox.exe' : 'omni-sandbox';
@@ -77,29 +85,43 @@ function httpsGet(url, maxRedirects = 5) {
   });
 }
 
-async function download() {
+/**
+ * Download the release asset from one repo. Throws a `NotAvailableError`
+ * when the repo has no (matching) release or the asset 404s — the caller
+ * treats that as "try the next candidate repo".
+ */
+class NotAvailableError extends Error {}
+
+async function downloadFrom(repo) {
   // Determine which release to download from
   let tag = requestedVersion;
   if (!tag) {
     // Get the latest release tag
-    console.log(`Fetching latest release from ${REPO}...`);
+    console.log(`Fetching latest release from ${repo}...`);
     try {
-      const output = execFileSync('gh', ['release', 'view', '--repo', REPO, '--json', 'tagName', '-q', '.tagName'], {
+      const output = execFileSync('gh', ['release', 'view', '--repo', repo, '--json', 'tagName', '-q', '.tagName'], {
         encoding: 'utf-8',
       }).trim();
       tag = output;
     } catch {
-      console.warn(`\x1b[33mWARNING: No release found in ${REPO} — skipping omni-sandbox download.\x1b[0m`);
-      process.exit(0);
+      throw new NotAvailableError(`no release found in ${repo}`);
     }
   }
 
-  const url = `https://github.com/${REPO}/releases/download/${tag}/${assetName}`;
-  console.log(`Downloading ${assetName} from release ${tag}...`);
+  const url = `https://github.com/${repo}/releases/download/${tag}/${assetName}`;
+  console.log(`Downloading ${assetName} from ${repo} release ${tag}...`);
 
   mkdirSync(binDir, { recursive: true });
 
-  const res = await httpsGet(url);
+  let res;
+  try {
+    res = await httpsGet(url);
+  } catch (err) {
+    if (String(err.message).includes('HTTP 404')) {
+      throw new NotAvailableError(`asset ${assetName} not found in ${repo}@${tag}`);
+    }
+    throw err;
+  }
   const dest = createWriteStream(sandboxPath);
   await pipeline(res, dest);
 
@@ -108,6 +130,33 @@ async function download() {
   }
 
   console.log(`Downloaded omni-sandbox to assets/bin/${sandboxBin}`);
+}
+
+async function download() {
+  // Prefer the standalone repo; fall back to the legacy monorepo release
+  // assets while the standalone remote/releases don't exist yet.
+  const candidates = REPO === LEGACY_REPO ? [REPO] : [REPO, LEGACY_REPO];
+  let downloaded = false;
+  for (const repo of candidates) {
+    try {
+      await downloadFrom(repo);
+      downloaded = true;
+      break;
+    } catch (err) {
+      if (err instanceof NotAvailableError && repo !== candidates[candidates.length - 1]) {
+        console.warn(`\x1b[33m${err.message} — falling back to legacy release assets.\x1b[0m`);
+        continue;
+      }
+      if (err instanceof NotAvailableError) {
+        console.warn(`\x1b[33mWARNING: ${err.message} — skipping omni-sandbox download.\x1b[0m`);
+        process.exit(0);
+      }
+      throw err;
+    }
+  }
+  if (!downloaded) {
+    return;
+  }
 
   // On Linux, also check for bundled bwrap
   if (process.platform === 'linux') {

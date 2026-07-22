@@ -1,4 +1,7 @@
-export const OMNI_CODE_VERSION = '0.6.17';
+import { getActiveProduct } from '@/lib/product';
+
+/** Pinned product version — single source of truth is the bundled `ProductDefinition`. */
+export const OMNI_CODE_VERSION = getActiveProduct().pinnedVersion;
 
 export type VersionCheckResult = {
   isOutdated: boolean;

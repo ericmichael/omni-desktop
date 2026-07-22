@@ -7,6 +7,7 @@ import path from 'path';
 import { promisify } from 'util';
 
 import { checkOmniVersion, OMNI_CODE_VERSION } from '@/lib/omni-version';
+import { getActiveProduct, getCachedProductRuntimeInfo } from '@/lib/product';
 import { withResultAsync } from '@/lib/result';
 import type { GpuType, OmniRuntimeInfo, OperatingSystem, RuntimeModelList, WindowProps } from '@/shared/types';
 
@@ -97,7 +98,8 @@ export const getOmniCliPath = (): string => {
     return cliOverride;
   }
   const venvPath = getOmniVenvPath();
-  return path.join(venvPath, process.platform === 'win32' ? 'Scripts/omni.exe' : 'bin/omni');
+  const prog = getActiveProduct().prog;
+  return path.join(venvPath, process.platform === 'win32' ? `Scripts/${prog}.exe` : `bin/${prog}`);
 };
 
 /**
@@ -200,10 +202,20 @@ export function validateUserPath(filePath: string, opts: { checkDepth?: boolean 
 //#region Convention defaults
 
 /**
- * Get the omni-code config directory, matching the path logic in omni_code/config.py.
- * Windows: %APPDATA%/OmniCode, Linux: ~/.config/omni_code
+ * Get the hosted product's config directory.
+ *
+ * Once the installed product has been introspected (`<prog> describe --json`,
+ * see src/main/product-runtime.ts), its resolved `config_dir` is
+ * authoritative. Before that (product not installed yet, or describe hasn't
+ * run), fall back to the convention mirrored from omni_code/config.py:
+ * Windows: %APPDATA%/OmniCode, Linux: ~/.config/omni_code — identical to
+ * what describe reports for omni-code.
  */
 export const getOmniConfigDir = (): string => {
+  const described = getCachedProductRuntimeInfo()?.configDir;
+  if (described) {
+    return described;
+  }
   if (process.platform === 'win32') {
     return path.join(app.getPath('appData'), 'OmniCode');
   }
@@ -374,7 +386,7 @@ export const getOmniRuntimeInfo = async (): Promise<OmniRuntimeInfo> => {
     return { isInstalled: false };
   }
 
-  const version = await getPackageVersion(pythonPath, 'omni-code');
+  const version = await getPackageVersion(pythonPath, getActiveProduct().packageName);
 
   if (!version) {
     return { isInstalled: false };
@@ -404,7 +416,10 @@ export const getOmniRuntimeInfo = async (): Promise<OmniRuntimeInfo> => {
  */
 export const getCliInstallDir = (): string => {
   if (process.platform === 'win32') {
-    return path.join(process.env.LOCALAPPDATA ?? path.join(app.getPath('home'), 'AppData', 'Local'), 'omni');
+    return path.join(
+      process.env.LOCALAPPDATA ?? path.join(app.getPath('home'), 'AppData', 'Local'),
+      getActiveProduct().prog
+    );
   }
   return path.join(app.getPath('home'), '.local', 'bin');
 };
@@ -415,10 +430,11 @@ export const getCliInstallDir = (): string => {
  * - Windows: %LOCALAPPDATA%\omni\omni.cmd (batch shim)
  */
 export const getCliInstalledPath = (): string => {
+  const prog = getActiveProduct().prog;
   if (process.platform === 'win32') {
-    return path.join(getCliInstallDir(), 'omni.cmd');
+    return path.join(getCliInstallDir(), `${prog}.cmd`);
   }
-  return path.join(getCliInstallDir(), 'omni');
+  return path.join(getCliInstallDir(), prog);
 };
 
 // Keep old names as aliases for backward compatibility with IPC callers

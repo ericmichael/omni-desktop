@@ -4,7 +4,8 @@
  *
  * The snapshot is the SDK's "if the docker container is gone, rehydrate
  * the workspace from this tar" cache. One file per resumable session;
- * see ``omniagents/core/sandbox/`` and ``omni-code/serve_cli.py``.
+ * see ``omniagents/core/sandbox/`` and omniagents ``docs/serve-protocol.md``
+ * (protocol v1, ``--snapshot-dir``).
  *
  * Two cleanup paths live here:
  *
