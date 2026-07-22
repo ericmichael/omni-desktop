@@ -868,6 +868,56 @@ export const extractSafeToolNames = (tools: readonly ClientToolDef[]): string[] 
   tools.filter((t) => t.safe).map((t) => t.name);
 
 /**
+ * First-party `omni-projects` MCP tools (the stdio server bundled with the
+ * launcher, `packages/projects-mcp`) pre-authorized in interactive mode.
+ * This is our own code operating our own data layer — every effect is
+ * visible and reversible in the UI — so prompting per call is pure
+ * friction. The two destructive tools (`delete_project`,
+ * `delete_inbox_item`) are deliberately absent and still prompt.
+ *
+ * Sent as `safe_mcp_tools` tuples (original tool names + server label), so
+ * the grant is keyed by (server, tool) in omniagents and a same-named tool
+ * on any other attached MCP server still prompts.
+ */
+const OMNI_PROJECTS_SERVER_LABEL = 'omni-projects';
+
+const OMNI_PROJECTS_SAFE_TOOLS: readonly string[] = [
+  // Read-only
+  'get_current_principal',
+  'get_pipeline',
+  'get_ticket',
+  'get_ticket_comments',
+  'list_inbox',
+  'list_milestones',
+  'list_pages',
+  'list_projects',
+  'list_sandbox_profiles',
+  'list_team_members',
+  'list_tickets',
+  'read_milestone_brief',
+  'read_page',
+  'search_tickets',
+  // Writes — reversible CRUD on our own store
+  'add_ticket_comment',
+  'archive_ticket',
+  'create_inbox_item',
+  'create_milestone',
+  'create_page',
+  'create_project',
+  'create_ticket',
+  'inbox_to_project',
+  'inbox_to_tickets',
+  'move_ticket',
+  'unarchive_ticket',
+  'update_inbox_item',
+  'update_milestone',
+  'update_page',
+  'update_pipeline',
+  'update_project',
+  'update_ticket',
+];
+
+/**
  * Behavioral guidance inlined into `additional_instructions`. Covers the
  * concepts tool schemas can't convey: channel choice (comment vs. notify vs.
  * escalate), gate semantics, cross-session memory, and UI-visibility nuances.
@@ -1144,7 +1194,15 @@ export const buildSessionVariables = (args: SessionVariablesArgs): Record<string
 
   return {
     client_tools: tools,
-    safe_tool_overrides: autopilot ? { safe_tool_patterns: ['.*'] } : { safe_tool_names: extractSafeToolNames(tools) },
+    safe_tool_overrides: autopilot
+      ? { safe_tool_patterns: ['.*'] }
+      : {
+          safe_tool_names: extractSafeToolNames(tools),
+          safe_mcp_tools: OMNI_PROJECTS_SAFE_TOOLS.map((name) => ({
+            server_label: OMNI_PROJECTS_SERVER_LABEL,
+            tool_name: name,
+          })),
+        },
     additional_instructions: instructions,
     // Structured ticket context — omniagents persists these into
     // ``session.variables`` so omni-code tools / server functions /

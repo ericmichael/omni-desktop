@@ -1080,8 +1080,10 @@ export function ToolCard({ item, defaultOpen }: { item: ToolItem; defaultOpen?: 
     if (sum && sum.trim().length > 0) {
       return sum.trim();
     }
-    return item.tool;
-  }, [item.tool, item.metadata]);
+    // MCP-derived tools: show the original tool name, never the
+    // ``mcp_<server>__`` wire encoding. The server rides in the preview.
+    return item.tool_label || item.tool;
+  }, [item.tool, item.tool_label, item.metadata]);
 
   const headerPreview = useMemo(() => {
     const meta = item.metadata;
@@ -1089,8 +1091,12 @@ export function ToolCard({ item, defaultOpen }: { item: ToolItem; defaultOpen?: 
     if (sum && sum.trim().length > 0) {
       return undefined;
     }
-    return formatArgsPreview(item.input || '', 80) || undefined;
-  }, [item.input, item.metadata]);
+    const args = formatArgsPreview(item.input || '', 80);
+    if (item.server_label) {
+      return args ? `${item.server_label} · ${args}` : item.server_label;
+    }
+    return args || undefined;
+  }, [item.input, item.metadata, item.server_label]);
 
   const richBody = useMemo(() => renderMetadata(item.metadata, item.output || ''), [item.metadata, item.output]);
   const parsedInput = useMemo(() => {
@@ -1215,6 +1221,9 @@ function ApprovalCard({
     const cmd = metaInner.command;
     const truncated = cmd.length > 60 ? `${cmd.slice(0, 57)}...` : cmd;
     headerSuffix = <span className="font-mono text-xs text-warning/90"> — {truncated}</span>;
+  } else if (item.server_label) {
+    // Local-MCP-derived tool with no richer suffix: name the server.
+    headerSuffix = <span className="font-mono text-xs text-warning/90"> — {item.server_label}</span>;
   }
 
   const canCollapse = !!richBody && typeof displayType === 'string' && COLLAPSIBLE_DISPLAY_TYPES.has(displayType);
@@ -1228,7 +1237,7 @@ function ApprovalCard({
         </div>
       ) : null}
       <div className="break-words pr-24 text-sm font-semibold text-warning">
-        {isMcp ? 'Approve MCP call' : `Approve ${item.tool}`}
+        {isMcp ? 'Approve MCP call' : `Approve ${item.tool_label || item.tool}`}
         {headerSuffix}
       </div>
       {summary ? <div className="mt-0.5 break-words text-xs text-muted-foreground">{summary}</div> : null}

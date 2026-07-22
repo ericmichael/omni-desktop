@@ -98,6 +98,13 @@ export type ChatSessionEvent =
       call_id: string;
       tool: string;
       input: string;
+      // In-flight card title from the tool's ``running_summary`` declaration
+      // (omniagents attaches it as ``metadata.summary`` on ``tool_called``);
+      // superseded wholesale by the result's metadata.
+      metadata?: ChatItemMetadata;
+      // (server, tool) identity fields for MCP-derived tools.
+      server_label?: string;
+      tool_label?: string;
       run_id?: string;
       session_id?: string;
     }
@@ -107,6 +114,8 @@ export type ChatSessionEvent =
       tool: string;
       output: string;
       metadata?: ChatItemMetadata;
+      server_label?: string;
+      tool_label?: string;
       run_id?: string;
       session_id?: string;
     }
@@ -125,6 +134,7 @@ export type ChatSessionEvent =
       // via a different RPC (no ``always_approve`` flag).
       kind?: 'function' | 'mcp';
       server_label?: string;
+      tool_label?: string;
     }
   | { type: 'APPROVAL_RESOLVED'; request_id: string }
   | { type: 'SET_STATUS'; text?: string; showSpinner?: boolean; session_id?: string }
@@ -303,9 +313,12 @@ export const chatSessionMachine = setup({
       const item: ToolItem = {
         type: 'tool',
         tool: e.tool,
+        server_label: e.server_label,
+        tool_label: e.tool_label,
         input: e.input,
         call_id: e.call_id,
         status: 'called',
+        metadata: e.metadata,
         runId: context.runId,
       };
       return {
@@ -324,11 +337,15 @@ export const chatSessionMachine = setup({
           output: e.output,
           status: 'result',
           metadata: e.metadata,
+          server_label: e.server_label ?? (next[idx] as ToolItem).server_label,
+          tool_label: e.tool_label ?? (next[idx] as ToolItem).tool_label,
         } as ToolItem;
       } else {
         next.push({
           type: 'tool',
           tool: e.tool,
+          server_label: e.server_label,
+          tool_label: e.tool_label,
           output: e.output,
           call_id: e.call_id,
           status: 'result',
@@ -386,6 +403,7 @@ export const chatSessionMachine = setup({
         session_id: e.session_id,
         kind: e.kind ?? 'function',
         server_label: e.server_label,
+        tool_label: e.tool_label,
       };
       const newPending = new Map(context.pendingApprovals);
       newPending.set(e.request_id, item);

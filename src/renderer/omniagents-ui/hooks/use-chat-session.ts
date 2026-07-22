@@ -117,6 +117,9 @@ export function useChatSession(client: RPCClient) {
           call_id: String(p?.call_id ?? ''),
           tool,
           input: typeof p?.input === 'string' ? p.input : JSON.stringify(p?.input),
+          metadata: p?.metadata,
+          server_label: typeof p?.server_label === 'string' ? p.server_label : undefined,
+          tool_label: typeof p?.tool_label === 'string' ? p.tool_label : undefined,
           run_id: typeof p?.run_id === 'string' ? p.run_id : undefined,
           session_id: typeof p?.session_id === 'string' ? p.session_id : undefined,
         });
@@ -136,6 +139,8 @@ export function useChatSession(client: RPCClient) {
           tool,
           output,
           metadata,
+          server_label: typeof p?.server_label === 'string' ? p.server_label : undefined,
+          tool_label: typeof p?.tool_label === 'string' ? p.tool_label : undefined,
           run_id: typeof p?.run_id === 'string' ? p.run_id : undefined,
           session_id: typeof p?.session_id === 'string' ? p.session_id : undefined,
         });
@@ -217,6 +222,8 @@ export function useChatSession(client: RPCClient) {
           tool: String(p?.tool_name ?? ''),
           argumentsText: String(p?.arguments ?? ''),
           metadata: p?.metadata,
+          server_label: typeof p?.server_label === 'string' ? p.server_label : undefined,
+          tool_label: typeof p?.tool_label === 'string' ? p.tool_label : undefined,
           session_id: typeof p?.session_id === 'string' ? p.session_id : undefined,
         });
       }),

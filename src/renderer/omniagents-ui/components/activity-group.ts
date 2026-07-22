@@ -97,7 +97,9 @@ function categorize(toolName: string): keyof Omit<GroupSummary, 'total' | 'error
 export function computeGroupSummary(tools: ToolItem[]): GroupSummary {
   const s: GroupSummary = { total: tools.length, reads: 0, edits: 0, commands: 0, searches: 0, other: 0, errors: 0 };
   for (const t of tools) {
-    s[categorize(t.tool)]++;
+    // MCP-derived tools categorize by their original name, not the
+    // ``mcp_<server>__`` wire encoding (which would always bucket "other").
+    s[categorize(t.tool_label || t.tool)]++;
     if (t.metadata?.display_type === 'error') {
       s.errors++;
     }

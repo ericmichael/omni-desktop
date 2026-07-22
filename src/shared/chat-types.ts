@@ -40,7 +40,12 @@ export type ChatMessage = {
 export type ToolItem = {
   type: 'tool';
   call_id?: string;
+  /** Flat wire name (for MCP-derived tools the prefixed ``mcp_<server>__<tool>``). */
   tool: string;
+  /** MCP server name when the tool is MCP-derived — display as a suffix, never parse `tool`. */
+  server_label?: string;
+  /** Original (unprefixed) MCP tool name for display. */
+  tool_label?: string;
   input?: string;
   output?: string;
   status: 'called' | 'result';
@@ -62,8 +67,11 @@ export type ApprovalItem = {
   // Discriminator. Defaults to 'function' for back-compat with existing
   // approval items already in items[] when this field was introduced.
   kind?: 'function' | 'mcp';
-  // Set for ``kind: 'mcp'`` to identify the hosted MCP server.
+  // Identifies the MCP server: set for ``kind: 'mcp'`` (hosted), and for
+  // ``kind: 'function'`` approvals of local-MCP-derived tools.
   server_label?: string;
+  // Original (unprefixed) MCP tool name for display on local-MCP approvals.
+  tool_label?: string;
 };
 
 export type ChatItemMetadata = {

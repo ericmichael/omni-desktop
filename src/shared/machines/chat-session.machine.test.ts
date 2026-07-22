@@ -423,6 +423,34 @@ describe('chatSessionMachine', () => {
       expect(tool.tool).toBe('bash');
       expect(tool.status).toBe('called');
     });
+
+    it('stores (server, tool) identity labels for MCP-derived tools', () => {
+      let snap = runningSnap();
+      snap = next(snap, {
+        type: 'TOOL_CALLED',
+        call_id: 'c1',
+        tool: 'mcp_omni-projects__list_tickets',
+        server_label: 'omni-projects',
+        tool_label: 'list_tickets',
+        input: '{}',
+        session_id: 'sess-1',
+      });
+      let tool = ctx(snap).items.find((it) => it.type === 'tool') as any;
+      expect(tool.server_label).toBe('omni-projects');
+      expect(tool.tool_label).toBe('list_tickets');
+      // Labels survive the result merge even when the result omits them.
+      snap = next(snap, {
+        type: 'TOOL_RESULT',
+        call_id: 'c1',
+        tool: 'mcp_omni-projects__list_tickets',
+        output: '3 tickets',
+        session_id: 'sess-1',
+      });
+      tool = ctx(snap).items.find((it) => it.type === 'tool') as any;
+      expect(tool.status).toBe('result');
+      expect(tool.server_label).toBe('omni-projects');
+      expect(tool.tool_label).toBe('list_tickets');
+    });
   });
 
   describe('TOOL_RESULT', () => {

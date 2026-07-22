@@ -138,6 +138,28 @@ describe('client_tools shape', () => {
     expect(vars.safe_tool_overrides.safe_tool_names).toBeUndefined();
   });
 
+  it('interactive mode pre-authorizes omni-projects via (server, tool) tuples', () => {
+    const vars = buildSessionVariables({ surface: 'chat' }) as {
+      safe_tool_overrides: {
+        safe_tool_names?: string[];
+        safe_mcp_tools?: { server_label: string; tool_name: string }[];
+      };
+    };
+    const mcpSafe = vars.safe_tool_overrides.safe_mcp_tools!;
+    expect(mcpSafe).toBeDefined();
+    expect(mcpSafe.every((e) => e.server_label === 'omni-projects')).toBe(true);
+    const names = mcpSafe.map((e) => e.tool_name);
+    expect(names).toContain('list_tickets');
+    expect(names).toContain('create_ticket');
+    // Destructive tools stay behind approval
+    expect(names).not.toContain('delete_project');
+    expect(names).not.toContain('delete_inbox_item');
+    // Grants moved off the bare-name list — no cross-server leak
+    const flat = vars.safe_tool_overrides.safe_tool_names!;
+    expect(flat).not.toContain('list_tickets');
+    expect(flat).not.toContain('create_ticket');
+  });
+
   it('autopilot supervisorPrompt is prepended to additional_instructions', () => {
     const vars = buildSessionVariables({
       surface: 'code',

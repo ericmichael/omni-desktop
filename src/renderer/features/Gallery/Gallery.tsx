@@ -388,6 +388,31 @@ export const auth = () => {
     },
   },
   {
+    label: 'MCP-derived tool — (server, tool) identity labels',
+    item: {
+      type: 'tool',
+      call_id: 'gallery-mcp-labels',
+      tool: 'mcp_omni-projects__list_tickets',
+      server_label: 'omni-projects',
+      tool_label: 'list_tickets',
+      status: 'result',
+      input: JSON.stringify({ project_id: 'proj-1', column: 'In Progress' }),
+      output: '3 tickets',
+      metadata: {
+        display_type: 'table',
+        summary: '3 tickets in "In Progress"',
+        table: {
+          columns: [{ title: 'id' }, { title: 'title' }],
+          rows: [
+            ['t-11', 'Fix login redirect'],
+            ['t-12', 'Add CSV export'],
+            ['t-13', 'Upgrade Fluent to v9.60'],
+          ],
+        },
+      },
+    },
+  },
+  {
     label: 'unknown display_type — preview fallback',
     item: {
       type: 'tool',
