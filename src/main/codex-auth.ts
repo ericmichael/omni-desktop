@@ -25,16 +25,28 @@ const OAUTH_PORT = 1455;
 const REDIRECT_URI = `http://localhost:${OAUTH_PORT}/auth/callback`;
 const CODEX_CRED_FILE = 'codex.json';
 
-/** Stored token shape — matches `omni_code.codex_auth` exactly. */
+/** Stored token shape — matches the runtime's codex provider exactly. */
 export type CodexTokens = {
   refresh: string;
   access: string;
   /** ms epoch */
   expires: number;
   account_id?: string;
+  /**
+   * Stamped by the runtime when the OAuth issuer REJECTED a refresh
+   * (revoked/expired grant — not a network blip). Presence means the
+   * session is dead and re-authentication is required; any successful
+   * refresh or fresh sign-in writes a clean dict, clearing it.
+   */
+  auth_error?: { code: number; at: number };
 };
 
-export type CodexStatus = { signedIn: boolean; accountId?: string };
+export type CodexStatus = {
+  signedIn: boolean;
+  accountId?: string;
+  /** Signed in on paper, but the issuer rejected the refresh — re-auth needed. */
+  broken?: boolean;
+};
 
 /** Server/headless device-flow user code + verification URL for the renderer. */
 export type CodexDeviceCode = { userCode: string; verificationUri: string };
@@ -150,7 +162,11 @@ export function getStatus(): CodexStatus {
   }
   try {
     const tokens = JSON.parse(readFileSync(path, 'utf-8')) as CodexTokens;
-    return { signedIn: Boolean(tokens.refresh), accountId: tokens.account_id };
+    return {
+      signedIn: Boolean(tokens.refresh),
+      accountId: tokens.account_id,
+      ...(tokens.auth_error ? { broken: true } : {}),
+    };
   } catch {
     return { signedIn: false };
   }

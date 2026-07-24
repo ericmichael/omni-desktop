@@ -1314,7 +1314,12 @@ export const wireGlobalHandlers = async (arg: {
       const tokens = await pgSecret.getUserCodexTokens(c.principalId);
       const refresh = typeof tokens?.refresh === 'string' ? tokens.refresh : undefined;
       const accountId = typeof tokens?.account_id === 'string' ? tokens.account_id : undefined;
-      return refresh ? { signedIn: true, ...(accountId ? { accountId } : {}) } : { signedIn: false };
+      // The runtime stamps a rejected refresh into the token bundle (and the
+      // refresh callback persists it here) — surface it as a broken session.
+      const broken = Boolean(tokens?.['auth_error']);
+      return refresh
+        ? { signedIn: true, ...(accountId ? { accountId } : {}), ...(broken ? { broken: true } : {}) }
+        : { signedIn: false };
     }
     return codexStatus();
   });

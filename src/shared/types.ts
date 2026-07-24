@@ -2569,7 +2569,13 @@ type CodexIpcEvents = Namespaced<
   }
 >;
 
-export type CodexAuthStatus = { signedIn: boolean; accountId?: string };
+export type CodexAuthStatus = {
+  signedIn: boolean;
+  accountId?: string;
+  /** Signed in on paper, but the issuer rejected the refresh — re-auth needed.
+   *  Read from the `auth_error` stamp the runtime writes into `codex.json`. */
+  broken?: boolean;
+};
 
 /** Device-flow code surface for the renderer to display while `codex:link` polls. */
 export type CodexDeviceCode = { userCode: string; verificationUri: string };

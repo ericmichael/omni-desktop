@@ -192,6 +192,17 @@ export const SettingsModalAiTab = memo(() => {
       .catch(() => setRuntimeModelNames([]));
   }, []);
 
+  // Dead ChatGPT sessions must not render a plausible "discovered" model
+  // list — while broken, discovery is failing and the runtime list is just
+  // local seeds wearing a live costume.
+  const [codexBroken, setCodexBroken] = useState(false);
+  useEffect(() => {
+    emitter
+      .invoke('codex:status')
+      .then((s) => setCodexBroken(Boolean(s.broken)))
+      .catch(() => setCodexBroken(false));
+  }, []);
+
   // Union of store-configured keys and the live runtime list, so discovered
   // models (e.g. Codex) are selectable as the default/voice model.
   const modelKeys = useMemo(() => {
@@ -544,6 +555,7 @@ export const SettingsModalAiTab = memo(() => {
                     name={name}
                     provider={provider}
                     discoveredModels={discoveredModels}
+                    codexBroken={codexBroken}
                     editingModel={editingModel}
                     newModelId={newModelId}
                     onRemove={removeProvider}
@@ -592,7 +604,7 @@ SettingsModalAiTab.displayName = 'SettingsModalAiTab';
  */
 const CodexSignInCard = memo(({ onSignedIn }: { onSignedIn: () => Promise<string | undefined> }) => {
   const styles = useStyles();
-  const [status, setStatus] = useState<{ signedIn: boolean; accountId?: string } | null>(null);
+  const [status, setStatus] = useState<{ signedIn: boolean; accountId?: string; broken?: boolean } | null>(null);
   const [activeModel, setActiveModel] = useState<string | undefined>(undefined);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -650,23 +662,27 @@ const CodexSignInCard = memo(({ onSignedIn }: { onSignedIn: () => Promise<string
         <div className={styles.rowGap2}>
           <div className={styles.headerContent}>
             <div className={styles.headerName}>
-              {status?.signedIn ? 'Signed in to ChatGPT' : 'Use your ChatGPT subscription'}
+              {status?.broken
+                ? 'ChatGPT session expired'
+                : status?.signedIn
+                  ? 'Signed in to ChatGPT'
+                  : 'Use your ChatGPT subscription'}
             </div>
             <div className={styles.headerSummary}>
-              {status?.signedIn
-                ? activeModel
-                  ? `Using ${activeModel} — switch models any time below or with /model in chat`
-                  : 'ChatGPT models are available — switch with /model in chat or set a default below'
-                : (error ?? 'Drive the agent through ChatGPT Plus/Pro/Team via the Codex Responses API.')}
+              {status?.broken
+                ? 'Sign in again to reconnect.'
+                : status?.signedIn
+                  ? (activeModel ?? '')
+                  : (error ?? 'Works with Plus, Pro, and Team plans.')}
             </div>
           </div>
-          {status?.signedIn ? (
+          {status?.signedIn && !status.broken ? (
             <Button size="sm" variant="ghost" onClick={onSignOut} isDisabled={busy}>
               Sign out
             </Button>
           ) : (
             <Button size="sm" onClick={onSignIn} isDisabled={busy}>
-              {busy ? 'Waiting for authorization…' : 'Sign in with ChatGPT'}
+              {busy ? 'Waiting for authorization…' : status?.broken ? 'Sign in again' : 'Sign in with ChatGPT'}
             </Button>
           )}
         </div>
@@ -698,6 +714,7 @@ const ProviderRow = memo(
     name,
     provider,
     discoveredModels,
+    codexBroken,
     editingModel,
     newModelId,
     onRemove,
@@ -711,6 +728,8 @@ const ProviderRow = memo(
     name: string;
     provider: ProviderEntry;
     discoveredModels: string[];
+    /** Dead ChatGPT session — suppress the "discovered" list (it's just seeds). */
+    codexBroken: boolean;
     editingModel: { provider: string; modelId: string } | null;
     newModelId: string;
     onRemove: (name: string) => void;
@@ -726,7 +745,9 @@ const ProviderRow = memo(
     const isOauth = provider.type === 'openai-oauth';
     // Show runtime-discovered models for OAuth providers (Codex) where the
     // store intentionally holds an empty `models: {}` and discovery fills it.
-    const extraDiscovered = isOauth ? discoveredModels.filter((id) => !(id in provider.models)) : [];
+    // While the sign-in is broken, discovery is failing and the runtime list
+    // is only local seeds — showing them as "discovered" would be a lie.
+    const extraDiscovered = isOauth && !codexBroken ? discoveredModels.filter((id) => !(id in provider.models)) : [];
     const modelCount = storedCount + extraDiscovered.length;
     const showBaseUrl =
       provider.type === 'azure' || provider.type === 'openai-compatible' || provider.type === 'litellm';
@@ -861,6 +882,13 @@ const ProviderRow = memo(
                   </div>
                 </div>
               ))}
+              {isOauth && codexBroken && (
+                <div className={styles.modelCard}>
+                  <div className={styles.modelHeader}>
+                    <div className={styles.modelLabel}>Sign-in expired — model list unavailable</div>
+                  </div>
+                </div>
+              )}
             </div>
 
             {!isOauth && (
