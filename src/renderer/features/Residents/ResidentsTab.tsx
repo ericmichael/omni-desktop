@@ -1,6 +1,27 @@
-import { Field, makeStyles, mergeClasses, Spinner, Switch, Tab, TabList, tokens } from '@fluentui/react-components';
+import type { FieldProps, LabelProps, PresenceBadgeStatus } from '@fluentui/react-components';
+import {
+  Avatar,
+  AvatarGroup,
+  AvatarGroupItem,
+  Divider as LabeledDivider,
+  Field,
+  InfoLabel,
+  InteractionTag,
+  InteractionTagPrimary,
+  makeStyles,
+  mergeClasses,
+  Spinner,
+  Switch,
+  Tab,
+  TabList,
+  tokens,
+  Tooltip,
+} from '@fluentui/react-components';
 import {
   Add20Regular,
+  ArrowReply20Regular,
+  BookOpen20Regular,
+  Chat20Regular,
   Checkmark20Regular,
   Delete20Regular,
   Dismiss20Regular,
@@ -13,13 +34,15 @@ import {
 } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
 import type { ChangeEvent, ComponentProps, FormEvent, KeyboardEvent } from 'react';
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { formatTimestamp } from '@/lib/format-time';
+import { formatDayLabel, formatTimeOfDay, formatTimestamp } from '@/lib/format-time';
 import {
   channelIdFromName,
+  dmChannelId,
   dmParticipants,
   memoryKey,
+  parseResidentPrincipal,
   RESERVED_CHANNEL_IDS,
   residentHandle,
   SYSTEM_CHANNEL,
@@ -40,6 +63,7 @@ import {
   DialogContent,
   DialogHeader,
   EmptyState,
+  FormSkeleton,
   IconButton,
   Input,
   Menu,
@@ -53,6 +77,7 @@ import {
   MessageBar,
   MessageBarBody,
   PageHeader,
+  SaveBar,
   SectionLabel,
   Select,
   Textarea,
@@ -60,6 +85,7 @@ import {
 } from '@/renderer/ds';
 import { SandboxPicker } from '@/renderer/features/SandboxProfile/SandboxPicker';
 import { OmniAgentsApp } from '@/renderer/omniagents-ui';
+import { MarkdownMessage } from '@/renderer/omniagents-ui/shared/MarkdownMessage';
 import { emitter, serverOrigin } from '@/renderer/services/ipc';
 import { $machines } from '@/renderer/services/machines';
 import { persistedStoreApi } from '@/renderer/services/store';
@@ -72,14 +98,7 @@ import type {
   ResidentChannelMessage,
 } from '@/shared/types';
 
-import {
-  $residentSeenByChannel,
-  $residentStatus,
-  $residentsView,
-  markResidentMessagesSeen,
-  residentApi,
-  syncResidentStatus,
-} from './state';
+import { $residentStatus, $residentsView, markResidentMessagesSeen, residentApi, syncResidentStatus } from './state';
 
 type SandboxContext = ComponentProps<typeof SandboxPicker>['context'];
 
@@ -189,12 +208,38 @@ const useStyles = makeStyles({
     display: 'flex',
     alignItems: 'center',
     gap: tokens.spacingHorizontalS,
-    fontWeight: tokens.fontWeightSemibold,
+    fontWeight: tokens.fontWeightRegular,
     fontSize: tokens.fontSizeBase300,
+    minWidth: 0,
+  },
+  /* Unread rows follow the mainstream convention: weight, not just a badge. */
+  rowTitleUnread: {
+    fontWeight: tokens.fontWeightSemibold,
+  },
+  rowTitleText: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  /* Two stacked text lines beside a row avatar. */
+  rowLines: {
+    flex: '1 1 0',
+    minWidth: 0,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '2px',
   },
   rowMeta: {
     color: tokens.colorNeutralForeground3,
     fontSize: tokens.fontSizeBase200,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  rowTime: {
+    flexShrink: 0,
+    color: tokens.colorNeutralForeground3,
+    fontSize: tokens.fontSizeBase100,
   },
   /* ── Detail: the standard skeleton — full-bleed header band (title +
      actions + metadata), like the Routines and ticket detail pages. ── */
@@ -265,17 +310,36 @@ const useStyles = makeStyles({
     flex: '1 1 0',
     minHeight: 0,
     overflowY: 'auto',
-    padding: tokens.spacingHorizontalL,
+    paddingLeft: tokens.spacingHorizontalL,
+    paddingRight: tokens.spacingHorizontalL,
+    paddingTop: tokens.spacingVerticalS,
+    paddingBottom: tokens.spacingVerticalS,
     display: 'flex',
     flexDirection: 'column',
-    gap: tokens.spacingVerticalS,
   },
+  /* ── Message rows: the Slack gutter grid — avatar column, then head line
+     over the body. Consecutive same-sender messages group: only the first
+     carries the avatar + head. ── */
   message: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '2px',
-    '&:hover .message-reply-btn': { opacity: 1 },
-    '&:focus-within .message-reply-btn': { opacity: 1 },
+    position: 'relative',
+    display: 'grid',
+    gridTemplateColumns: '32px 1fr',
+    columnGap: tokens.spacingHorizontalS,
+    paddingTop: '2px',
+    paddingBottom: '2px',
+    paddingLeft: tokens.spacingHorizontalXS,
+    paddingRight: tokens.spacingHorizontalXS,
+    borderRadius: tokens.borderRadiusMedium,
+    ':hover': { backgroundColor: tokens.colorSubtleBackgroundHover },
+    '&:hover .message-actions': { opacity: 1 },
+    '&:focus-within .message-actions': { opacity: 1 },
+  },
+  messageGroupStart: {
+    marginTop: tokens.spacingVerticalM,
+  },
+  /* Replies keep a narrower gutter under the thread rail. */
+  messageReplyGrid: {
+    gridTemplateColumns: '24px 1fr',
   },
   /* A reply nests under its root — one level deep, the Slack shape. */
   messageReply: {
@@ -283,19 +347,50 @@ const useStyles = makeStyles({
     paddingLeft: tokens.spacingHorizontalM,
     borderLeft: `2px solid ${tokens.colorNeutralStroke1}`,
   },
+  msgGutter: {
+    paddingTop: '2px',
+  },
+  msgMain: {
+    minWidth: 0,
+    display: 'flex',
+    flexDirection: 'column',
+  },
   messageHead: {
     display: 'flex',
     alignItems: 'baseline',
     gap: tokens.spacingHorizontalS,
+    minWidth: 0,
   },
   messageFrom: {
     fontWeight: tokens.fontWeightSemibold,
-    fontSize: tokens.fontSizeBase200,
-  },
-  messageText: {
     fontSize: tokens.fontSizeBase300,
-    whiteSpace: 'pre-wrap',
-    overflowWrap: 'anywhere',
+  },
+  /* Hover action bar, floated over the row's top-right (Slack's idiom). */
+  msgActions: {
+    position: 'absolute',
+    top: '-12px',
+    right: tokens.spacingHorizontalS,
+    opacity: 0,
+    transitionProperty: 'opacity',
+    transitionDuration: tokens.durationFaster,
+    backgroundColor: tokens.colorNeutralBackground1,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    borderRadius: tokens.borderRadiusMedium,
+    boxShadow: tokens.shadow4,
+    '@media (hover: none)': { opacity: 1 },
+  },
+  /* Constrain the shared markdown surface to feed density. */
+  markdownBody: {
+    fontSize: tokens.fontSizeBase300,
+    lineHeight: tokens.lineHeightBase300,
+  },
+  /* Day dividers carry the date so message stamps stay time-only. */
+  dayDivider: {
+    flexShrink: 0,
+    paddingTop: tokens.spacingVerticalL,
+    paddingBottom: tokens.spacingVerticalXS,
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
   },
   /* "↳ reply" marker for reply rows outside the grouped channel view. */
   replyMarker: {
@@ -317,28 +412,52 @@ const useStyles = makeStyles({
       outlineOffset: '1px',
     },
   },
-  replyBtn: {
+  /* Composer block: optional reply banner + error line + the input row.
+     Relative so the mention popup can anchor above it. */
+  composerArea: {
+    position: 'relative',
+    borderTop: `1px solid ${tokens.colorNeutralStroke1}`,
+  },
+  /* ── @-mention typeahead, floated above the composer. ── */
+  mentionPopup: {
+    position: 'absolute',
+    bottom: '100%',
+    left: tokens.spacingHorizontalL,
+    zIndex: 10,
+    minWidth: '260px',
+    maxHeight: '240px',
+    overflowY: 'auto',
+    backgroundColor: tokens.colorNeutralBackground1,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    borderRadius: tokens.borderRadiusMedium,
+    boxShadow: tokens.shadow16,
+    paddingTop: tokens.spacingVerticalXS,
+    paddingBottom: tokens.spacingVerticalXS,
+  },
+  mentionItem: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+    width: '100%',
     border: 'none',
     backgroundColor: 'transparent',
+    textAlign: 'left',
     cursor: 'pointer',
+    paddingTop: tokens.spacingVerticalXS,
+    paddingBottom: tokens.spacingVerticalXS,
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalM,
+    fontSize: tokens.fontSizeBase300,
+  },
+  mentionItemActive: {
+    backgroundColor: tokens.colorSubtleBackgroundSelected,
+  },
+  mentionItemRole: {
     color: tokens.colorNeutralForeground3,
     fontSize: tokens.fontSizeBase200,
-    padding: '0 4px',
-    borderRadius: tokens.borderRadiusMedium,
-    opacity: 0,
-    transitionProperty: 'opacity',
-    transitionDuration: tokens.durationFaster,
-    ':hover': { color: tokens.colorBrandForeground1 },
-    ':focus-visible': {
-      opacity: 1,
-      outline: `2px solid ${tokens.colorBrandStroke1}`,
-      outlineOffset: '1px',
-    },
-    '@media (hover: none)': { opacity: 1 },
-  },
-  /* Composer block: optional reply banner + error line + the input row. */
-  composerArea: {
-    borderTop: `1px solid ${tokens.colorNeutralStroke1}`,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
   },
   replyBanner: {
     display: 'flex',
@@ -424,18 +543,6 @@ const useStyles = makeStyles({
     alignItems: 'center',
     flexWrap: 'wrap',
     gap: tokens.spacingHorizontalS,
-    '& .member-chip': {
-      background: 'none',
-      border: 'none',
-      padding: 0,
-      cursor: 'pointer',
-      borderRadius: tokens.borderRadiusCircular,
-    },
-    '& .member-chip:hover': { opacity: 0.8 },
-    '& .member-chip:focus-visible': {
-      outline: `2px solid ${tokens.colorBrandStroke1}`,
-      outlineOffset: '1px',
-    },
   },
   memberBarSpacer: {
     flex: '1 1 0',
@@ -446,19 +553,33 @@ const useStyles = makeStyles({
   memberWarning: {
     color: tokens.colorPaletteYellowForeground1,
   },
-  presenceDot: {
-    display: 'inline-block',
-    width: '6px',
-    height: '6px',
-    borderRadius: '50%',
-    marginRight: '4px',
-    backgroundColor: tokens.colorNeutralForeground4,
+  /* Desktop title band above a channel/DM feed (mobile titles via TopAppBar). */
+  feedHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+    paddingLeft: tokens.spacingHorizontalL,
+    paddingRight: tokens.spacingHorizontalL,
+    paddingTop: tokens.spacingVerticalM,
+    paddingBottom: tokens.spacingVerticalS,
+    borderBottom: `1px solid ${tokens.colorNeutralStroke1}`,
+    flexShrink: 0,
+    minWidth: 0,
   },
-  presenceDotBusy: {
-    backgroundColor: tokens.colorBrandForeground1,
+  feedHeaderTitle: {
+    fontSize: tokens.fontSizeBase400,
+    fontWeight: tokens.fontWeightSemibold,
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
   },
-  presenceDotIdle: {
-    backgroundColor: tokens.colorPaletteGreenForeground1,
+  feedHeaderMeta: {
+    color: tokens.colorNeutralForeground3,
+    fontSize: tokens.fontSizeBase200,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    minWidth: 0,
   },
   dialogForm: {
     display: 'flex',
@@ -507,6 +628,32 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     gap: tokens.spacingVerticalXS,
   },
+  /* ── Handbook: the Docs editor hosted at roster level ── */
+  handbookPane: {
+    display: 'flex',
+    flexDirection: 'column',
+    flex: '1 1 0',
+    minHeight: 0,
+  },
+  handbookHeader: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXS,
+    paddingLeft: tokens.spacingHorizontalXXL,
+    paddingRight: tokens.spacingHorizontalXXL,
+    paddingTop: tokens.spacingVerticalM,
+  },
+  handbookBody: {
+    flex: '1 1 0',
+    minHeight: 0,
+    overflowY: 'auto',
+    paddingLeft: tokens.spacingHorizontalL,
+    paddingRight: tokens.spacingHorizontalL,
+    maxWidth: '56rem',
+    width: '100%',
+    marginLeft: 'auto',
+    marginRight: 'auto',
+  },
 });
 
 const MORNING_HOUR_OPTIONS = Array.from({ length: 24 }, (_, h) => h);
@@ -529,6 +676,57 @@ const stateBadgeColor = (state: ResidentAgentRuntime['state'] | undefined): 'blu
   return 'default';
 };
 
+/** Runtime state → standard Fluent presence semantics: green = reachable
+ *  (idle), red = working a turn, offline = parked/disabled. */
+const presenceStatus = (state: ResidentAgentRuntime['state'] | undefined, enabled = true): PresenceBadgeStatus => {
+  if (!enabled) {
+    return 'offline';
+  }
+  if (state === 'thinking' || state === 'reflecting' || state === 'starting') {
+    return 'busy';
+  }
+  if (state === 'idle') {
+    return 'available';
+  }
+  return 'offline';
+};
+
+/** The tab's one identity mark: colorful Avatar keyed by the STABLE id (a
+ *  rename keeps the color), presence composed in where live state matters. */
+const AgentAvatar = memo(function AgentAvatar({
+  name,
+  colorId,
+  presence,
+  size = 32,
+}: {
+  name: string;
+  /** Stable color key — agent id, or the `user` participant. */
+  colorId: string;
+  presence?: PresenceBadgeStatus;
+  size?: 20 | 24 | 28 | 32 | 36 | 40 | 48;
+}): React.JSX.Element {
+  return (
+    <Avatar
+      color="colorful"
+      name={name}
+      idForColor={colorId}
+      size={size}
+      aria-hidden="true"
+      {...(presence ? { badge: { status: presence } } : {})}
+    />
+  );
+});
+
+/** Field label with the doctrine tucked behind an info icon — labels stay
+ *  scannable, the manual stays available. */
+const infoLabel = (text: string, info: string): FieldProps['label'] => ({
+  children: (_: unknown, props: LabelProps) => (
+    <InfoLabel {...props} info={info}>
+      {text}
+    </InfoLabel>
+  ),
+});
+
 /** Human label for a channel: null for #team, "you ↔ Scout" for DMs. */
 const channelLabel = (channel: string, roster: ResidentAgent[]): string | null => {
   if (channel === TEAM_CHANNEL) {
@@ -542,6 +740,46 @@ const channelLabel = (channel: string, roster: ResidentAgent[]): string | null =
   return `${nameOf(pair[0])} ↔ ${nameOf(pair[1])}`;
 };
 
+/** One row of the @-mention typeahead. Mouse-down (not click) so the pick
+ *  lands before the textarea's blur dismisses the popup. */
+const MentionItem = memo(function MentionItem({
+  agent,
+  index,
+  active,
+  onPick,
+  onHover,
+}: {
+  agent: ResidentAgent;
+  index: number;
+  active: boolean;
+  onPick: (agent: ResidentAgent) => void;
+  onHover: (index: number) => void;
+}): React.JSX.Element {
+  const styles = useStyles();
+  const handleMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      onPick(agent);
+    },
+    [onPick, agent]
+  );
+  const handleMouseEnter = useCallback(() => onHover(index), [onHover, index]);
+  return (
+    <button
+      type="button"
+      role="option"
+      aria-selected={active}
+      className={mergeClasses(styles.mentionItem, active && styles.mentionItemActive)}
+      onMouseDown={handleMouseDown}
+      onMouseEnter={handleMouseEnter}
+    >
+      <AgentAvatar name={agent.name} colorId={agent.id} size={24} />
+      <span>{agent.name}</span>
+      <span className={styles.mentionItemRole}>{agent.role}</span>
+    </button>
+  );
+});
+
 // ---------------------------------------------------------------------------
 // Activity feed — ALL channel traffic (#team + every DM thread), the
 // observability surface. The composer posts to #team.
@@ -551,11 +789,24 @@ const channelLabel = (channel: string, roster: ResidentAgent[]): string | null =
  *  behind an "earlier replies" expander. */
 const VISIBLE_REPLY_TAIL = 3;
 
-/** One row of the channel feed: a message (root or indented reply) or the
- *  expander standing in for a collapsed thread's earlier replies. */
+/** Messages this close together from the same sender coalesce into one
+ *  visual group — avatar and header on the first row only. */
+const GROUP_WINDOW_MS = 5 * 60 * 1000;
+
+/** May `cur` render as a continuation of `prev`? Incidents never coalesce —
+ *  each one must land with its own full header. */
+const sameGroup = (prev: ResidentChannelMessage, cur: ResidentChannelMessage): boolean =>
+  prev.from === cur.from &&
+  prev.channel === cur.channel &&
+  cur.channel !== SYSTEM_CHANNEL &&
+  cur.at - prev.at < GROUP_WINDOW_MS;
+
+/** One row of the channel feed: a message (root or indented reply, head or
+ *  grouped continuation), the collapsed-thread expander, or a day divider. */
 type FeedItem =
-  | { kind: 'message'; msg: ResidentChannelMessage; indent: boolean; replyCount?: number }
-  | { kind: 'expand'; rootId: number; hiddenCount: number };
+  | { kind: 'message'; msg: ResidentChannelMessage; indent: boolean; groupHead: boolean; replyCount?: number }
+  | { kind: 'expand'; rootId: number; hiddenCount: number }
+  | { kind: 'day'; ts: number };
 
 function ActivityFeed({
   roster,
@@ -588,12 +839,17 @@ function ActivityFeed({
   // Threads a user chose to expand (session-local, per feed).
   const [expandedThreads, setExpandedThreads] = useState<ReadonlySet<number>>(() => new Set());
 
+  // @-mention typeahead: the "@word" being typed at the caret, if any.
+  const [mention, setMention] = useState<{ query: string; start: number } | null>(null);
+  const [mentionIndex, setMentionIndex] = useState(0);
+
   // Switching feeds drops any half-set reply context and expansion state —
   // both belong to the channel they were picked in.
   useEffect(() => {
     setReplyTarget(null);
     setSendError(null);
     setExpandedThreads(new Set());
+    setMention(null);
   }, [channel]);
 
   // No channel = the all-traffic Activity view; otherwise one channel's feed.
@@ -623,7 +879,19 @@ function ActivityFeed({
    */
   const feedItems = useMemo((): FeedItem[] => {
     if (!isNamedChannel) {
-      return messages.map((msg) => ({ kind: 'message' as const, msg, indent: false }));
+      // Flat chronological feeds (Activity, DMs) get day dividers and
+      // consecutive-sender grouping — a day break also breaks the group.
+      const out: FeedItem[] = [];
+      let prev: ResidentChannelMessage | null = null;
+      for (const msg of messages) {
+        if (!prev || new Date(prev.at).toDateString() !== new Date(msg.at).toDateString()) {
+          out.push({ kind: 'day', ts: msg.at });
+          prev = null;
+        }
+        out.push({ kind: 'message', msg, indent: false, groupHead: !prev || !sameGroup(prev, msg) });
+        prev = msg;
+      }
+      return out;
     }
     const rootIds = new Set(messages.filter((m) => m.replyTo === undefined).map((m) => m.id));
     const repliesByRoot = new Map<number, ResidentChannelMessage[]>();
@@ -643,12 +911,15 @@ function ActivityFeed({
       threads.push({ top: m, replies, lastAt: replies.reduce((max, r) => Math.max(max, r.at), m.at) });
     }
     threads.sort((a, b) => a.lastAt - b.lastAt || a.top.id - b.top.id);
+    // Thread order is forum-bump, not chronological, so no day dividers
+    // here; roots are thread anchors and never render as continuations.
     const out: FeedItem[] = [];
     for (const t of threads) {
       out.push({
         kind: 'message',
         msg: t.top,
         indent: false,
+        groupHead: true,
         ...(t.replies.length > 0 ? { replyCount: t.replies.length } : {}),
       });
       const collapsed = t.replies.length > VISIBLE_REPLY_TAIL && !expandedThreads.has(t.top.id);
@@ -656,8 +927,15 @@ function ActivityFeed({
         out.push({ kind: 'expand', rootId: t.top.id, hiddenCount: t.replies.length - VISIBLE_REPLY_TAIL });
       }
       const visible = collapsed ? t.replies.slice(-VISIBLE_REPLY_TAIL) : t.replies;
+      let prevReply: ResidentChannelMessage | null = null;
       for (const reply of visible) {
-        out.push({ kind: 'message', msg: reply, indent: true });
+        out.push({
+          kind: 'message',
+          msg: reply,
+          indent: true,
+          groupHead: !prevReply || !sameGroup(prevReply, reply),
+        });
+        prevReply = reply;
       }
     }
     return out;
@@ -698,6 +976,7 @@ function ActivityFeed({
     setDraft('');
     setReplyTarget(null);
     setSendError(null);
+    setMention(null);
     // Sending implies "take me to the conversation" even if scrolled up.
     atBottomRef.current = true;
     residentApi.post(channel ?? TEAM_CHANNEL, text, replyTo).catch((err: Error) => {
@@ -715,14 +994,86 @@ function ActivityFeed({
     [submit]
   );
 
-  const handleDraftChange = useCallback((e: ChangeEvent<HTMLTextAreaElement>) => {
-    setDraft(e.target.value);
-    setSendError(null);
-  }, []);
+  // Mention candidates for the token being typed (prefix on handle or name).
+  const mentionCandidates = useMemo((): ResidentAgent[] => {
+    if (!mention) {
+      return [];
+    }
+    const q = mention.query.toLowerCase();
+    return roster.filter((a) => residentHandle(a.name).startsWith(q) || a.name.toLowerCase().startsWith(q));
+  }, [mention, roster]);
 
-  // Enter sends; Shift+Enter inserts a newline; Escape backs out of a reply.
+  const handleDraftChange = useCallback(
+    (e: ChangeEvent<HTMLTextAreaElement>) => {
+      const el = e.target;
+      setDraft(el.value);
+      setSendError(null);
+      // A DM already addresses its peer — no mention typeahead there.
+      if (dmPair) {
+        return;
+      }
+      const caret = el.selectionStart ?? el.value.length;
+      const match = /(^|\s)@([a-z0-9][a-z0-9-]*)?$/i.exec(el.value.slice(0, caret));
+      if (match) {
+        const query = match[2] ?? '';
+        setMention({ query, start: caret - query.length - 1 });
+        setMentionIndex(0);
+      } else {
+        setMention(null);
+      }
+    },
+    [dmPair]
+  );
+
+  /** Replace the typed "@word" with the picked agent's canonical @handle. */
+  const acceptMention = useCallback(
+    (agent: ResidentAgent) => {
+      if (!mention) {
+        return;
+      }
+      const handle = residentHandle(agent.name);
+      const caret = composerRef.current?.selectionStart ?? draft.length;
+      setDraft(`${draft.slice(0, mention.start)}@${handle} ${draft.slice(caret)}`);
+      setMention(null);
+      const pos = mention.start + handle.length + 2;
+      requestAnimationFrame(() => {
+        const el = composerRef.current;
+        if (el) {
+          el.focus();
+          el.setSelectionRange(pos, pos);
+        }
+      });
+    },
+    [mention, draft]
+  );
+
+  const dismissMention = useCallback(() => setMention(null), []);
+
+  // Typeahead keys win while the popup is up; then Enter sends, Shift+Enter
+  // inserts a newline, and Escape backs out of a reply.
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLTextAreaElement>) => {
+      if (mention && mentionCandidates.length > 0) {
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+          e.preventDefault();
+          const delta = e.key === 'ArrowDown' ? 1 : -1;
+          setMentionIndex((i) => (i + delta + mentionCandidates.length) % mentionCandidates.length);
+          return;
+        }
+        if (e.key === 'Enter' || e.key === 'Tab') {
+          e.preventDefault();
+          const picked = mentionCandidates[mentionIndex] ?? mentionCandidates[0];
+          if (picked) {
+            acceptMention(picked);
+          }
+          return;
+        }
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          setMention(null);
+          return;
+        }
+      }
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         submit();
@@ -731,16 +1082,16 @@ function ActivityFeed({
         clearReply();
       }
     },
-    [submit, replyTarget, clearReply]
+    [submit, replyTarget, clearReply, mention, mentionCandidates, mentionIndex, acceptMention]
   );
 
   const dmPeerId = dmPair?.find((p) => p !== USER_PARTICIPANT);
   const dmPeerName = dmPeerId ? (roster.find((a) => a.id === dmPeerId)?.name ?? dmPeerId) : null;
   const composerLabel = dmPeerName
-    ? `Message ${dmPeerName}…`
+    ? `Message ${dmPeerName}`
     : replyTarget
       ? 'Reply in thread…'
-      : `Post to #${channel ?? TEAM_CHANNEL} — mention an agent by name to address it…`;
+      : `Message #${channel ?? TEAM_CHANNEL}`;
   const participantName = (m: ResidentChannelMessage): string =>
     m.from === USER_PARTICIPANT ? 'you' : (m.fromName ?? m.from);
 
@@ -765,6 +1116,13 @@ function ActivityFeed({
           )
         ) : (
           feedItems.map((item) => {
+            if (item.kind === 'day') {
+              return (
+                <LabeledDivider key={`day-${item.ts}`} className={styles.dayDivider}>
+                  {formatDayLabel(item.ts)}
+                </LabeledDivider>
+              );
+            }
             if (item.kind === 'expand') {
               return (
                 <div key={`expand-${item.rootId}`} className={styles.messageReply}>
@@ -778,7 +1136,7 @@ function ActivityFeed({
                 </div>
               );
             }
-            const { msg: m, indent, replyCount } = item;
+            const { msg: m, indent, groupHead, replyCount } = item;
             const label = channel ? null : channelLabel(m.channel, roster);
             // #system rows are incident reports (declined approvals, failed
             // deliveries) — they must not read like ordinary chatter.
@@ -787,43 +1145,58 @@ function ActivityFeed({
             // an orphan whose root aged out of the log) carry a marker.
             const rootMsg = m.replyTo !== undefined ? messageById.get(m.replyTo) : undefined;
             const showReplyMarker = m.replyTo !== undefined && !indent;
+            const fromName = participantName(m);
             return (
               <div
                 key={m.id}
                 className={mergeClasses(
                   styles.message,
+                  indent && styles.messageReplyGrid,
                   indent && styles.messageReply,
-                  isIncident && styles.messageIncident
+                  isIncident && styles.messageIncident,
+                  groupHead && styles.messageGroupStart
                 )}
               >
-                <div className={styles.messageHead}>
-                  <span className={styles.messageFrom}>
-                    {m.from === USER_PARTICIPANT ? 'You' : (m.fromName ?? m.from)}
-                  </span>
-                  {label && <Badge color={isIncident ? 'yellow' : 'purple'}>{label}</Badge>}
-                  {showReplyMarker && (
-                    <span className={styles.replyMarker} title={rootMsg ? rootMsg.text : undefined}>
-                      ↳ replying to {rootMsg ? participantName(rootMsg) : 'an earlier message'}
-                    </span>
-                  )}
-                  {replyCount !== undefined && (
-                    <span className={styles.replyMarker}>
-                      {replyCount} {replyCount === 1 ? 'reply' : 'replies'}
-                    </span>
-                  )}
-                  <Caption1>{formatTimestamp(m.at)}</Caption1>
-                  {isNamedChannel && !readOnly && (
-                    <button
-                      type="button"
-                      className={mergeClasses(styles.replyBtn, 'message-reply-btn')}
-                      onClick={handleReplyClick.bind(null, m)}
-                      aria-label={`Reply to ${participantName(m)} in a thread`}
-                    >
-                      Reply
-                    </button>
+                <div className={styles.msgGutter}>
+                  {groupHead && (
+                    <AgentAvatar
+                      name={m.from === USER_PARTICIPANT ? 'You' : fromName}
+                      colorId={m.from}
+                      size={indent ? 24 : 32}
+                    />
                   )}
                 </div>
-                <div className={styles.messageText}>{m.text}</div>
+                <div className={styles.msgMain}>
+                  {groupHead && (
+                    <div className={styles.messageHead}>
+                      <span className={styles.messageFrom}>{m.from === USER_PARTICIPANT ? 'You' : fromName}</span>
+                      {label && <Badge color={isIncident ? 'yellow' : 'purple'}>{label}</Badge>}
+                      {showReplyMarker && (
+                        <span className={styles.replyMarker} title={rootMsg ? rootMsg.text : undefined}>
+                          ↳ replying to {rootMsg ? participantName(rootMsg) : 'an earlier message'}
+                        </span>
+                      )}
+                      {replyCount !== undefined && (
+                        <span className={styles.replyMarker}>
+                          {replyCount} {replyCount === 1 ? 'reply' : 'replies'}
+                        </span>
+                      )}
+                      <Caption1>{isNamedChannel ? formatTimestamp(m.at) : formatTimeOfDay(m.at)}</Caption1>
+                    </div>
+                  )}
+                  <MarkdownMessage content={m.text} className={styles.markdownBody} />
+                </div>
+                {isNamedChannel && !readOnly && (
+                  <div className={mergeClasses(styles.msgActions, 'message-actions')}>
+                    <IconButton
+                      aria-label={`Reply to ${fromName} in a thread`}
+                      tooltip={`Reply to ${fromName} in a thread`}
+                      size="sm"
+                      icon={<ArrowReply20Regular />}
+                      onClick={handleReplyClick.bind(null, m)}
+                    />
+                  </div>
+                )}
               </div>
             );
           })
@@ -835,6 +1208,20 @@ function ActivityFeed({
         </div>
       ) : (
         <div className={styles.composerArea}>
+          {mention && mentionCandidates.length > 0 && (
+            <div className={styles.mentionPopup} role="listbox" aria-label="Mention an agent">
+              {mentionCandidates.map((a, i) => (
+                <MentionItem
+                  key={a.id}
+                  agent={a}
+                  index={i}
+                  active={i === mentionIndex}
+                  onPick={acceptMention}
+                  onHover={setMentionIndex}
+                />
+              ))}
+            </div>
+          )}
           {replyTarget && (
             <div className={styles.replyBanner}>
               <Caption1 className={styles.replyBannerText}>
@@ -853,6 +1240,7 @@ function ActivityFeed({
               placeholder={composerLabel}
               onChange={handleDraftChange}
               onKeyDown={handleKeyDown}
+              onBlur={dismissMention}
               aria-label={dmPeerName ? `Message ${dmPeerName}` : `Message #${channel ?? TEAM_CHANNEL}`}
             />
             <IconButton aria-label="Send" icon={<Send20Regular />} onClick={submit} />
@@ -949,7 +1337,7 @@ function ResidentSessionView({ agent }: { agent: ResidentAgent }): React.JSX.Ele
     return (
       <div className={styles.sessionCenter}>
         <Spinner size="small" />
-        <span>Waking {agent.name}…</span>
+        <span>Opening session…</span>
       </div>
     );
   }
@@ -976,30 +1364,34 @@ const MemberChip = memo(function MemberChip({
   runtime: ResidentAgentRuntime | undefined;
   onOpen: (agentId: string) => void;
 }): React.JSX.Element {
-  const styles = useStyles();
   const handleClick = useCallback(() => onOpen(agent.id), [onOpen, agent.id]);
   const state = runtime?.state;
   const busy = state === 'thinking' || state === 'reflecting' || state === 'starting';
-  const idle = state === 'idle';
   // While busy the tooltip carries the wake reason — a one-line headline of
   // what the agent is on, without opening its session.
   const headline = busy && runtime?.lastReason ? ` · ${runtime.lastReason}` : '';
   return (
-    <button
-      type="button"
-      className="member-chip"
-      onClick={handleClick}
-      title={`Open ${agent.name}'s session — ${STATE_LABEL[state ?? 'parked']}${headline}`}
-      aria-label={`Open ${agent.name}'s session`}
+    <Tooltip
+      content={`Open ${agent.name}'s session — ${STATE_LABEL[state ?? 'parked']}${headline}`}
+      relationship="description"
     >
-      <Badge color="default">
-        <span
-          className={mergeClasses(styles.presenceDot, busy && styles.presenceDotBusy, idle && styles.presenceDotIdle)}
-          aria-hidden="true"
-        />
-        {agent.name}
-      </Badge>
-    </button>
+      <InteractionTag size="small" shape="circular">
+        <InteractionTagPrimary
+          media={
+            <Avatar
+              color="colorful"
+              name={agent.name}
+              idForColor={agent.id}
+              badge={{ status: presenceStatus(state, agent.enabled) }}
+            />
+          }
+          onClick={handleClick}
+          aria-label={`Open ${agent.name}'s session`}
+        >
+          {agent.name}
+        </InteractionTagPrimary>
+      </InteractionTag>
+    </Tooltip>
   );
 });
 
@@ -1140,7 +1532,9 @@ const ChannelRow = memo(function ChannelRow({
       onKeyDown={handleRowKeyDown}
     >
       <span className={styles.rowTop}>
-        <span className={mergeClasses(styles.rowTitle, styles.rowTopGrow)}>#{channelId}</span>
+        <span className={mergeClasses(styles.rowTitle, styles.rowTopGrow, unread > 0 && styles.rowTitleUnread)}>
+          #{channelId}
+        </span>
         {!selected && unread > 0 && <CounterBadge count={unread} size="small" color="brand" />}
         {manageable && (
           <span
@@ -1272,10 +1666,14 @@ function NewChannelRow({
   );
 }
 
-/** A DM thread row: "You ↔ Scout" (or two agent names), newest traffic first. */
+/** A DM thread row: the peer's identity (avatar + presence for your own
+ *  threads, a stacked pair for agent↔agent), last-message snippet, time. */
 const DmRow = memo(function DmRow({
   channelId,
   title,
+  avatars,
+  presence,
+  snippet,
   lastAt,
   selected,
   unread,
@@ -1283,20 +1681,40 @@ const DmRow = memo(function DmRow({
 }: {
   channelId: string;
   title: string;
-  lastAt: number;
+  /** name/colorId pairs — one for a user↔agent thread, two for agent↔agent. */
+  avatars: ReadonlyArray<{ name: string; colorId: string }>;
+  /** Live presence for the single-peer case. */
+  presence?: PresenceBadgeStatus;
+  snippet: string | null;
+  lastAt: number | null;
   selected: boolean;
   unread: number;
   onSelect: (id: string) => void;
 }): React.JSX.Element {
   const styles = useStyles();
   const handleClick = useCallback(() => onSelect(channelId), [onSelect, channelId]);
+  const single = avatars.length === 1 ? avatars[0] : null;
   return (
     <button type="button" className={mergeClasses(styles.row, selected && styles.rowSelected)} onClick={handleClick}>
       <span className={styles.rowTop}>
-        <span className={mergeClasses(styles.rowTitle, styles.rowTopGrow)}>{title}</span>
+        {single ? (
+          <AgentAvatar name={single.name} colorId={single.colorId} size={32} {...(presence ? { presence } : {})} />
+        ) : (
+          <AvatarGroup layout="stack" size={24}>
+            {avatars.map((a) => (
+              <AvatarGroupItem key={a.colorId} color="colorful" name={a.name} idForColor={a.colorId} />
+            ))}
+          </AvatarGroup>
+        )}
+        <span className={styles.rowLines}>
+          <span className={mergeClasses(styles.rowTitle, unread > 0 && styles.rowTitleUnread)}>
+            <span className={styles.rowTitleText}>{title}</span>
+          </span>
+          {snippet && <span className={styles.rowMeta}>{snippet}</span>}
+        </span>
+        {lastAt !== null && <span className={styles.rowTime}>{formatTimestamp(lastAt)}</span>}
         {!selected && unread > 0 && <CounterBadge count={unread} size="small" color="brand" />}
       </span>
-      <span className={styles.rowMeta}>{formatTimestamp(lastAt)}</span>
     </button>
   );
 });
@@ -1392,6 +1810,7 @@ const AgentRow = memo(function AgentRow({
   projectLabel,
   selected,
   onSelect,
+  onMessage,
   onWake,
   onToggleEnabled,
   onRequestDelete,
@@ -1401,6 +1820,7 @@ const AgentRow = memo(function AgentRow({
   projectLabel: string | null;
   selected: boolean;
   onSelect: (id: string) => void;
+  onMessage: (id: string) => void;
   onWake: (id: string) => void;
   onToggleEnabled: (id: string, enabled: boolean) => void;
   onRequestDelete: (id: string) => void;
@@ -1418,12 +1838,17 @@ const AgentRow = memo(function AgentRow({
     [onSelect, agent.id]
   );
   const handleMenuOpenChange = useCallback((_e: unknown, data: { open: boolean }) => setMenuOpen(data.open), []);
+  const handleMessage = useCallback(() => onMessage(agent.id), [onMessage, agent.id]);
   const handleWake = useCallback(() => onWake(agent.id), [onWake, agent.id]);
   const handleToggle = useCallback(
     () => onToggleEnabled(agent.id, !agent.enabled),
     [onToggleEnabled, agent.id, agent.enabled]
   );
   const handleDelete = useCallback(() => onRequestDelete(agent.id), [onRequestDelete, agent.id]);
+  const state = runtime?.state;
+  // Presence carries idle/parked; a text badge appears only while a turn is
+  // actually running (the state worth reading), or when disabled.
+  const busy = state === 'thinking' || state === 'reflecting' || state === 'starting';
   return (
     // div+role rather than <button>: the row hosts the "…" menu button, and
     // nesting buttons inside a button is invalid markup.
@@ -1435,9 +1860,19 @@ const AgentRow = memo(function AgentRow({
       onKeyDown={handleRowKeyDown}
     >
       <span className={styles.rowTop}>
-        <span className={mergeClasses(styles.rowTitle, styles.rowTopGrow)}>{agent.name}</span>
-        <Badge color={stateBadgeColor(runtime?.state)}>{STATE_LABEL[runtime?.state ?? 'parked']}</Badge>
-        {!agent.enabled && <Badge color="default">Disabled</Badge>}
+        <AgentAvatar name={agent.name} colorId={agent.id} size={32} presence={presenceStatus(state, agent.enabled)} />
+        <span className={styles.rowLines}>
+          <span className={styles.rowTitle}>
+            <span className={styles.rowTitleText}>{agent.name}</span>
+            {busy && <Badge color={stateBadgeColor(state)}>{STATE_LABEL[state ?? 'parked']}</Badge>}
+            {!agent.enabled && <Badge color="default">Disabled</Badge>}
+          </span>
+          <span className={styles.rowMeta}>
+            {agent.role}
+            {projectLabel ? ` · ${projectLabel}` : ''}
+            {runtime?.lastWakeupAt ? ` · woke ${formatTimestamp(runtime.lastWakeupAt)}` : ''}
+          </span>
+        </span>
         <span
           role="presentation"
           className={mergeClasses(styles.rowMenu, 'resident-row-menu', menuOpen && styles.rowMenuOpen)}
@@ -1449,6 +1884,9 @@ const AgentRow = memo(function AgentRow({
             </MenuTrigger>
             <MenuPopover>
               <MenuList>
+                <MenuItem icon={<Chat20Regular />} onClick={handleMessage}>
+                  Message
+                </MenuItem>
                 <MenuItem icon={<FlashRegular />} disabled={!agent.enabled} onClick={handleWake}>
                   Wake now
                 </MenuItem>
@@ -1461,11 +1899,6 @@ const AgentRow = memo(function AgentRow({
             </MenuPopover>
           </Menu>
         </span>
-      </span>
-      <span className={styles.rowMeta}>
-        {agent.role}
-        {projectLabel ? ` · ${projectLabel}` : ''}
-        {runtime?.lastWakeupAt ? ` · woke ${formatTimestamp(runtime.lastWakeupAt)}` : ''}
       </span>
     </div>
   );
@@ -1514,8 +1947,10 @@ function AssignmentFields({
   return (
     <>
       <Field
-        label="Projects"
-        hint="Scoped agents launch with every selected project's sources mounted (with their git credentials); their private home rides along as the `home` mount. None = generalist with only the home workspace."
+        label={infoLabel(
+          'Projects',
+          "Scoped agents launch with every selected project's sources mounted (with their git credentials); their private home rides along as the `home` mount. None = generalist with only the home workspace."
+        )}
       >
         <div className={styles.projectScopeList}>
           {projects.map((p) => (
@@ -1524,8 +1959,10 @@ function AssignmentFields({
         </div>
       </Field>
       <Field
-        label="Sandbox"
-        hint="Where this agent's sessions run. Applied on save — the agent parks and its next wakeup starts with the new configuration."
+        label={infoLabel(
+          'Sandbox',
+          "Where this agent's sessions run. Applied on save — the agent parks and its next wakeup starts with the new configuration."
+        )}
       >
         <SandboxPicker value={profileName} onChange={onProfileChange} context={sandboxContext} />
       </Field>
@@ -1625,11 +2062,6 @@ function AgentSettings({
   return (
     <div className={styles.detailBody}>
       <div className={styles.form}>
-        {error && (
-          <MessageBar intent="error">
-            <MessageBarBody>{error}</MessageBarBody>
-          </MessageBar>
-        )}
         <Field label="Name" hint={`DM address: @${residentHandle(name.trim() || agent.name)} — it follows the name.`}>
           <Input value={name} onChange={handleName} />
         </Field>
@@ -1651,8 +2083,10 @@ function AgentSettings({
           onProfileChange={setProfileName}
         />
         <Field
-          label="Morning wakeup"
-          hint="The daily planning beat — the agent wakes with its memories and the overnight digest. If the app is closed at that hour, the beat catches up (marked late) when the app next opens that day."
+          label={infoLabel(
+            'Morning wakeup',
+            'The daily planning beat — the agent wakes with its memories and the overnight digest. If the app is closed at that hour, the beat catches up (marked late) when the app next opens that day.'
+          )}
         >
           <Select value={morningHour === null ? 'off' : String(morningHour)} onChange={handleMorningHour}>
             <option value="off">Off — no morning beat</option>
@@ -1664,12 +2098,7 @@ function AgentSettings({
           </Select>
         </Field>
 
-        <div className={styles.statusLine}>
-          <Button variant="primary" onClick={save} isDisabled={!dirty || saving}>
-            {saving ? 'Saving…' : 'Save'}
-          </Button>
-          {dirty && !saving && <Caption1>Unsaved changes</Caption1>}
-        </div>
+        <SaveBar onSave={save} dirty={dirty} saving={saving} error={error} />
       </div>
     </div>
   );
@@ -1731,8 +2160,10 @@ function AgentMemory({ agent }: { agent: ResidentAgent }): React.JSX.Element {
     <div className={styles.detailBody}>
       <div className={styles.form}>
         <Field
-          label={`Durable memory (${memories.length})`}
-          hint="Keyed facts the agent maintains with its remember/forget tools (curated nightly at reflection); you can prune or add here. Changes reach the agent on its next run."
+          label={infoLabel(
+            `Durable memory (${memories.length})`,
+            'Keyed facts the agent maintains with its remember/forget tools (curated nightly at reflection); you can prune or add here. Changes reach the agent on its next run.'
+          )}
         >
           <div>
             {memories.length === 0 && (
@@ -1788,11 +2219,13 @@ function AgentDetail({
   agent,
   projects,
   sandboxContext,
+  onMessage,
   onDeleted,
 }: {
   agent: ResidentAgent;
   projects: Project[];
   sandboxContext: SandboxContext;
+  onMessage: (agentId: string) => void;
   onDeleted: () => void;
 }): React.JSX.Element {
   const styles = useStyles();
@@ -1804,6 +2237,8 @@ function AgentDetail({
   const handleTabSelect = useCallback((_: unknown, data: { value: unknown }) => {
     setTab(data.value as 'session' | 'memory' | 'settings');
   }, []);
+
+  const handleMessage = useCallback(() => onMessage(agent.id), [onMessage, agent.id]);
 
   const handleWake = useCallback(() => {
     void residentApi.wake(agent.id);
@@ -1829,10 +2264,19 @@ function AgentDetail({
           other detail page. Destructive delete lives in the overflow menu. */}
       <div className={styles.bandHeader}>
         <div className={styles.bandTitleRow}>
+          <AgentAvatar
+            name={agent.name}
+            colorId={agent.id}
+            size={40}
+            presence={presenceStatus(runtime?.state, agent.enabled)}
+          />
           <span className={styles.bandTitle}>{agent.name}</span>
           <Badge color={stateBadgeColor(runtime?.state)}>{STATE_LABEL[runtime?.state ?? 'parked']}</Badge>
           {!agent.enabled && <Badge color="default">Disabled</Badge>}
           <div className={styles.bandSpacer} />
+          <Button size="sm" leftIcon={<Chat20Regular />} onClick={handleMessage}>
+            Message
+          </Button>
           <Button size="sm" leftIcon={<FlashRegular />} onClick={handleWake} isDisabled={!agent.enabled}>
             Wake now
           </Button>
@@ -1996,6 +2440,118 @@ function NewAgentForm({
 }
 
 // ---------------------------------------------------------------------------
+// Handbook — the roster's ONE shared rules document (handbook-first)
+// ---------------------------------------------------------------------------
+
+/** The same Yoopta editor the project Docs pages mount (lazy, like PageView). */
+const ContextEditor = lazy(() =>
+  import('@/renderer/features/Tickets/ContextEditor').then((m) => ({ default: m.ContextEditor }))
+);
+
+const HANDBOOK_SAVE_DEBOUNCE_MS = 800;
+
+function HandbookPane({ roster }: { roster: ResidentAgent[] }): React.JSX.Element {
+  const styles = useStyles();
+  const [loaded, setLoaded] = useState<{ body: string } | null>(null);
+  const [meta, setMeta] = useState<{ updatedAt: number; updatedBy: string | null } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    residentApi
+      .getHandbook()
+      .then((h) => {
+        if (!cancelled) {
+          setLoaded({ body: h?.body ?? '' });
+          setMeta(h ? { updatedAt: h.updatedAt, updatedBy: h.updatedBy } : null);
+        }
+      })
+      .catch((e: Error) => {
+        if (!cancelled) {
+          setError(e.message);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Pages-style debounced autosave; the pending edit flushes on unmount so
+  // navigating away never drops the last keystrokes.
+  const pendingRef = useRef<string | null>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const flush = useCallback(() => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    const body = pendingRef.current;
+    if (body === null) {
+      return;
+    }
+    pendingRef.current = null;
+    residentApi
+      .setHandbook(body)
+      .then(() => setMeta({ updatedAt: Date.now(), updatedBy: null }))
+      .catch((e: Error) => setError(e.message));
+  }, []);
+  const handleMarkdownChange = useCallback(
+    (md: string) => {
+      pendingRef.current = md;
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+      }
+      timerRef.current = setTimeout(flush, HANDBOOK_SAVE_DEBOUNCE_MS);
+    },
+    [flush]
+  );
+  useEffect(() => flush, [flush]);
+
+  const editorId = meta?.updatedBy ? parseResidentPrincipal(meta.updatedBy) : null;
+  const editorName = meta?.updatedBy
+    ? editorId
+      ? (roster.find((a) => a.id === editorId)?.name ?? meta.updatedBy)
+      : meta.updatedBy
+    : 'you';
+
+  if (!loaded) {
+    return (
+      <div className={styles.handbookBody}>
+        <FormSkeleton fields={4} />
+      </div>
+    );
+  }
+  return (
+    <div className={styles.handbookPane}>
+      <div className={styles.handbookHeader}>
+        <span className={styles.bandTitle}>Handbook</span>
+        {meta && (
+          <span className={styles.rowMeta}>
+            Last updated {formatTimestamp(meta.updatedAt)} by {editorName}
+          </span>
+        )}
+        {error && (
+          <MessageBar intent="error">
+            <MessageBarBody>{error}</MessageBarBody>
+          </MessageBar>
+        )}
+      </div>
+      <div className={styles.handbookBody}>
+        <Suspense
+          fallback={
+            <div className={styles.sessionCenter}>
+              <Spinner size="small" />
+            </div>
+          }
+        >
+          <ContextEditor initialMarkdown={loaded.body} onChangeMarkdown={handleMarkdownChange} />
+        </Suspense>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Tab
 // ---------------------------------------------------------------------------
 
@@ -2006,7 +2562,7 @@ export function ResidentsTab(): React.JSX.Element {
   const storeData = useStore(persistedStoreApi.$atom);
   const statuses = useStore($residentStatus);
   const view = useStore($residentsView);
-  const seenByChannel = useStore($residentSeenByChannel);
+  const seenByChannel = useMemo(() => storeData.residentChannelSeen ?? {}, [storeData.residentChannelSeen]);
   const [creating, setCreating] = useState(false);
 
   const roster: ResidentAgent[] = useMemo(() => storeData.residentAgents ?? [], [storeData.residentAgents]);
@@ -2048,15 +2604,16 @@ export function ResidentsTab(): React.JSX.Element {
   );
   const channelDefs = useMemo(() => storeData.residentChannelDefs ?? [], [storeData.residentChannelDefs]);
   const channelIds = useMemo(() => [TEAM_CHANNEL, ...channelDefs.map((c) => c.id)], [channelDefs]);
-  // DM threads are first-class rows, derived from the log (newest first).
+  // DM threads are first-class rows, derived from the log (newest first),
+  // carrying their last message for the row snippet.
   const dmThreads = useMemo(() => {
-    const latest = new Map<string, number>();
+    const latest = new Map<string, ResidentChannelMessage>();
     for (const m of storeData.residentChannels ?? []) {
       if (m.channel.startsWith('dm:')) {
-        latest.set(m.channel, m.at);
+        latest.set(m.channel, m);
       }
     }
-    return [...latest.entries()].map(([id, at]) => ({ id, at })).sort((a, b) => b.at - a.at);
+    return [...latest.entries()].map(([id, last]) => ({ id, at: last.at, last })).sort((a, b) => b.at - a.at);
   }, [storeData.residentChannels]);
   const dmTitle = useCallback(
     (channelId: string): string => {
@@ -2066,25 +2623,45 @@ export function ResidentsTab(): React.JSX.Element {
       }
       const nameOf = (p: string): string =>
         p === USER_PARTICIPANT ? 'You' : (roster.find((a) => a.id === p)?.name ?? p);
+      // Your own threads read as the peer's name (the Slack DM shape);
+      // observed agent↔agent threads name both parties.
+      if (pair.includes(USER_PARTICIPANT)) {
+        return nameOf(pair.find((p) => p !== USER_PARTICIPANT) ?? pair[0]);
+      }
       return `${nameOf(pair[0])} ↔ ${nameOf(pair[1])}`;
+    },
+    [roster]
+  );
+  // A DM channel is addressable when every participant still resolves —
+  // including threads with NO messages yet (the start-a-DM path).
+  const isKnownDm = useCallback(
+    (ch: string): boolean => {
+      const pair = dmParticipants(ch);
+      return pair !== null && pair.every((p) => p === USER_PARTICIPANT || roster.some((a) => a.id === p));
     },
     [roster]
   );
   const selectedChannel =
     view.selectedChannel &&
-    (channelIds.includes(view.selectedChannel) || dmThreads.some((t) => t.id === view.selectedChannel))
+    (channelIds.includes(view.selectedChannel) ||
+      dmThreads.some((t) => t.id === view.selectedChannel) ||
+      isKnownDm(view.selectedChannel))
       ? view.selectedChannel
       : null;
   // The user can post into their own DM threads; agent↔agent threads are
   // observed (the composer would misroute — post() targets one participant).
   const selectedDmPair = selectedChannel ? dmParticipants(selectedChannel) : null;
   const selectedIsAgentDm = selectedDmPair !== null && !selectedDmPair.includes(USER_PARTICIPANT);
-  const activityOpen = !selected && !selectedChannel && !creating;
+  const handbookOpen = view.showHandbook === true && !creating;
 
   // "Activity selected" and "nothing selected" share the same view state
   // (both ids null); on mobile — where the list is the landing view — an
   // explicit flag distinguishes tapping the Activity row from being home.
   const [mobileActivityOpen, setMobileActivityOpen] = useState(false);
+  // On mobile the landing list must NOT paint Activity as selected (nor
+  // swallow its unread badge) just because nothing else is open.
+  const noSelection = !selected && !selectedChannel && !creating && !handbookOpen;
+  const activityOpen = isDesktop ? noSelection : noSelection && mobileActivityOpen;
 
   const handleSelect = useCallback((id: string) => {
     setCreating(false);
@@ -2098,10 +2675,24 @@ export function ResidentsTab(): React.JSX.Element {
     $residentsView.set({ selectedAgentId: null, selectedChannel: channelId });
   }, []);
 
+  // Start (or reopen) your DM thread with an agent — the thread is a valid
+  // destination even before its first message.
+  const handleMessageAgent = useCallback((agentId: string) => {
+    setCreating(false);
+    setMobileActivityOpen(false);
+    $residentsView.set({ selectedAgentId: null, selectedChannel: dmChannelId(USER_PARTICIPANT, agentId) });
+  }, []);
+
   const handleSelectActivity = useCallback(() => {
     setCreating(false);
     setMobileActivityOpen(true);
     $residentsView.set({ selectedAgentId: null, selectedChannel: null });
+  }, []);
+
+  const handleSelectHandbook = useCallback(() => {
+    setCreating(false);
+    setMobileActivityOpen(false);
+    $residentsView.set({ selectedAgentId: null, selectedChannel: null, showHandbook: true });
   }, []);
 
   // Row-menu agent actions (the same operations the detail header offers,
@@ -2173,6 +2764,39 @@ export function ResidentsTab(): React.JSX.Element {
     $residentsView.set({ selectedAgentId: null, selectedChannel: null });
   }, []);
 
+  // DM rows: live threads, plus the just-opened empty thread (start-a-DM)
+  // so the selection has a row while the first message is being written.
+  const dmListRows = useMemo((): { id: string; at: number | null; last: ResidentChannelMessage | null }[] => {
+    const rows: { id: string; at: number | null; last: ResidentChannelMessage | null }[] = dmThreads.map((t) => ({
+      id: t.id,
+      at: t.at,
+      last: t.last,
+    }));
+    if (selectedChannel && dmParticipants(selectedChannel) && !dmThreads.some((t) => t.id === selectedChannel)) {
+      rows.unshift({ id: selectedChannel, at: null, last: null });
+    }
+    return rows;
+  }, [dmThreads, selectedChannel]);
+
+  /** Row identity for a DM thread: the agent participants' avatars, and the
+   *  peer's live presence when it's a user↔agent thread. */
+  const dmRowIdentity = useCallback(
+    (channelId: string): { avatars: { name: string; colorId: string }[]; presence?: PresenceBadgeStatus } => {
+      const pair = dmParticipants(channelId);
+      const agentIds = (pair ?? []).filter((p) => p !== USER_PARTICIPANT);
+      const avatars = agentIds.map((p) => ({ name: roster.find((a) => a.id === p)?.name ?? p, colorId: p }));
+      if (avatars.length === 0) {
+        avatars.push({ name: 'You', colorId: USER_PARTICIPANT });
+      }
+      if (agentIds.length === 1 && agentIds[0]) {
+        const peer = roster.find((a) => a.id === agentIds[0]);
+        return { avatars, presence: presenceStatus(statuses[agentIds[0]]?.state, peer?.enabled ?? true) };
+      }
+      return { avatars };
+    },
+    [roster, statuses]
+  );
+
   const listPane = (
     <div className={mergeClasses(styles.listPane, isGlass && styles.listPaneGlass)}>
       {/* Creation lives on the section headers below, each "+" scoped by its
@@ -2190,6 +2814,17 @@ export function ResidentsTab(): React.JSX.Element {
             {!activityOpen && activityUnread > 0 && <CounterBadge count={activityUnread} size="small" color="brand" />}
           </span>
           <span className={styles.rowMeta}>Every channel and agent conversation, in one feed</span>
+        </button>
+        <button
+          type="button"
+          className={mergeClasses(styles.row, handbookOpen && styles.rowSelected)}
+          onClick={handleSelectHandbook}
+        >
+          <span className={styles.rowTitle}>
+            <BookOpen20Regular />
+            Handbook
+          </span>
+          <span className={styles.rowMeta}>Shared team rules — every agent receives them on wake</span>
         </button>
         <div className={styles.sectionHeader}>
           <SectionLabel className={styles.sectionHeaderLabel}>Channels</SectionLabel>
@@ -2221,22 +2856,31 @@ export function ResidentsTab(): React.JSX.Element {
         {addingChannel && (
           <NewChannelRow existingIds={channelIds} onDone={stopAddChannel} onOpenExisting={handleSelectChannel} />
         )}
-        {dmThreads.length > 0 && (
+        {dmListRows.length > 0 && (
           <div className={styles.sectionHeader}>
             <SectionLabel className={styles.sectionHeaderLabel}>Direct messages</SectionLabel>
           </div>
         )}
-        {dmThreads.map((thread) => (
-          <DmRow
-            key={thread.id}
-            channelId={thread.id}
-            title={dmTitle(thread.id)}
-            lastAt={thread.at}
-            selected={selectedChannel === thread.id}
-            unread={unreadByChannel[thread.id] ?? 0}
-            onSelect={handleSelectChannel}
-          />
-        ))}
+        {dmListRows.map((thread) => {
+          const identity = dmRowIdentity(thread.id);
+          const snippet = thread.last
+            ? `${thread.last.from === USER_PARTICIPANT ? 'You' : (thread.last.fromName ?? thread.last.from)}: ${thread.last.text}`
+            : null;
+          return (
+            <DmRow
+              key={thread.id}
+              channelId={thread.id}
+              title={dmTitle(thread.id)}
+              avatars={identity.avatars}
+              {...(identity.presence ? { presence: identity.presence } : {})}
+              snippet={snippet}
+              lastAt={thread.at}
+              selected={selectedChannel === thread.id}
+              unread={unreadByChannel[thread.id] ?? 0}
+              onSelect={handleSelectChannel}
+            />
+          );
+        })}
         <div className={styles.sectionHeader}>
           <SectionLabel className={styles.sectionHeaderLabel}>Agents</SectionLabel>
           <IconButton aria-label="New agent" icon={<Add20Regular />} size="sm" onClick={startCreate} />
@@ -2254,6 +2898,7 @@ export function ResidentsTab(): React.JSX.Element {
             }
             selected={selected?.id === agent.id}
             onSelect={handleSelect}
+            onMessage={handleMessageAgent}
             onWake={handleWakeAgent}
             onToggleEnabled={handleToggleAgent}
             onRequestDelete={handleRequestDeleteAgent}
@@ -2274,6 +2919,46 @@ export function ResidentsTab(): React.JSX.Element {
     </div>
   );
 
+  // Desktop title band for a channel/DM feed — identity + context up top,
+  // like every other detail page (mobile titles via the TopAppBar instead).
+  let feedHeader: React.JSX.Element | null = null;
+  if (selectedChannel && isDesktop) {
+    if (selectedDmPair) {
+      const identity = dmRowIdentity(selectedChannel);
+      const single = identity.avatars.length === 1 ? identity.avatars[0] : null;
+      feedHeader = (
+        <div className={styles.feedHeader}>
+          {single ? (
+            <AgentAvatar
+              name={single.name}
+              colorId={single.colorId}
+              size={28}
+              {...(identity.presence ? { presence: identity.presence } : {})}
+            />
+          ) : (
+            <AvatarGroup layout="stack" size={24}>
+              {identity.avatars.map((a) => (
+                <AvatarGroupItem key={a.colorId} color="colorful" name={a.name} idForColor={a.colorId} />
+              ))}
+            </AvatarGroup>
+          )}
+          <span className={styles.feedHeaderTitle}>{dmTitle(selectedChannel)}</span>
+          {selectedIsAgentDm && <span className={styles.feedHeaderMeta}>agent↔agent — observed</span>}
+        </div>
+      );
+    } else {
+      const def = channelDefs.find((c) => c.id === selectedChannel);
+      const headerMeta =
+        def?.description ?? (selectedChannel === TEAM_CHANNEL ? 'All-hands — everyone reads it' : null);
+      feedHeader = (
+        <div className={styles.feedHeader}>
+          <span className={styles.feedHeaderTitle}>#{selectedChannel}</span>
+          {headerMeta && <span className={styles.feedHeaderMeta}>{headerMeta}</span>}
+        </div>
+      );
+    }
+  }
+
   const detailBody = creating ? (
     <>
       {isDesktop && (
@@ -2291,7 +2976,15 @@ export function ResidentsTab(): React.JSX.Element {
       />
     </>
   ) : selected ? (
-    <AgentDetail agent={selected} projects={projects} sandboxContext={sandboxContext} onDeleted={handleDeleted} />
+    <AgentDetail
+      agent={selected}
+      projects={projects}
+      sandboxContext={sandboxContext}
+      onMessage={handleMessageAgent}
+      onDeleted={handleDeleted}
+    />
+  ) : handbookOpen ? (
+    <HandbookPane roster={roster} />
   ) : roster.length === 0 && isDesktop ? (
     <EmptyState
       title="No agents yet"
@@ -2304,6 +2997,7 @@ export function ResidentsTab(): React.JSX.Element {
     />
   ) : selectedChannel ? (
     <>
+      {feedHeader}
       <MemberBar channel={selectedChannel} roster={roster} onOpenAgent={handleSelect} />
       <ActivityFeed roster={roster} channel={selectedChannel} readOnly={selectedIsAgentDm} />
     </>

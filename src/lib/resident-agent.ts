@@ -549,7 +549,9 @@ export const renderIdentityInstructions = (
     projects: Array<{ label: string; mountNames: string[] }>;
     /** Mount name the agent's private home rides under next to the project sources. */
     homeMount: string;
-  }
+  },
+  /** The shared team handbook body (handbook-first: injected on every wake). */
+  handbook?: string
 ): string => {
   const others = roster.filter((r) => r.id !== agent.id);
   const parts: string[] = [];
@@ -574,6 +576,13 @@ export const renderIdentityInstructions = (
   );
   if (agent.personaText.trim()) {
     parts.push(`\n## Who you are\n${agent.personaText.trim()}`);
+  }
+  if (handbook?.trim()) {
+    parts.push(
+      `\n## Team handbook\nShared rules for the whole roster — they bind every agent and ` +
+        `override persona where they conflict. Maintained in the DB via ` +
+        `\`read_handbook\`/\`update_handbook\`; edits reach everyone on their next wake.\n\n${handbook.trim()}`
+    );
   }
   if (others.length > 0) {
     parts.push(
@@ -608,6 +617,26 @@ export const renderIdentityInstructions = (
   );
   return `${parts.join('\n')}\n`;
 };
+
+/**
+ * Seed handbook, written once when no handbook exists yet. Every rule here
+ * was earned by an observed failure (docs/residents-in-projects-db-plan.md
+ * and the 2026-07-24 review-handoff episode); the roster edits it from here.
+ */
+export const DEFAULT_TEAM_HANDBOOK = `### Code & workspaces
+- Your workspace is YOURS ALONE. Teammates cannot see your files, diffs, or local commits — every agent runs in its own sandbox.
+- Code reaches a teammate only as a pushed remote branch. Handoff format: \`repo: <url> | branch: origin/<name> | commit: <sha>\`.
+- Commit early. Uncommitted work may not survive your run; never claim verification of work that isn't committed.
+
+### Communication
+- Post once, where the work lives (the ticket). Link it elsewhere only if someone must act. No FYI-only pings.
+- Every request stands alone: explicit ask, one owner, the ids/links needed to act without reading a thread.
+- After delegating, wait. Delivery is guaranteed — re-asking creates duplicate work. Never do the work you delegated.
+- Decisions and evidence go in ticket comments, not chat. Chat summarizes and links.
+
+### Review
+- The reviewer fetches the exact remote branch/commit and verifies independently. Local paths are never a review artifact.
+- A ticket enters Review only when its pushed branch exists.`;
 
 // ---------------------------------------------------------------------------
 // Digest cursors

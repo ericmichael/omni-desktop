@@ -187,3 +187,16 @@ describe('resident alarms', () => {
     expect(repo.listResidentAlarms()).toEqual([]);
   });
 });
+
+describe('team handbook', () => {
+  it('is absent until first write, then upserts in place', () => {
+    expect(repo.getTeamHandbook()).toBeUndefined();
+
+    repo.setTeamHandbook('rule one', null, '2026-07-24 08:00:00.000');
+    expect(repo.getTeamHandbook()).toMatchObject({ body: 'rule one', updated_by: null });
+
+    repo.setTeamHandbook('rule one\nrule two', 'agent:sable', '2026-07-24 09:00:00.000');
+    const row = repo.getTeamHandbook();
+    expect(row).toMatchObject({ body: 'rule one\nrule two', updated_by: 'agent:sable' });
+  });
+});

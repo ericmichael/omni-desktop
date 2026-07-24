@@ -670,4 +670,19 @@ ${['resident_agents', 'resident_memories', 'resident_channels', 'resident_messag
   .join('\n')}
 `,
   },
+  {
+    version: 17,
+    sql: `
+-- Team handbook (mirrors SQLite v17): one shared rules document per tenant.
+CREATE TABLE team_handbook (
+  tenant_id  TEXT PRIMARY KEY,
+  body       TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL,
+  updated_by TEXT
+);
+${rls('team_handbook')}
+CREATE TRIGGER team_handbook_notify AFTER INSERT OR UPDATE OR DELETE ON team_handbook
+  FOR EACH ROW EXECUTE FUNCTION omni_notify_change();
+`,
+  },
 ];

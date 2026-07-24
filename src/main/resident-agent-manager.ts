@@ -27,7 +27,7 @@ import { rmSync } from 'node:fs';
 import path from 'node:path';
 
 import type Store from 'electron-store';
-import { type IProjectsRepo, residentId } from 'omni-projects-db';
+import { fromIso, type IProjectsRepo, residentId, toIso } from 'omni-projects-db';
 import { WebSocket as WsWebSocket } from 'ws';
 
 import {
@@ -35,6 +35,7 @@ import {
   channelIdFromName,
   dayKey,
   daySessionId,
+  DEFAULT_TEAM_HANDBOOK,
   type DigestRow,
   dmChannelId,
   dmParticipants,
@@ -427,7 +428,9 @@ export class ResidentAgentManager {
     log: ResidentChannelMessage[];
     channelDefs: ResidentChannelDef[];
     alarms: Record<string, ResidentAlarm[]>;
-  } = { agents: [], memories: {}, log: [], channelDefs: [], alarms: {} };
+    /** Shared team handbook body (handbook-first: rides every identity render). */
+    handbook: string;
+  } = { agents: [], memories: {}, log: [], channelDefs: [], alarms: {}, handbook: '' };
 
   /** Monotonic id authorities, seeded from the DB at hydrate. */
   private nextMessageId = 1;
@@ -539,6 +542,31 @@ export class ResidentAgentManager {
     }
     this.data.alarms = alarms;
     this.nextMessageId = this.data.log.reduce((max, m) => Math.max(max, m.id), 0) + 1;
+
+    // Team handbook: seed the shared rules document on first boot; after
+    // that the DB row is the source of truth (user edits via the Agents tab,
+    // agents via the update_handbook MCP tool).
+    const handbook = await this.repo.getTeamHandbook();
+    if (handbook === undefined) {
+      await this.repo.setTeamHandbook(DEFAULT_TEAM_HANDBOOK, null, toIso(this.now()));
+      this.data.handbook = DEFAULT_TEAM_HANDBOOK;
+    } else {
+      this.data.handbook = handbook.body;
+    }
+  }
+
+  /**
+   * Re-read the handbook before building identity instructions — agents
+   * edit it through the MCP subprocess, which this manager's cache can't
+   * see. "Fresh on every wake" is the handbook's delivery contract.
+   */
+  private async refreshHandbook(): Promise<void> {
+    try {
+      const row = await this.repo.getTeamHandbook();
+      this.data.handbook = row?.body ?? '';
+    } catch {
+      // Keep the cached copy — a read blip must not blank the rules.
+    }
   }
 
   /**
@@ -1107,6 +1135,23 @@ export class ResidentAgentManager {
    * Serialized on the agent's chain so it can't race a park/reflect.
    */
   ensureSession = (agentId: string): Promise<{ sessionId: string; uiUrl: string }> => {
+    // Fast path: the agent is MID-RUN. The delivery task holds the chain for
+    // the whole run, so queuing behind it would block the session view until
+    // the run ends — exactly when the user most wants to watch. A thinking
+    // agent already has a live process, an attached watcher, and today's
+    // session ensured (delivery did all three before triggering the run), so
+    // the handles can be returned immediately.
+    const running = this.runtime(agentId);
+    if (running.thinking && running.watcher && running.day === dayKey(this.now())) {
+      const status = this.processManager.getStatus(residentProcessId(agentId));
+      if (status.type === 'running' && status.data.uiUrl) {
+        if (running.parkTimer) {
+          clearTimeout(running.parkTimer);
+          running.parkTimer = null;
+        }
+        return Promise.resolve({ sessionId: daySessionId(agentId, running.day), uiUrl: status.data.uiUrl });
+      }
+    }
     return this.chained(agentId, async () => {
       const rt = this.runtime(agentId);
       if (rt.parkTimer) {
@@ -1116,6 +1161,7 @@ export class ResidentAgentManager {
         rt.parkTimer = null;
       }
       await this.reflectIfDayRolled(agentId);
+      await this.refreshHandbook();
       const wsUrl = await this.ensureRunning(agentId);
       const key = dayKey(this.now());
       rt.day = rt.day ?? key;
@@ -1250,6 +1296,7 @@ export class ResidentAgentManager {
       return; // digest-only backlog waits for the next real wakeup
     }
     await this.reflectIfDayRolled(agentId);
+    await this.refreshHandbook();
     // Hoisted: the catch must know whether a consumed batch held a morning
     // beat so an undelivered beat can re-dispatch on the next sweep.
     let events: ResidentEvent[] = [];
@@ -1714,9 +1761,35 @@ export class ResidentAgentManager {
       agent,
       this.memoriesOf(agentId),
       this.roster(),
-      scoped.length > 0 ? { projects: scoped, homeMount: HOME_MOUNT } : undefined
+      scoped.length > 0 ? { projects: scoped, homeMount: HOME_MOUNT } : undefined,
+      this.data.handbook
     );
   }
+
+  // ---------------------------------------------------------------- handbook
+
+  getHandbook = async (): Promise<{ body: string; updatedAt: number; updatedBy: string | null } | null> => {
+    const row = await this.repo.getTeamHandbook();
+    if (!row) {
+      return null;
+    }
+    this.data.handbook = row.body;
+    return { body: row.body, updatedAt: fromIso(row.updated_at), updatedBy: row.updated_by };
+  };
+
+  /** User edit from the Agents tab (agents edit via the MCP tool instead). */
+  setHandbook = (body: string): void => {
+    this.data.handbook = body;
+    this.enqueuePersist(() => this.repo.setTeamHandbook(body, null, toIso(this.now())));
+    // No activity row per save: the editor autosaves as you type, and the
+    // handbook row itself carries updated_at/updated_by for the audit trail.
+    // Live sessions pick the new rules up immediately; parked agents on wake.
+    for (const [agentId, rt] of this.runtimes) {
+      if (rt.watcher) {
+        this.refreshIdentity(agentId);
+      }
+    }
+  };
 
   /** Push fresh identity to any live watcher sessions (persona / memory /
    *  scope edits that land mid-connection). Parked agents pick the new
@@ -2029,6 +2102,8 @@ export function registerResidentHandlers(
   h('resident:get-status', (m) => m.getStatus());
   h('resident:ensure-session', (m, agentId) => m.ensureSession(agentId));
   h('resident:set-memories', (m, agentId, memories) => m.setMemories(agentId, memories));
+  h('resident:get-handbook', (m) => m.getHandbook());
+  h('resident:set-handbook', (m, body) => m.setHandbook(body));
   return channels;
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */

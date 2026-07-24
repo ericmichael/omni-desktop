@@ -35,6 +35,7 @@ export {
 export type {
   ColumnRow,
   CommentRow,
+  HandbookRow,
   InboxRow,
   MilestoneRow,
   PageRow,

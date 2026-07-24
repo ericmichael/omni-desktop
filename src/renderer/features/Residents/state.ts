@@ -21,30 +21,46 @@ import type {
 
 export const $residentStatus = atom<Record<string, ResidentAgentRuntime>>({});
 
-/** Detail-pane selection: an agent, a channel, or (both null) the
- *  all-traffic Activity view. */
-export const $residentsView = atom<{ selectedAgentId: string | null; selectedChannel: string | null }>({
+/** Detail-pane selection: an agent, a channel, the team handbook, or (all
+ *  unset) the all-traffic Activity view. */
+export const $residentsView = atom<{
+  selectedAgentId: string | null;
+  selectedChannel: string | null;
+  showHandbook?: boolean;
+}>({
   selectedAgentId: null,
   selectedChannel: null,
 });
 
-/** Highest message id the user has SEEN, per channel (session-local).
- *  Drives the unread badges on channel/DM rows and the Activity row's
- *  cross-channel total — a per-channel cursor, so reading one channel
- *  never marks another one seen. */
-export const $residentSeenByChannel = atom<Record<string, number>>({});
+/**
+ * Seen cursors (highest message id the user has SEEN, per channel) live in
+ * the persisted store (`residentChannelSeen`) so unread badges survive
+ * restarts. Store writes round-trip through main before the atom updates,
+ * so rapid mark calls merge into this local advance-only cache first —
+ * a later call can never regress a cursor a pending write already raised.
+ */
+let seenCache: Record<string, number> | null = null;
 
 /** Advance the seen cursors for a batch of rendered messages. */
 export function markResidentMessagesSeen(messages: ReadonlyArray<{ id: number; channel: string }>): void {
-  const seen = $residentSeenByChannel.get();
+  const stored = persistedStoreApi.getKey('residentChannelSeen') ?? {};
+  // Element-wise max of the store and the cache: another window may have
+  // advanced a channel we haven't, and vice versa.
+  const base: Record<string, number> = { ...stored };
+  for (const [ch, id] of Object.entries(seenCache ?? {})) {
+    if (id > (base[ch] ?? 0)) {
+      base[ch] = id;
+    }
+  }
   let next: Record<string, number> | null = null;
   for (const m of messages) {
-    if (m.id > ((next ?? seen)[m.channel] ?? 0)) {
-      next = { ...(next ?? seen), [m.channel]: m.id };
+    if (m.id > ((next ?? base)[m.channel] ?? 0)) {
+      next = { ...(next ?? base), [m.channel]: m.id };
     }
   }
   if (next) {
-    $residentSeenByChannel.set(next);
+    seenCache = next;
+    void persistedStoreApi.setKey('residentChannelSeen', next);
   }
 }
 
@@ -95,6 +111,9 @@ export const residentApi = {
     emitter.invoke('resident:ensure-session', agentId),
   setMemories: (agentId: string, memories: ResidentMemoryEntry[]): Promise<void> =>
     emitter.invoke('resident:set-memories', agentId, memories),
+  getHandbook: (): Promise<{ body: string; updatedAt: number; updatedBy: string | null } | null> =>
+    emitter.invoke('resident:get-handbook'),
+  setHandbook: (body: string): Promise<void> => emitter.invoke('resident:set-handbook', body),
 };
 
 /** Refresh the runtime snapshot (tab mount / reconnect). */

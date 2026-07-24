@@ -2,6 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { IProjectsRepo } from 'omni-projects-db';
 
 import { registerCommentTools } from './tools/comments.js';
+import { registerHandbookTools } from './tools/handbook.js';
 import { registerInboxTools } from './tools/inbox.js';
 import { registerMilestoneTools } from './tools/milestones.js';
 import { registerPageTools } from './tools/pages.js';
@@ -38,6 +39,7 @@ export function createServer(repo: IProjectsRepo, context: ProjectsMcpContext = 
   registerPageTools(server, repo);
   registerInboxTools(server, repo);
   registerPipelineTools(server, repo);
+  registerHandbookTools(server, repo, context);
 
   server.tool(
     'list_sandbox_profiles',

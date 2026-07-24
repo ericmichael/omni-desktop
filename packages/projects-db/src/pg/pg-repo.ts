@@ -18,6 +18,7 @@ import type { ColumnSyncInput, ColumnSyncResult, IProjectsRepo } from '../repo-i
 import type {
   ColumnRow,
   CommentRow,
+  HandbookRow,
   InboxRow,
   MilestoneRow,
   PageRow,
@@ -848,5 +849,23 @@ export class PgProjectsRepo implements IProjectsRepo {
 
   async deleteResidentAlarm(id: number): Promise<void> {
     await this.tx((c) => c.query('DELETE FROM resident_alarms WHERE id = $1', [id]));
+  }
+
+  // ---- Team handbook ----
+
+  getTeamHandbook(): Promise<HandbookRow | undefined> {
+    return this.one<HandbookRow>('SELECT body, updated_at, updated_by FROM team_handbook', []);
+  }
+
+  async setTeamHandbook(body: string, updatedBy: string | null, updatedAt: string): Promise<void> {
+    await this.tx((c) =>
+      c.query(
+        `INSERT INTO team_handbook (tenant_id, body, updated_by, updated_at)
+         VALUES ($1,$2,$3,$4)
+         ON CONFLICT (tenant_id) DO UPDATE SET
+           body = EXCLUDED.body, updated_by = EXCLUDED.updated_by, updated_at = EXCLUDED.updated_at`,
+        [this.tenantId, body, updatedBy, updatedAt]
+      )
+    );
   }
 }

@@ -125,6 +125,18 @@ describe('store→db migration + hydration', () => {
     expect((await repo.listResidents()).map((r) => r.id)).toEqual(['sable', 'quill']);
   });
 
+  it('seeds the team handbook on first boot and leaves an existing one alone', async () => {
+    const manager = buildManager({ residentMorningBeats: {} });
+    await manager.whenReady;
+    const seeded = await repo.getTeamHandbook();
+    expect(seeded?.body).toContain('YOURS ALONE');
+
+    await repo.setTeamHandbook('my rules', null, '2026-07-24 08:00:00.000');
+    const second = buildManager({ residentMorningBeats: {} });
+    await second.whenReady;
+    expect((await repo.getTeamHandbook())?.body).toBe('my rules');
+  });
+
   it('is idempotent: a second boot hydrates from the DB without duplicating', async () => {
     const storeData = legacyStoreData();
     const first = buildManager(storeData);

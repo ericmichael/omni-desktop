@@ -18,6 +18,7 @@ import type { ColumnSyncInput, ColumnSyncResult, IProjectsRepo } from './repo-in
 import type {
   ColumnRow,
   CommentRow,
+  HandbookRow,
   InboxRow,
   MilestoneRow,
   PageRow,
@@ -257,5 +258,13 @@ export class SqliteProjectsRepo implements IProjectsRepo {
   }
   async deleteResidentAlarm(id: number): Promise<void> {
     this.sync.deleteResidentAlarm(id);
+  }
+
+  // ---- Team handbook ----
+  async getTeamHandbook(): Promise<HandbookRow | undefined> {
+    return this.sync.getTeamHandbook();
+  }
+  async setTeamHandbook(body: string, updatedBy: string | null, updatedAt: string): Promise<void> {
+    this.sync.setTeamHandbook(body, updatedBy, updatedAt);
   }
 }

@@ -6,6 +6,7 @@ import { tx, txDeferred } from './tx.js';
 import type {
   ColumnRow,
   CommentRow,
+  HandbookRow,
   InboxRow,
   MilestoneRow,
   PageRow,
@@ -870,6 +871,17 @@ export class ProjectsRepo {
     this.stmts.deleteResidentAlarm.run(id);
     this.bumpChangeSeq();
   }
+
+  // ---- Team handbook ----
+
+  getTeamHandbook(): HandbookRow | undefined {
+    return this.stmts.getTeamHandbook.get() as HandbookRow | undefined;
+  }
+
+  setTeamHandbook(body: string, updatedBy: string | null, updatedAt: string): void {
+    this.stmts.setTeamHandbook.run(body, updatedBy, updatedAt);
+    this.bumpChangeSeq();
+  }
 }
 
 // ---- Prepared statement compilation ----
@@ -1085,5 +1097,14 @@ function prepareStatements(db: DatabaseSync) {
       VALUES (?, ?, ?, ?, ?)
     `),
     deleteResidentAlarm: db.prepare('DELETE FROM resident_alarms WHERE id = ?'),
+
+    // Team handbook
+    getTeamHandbook: db.prepare('SELECT body, updated_at, updated_by FROM team_handbook WHERE id = 1'),
+    setTeamHandbook: db.prepare(`
+      INSERT INTO team_handbook (id, body, updated_by, updated_at)
+      VALUES (1, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        body = excluded.body, updated_by = excluded.updated_by, updated_at = excluded.updated_at
+    `),
   };
 }

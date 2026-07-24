@@ -15,6 +15,7 @@ export const DEFAULTS: StoreData = {
   residentChannelDefs: [],
   residentAlarms: {},
   residentMorningBeats: {},
+  residentChannelSeen: {},
   optInToLauncherPrereleases: false,
   previewFeatures: false,
   notifyOnAgentAttention: false,

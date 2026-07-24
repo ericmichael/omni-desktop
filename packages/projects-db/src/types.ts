@@ -182,3 +182,10 @@ export type ResidentAlarmRow = {
   note: string;
   created_at: string;
 };
+
+export type HandbookRow = {
+  body: string;
+  updated_at: string;
+  /** Principal that last edited ('agent:<id>' for residents, null for the user). */
+  updated_by: string | null;
+};

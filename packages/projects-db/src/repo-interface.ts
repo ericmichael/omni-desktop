@@ -27,6 +27,7 @@ import type { ColumnCategory } from './defaults.js';
 import type {
   ColumnRow,
   CommentRow,
+  HandbookRow,
   InboxRow,
   MilestoneRow,
   PageRow,
@@ -184,4 +185,8 @@ export interface IProjectsRepo {
   /** Ids are caller-assigned, like {@link appendResidentMessage}. */
   addResidentAlarm(row: ResidentAlarmRow): Promise<void>;
   deleteResidentAlarm(id: number): Promise<void>;
+
+  // ---- Team handbook ----
+  getTeamHandbook(): Promise<HandbookRow | undefined>;
+  setTeamHandbook(body: string, updatedBy: string | null, updatedAt: string): Promise<void>;
 }

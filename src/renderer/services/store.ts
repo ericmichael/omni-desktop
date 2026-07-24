@@ -18,6 +18,7 @@ const getDefaults = (): StoreData => ({
   residentChannelDefs: [],
   residentAlarms: {},
   residentMorningBeats: {},
+  residentChannelSeen: {},
   optInToLauncherPrereleases: false,
   previewFeatures: false,
   notifyOnAgentAttention: false,

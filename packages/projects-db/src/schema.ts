@@ -466,4 +466,19 @@ CREATE TABLE resident_alarms (
 CREATE INDEX idx_resident_alarms_agent ON resident_alarms(agent_id);
 `,
   },
+  {
+    version: 17,
+    sql: `
+-- Team handbook: ONE shared rules document for the resident roster
+-- (GitLab handbook-first, structurally enforced — the body renders into
+-- every agent's identity instructions on every wake). Single row; the
+-- launcher UI and the update_handbook MCP tool are the two writers.
+CREATE TABLE team_handbook (
+  id         INTEGER PRIMARY KEY CHECK (id = 1),
+  body       TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL,
+  updated_by TEXT
+);
+`,
+  },
 ];

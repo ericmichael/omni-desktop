@@ -296,6 +296,10 @@ export type StoreData = {
    *  delivered nor swallows one the closed app owed — a missed beat
    *  catches up (marked late) on the next launch that day. */
   residentMorningBeats: Record<string, string>;
+  /** Highest message id the USER has seen per channel — genuinely persisted
+   *  host-store UI state (not a projects-db mirror), so unread badges
+   *  survive restarts. Advance-only. */
+  residentChannelSeen: Record<string, number>;
   /**
    * Name of the default sandbox profile. Resolved at launch time against
    * the launcher's profile chain (built-in → user-default → per-project).
@@ -754,6 +758,10 @@ export const schema: Schema<StoreData> = {
     default: {},
   },
   residentMorningBeats: {
+    type: 'object',
+    default: {},
+  },
+  residentChannelSeen: {
     type: 'object',
     default: {},
   },
@@ -2295,6 +2303,9 @@ type ResidentIpcEvents = Namespaced<
     'ensure-session': (agentId: string) => { sessionId: string; uiUrl: string };
     /** Replace an agent's durable memory list (UI edits/removals). */
     'set-memories': (agentId: string, memories: ResidentMemoryEntry[]) => void;
+    /** Shared team handbook (rendered into every agent's identity on wake). */
+    'get-handbook': () => { body: string; updatedAt: number; updatedBy: string | null } | null;
+    'set-handbook': (body: string) => void;
   }
 >;
 

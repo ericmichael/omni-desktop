@@ -17,6 +17,32 @@ export function formatTimestamp(ts: number, now: number = Date.now()): string {
   return `${date}, ${time}`;
 }
 
+/** Time of day only ("9:04 AM") — for feeds whose date context comes from
+ *  day dividers. */
+export function formatTimeOfDay(ts: number): string {
+  return new Date(ts).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+}
+
+/** Day-divider label: "Today", "Yesterday", else "Fri, Jul 12" (year added
+ *  when it differs). */
+export function formatDayLabel(ts: number, now: number = Date.now()): string {
+  const d = new Date(ts);
+  const ref = new Date(now);
+  if (d.toDateString() === ref.toDateString()) {
+    return 'Today';
+  }
+  const yesterday = new Date(now - 24 * 60 * 60 * 1000);
+  if (d.toDateString() === yesterday.toDateString()) {
+    return 'Yesterday';
+  }
+  return d.toLocaleDateString(undefined, {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    ...(d.getFullYear() === ref.getFullYear() ? {} : { year: 'numeric' }),
+  });
+}
+
 /** Compact duration: "42s", "3m", "1h 5m". */
 export function formatDuration(ms: number): string {
   if (ms < 1000) {

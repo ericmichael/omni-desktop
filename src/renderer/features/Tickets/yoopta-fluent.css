@@ -256,3 +256,30 @@ body:has(.omni-glass) [class*='yoopta-ui-block-options-separator'],
 body:has(.omni-glass) [class*='yoopta-ui-action-menu-list-separator'] {
   background-color: var(--yoopta-glass-border) !important;
 }
+
+/* The editor ROOT paints an opaque canvas (`.yoopta-editor { background:
+   hsl(var(--background)) }` in the theme's injected stylesheet) — on glass
+   the canvas must be transparent so content sits directly on the surface,
+   like every other pane. */
+.omni-glass .yoopta-editor {
+  background-color: transparent !important;
+}
+
+/* The shadcn theme (applyTheme) paints editor elements with Tailwind
+   utilities that resolve to OPAQUE hsl colors — invisible to the named
+   yoopta-* overrides above. Remap the surface tokens to the translucent
+   glass panels (exact-token matches — deliberately NOT substring matches,
+   because the theme ships `hover:bg-accent` and `bg-background/95`
+   variants that must keep their own semantics). Scoped to the editor so
+   nothing else is touched. */
+.omni-glass .yoopta-editor [class~='bg-background'],
+.omni-glass .yoopta-editor [class~='bg-card'],
+.omni-glass .yoopta-editor [class~='bg-popover'] {
+  background-color: var(--yoopta-glass-panel) !important;
+}
+
+.omni-glass .yoopta-editor [class~='bg-muted'],
+.omni-glass .yoopta-editor [class~='bg-secondary'],
+.omni-glass .yoopta-editor [class~='bg-accent'] {
+  background-color: var(--yoopta-glass-panel-soft) !important;
+}
