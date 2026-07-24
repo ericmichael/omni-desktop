@@ -171,4 +171,61 @@ describe('ScheduledTaskManager routine bridge', () => {
     emit({ kind: 'approval-resolved', taskId: 'routine-1' });
     await vi.waitFor(() => expect(manager!.list()[0]!.history[0]!.status).toBe('running'));
   });
+
+  it('reconciles runs interrupted by an app restart on start()', () => {
+    // A run active at quit persists runningSessionId + a `running` history
+    // row; without boot reconciliation the task is wedged forever (every
+    // future fire skipped as previous_run_active).
+    const storeData: Partial<StoreData> = {
+      scheduledTasks: [
+        createTask({
+          runningSessionId: 'stale-session',
+          history: [
+            {
+              id: 'stale-run',
+              scheduledFor: now - 60_000,
+              startedAt: now - 60_000,
+              status: 'running',
+              sessionId: 'stale-session',
+            },
+            {
+              id: 'older-run',
+              scheduledFor: now - 120_000,
+              startedAt: now - 120_000,
+              completedAt: now - 110_000,
+              status: 'completed',
+            },
+          ],
+        }),
+      ],
+    };
+    const { bridge } = createBridge();
+    manager = new ScheduledTaskManager({ store: createStore(storeData), bridge, now: () => now });
+
+    manager.start();
+
+    const task = manager.list()[0]!;
+    expect(task.runningSessionId).toBeUndefined();
+    expect(task.history[0]).toMatchObject({
+      id: 'stale-run',
+      status: 'failed',
+      completedAt: now,
+      reason: 'Interrupted: the app closed while the run was active',
+    });
+    expect(task.history[1]!.status).toBe('completed');
+  });
+
+  it('lets a manual run fire again after boot reconciliation', async () => {
+    const storeData: Partial<StoreData> = {
+      scheduledTasks: [createTask({ runningSessionId: 'stale-session' })],
+    };
+    const { bridge, calls } = createBridge();
+    manager = new ScheduledTaskManager({ store: createStore(storeData), bridge, now: () => now });
+    manager.start();
+
+    manager.runNow('routine-1');
+
+    await vi.waitFor(() => expect(calls.startRun.length).toBe(1));
+    expect(manager.list()[0]!.history[0]!.status).toBe('running');
+  });
 });

@@ -11,7 +11,7 @@ import {
 } from '@/renderer/features/Omni/state';
 import { getProfileMenuLabel } from '@/renderer/features/SandboxProfile/profile-list';
 import { toast } from '@/renderer/features/Toast/state';
-import { $agentStatuses, agentProcessApi } from '@/renderer/services/agent-process';
+import { $agentStatuses, agentProcessApi, clearStatus } from '@/renderer/services/agent-process';
 import { emitter } from '@/renderer/services/ipc';
 import { $initialized, persistedStoreApi } from '@/renderer/services/store';
 import { type AutoLaunchEvent, autoLaunchMachine, type AutoLaunchPhase } from '@/shared/machines/auto-launch.machine';
@@ -161,6 +161,12 @@ export const useAutoLaunch = (opts: UseAutoLaunchOptions) => {
             return;
           }
 
+          // Drop any stale terminal status from a previous run of this
+          // processId (relaunch paths stop first, leaving an `exited` entry).
+          // watchProcessStatus subscribes with an immediate replay of the
+          // current value, so a leftover `exited` would bounce the machine
+          // straight back to idle the moment `starting` is entered.
+          clearStatus(processIdRef.current);
           agentProcessApi.start(processIdRef.current, {
             workspaceDir: wd,
             ...(projectIdRef.current ? { projectId: projectIdRef.current } : {}),

@@ -167,6 +167,62 @@ describe('ProcessManager', () => {
     });
   });
 
+  describe('multi-project scope (projectIds)', () => {
+    const project = (id: string, sources: Project['sources']): Project => ({
+      id,
+      label: id,
+      slug: id,
+      sources,
+      createdAt: 0,
+    });
+
+    it('mounts the union of scoped projects with collision-suffixed mount names', async () => {
+      const projects = [
+        project('p1', [
+          { id: 's1', mountName: 'api', kind: 'git-remote', repoUrl: 'https://github.com/acme/api.git' },
+        ]),
+        project('p2', [
+          { id: 's2', mountName: 'api', kind: 'git-remote', repoUrl: 'https://github.com/acme/api2.git' },
+          { id: 's3', mountName: 'web', kind: 'git-remote', repoUrl: 'https://github.com/acme/web.git' },
+        ]),
+        // Source-less (context-only) project contributes no mounts.
+        project('p3', []),
+      ];
+      const { pm } = makePm({ storeData: { defaultProfileName: 'devbox', projects } });
+      await pm.start('agent:bob', {
+        workspaceDir: '/tmp/agents/bob',
+        projectIds: ['p1', 'p2', 'p3', 'missing'],
+        extraSources: [{ mountName: 'home', workspaceDir: '/tmp/agents/bob' }],
+      });
+
+      const arg = hoisted.agentProcessInstances[0]!.start.mock.calls[0]![0] as {
+        sources: Array<{ mountName: string }>;
+        projectId?: string;
+      };
+      expect(arg.sources.map((s) => s.mountName)).toEqual(['api', 'api-2', 'web', 'home']);
+      // projectIds starts never set the single projectId (per-project profile
+      // layer and PR container matching are single-project concepts).
+      expect(arg.projectId).toBeUndefined();
+    });
+
+    it('excludes projectIds processes from getProjectContainerId', async () => {
+      const projects = [
+        project('p1', [
+          { id: 's1', mountName: 'api', kind: 'git-remote', repoUrl: 'https://github.com/acme/api.git' },
+        ]),
+      ];
+      const { pm } = makePm({ storeData: { defaultProfileName: 'devbox', projects } });
+      await pm.start('agent:bob', { workspaceDir: '/tmp/agents/bob', projectIds: ['p1'] });
+      hoisted.agentProcessInstances[0]!.getStatus.mockReturnValue({
+        type: 'running',
+        timestamp: 1,
+        data: { uiUrl: 'http://x', containerId: 'c1' },
+      });
+
+      expect(pm.getProjectContainerId('p1')).toBeNull();
+    });
+  });
+
   describe('getStatus', () => {
     it('returns uninitialized for unknown processId', () => {
       const { pm } = makePm();

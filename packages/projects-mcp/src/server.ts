@@ -33,7 +33,7 @@ export function createServer(repo: IProjectsRepo, context: ProjectsMcpContext = 
 
   registerProjectTools(server, repo);
   registerTicketTools(server, repo);
-  registerCommentTools(server, repo);
+  registerCommentTools(server, repo, context);
   registerMilestoneTools(server, repo);
   registerPageTools(server, repo);
   registerInboxTools(server, repo);
@@ -56,17 +56,24 @@ export function createServer(repo: IProjectsRepo, context: ProjectsMcpContext = 
 
   server.tool(
     'list_team_members',
-    'List team members valid for ticket assignee. Empty in single-user/local mode.',
+    'List assignable principals: human team members (empty in single-user/local mode) plus resident agents ' +
+      '(user_id "agent:<id>", role "agent").',
     {},
     async () => {
-      const members = context.listTeamMembers ? await context.listTeamMembers() : [];
-      return { content: [{ type: 'text' as const, text: JSON.stringify({ members }) }] };
+      const humans = context.listTeamMembers ? await context.listTeamMembers() : [];
+      // Residents come straight from the repo — the fold gave the local
+      // stdio server a directory too (docs/residents-in-projects-db-plan.md).
+      const residents = (await repo.listResidents())
+        .filter((r) => r.enabled === 1)
+        .map((r) => ({ user_id: `agent:${r.id}`, display_name: r.name, role: 'agent' }));
+      return { content: [{ type: 'text' as const, text: JSON.stringify({ members: [...humans, ...residents] }) }] };
     }
   );
 
   server.tool(
     'get_current_principal',
-    'Return the current principal/user ID for assigning tickets to self. Null in single-user/local mode.',
+    'Return the current principal ID for assigning tickets to self — `agent:<id>` in a resident agent session, ' +
+      'the user principal in teams mode, null in a single-user/local user session.',
     {},
     async () => {
       const principal = context.getCurrentPrincipal ? await context.getCurrentPrincipal() : null;

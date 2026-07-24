@@ -18,7 +18,13 @@ const dbPath = (values['db-path'] as string) || getDefaultDbPath();
 
 const db = openDatabase(dbPath);
 const repo = new SqliteProjectsRepo(new ProjectsRepo(db));
-const server = createServer(repo);
+// Session identity carrier for the local/stdio path: the launcher sets
+// OMNI_PROJECTS_PRINCIPAL=agent:<id> in a resident process's env (the managed
+// mcp.json is global, so identity can't ride a CLI flag), and the env
+// propagates from `omni serve` to this child. User sessions have no principal
+// locally — get_current_principal stays null for them.
+const principal = process.env['OMNI_PROJECTS_PRINCIPAL'] || null;
+const server = createServer(repo, principal ? { getCurrentPrincipal: async () => principal } : {});
 
 const transport = new StdioServerTransport();
 await server.connect(transport);

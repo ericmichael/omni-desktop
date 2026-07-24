@@ -31,6 +31,11 @@ import type {
   MilestoneRow,
   PageRow,
   ProjectRow,
+  ResidentAlarmRow,
+  ResidentChannelRow,
+  ResidentMemoryRow,
+  ResidentMessageRow,
+  ResidentRow,
   TaskRow,
   TicketRow,
 } from './types.js';
@@ -141,4 +146,42 @@ export interface IProjectsRepo {
   upsertTask(row: TaskRow): Promise<void>;
   deleteTask(id: string): Promise<void>;
   replaceAllTasks(rows: TaskRow[]): Promise<void>;
+
+  // ---- Resident agents (docs/residents-in-projects-db-plan.md) ----
+  listResidents(): Promise<ResidentRow[]>;
+  upsertResident(row: ResidentRow): Promise<void>;
+  /** Cascades memories + alarms; messages are kept (the log is a record). */
+  deleteResident(id: string): Promise<void>;
+
+  // ---- Resident memories ----
+  listResidentMemories(agentId: string): Promise<ResidentMemoryRow[]>;
+  upsertResidentMemory(row: ResidentMemoryRow): Promise<void>;
+  deleteResidentMemory(agentId: string, key: string): Promise<void>;
+  /** Replace an agent's full memory list (UI edits). */
+  setResidentMemories(agentId: string, rows: ResidentMemoryRow[]): Promise<void>;
+
+  // ---- Resident channels + message log ----
+  listResidentChannels(): Promise<ResidentChannelRow[]>;
+  upsertResidentChannel(row: ResidentChannelRow): Promise<void>;
+  /** Deletes the channel def and prunes its rows from the log. */
+  deleteResidentChannel(id: string): Promise<void>;
+  /**
+   * Append one log row. Ids are caller-assigned (the manager's write-through
+   * cache is the id authority — threading needs the id synchronously), so the
+   * row arrives complete.
+   */
+  appendResidentMessage(row: ResidentMessageRow): Promise<void>;
+  /** Prune the rows of one channel (DM cleanup on resident delete). */
+  deleteResidentMessagesForChannel(channel: string): Promise<void>;
+  listResidentMessagesAfter(id: number, limit: number): Promise<ResidentMessageRow[]>;
+  /** Newest `limit` rows in ascending id order (the snapshot tail). */
+  listResidentMessages(limit: number): Promise<ResidentMessageRow[]>;
+  /** Log bound: keep the newest `keep` rows (per tenant on Postgres). */
+  pruneResidentMessages(keep: number): Promise<void>;
+
+  // ---- Resident alarms ----
+  listResidentAlarms(): Promise<ResidentAlarmRow[]>;
+  /** Ids are caller-assigned, like {@link appendResidentMessage}. */
+  addResidentAlarm(row: ResidentAlarmRow): Promise<void>;
+  deleteResidentAlarm(id: number): Promise<void>;
 }

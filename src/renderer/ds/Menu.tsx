@@ -9,6 +9,7 @@ export {
   Menu,
   MenuDivider,
   MenuItem,
+  MenuItemCheckbox,
   MenuItemRadio,
   MenuList,
   MenuPopover,

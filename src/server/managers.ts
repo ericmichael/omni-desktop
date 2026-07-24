@@ -16,6 +16,7 @@ import { join } from 'path';
 
 import { emptyMcpConfig, emptyModelsConfig, emptyNetworkConfig, parseEnvVars } from '@/lib/agent-config';
 import { getProductSlug } from '@/lib/product';
+import { parseResidentPrincipal, residentPrincipalId } from '@/lib/resident-agent';
 import { uuidv4 } from '@/lib/uuid';
 import { ACI_DESKTOP_PROFILE_NAME, ACI_PROFILE_NAME, writeAciProfile } from '@/main/aci-profile';
 import { listRepos as azureListRepos } from '@/main/azure-repos';
@@ -51,6 +52,7 @@ import { backfillProjectConfigs } from '@/main/project-config-backfill';
 import { closeProjectDb, getDb, openProjectDb } from '@/main/project-db';
 import { registerProjectHandlers } from '@/main/project-handlers';
 import { ProjectManager } from '@/main/project-manager';
+import { registerResidentHandlers, ResidentAgentManager } from '@/main/resident-agent-manager';
 import { RoutineBridge } from '@/main/routine-bridge';
 import { registerScheduledTaskHandlers, ScheduledTaskManager } from '@/main/scheduled-task-manager';
 import { registerSnapshotHandlers } from '@/main/snapshot-manager';
@@ -411,6 +413,7 @@ export const wireGlobalHandlers = async (arg: {
     projectManager: ProjectManager;
     processManager: ProcessManager;
     scheduledTaskManager: ScheduledTaskManager;
+    residentAgentManager: ResidentAgentManager;
     routineBridge: RoutineBridge;
     settings: SettingsStore;
     extension: ExtensionManager;
@@ -456,7 +459,7 @@ export const wireGlobalHandlers = async (arg: {
       // Falls back to undefined when no cloud URL is configured — the Python
       // runtime treats absence of OMNI_CODEX_REFRESH_URL as "don't call back".
       getExtraEnv: dbUrl
-        ? async () => {
+        ? async (processId?: string) => {
             const codexRefreshUrl = (() => {
               const dataApi = process.env['OMNI_DATA_API_URL'];
               if (!dataApi) {
@@ -517,10 +520,15 @@ export const wireGlobalHandlers = async (arg: {
                   OMNIAGENTS_TENANT_ID: teamId,
                 }
               : {};
+            const residentId = parseResidentPrincipal(processId);
             return {
               OMNI_RUNTIME_TOKEN: signRuntimeToken(runtimeTokenSecret, {
                 tenantId: teamId,
                 principalId,
+                // Resident spawn: the token carries the agent identity, so the
+                // MCP route resolves get_current_principal to `agent:<id>` —
+                // the resident acts as itself, not as the launching user.
+                ...(residentId ? { agentId: residentId } : {}),
                 sessionId: uuidv4(),
               }),
               // Codex token-refresh callback. The runtime POSTs refreshed
@@ -583,6 +591,24 @@ export const wireGlobalHandlers = async (arg: {
       },
     });
     scheduledTaskManager.start();
+    // Postgres: a tenant-scoped PgProjectsRepo (RLS-isolated). SQLite: the
+    // single shared repo (one tenant only). Shared by the resident manager
+    // and ProjectManager below.
+    const tenantRepo = pgPool ? new PgProjectsRepo(pgPool, teamId, replicaId) : asyncRepo;
+    const residentAgentManager = new ResidentAgentManager({
+      store: settings as any,
+      repo: tenantRepo,
+      processManager,
+      getSnapshot: () => getStoreSnapshot(teamId, principalId),
+      sendToWindow: (channel, ...args) => {
+        if (channel === 'store:changed') {
+          tenantSend('store:changed', getStoreSnapshot(teamId, principalId));
+          return;
+        }
+        tenantSend(channel, ...args);
+      },
+    });
+    residentAgentManager.start();
     // Computer-as-sandbox: the per-principal set of `local:<machineId>` picker
     // entries is derived from the machine registry in `broadcastMachines` (a
     // sync cache read by `getStoreSnapshot`). The single `HostBridgePreparer`
@@ -600,24 +626,36 @@ export const wireGlobalHandlers = async (arg: {
       store: settings as any,
       sendToWindow: tenantSend,
       processManager,
-      // Postgres: a tenant-scoped PgProjectsRepo (RLS-isolated). SQLite: the
-      // single shared repo + sync change-watcher (one tenant only).
-      repo: pgPool ? new PgProjectsRepo(pgPool, teamId, replicaId) : asyncRepo,
+      // Tenant repo shared with the resident manager; sync change-watcher is
+      // SQLite-only.
+      repo: tenantRepo,
       changeSeqRepo: pgPool ? undefined : syncRepo,
+      // Resident durable keys ride every snapshot/broadcast this manager makes.
+      snapshotExtras: () => residentAgentManager.getDurableSnapshot(),
       skillsDir: join(configDir, 'skills'),
       // Teams: per-user WIP/review. Only in multi-tenant cloud — local stays global.
       ...(teamsEnabled ? { currentPrincipal: principalId } : {}),
-      // Teams: toast the assignee (their own sessions) when assigned a ticket.
-      ...(teamsEnabled
-        ? {
-            onAssign: (assignee: string, ticket: import('@/shared/types').Ticket) =>
-              wsHandler.sendToPrincipalInTeam(teamId, assignee, 'toast:show', {
-                level: 'info',
-                title: 'Ticket assigned to you',
-                description: ticket.title,
-              }),
-          }
-        : {}),
+      // Assignment fan-out: residents get an assignment wakeup (all modes);
+      // human members get the teams toast (their own sessions).
+      onAssign: (assignee: string, ticket: import('@/shared/types').Ticket) => {
+        const residentId = parseResidentPrincipal(assignee);
+        if (residentId) {
+          const project = ref?.projectManager.getStoreSnapshot().projects.find((p) => p.id === ticket.projectId);
+          residentAgentManager.deliverAssignment(residentId, {
+            id: ticket.id,
+            title: ticket.title,
+            ...(project ? { projectLabel: project.label } : {}),
+          });
+          return;
+        }
+        if (teamsEnabled) {
+          wsHandler.sendToPrincipalInTeam(teamId, assignee, 'toast:show', {
+            level: 'info',
+            title: 'Ticket assigned to you',
+            description: ticket.title,
+          });
+        }
+      },
       ...(artAccount && artKey
         ? {
             artifactStoreFor: () => new AzureFilesArtifactStore({ account: artAccount, key: artKey, share: artShare }),
@@ -632,6 +670,7 @@ export const wireGlobalHandlers = async (arg: {
       projectManager,
       processManager,
       scheduledTaskManager,
+      residentAgentManager,
       routineBridge,
       settings,
       extension,
@@ -698,6 +737,7 @@ export const wireGlobalHandlers = async (arg: {
     materializeTenant(tenantId, principalId);
   };
   const getStoreSnapshot = (tenantId: string, principalId: string = tenantId): StoreData => {
+    // Resident durable keys ride along via ProjectManager's snapshotExtras.
     let snapshot = getTenant(tenantId, principalId).projectManager.getStoreSnapshot();
     // Cloud/teams: the merged snapshot carries the shared team model/MCP keys —
     // mask them before they reach the renderer's mirrored store.
@@ -761,7 +801,7 @@ export const wireGlobalHandlers = async (arg: {
     return name.length > 0 ? name[0]!.toUpperCase() + name.slice(1) : name;
   };
 
-  const getMcpContext = (tenantId: string, principalId: string = tenantId) => ({
+  const getMcpContext = (tenantId: string, principalId: string = tenantId, agentId?: string) => ({
     listSandboxProfiles: async () => {
       const snapshot = getStoreSnapshot(tenantId, principalId);
       const names =
@@ -787,7 +827,9 @@ export const wireGlobalHandlers = async (arg: {
         role: m.role,
       }));
     },
-    getCurrentPrincipal: async () => (teamsEnabled ? principalId : null),
+    // A resident session acts as itself (`agent:<id>`, from the runtime
+    // token's agentId claim); user sessions resolve to the launching user.
+    getCurrentPrincipal: async () => (agentId ? residentPrincipalId(agentId) : teamsEnabled ? principalId : null),
   });
   /**
    * Broadcast a (team, principal) store snapshot. Cloud: to ONLY that principal's
@@ -902,6 +944,7 @@ export const wireGlobalHandlers = async (arg: {
   registerInboxHandlers(ipc, (e) => tenantPM(e).inbox);
   registerProcessHandlers(ipc, (e) => ctxTenant(e).processManager);
   registerScheduledTaskHandlers(ipc, (e) => ctxTenant(e).scheduledTaskManager);
+  registerResidentHandlers(ipc, (e) => ctxTenant(e).residentAgentManager);
   registerExtensionHandlers(ipc, (e) => ctxTenant(e).extension);
   registerBrowserHandlers(ipc, (e) => ctxTenant(e).browser);
 
@@ -1658,6 +1701,7 @@ export const wireGlobalHandlers = async (arg: {
     }
     const tenantCleanups = [...tenants.values()].flatMap((t) => [
       Promise.resolve(t.scheduledTaskManager.stop()),
+      t.residentAgentManager.cleanup(),
       Promise.resolve(t.routineBridge.disposeAll()),
       t.projectManager.exit(),
       t.processManager.cleanup(),

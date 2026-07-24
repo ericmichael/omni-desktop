@@ -20,7 +20,16 @@ export { IconButton } from '@/renderer/ds/IconButton';
 export { Input } from '@/renderer/ds/Input';
 export { ListItem } from '@/renderer/ds/ListItem';
 export type { MenuCheckedValueChangeData, MenuCheckedValueChangeEvent } from '@/renderer/ds/Menu';
-export { Menu, MenuDivider, MenuItem, MenuItemRadio, MenuList, MenuPopover, MenuTrigger } from '@/renderer/ds/Menu';
+export {
+  Menu,
+  MenuDivider,
+  MenuItem,
+  MenuItemCheckbox,
+  MenuItemRadio,
+  MenuList,
+  MenuPopover,
+  MenuTrigger,
+} from '@/renderer/ds/Menu';
 export type { MessageBarProps } from '@/renderer/ds/MessageBar';
 export { MessageBar, MessageBarActions, MessageBarBody } from '@/renderer/ds/MessageBar';
 export { PageHeader } from '@/renderer/ds/PageHeader';

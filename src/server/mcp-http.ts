@@ -34,7 +34,7 @@ export interface McpHttpDeps {
   /** Resolve a tenant-scoped repo from the verified token's tenant. */
   getTenantRepo: (tenantId: string) => IProjectsRepo;
   /** Resolve option-discovery providers from the verified token claims. */
-  getContext?: (claims: { tenantId: string; principalId?: string }) => ProjectsMcpContext;
+  getContext?: (claims: { tenantId: string; principalId?: string; agentId?: string }) => ProjectsMcpContext;
 }
 
 export const MCP_PROJECTS_PATH = '/mcp/projects';

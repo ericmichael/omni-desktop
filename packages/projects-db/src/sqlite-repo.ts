@@ -22,6 +22,11 @@ import type {
   MilestoneRow,
   PageRow,
   ProjectRow,
+  ResidentAlarmRow,
+  ResidentChannelRow,
+  ResidentMemoryRow,
+  ResidentMessageRow,
+  ResidentRow,
   TaskRow,
   TicketRow,
 } from './types.js';
@@ -190,5 +195,67 @@ export class SqliteProjectsRepo implements IProjectsRepo {
   }
   async replaceAllTasks(rows: TaskRow[]): Promise<void> {
     this.sync.replaceAllTasks(rows);
+  }
+
+  // ---- Resident agents ----
+  async listResidents(): Promise<ResidentRow[]> {
+    return this.sync.listResidents();
+  }
+  async upsertResident(row: ResidentRow): Promise<void> {
+    this.sync.upsertResident(row);
+  }
+  async deleteResident(id: string): Promise<void> {
+    this.sync.deleteResident(id);
+  }
+
+  // ---- Resident memories ----
+  async listResidentMemories(agentId: string): Promise<ResidentMemoryRow[]> {
+    return this.sync.listResidentMemories(agentId);
+  }
+  async upsertResidentMemory(row: ResidentMemoryRow): Promise<void> {
+    this.sync.upsertResidentMemory(row);
+  }
+  async deleteResidentMemory(agentId: string, key: string): Promise<void> {
+    this.sync.deleteResidentMemory(agentId, key);
+  }
+  async setResidentMemories(agentId: string, rows: ResidentMemoryRow[]): Promise<void> {
+    this.sync.setResidentMemories(agentId, rows);
+  }
+
+  // ---- Resident channels + message log ----
+  async listResidentChannels(): Promise<ResidentChannelRow[]> {
+    return this.sync.listResidentChannels();
+  }
+  async upsertResidentChannel(row: ResidentChannelRow): Promise<void> {
+    this.sync.upsertResidentChannel(row);
+  }
+  async deleteResidentChannel(id: string): Promise<void> {
+    this.sync.deleteResidentChannel(id);
+  }
+  async appendResidentMessage(row: ResidentMessageRow): Promise<void> {
+    this.sync.appendResidentMessage(row);
+  }
+  async deleteResidentMessagesForChannel(channel: string): Promise<void> {
+    this.sync.deleteResidentMessagesForChannel(channel);
+  }
+  async listResidentMessagesAfter(id: number, limit: number): Promise<ResidentMessageRow[]> {
+    return this.sync.listResidentMessagesAfter(id, limit);
+  }
+  async listResidentMessages(limit: number): Promise<ResidentMessageRow[]> {
+    return this.sync.listResidentMessages(limit);
+  }
+  async pruneResidentMessages(keep: number): Promise<void> {
+    this.sync.pruneResidentMessages(keep);
+  }
+
+  // ---- Resident alarms ----
+  async listResidentAlarms(): Promise<ResidentAlarmRow[]> {
+    return this.sync.listResidentAlarms();
+  }
+  async addResidentAlarm(row: ResidentAlarmRow): Promise<void> {
+    this.sync.addResidentAlarm(row);
+  }
+  async deleteResidentAlarm(id: number): Promise<void> {
+    this.sync.deleteResidentAlarm(id);
   }
 }

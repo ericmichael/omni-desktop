@@ -257,7 +257,7 @@ const main = async () => {
   registerMcpHttpRoute(fastify, {
     runtimeTokenSecret,
     getTenantRepo,
-    getContext: (claims) => getMcpContext(claims.tenantId, claims.principalId ?? claims.tenantId),
+    getContext: (claims) => getMcpContext(claims.tenantId, claims.principalId ?? claims.tenantId, claims.agentId),
   });
   console.log(`[mcp-http] omni-projects MCP available at ${MCP_PROJECTS_PATH}`);
 

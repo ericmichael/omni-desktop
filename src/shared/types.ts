@@ -56,6 +56,7 @@ export type LayoutMode =
   | 'chat'
   | 'dashboards'
   | 'routines'
+  | 'agents'
   | 'plugins'
   | 'settings'
   | 'gallery';
@@ -133,8 +134,168 @@ export type CloudMode = {
   account: CloudAccount;
 };
 
+/**
+ * One member of the resident-agent roster (docs/resident-agents-plan.md):
+ * a named, specialized, persistent work agent. Persona is shipped prior;
+ * durable memory (`residentMemories`) is earned posterior. The runtime
+ * process is a normal AgentProcess keyed `agent:<id>`.
+ */
+export type ResidentAgent = {
+  /** Stable slug id — also the DM address (`@<id>:`) and process-id suffix. */
+  id: string;
+  /** Display name. */
+  name: string;
+  /** One-line specialization, e.g. "release engineer". */
+  role: string;
+  /** Persona markdown — who the agent is, voice, doctrine. User-editable. */
+  personaText: string;
+  /** Sandbox profile override. Resolution: this > assigned project's
+   *  profile > the user's default. New agents default to `devbox` — an
+   *  autonomous wakeup-driven process should land in a container unless
+   *  the user deliberately chooses otherwise. */
+  profileName?: string;
+  /**
+   * Projects this agent is responsible for. Every scoped project's
+   * declared sources mount into the agent's sandbox (union, mount-name
+   * collisions suffixed; git credentials resolve per source exactly like
+   * a project launch) and the agent's private home rides along as an
+   * extra `home` mount so its files travel with it (identity rides the
+   * session variables, not the filesystem). Source-less (context-only) projects contribute no mounts — the
+   * agent reaches them through the project MCP tools. Empty/absent =
+   * generalist with only the home workspace. Note: scoped sources are
+   * seeded at launch and thereafter live behind the snapshot — git
+   * sources refresh via fetch/pull in-sandbox; plain folders do not.
+   */
+  projectIds?: string[];
+  /**
+   * Local hour (0–23) of the daily morning beat (`day_start` — the planning
+   * wakeup that carries memories + the overnight digest). `null` disables
+   * the beat for this agent. If the app is closed as the hour passes, the
+   * beat catches up (marked late) when the app next opens that day.
+   */
+  morningHour: number | null;
+  /** Disabled agents receive no events and never wake. */
+  enabled: boolean;
+  createdAt: number;
+};
+
+/** One durable memory, keyed like a KV entry. */
+export type ResidentMemoryEntry = {
+  /** Stable slug identity — `remember(key, …)` upserts by it, `forget(key)`
+   *  retracts by it, and the identity block shows it as `[key]`. */
+  key: string;
+  text: string;
+  at: number;
+};
+
+/**
+ * A self-set future wakeup (the game's `plan("@HH:MM …")`, launcher-side
+ * because alarms must survive parking — the serve process an alarm would
+ * otherwise live in gets stopped when the agent idles). Fires once as a
+ * WAKE_NOW `scheduled` event, then is removed.
+ */
+export type ResidentAlarm = {
+  id: number;
+  /** Wall-clock ms when the alarm fires. */
+  at: number;
+  /** The agent's own note, rendered back in the waking ping. */
+  note: string;
+  createdAt: number;
+};
+
+/**
+ * A named shared channel beside the built-in `team`. All named channels
+ * are public to the whole roster (the game's village-channel model);
+ * membership scoping is a later concern.
+ */
+export type ResidentChannelDef = {
+  /** Slug id (`deploy-log`); reserved: `team`, `system`, `user`, `dm:*`. */
+  id: string;
+  /** One-line purpose shown in the UI and channel list. */
+  description?: string;
+  /**
+   * Roster ids that belong to this channel (Slack-style membership):
+   * only members are woken by posts, see the channel in digests, and may
+   * post to it. Absent = open to every agent. The user is implicitly in
+   * every channel; `team` is always all-hands.
+   */
+  members?: string[];
+  createdAt: number;
+};
+
+/**
+ * One message in the resident channels log. `channel` is `"team"`, a
+ * named channel id, a `dm:<a>:<b>` pair id, or `"system"`; `from` is
+ * `"user"`, `"system"`, or a roster id. The log is the observability
+ * surface — all agent↔agent traffic lands here.
+ */
+export type ResidentChannelMessage = {
+  id: number;
+  channel: string;
+  from: string;
+  /** Display name at post time (roster names can change later). */
+  fromName?: string;
+  text: string;
+  at: number;
+  /**
+   * Threading (named channels only — DM channels are threads by
+   * construction): id of the thread's ROOT message. Always normalized to
+   * the root on write — replying to a reply threads under the same root,
+   * so threads are one level deep (the Slack shape), never trees.
+   */
+  replyTo?: number;
+};
+
+/** Live runtime view of one resident agent, broadcast on `resident:status`. */
+export type ResidentAgentRuntime = {
+  state: 'parked' | 'starting' | 'idle' | 'thinking' | 'reflecting';
+  /** Wall-clock ms of the last delivered wakeup (null = never this boot). */
+  lastWakeupAt: number | null;
+  /** Primary event kind of the last wakeup. */
+  lastReason: string | null;
+  /** Current day key (`YYYY-MM-DD`) of the agent's session. */
+  day: string | null;
+  pendingCount: number;
+  /** Wakeups delivered since boot. */
+  decisions: number;
+};
+
+export type ResidentAgentInput = {
+  name: string;
+  role: string;
+  personaText: string;
+  profileName?: string;
+  /** Project scope — see `ResidentAgent.projectIds`. */
+  projectIds?: string[];
+  /** Hour (0–23) of the daily morning beat; `null` = no morning beat. */
+  morningHour?: number | null;
+};
+
+/** `projectIds: []` unassigns (undefined = leave unchanged). */
+export type ResidentAgentUpdate = Partial<ResidentAgentInput> & {
+  enabled?: boolean;
+};
+
 export type StoreData = {
   workspaceDir?: string;
+  // Resident durable data lives in projects-db (docs/residents-in-projects-db-plan.md).
+  // These five keys are read-only SNAPSHOT MIRRORS assembled from the repo —
+  // never persisted to the host store; writes go through `resident:*` IPC.
+  /** Resident-agent roster (docs/resident-agents-plan.md). */
+  residentAgents: ResidentAgent[];
+  /** Durable memories per roster id — earned facts, editable, `forget`-able. */
+  residentMemories: Record<string, ResidentMemoryEntry[]>;
+  /** The `#team` + DM channel log (bounded; oldest rows pruned). */
+  residentChannels: ResidentChannelMessage[];
+  /** User-created named channels (beside the built-in `team`). */
+  residentChannelDefs: ResidentChannelDef[];
+  /** Self-set future wakeups per roster id (survive parks and restarts). */
+  residentAlarms: Record<string, ResidentAlarm[]>;
+  /** Day key (`YYYY-MM-DD`) of the last delivered morning beat per roster
+   *  id. Persisted so a mid-day restart neither re-fires a beat already
+   *  delivered nor swallows one the closed app owed — a missed beat
+   *  catches up (marked late) on the next launch that day. */
+  residentMorningBeats: Record<string, string>;
   /**
    * Name of the default sandbox profile. Resolved at launch time against
    * the launcher's profile chain (built-in → user-default → per-project).
@@ -558,6 +719,44 @@ export const schema: Schema<StoreData> = {
   workspaceDir: {
     type: 'string',
   },
+  // Resident durable data moved to projects-db (docs/residents-in-projects-db-plan.md).
+  // The store schema keeps loose entries for the legacy keys so a pre-fold
+  // store loads cleanly for the one-shot migration; after it runs they hold
+  // empty defaults.
+  residentAgents: {
+    type: 'array',
+    default: [],
+  },
+  residentMemories: {
+    type: 'object',
+    default: {},
+  },
+  residentChannels: {
+    type: 'array',
+    default: [],
+  },
+  residentChannelDefs: {
+    type: 'array',
+    default: [],
+    items: {
+      type: 'object',
+      properties: {
+        id: { type: 'string' },
+        description: { type: 'string' },
+        members: { type: 'array', items: { type: 'string' } },
+        createdAt: { type: 'number' },
+      },
+      required: ['id', 'createdAt'],
+    },
+  },
+  residentAlarms: {
+    type: 'object',
+    default: {},
+  },
+  residentMorningBeats: {
+    type: 'object',
+    default: {},
+  },
   defaultProfileName: {
     type: 'string',
     default: 'host',
@@ -630,6 +829,7 @@ export const schema: Schema<StoreData> = {
       'projects',
       'dashboards',
       'routines',
+      'agents',
       'plugins',
       'settings',
       'more',
@@ -1336,6 +1536,17 @@ export type AgentProcessStartOptions = {
    */
   projectId?: string;
   /**
+   * Multi-project scope (resident agents): the union of every listed
+   * project's declared sources is resolved into mounts, with mount-name
+   * collisions numerically suffixed and git credentials resolved per
+   * source. Mutually exclusive with `projectId` in practice — a start
+   * with `projectIds` deliberately does NOT set `projectId`, so
+   * per-project lookups (`--project` profile layer, PR container
+   * matching) skip these processes. Source-less projects contribute no
+   * mounts.
+   */
+  projectIds?: string[];
+  /**
    * Per-launch profile override. Wins over per-project ``sandboxProfile``
    * and the user's ``defaultProfileName``. Set by the pre-launch sandbox
    * picker; not persisted — a follow-up launch without this set falls
@@ -1362,6 +1573,14 @@ export type AgentProcessStartOptions = {
    * just a missed opportunity for warm reattach.
    */
   containerId?: string;
+  /**
+   * Additional host directories to mount alongside the resolved project
+   * sources (resident agents mount their private home as `home` next to
+   * their assigned project's sources). Deduped against the resolved
+   * sources by directory; git-detection and launcher-owned auto-mirror
+   * apply the same as any synthesized source.
+   */
+  extraSources?: Array<{ mountName: string; workspaceDir: string }>;
 };
 
 /**
@@ -2040,6 +2259,42 @@ type StoreIpcEvents = Namespaced<
     get: () => StoreData;
     set: (data: StoreData) => void;
     reset: () => void;
+  }
+>;
+
+type ResidentIpcEvents = Namespaced<
+  'resident',
+  {
+    /** Roster CRUD. Create derives the id slug from the name. */
+    create: (input: ResidentAgentInput) => ResidentAgent;
+    update: (agentId: string, patch: ResidentAgentUpdate) => ResidentAgent;
+    delete: (agentId: string) => void;
+    /** User posts to a channel (`team`, a named channel, or `dm:user:<agentId>`).
+     *  `replyTo` threads the post under that message's root (named channels only). */
+    post: (channel: string, text: string, replyTo?: number) => void;
+    /** Create a named channel; the id slug is derived from the name. */
+    'create-channel': (name: string, description?: string) => ResidentChannelDef;
+    /** Edit a named channel's description (the id slug is fixed at creation).
+     *  An empty/blank description clears it. */
+    'update-channel': (channelId: string, patch: { description?: string }) => ResidentChannelDef;
+    /** Delete a named channel and prune its rows (built-ins refuse). */
+    'delete-channel': (channelId: string) => void;
+    /** Replace a named channel's member list (roster ids); `null` restores
+     *  the open state (every agent, including future ones, is a member). */
+    'set-channel-members': (channelId: string, members: string[] | null) => void;
+    /** Manually wake an agent now (WAKE_NOW, bypasses digests). */
+    wake: (agentId: string) => void;
+    /** Live runtime snapshot for every roster member. */
+    'get-status': () => Record<string, ResidentAgentRuntime>;
+    /**
+     * Wake the agent's process (if parked) and return the handles the
+     * renderer needs to mount the REAL session UI (OmniAgentsApp) on it:
+     * the current day-session id and the serve uiUrl. Main attaches its
+     * watcher first, so thinking-state tracking covers user-driven runs.
+     */
+    'ensure-session': (agentId: string) => { sessionId: string; uiUrl: string };
+    /** Replace an agent's durable memory list (UI edits/removals). */
+    'set-memories': (agentId: string, memories: ResidentMemoryEntry[]) => void;
   }
 >;
 
@@ -3010,6 +3265,20 @@ type RoutineIpcEvents = Namespaced<
     'dispatch-result': (requestId: string, ok: boolean, result?: { runId?: string }, error?: string) => void;
     /** Renderer forwards a routine run/approval event so main can update history. */
     event: (event: RoutineBridgeEvent) => void;
+    /**
+     * Renderer announces its dispatch listener is wired. Main queues
+     * `routine:dispatch` sends until this arrives — at boot the manager can
+     * fire (missed-run catch-up) before any window exists, and a send into
+     * the void would otherwise burn the whole request timeout.
+     */
+    'renderer-ready': () => void;
+    /**
+     * Claim a dispatch for execution. `routine:dispatch` is a broadcast; in
+     * server mode every connected client receives it, and exactly one may
+     * act (double `start-run` would enqueue the prompt twice). First claim
+     * wins; the rest drop the request.
+     */
+    'claim-dispatch': (requestId: string) => boolean;
   }
 >;
 
@@ -3480,7 +3749,8 @@ export type IpcEvents = MainProcessIpcEvents &
   AppControlIpcEvents &
   BrowserIpcEvents &
   SupervisorIpcEvents &
-  RoutineIpcEvents;
+  RoutineIpcEvents &
+  ResidentIpcEvents;
 
 /**
  * Store events. Main process emits these events, renderer process listens to them.
@@ -3659,6 +3929,19 @@ type RoutineIpcRendererEvents = Namespaced<
 >;
 
 /**
+ * Resident-agent events. Main broadcasts the full runtime snapshot on any
+ * change (roster scale is small); `attention` surfaces headless-run
+ * incidents (declined approvals, failed deliveries) as one-line notices.
+ */
+type ResidentIpcRendererEvents = Namespaced<
+  'resident',
+  {
+    status: [Record<string, ResidentAgentRuntime>];
+    attention: [{ agentId: string; message: string; at: number }];
+  }
+>;
+
+/**
  * Browser events. Main process emits a full-state snapshot whenever any
  * browser mutation lands — tabs, history, bookmarks, profiles. Renderers
  * simply replace their atom.
@@ -3732,7 +4015,8 @@ export type IpcRendererEvents = TerminalIpcRendererEvents &
   WorkspaceSyncIpcRendererEvents &
   BrowserIpcRendererEvents &
   SupervisorIpcRendererEvents &
-  RoutineIpcRendererEvents;
+  RoutineIpcRendererEvents &
+  ResidentIpcRendererEvents;
 
 // #region Config file types
 

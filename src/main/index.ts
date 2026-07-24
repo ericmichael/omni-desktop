@@ -11,6 +11,7 @@ import { pathToFileURL } from 'url';
 
 import { emptyMcpConfig, emptyModelsConfig, emptyNetworkConfig, parseEnvVars } from '@/lib/agent-config';
 import { getArtifactsDir } from '@/lib/artifacts';
+import { parseResidentPrincipal } from '@/lib/resident-agent';
 import { createAppControlManager } from '@/main/app-control-manager';
 import { listRepos as azureListRepos } from '@/main/azure-repos';
 import { createBrowserManager } from '@/main/browser-manager';
@@ -52,6 +53,7 @@ import { refreshProductRuntimeInfo } from '@/main/product-runtime';
 import { backfillProjectConfigs } from '@/main/project-config-backfill';
 import { closeProjectDb, getDb, openProjectDb } from '@/main/project-db';
 import { createProjectManager } from '@/main/project-manager';
+import { registerResidentHandlers, ResidentAgentManager } from '@/main/resident-agent-manager';
 import { wireReverseRpcRouter } from '@/main/reverse-rpc-bridge';
 import { RoutineBridge } from '@/main/routine-bridge';
 import { registerScheduledTaskHandlers, ScheduledTaskManager } from '@/main/scheduled-task-manager';
@@ -300,12 +302,33 @@ const scheduledTaskManager = new ScheduledTaskManager({
   store,
   bridge: routineBridge,
   sendToWindow: main.sendToWindow,
+  // Composed snapshot for broadcasts — read at call time; getStoreSnapshot
+  // is assigned after ProjectManager boots.
+  getSnapshot: () => (main.getStoreSnapshot ? main.getStoreSnapshot() : store.store),
 });
 const scheduledTaskChannels = [
   ...registerScheduledTaskHandlers(main.ipc, () => scheduledTaskManager),
   ...routineBridge.registerIpc(main.ipc),
 ];
 scheduledTaskManager.start();
+
+// Resident agents (docs/resident-agents-plan.md): the roster of named,
+// persistent work agents. Rides ProcessManager for lifecycle; durable
+// data lives in projects-db (docs/residents-in-projects-db-plan.md).
+const residentAgentManager = new ResidentAgentManager({
+  store,
+  repo: asyncRepo,
+  processManager,
+  sendToWindow: main.sendToWindow,
+  // Live UI updates: MainProcessManager suppresses the automatic
+  // store:changed broadcast once the SQLite snapshot provider is set, so
+  // this manager broadcasts its own writes with the MERGED snapshot
+  // (project keys included). Read at call time — getStoreSnapshot is
+  // assigned after ProjectManager boots.
+  getSnapshot: () => (main.getStoreSnapshot ? main.getStoreSnapshot() : store.store),
+});
+registerResidentHandlers(main.ipc, () => residentAgentManager);
+residentAgentManager.start();
 
 // Create ConsoleManager — proxies terminal:* IPC into omni serve's
 // WebSocket. Constructed after ProcessManager because it needs the
@@ -349,8 +372,27 @@ const [projectManager, cleanupProject] = createProjectManager({
   // Async repo backs the cached projection; sync repo drives the change-watcher.
   repo: asyncRepo,
   changeSeqRepo: repo,
+  // Resident durable keys ride EVERY snapshot this manager builds or
+  // broadcasts — a project-data broadcast without them would clobber the
+  // roster in the renderer's mirrored store.
+  snapshotExtras: () => residentAgentManager.getDurableSnapshot(),
+  // Ticket assigned to a resident (`agent:<id>`) → assignment wakeup.
+  onAssign: (assignee, ticket) => {
+    const residentId = parseResidentPrincipal(assignee);
+    if (!residentId) {
+      return;
+    }
+    const project = projectManager.getStoreSnapshot().projects.find((p) => p.id === ticket.projectId);
+    residentAgentManager.deliverAssignment(residentId, {
+      id: ticket.id,
+      title: ticket.title,
+      ...(project ? { projectLabel: project.label } : {}),
+    });
+  },
 });
-// Wire up the store snapshot provider so MainProcessManager serves project data from SQLite
+// Wire up the store snapshot provider so MainProcessManager serves project data
+// from SQLite. Resident durable keys ride along via ProjectManager's
+// snapshotExtras, so this single snapshot is complete everywhere it's used.
 main.getStoreSnapshot = () => projectManager.getStoreSnapshot();
 const [, cleanupExtensions] = createExtensionManager({
   ipc: main.ipc,
@@ -489,6 +531,7 @@ async function cleanup() {
         ipcMain.removeHandler(channel);
       }
     })(),
+    residentAgentManager.cleanup(),
     cleanupProcessManager(),
     cleanupProject(),
     cleanupExtensions(),

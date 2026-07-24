@@ -129,3 +129,56 @@ export type TaskRow = {
   ticket_id: string | null;
   last_urls: string | null; // JSON
 };
+
+// ---- Resident agents (docs/residents-in-projects-db-plan.md) ----
+
+export type ResidentRow = {
+  id: string;
+  name: string;
+  role: string;
+  persona_text: string;
+  profile_name: string | null;
+  project_ids: string; // JSON string[]
+  /** Local hour (0-23) of the daily morning beat; NULL = beat disabled. */
+  morning_hour: number | null;
+  enabled: number;
+  created_at: string;
+};
+
+export type ResidentMemoryRow = {
+  agent_id: string;
+  /** Upsert key — `remember(key, …)` replaces, `forget(key)` retracts. */
+  key: string;
+  text: string;
+  at: string;
+};
+
+export type ResidentChannelRow = {
+  id: string;
+  description: string | null;
+  /** JSON string[] of member roster ids; NULL = open to every agent. */
+  members: string | null;
+  created_at: string;
+};
+
+export type ResidentMessageRow = {
+  id: number;
+  /** 'team' | named channel id | 'dm:<a>:<b>' | 'system'. */
+  channel: string;
+  /** 'user' | 'system' | roster id. */
+  from_id: string;
+  from_name: string | null;
+  text: string;
+  at: string;
+  /** Root message id of the thread (pre-normalized to the root on write). */
+  reply_to: number | null;
+};
+
+export type ResidentAlarmRow = {
+  id: number;
+  agent_id: string;
+  /** When the alarm fires. */
+  at: string;
+  note: string;
+  created_at: string;
+};

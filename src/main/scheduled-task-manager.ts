@@ -40,6 +40,9 @@ type ManagerDeps = {
    */
   bridge: RoutineBridge;
   sendToWindow?: <T extends keyof IpcRendererEvents>(channel: T, ...args: IpcRendererEvents[T]) => void;
+  /** Composed snapshot for `store:changed` broadcasts (SQLite projection +
+   *  resident mirrors). Absent → raw electron-store payload (tests). */
+  getSnapshot?: () => StoreData | undefined;
   now?: () => number;
 };
 
@@ -58,6 +61,7 @@ export class ScheduledTaskManager {
   private store: ScheduledTaskStore;
   private bridge: RoutineBridge;
   private sendToWindow?: ManagerDeps['sendToWindow'];
+  private getSnapshot?: ManagerDeps['getSnapshot'];
   private now: () => number;
   private timer: ReturnType<typeof setInterval> | null = null;
   private ticking = false;
@@ -70,6 +74,7 @@ export class ScheduledTaskManager {
     this.store = deps.store;
     this.bridge = deps.bridge;
     this.sendToWindow = deps.sendToWindow;
+    this.getSnapshot = deps.getSnapshot;
     this.now = deps.now ?? Date.now;
     this.bridgeUnsub = this.bridge.onEvent((event) => this.handleBridgeEvent(event));
   }
@@ -78,10 +83,50 @@ export class ScheduledTaskManager {
     if (this.timer) {
       return;
     }
+    this.reconcileInterruptedRuns();
     this.recomputeNextRuns();
     void this.tick();
     this.timer = setInterval(() => void this.tick(), TICK_MS);
     this.timer.unref?.();
+  }
+
+  /**
+   * Boot reconciliation: a run recorded as active in the persisted store
+   * cannot have survived a process restart — `activeRuns` and the bridge's
+   * event listeners are in-memory. Left alone, a stale `runningSessionId`
+   * makes `hasActiveRun` true forever, so every future fire (manual "Run
+   * now" included) would be skipped as `previous_run_active`. Fail the
+   * dangling history rows and clear the flag.
+   */
+  private reconcileInterruptedRuns(): void {
+    const now = this.now();
+    let anyChanged = false;
+    const tasks = this.tasks().map((task) => {
+      let taskChanged = Boolean(task.runningSessionId);
+      const history = (task.history ?? []).map((run) => {
+        if (run.status !== 'running' && run.status !== 'waiting_for_approval') {
+          return run;
+        }
+        taskChanged = true;
+        return {
+          ...run,
+          completedAt: now,
+          status: 'failed' as const,
+          pendingApprovalToolName: undefined,
+          pendingApprovalServerLabel: undefined,
+          pendingApprovalKind: undefined,
+          reason: 'Interrupted: the app closed while the run was active',
+        };
+      });
+      if (!taskChanged) {
+        return task;
+      }
+      anyChanged = true;
+      return { ...task, runningSessionId: undefined, history };
+    });
+    if (anyChanged) {
+      this.writeTasks(tasks);
+    }
   }
 
   stop(): void {
@@ -264,6 +309,11 @@ export class ScheduledTaskManager {
     this.ticking = true;
     try {
       const now = this.now();
+      // Fires run concurrently: one task blocked on the bridge timeout must
+      // not delay every other due task by minutes. Store writes stay safe —
+      // each patchTask read-modify-write is synchronous, and concurrent
+      // fireTasks only interleave at their awaits.
+      const fires: Promise<void>[] = [];
       for (const task of this.tasks()) {
         if (!task.enabled || task.schedule.kind === 'manual') {
           continue;
@@ -271,7 +321,7 @@ export class ScheduledTaskManager {
         if (task.nextRunAt && task.nextRunAt <= now) {
           const missedRunAt = mostRecentMissedScheduledTaskRun(task.schedule, task.nextRunAt, now);
           if (missedRunAt !== null) {
-            await this.fireTask(task, missedRunAt, 'scheduled');
+            fires.push(this.fireTask(task, missedRunAt, 'scheduled'));
           } else {
             this.patchTask(task.id, {
               nextRunAt: nextScheduledTaskRun(task.schedule, now),
@@ -286,6 +336,7 @@ export class ScheduledTaskManager {
           }
         }
       }
+      await Promise.allSettled(fires);
     } finally {
       this.ticking = false;
     }
@@ -579,7 +630,14 @@ export class ScheduledTaskManager {
 
   private writeTasks(tasks: ScheduledTask[]): void {
     this.store.set('scheduledTasks', tasks);
-    this.sendToWindow?.('store:changed', (this.store as Store<StoreData>).store as StoreData | undefined);
+    // Broadcast the COMPOSED snapshot when a provider is wired — the raw
+    // electron-store payload lacks the SQLite projection and the resident
+    // mirrors, and would clobber them in the renderer's atom. (Server mode's
+    // wrapper intercepts the channel and substitutes the tenant snapshot.)
+    this.sendToWindow?.(
+      'store:changed',
+      this.getSnapshot ? this.getSnapshot() : ((this.store as Store<StoreData>).store as StoreData | undefined)
+    );
   }
 }
 

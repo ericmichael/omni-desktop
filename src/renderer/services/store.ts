@@ -12,6 +12,12 @@ import type { OperatingSystem, StoreData } from '@/shared/types';
 
 const getDefaults = (): StoreData => ({
   defaultProfileName: 'host',
+  residentAgents: [],
+  residentMemories: {},
+  residentChannels: [],
+  residentChannelDefs: [],
+  residentAlarms: {},
+  residentMorningBeats: {},
   optInToLauncherPrereleases: false,
   previewFeatures: false,
   notifyOnAgentAttention: false,

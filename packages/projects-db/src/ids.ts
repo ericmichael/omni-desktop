@@ -8,3 +8,4 @@ export const inboxId = () => `inb_${nanoid(12)}`;
 export const columnId = () => `col_${nanoid(12)}`;
 export const commentId = () => `cmt_${nanoid(12)}`;
 export const taskId = () => `task_${nanoid(12)}`;
+export const residentId = () => `res_${nanoid(12)}`;

@@ -2,6 +2,7 @@ import { Filter20Regular } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback } from 'react';
 
+import { residentPrincipalId } from '@/lib/resident-agent';
 import {
   Button,
   Menu,
@@ -14,16 +15,18 @@ import {
 } from '@/renderer/ds';
 import { $currentPrincipal, $members } from '@/renderer/features/Teams/state';
 import { $assigneeFilter } from '@/renderer/features/Tickets/state';
+import { persistedStoreApi } from '@/renderer/services/store';
 
 /**
- * Filter the board by assignee (teams). Hidden in single-user/local mode (no
- * roster). "Me" uses the current principal; ownership is unaffected — this is
- * purely a view filter.
+ * Filter the board by assignee: human members (teams) and resident agents.
+ * Hidden when both rosters are empty. "Me" uses the current principal;
+ * ownership is unaffected — this is purely a view filter.
  */
 export const AssigneeFilter = memo(function AssigneeFilter() {
   const members = useStore($members);
   const filter = useStore($assigneeFilter);
   const me = useStore($currentPrincipal);
+  const residents = useStore(persistedStoreApi.$atom).residentAgents.filter((a) => a.enabled);
 
   const handleCheckedChange = useCallback((_e: unknown, data: MenuCheckedValueChangeData) => {
     if (data.name === 'assignee') {
@@ -31,8 +34,8 @@ export const AssigneeFilter = memo(function AssigneeFilter() {
     }
   }, []);
 
-  // No teams → nothing to filter by.
-  if (members.length === 0) {
+  // Nobody to filter by.
+  if (members.length === 0 && residents.length === 0) {
     return null;
   }
 
@@ -45,6 +48,7 @@ export const AssigneeFilter = memo(function AssigneeFilter() {
           ? 'Unassigned'
           : (members.find((m) => m.userId === filter)?.displayName ??
             members.find((m) => m.userId === filter)?.email ??
+            residents.find((a) => residentPrincipalId(a.id) === filter)?.name ??
             'Assignee');
 
   return (
@@ -67,10 +71,16 @@ export const AssigneeFilter = memo(function AssigneeFilter() {
           <MenuItemRadio name="assignee" value="unassigned">
             Unassigned
           </MenuItemRadio>
-          <MenuDivider />
+          {members.length > 0 && <MenuDivider />}
           {members.map((m) => (
             <MenuItemRadio key={m.userId} name="assignee" value={m.userId}>
               {m.displayName ?? m.email ?? m.userId}
+            </MenuItemRadio>
+          ))}
+          {residents.length > 0 && <MenuDivider />}
+          {residents.map((a) => (
+            <MenuItemRadio key={a.id} name="assignee" value={residentPrincipalId(a.id)}>
+              {a.name}
             </MenuItemRadio>
           ))}
         </MenuList>

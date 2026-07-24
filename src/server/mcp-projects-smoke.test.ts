@@ -298,4 +298,98 @@ describe('omni-projects MCP tools (async IProjectsRepo, SQLite)', () => {
     const projects = await call('list_projects');
     expect(projects.projects.map((p: any) => p.id)).not.toContain(created.id);
   });
+
+  // Resident principals (docs/residents-in-projects-db-plan.md)
+
+  it('merges enabled residents into list_team_members', async () => {
+    const base = {
+      role: 'engineer',
+      persona_text: 'p',
+      profile_name: null,
+      project_ids: '[]',
+      morning_hour: 8,
+      created_at: '2026-07-23 08:00:00.000',
+    };
+    await repo.upsertResident({ ...base, id: 'sable', name: 'Sable', enabled: 1 });
+    await repo.upsertResident({ ...base, id: 'quill', name: 'Quill', enabled: 0 });
+
+    const members = await call('list_team_members');
+    // Humans from the context, residents from the repo; disabled excluded.
+    expect(members.members).toContainEqual(expect.objectContaining({ user_id: 'principal-1' }));
+    expect(members.members).toContainEqual({ user_id: 'agent:sable', display_name: 'Sable', role: 'agent' });
+    expect(members.members.map((m: any) => m.user_id)).not.toContain('agent:quill');
+  });
+
+  it('stamps resident-authored comments with the session principal', async () => {
+    // Seed a project + ticket at the repo level so this test doesn't depend
+    // on the create_project tool path.
+    const ts = '2026-07-23 08:00:00.000';
+    await repo.upsertProject({
+      id: 'proj_stamp',
+      label: 'Stamp',
+      slug: 'stamp',
+      is_personal: 0,
+      auto_dispatch: 0,
+      sources: '[]',
+      sandbox_profile: null,
+      config: null,
+      due_date: null,
+      pinned_at: null,
+      created_at: ts,
+      updated_at: ts,
+    });
+    await repo.syncColumnsForProject('proj_stamp', [{ logicalId: 'doing', label: 'Doing' }]);
+    const columns = await repo.listColumns('proj_stamp');
+    await repo.upsertTicket({
+      id: 'tkt_stamp',
+      project_id: 'proj_stamp',
+      milestone_id: null,
+      column_id: columns[0]!.id,
+      title: 'Stamped',
+      description: '',
+      priority: 'medium',
+      branch: null,
+      blocked_by: '[]',
+      resolution: null,
+      resolved_at: null,
+      archived_at: null,
+      column_changed_at: null,
+      use_worktree: 0,
+      worktree_path: null,
+      worktree_name: null,
+      supervisor_session_id: null,
+      phase: null,
+      phase_changed_at: null,
+      supervisor_task_id: null,
+      token_usage: null,
+      runs: '[]',
+      pr_review: null,
+      pr_merged_at: null,
+      assignee: null,
+      created_at: ts,
+      updated_at: ts,
+    });
+
+    // A resident session: same repo, identity carried by the context (the
+    // token/env carriers resolve to this in production).
+    const agentServer = createServer(repo, { getCurrentPrincipal: async () => 'agent:sable' });
+    const [clientT, serverT] = InMemoryTransport.createLinkedPair();
+    const agentClient = new Client({ name: 'agent-test', version: '0.0.0' });
+    await Promise.all([agentServer.connect(serverT), agentClient.connect(clientT)]);
+
+    const stampRes = (await agentClient.callTool({
+      name: 'add_ticket_comment',
+      // The self-declared enum is overridden by the session principal.
+      arguments: { ticket_id: 'tkt_stamp', content: 'shipped it', author: 'agent' },
+    })) as { content: Array<{ type: string; text: string }>; isError?: boolean };
+    expect(stampRes.isError ?? false, stampRes.content[0]?.text).toBe(false);
+    await agentClient.close();
+
+    // The human-context session keeps the enum behavior.
+    await call('add_ticket_comment', { ticket_id: 'tkt_stamp', content: 'a human finding', author: 'agent' });
+
+    const comments = await call('get_ticket_comments', { ticket_id: 'tkt_stamp' });
+    expect(comments.comments.find((c: any) => c.content === 'shipped it')?.author).toBe('agent:sable');
+    expect(comments.comments.find((c: any) => c.content === 'a human finding')?.author).toBe('agent');
+  });
 });

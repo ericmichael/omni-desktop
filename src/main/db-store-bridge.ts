@@ -19,6 +19,11 @@ import type {
   PageRow,
   ProjectRow,
   ProjectsRepo,
+  ResidentAlarmRow,
+  ResidentChannelRow,
+  ResidentMemoryRow,
+  ResidentMessageRow,
+  ResidentRow,
   TaskRow,
   TicketRow,
 } from 'omni-projects-db';
@@ -41,6 +46,11 @@ import type {
   ProjectId,
   ProjectSource,
   PullRequestLink,
+  ResidentAgent,
+  ResidentAlarm,
+  ResidentChannelDef,
+  ResidentChannelMessage,
+  ResidentMemoryEntry,
   StoreData,
   Task,
   TaskId,
@@ -528,6 +538,96 @@ export function taskToRow(t: Task): TaskRow {
 // ---- Store snapshot builder ----
 
 /** Keys served from SQLite (not the host store) when the repo is active. */
+// ---- Residents (docs/residents-in-projects-db-plan.md) ----
+
+export function rowToResidentAgent(row: ResidentRow): ResidentAgent {
+  const projectIds = parseJsonOr<string[]>(row.project_ids, []);
+  return {
+    id: row.id,
+    name: row.name,
+    role: row.role,
+    personaText: row.persona_text,
+    ...(row.profile_name ? { profileName: row.profile_name } : {}),
+    ...(projectIds.length > 0 ? { projectIds } : {}),
+    morningHour: row.morning_hour,
+    enabled: row.enabled === 1,
+    createdAt: fromIso(row.created_at),
+  };
+}
+
+export function residentAgentToRow(agent: ResidentAgent): ResidentRow {
+  return {
+    id: agent.id,
+    name: agent.name,
+    role: agent.role,
+    persona_text: agent.personaText,
+    profile_name: agent.profileName ?? null,
+    project_ids: JSON.stringify(agent.projectIds ?? []),
+    morning_hour: agent.morningHour,
+    enabled: agent.enabled ? 1 : 0,
+    created_at: toIso(agent.createdAt),
+  };
+}
+
+export function rowToResidentMemory(row: ResidentMemoryRow): ResidentMemoryEntry {
+  return { key: row.key, text: row.text, at: fromIso(row.at) };
+}
+
+export function residentMemoryToRow(agentId: string, entry: ResidentMemoryEntry): ResidentMemoryRow {
+  return { agent_id: agentId, key: entry.key, text: entry.text, at: toIso(entry.at) };
+}
+
+export function rowToResidentChannelDef(row: ResidentChannelRow): ResidentChannelDef {
+  const members = row.members === null ? undefined : parseJsonOr<string[]>(row.members, []);
+  return {
+    id: row.id,
+    ...(row.description ? { description: row.description } : {}),
+    ...(members !== undefined ? { members } : {}),
+    createdAt: fromIso(row.created_at),
+  };
+}
+
+export function residentChannelDefToRow(def: ResidentChannelDef): ResidentChannelRow {
+  return {
+    id: def.id,
+    description: def.description ?? null,
+    members: def.members === undefined ? null : JSON.stringify(def.members),
+    created_at: toIso(def.createdAt),
+  };
+}
+
+export function rowToResidentMessage(row: ResidentMessageRow): ResidentChannelMessage {
+  return {
+    id: row.id,
+    channel: row.channel,
+    from: row.from_id,
+    ...(row.from_name ? { fromName: row.from_name } : {}),
+    text: row.text,
+    at: fromIso(row.at),
+    ...(row.reply_to !== null ? { replyTo: row.reply_to } : {}),
+  };
+}
+
+export function residentMessageToRow(msg: ResidentChannelMessage): ResidentMessageRow {
+  return {
+    id: msg.id,
+    channel: msg.channel,
+    from_id: msg.from,
+    from_name: msg.fromName ?? null,
+    text: msg.text,
+    at: toIso(msg.at),
+    reply_to: msg.replyTo ?? null,
+  };
+}
+
+export function rowToResidentAlarm(row: ResidentAlarmRow): ResidentAlarm {
+  return { id: row.id, at: fromIso(row.at), note: row.note, createdAt: fromIso(row.created_at) };
+}
+
+export function residentAlarmToRow(agentId: string, alarm: ResidentAlarm): ResidentAlarmRow {
+  return { id: alarm.id, agent_id: agentId, at: toIso(alarm.at), note: alarm.note, created_at: toIso(alarm.createdAt) };
+}
+
 export const PROJECT_KEYS: ReadonlySet<keyof StoreData> = new Set<keyof StoreData>([
   'projects',
   'tickets',
@@ -535,6 +635,13 @@ export const PROJECT_KEYS: ReadonlySet<keyof StoreData> = new Set<keyof StoreDat
   'pages',
   'inboxItems',
   'tasks',
+  // Resident durable data — snapshot mirrors from projects-db; writes go
+  // through `resident:*` IPC (docs/residents-in-projects-db-plan.md).
+  'residentAgents',
+  'residentMemories',
+  'residentChannels',
+  'residentChannelDefs',
+  'residentAlarms',
 ]);
 
 /** Minimal store shape needed to assemble a snapshot — satisfied by both

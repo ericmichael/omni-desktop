@@ -22,6 +22,11 @@ import type {
   MilestoneRow,
   PageRow,
   ProjectRow,
+  ResidentAlarmRow,
+  ResidentChannelRow,
+  ResidentMemoryRow,
+  ResidentMessageRow,
+  ResidentRow,
   TaskRow,
   TicketRow,
 } from '../types.js';
@@ -693,5 +698,155 @@ export class PgProjectsRepo implements IProjectsRepo {
         await this.upsertTaskIn(c, row);
       }
     });
+  }
+
+  // ---- Resident agents ----
+
+  listResidents(): Promise<ResidentRow[]> {
+    return this.rows<ResidentRow>('SELECT * FROM resident_agents ORDER BY created_at');
+  }
+
+  async upsertResident(row: ResidentRow): Promise<void> {
+    await this.tx((c) =>
+      c.query(
+        `INSERT INTO resident_agents (tenant_id, id, name, role, persona_text, profile_name, project_ids, morning_hour, enabled, created_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+         ON CONFLICT (tenant_id, id) DO UPDATE SET
+           name = EXCLUDED.name, role = EXCLUDED.role, persona_text = EXCLUDED.persona_text,
+           profile_name = EXCLUDED.profile_name, project_ids = EXCLUDED.project_ids,
+           morning_hour = EXCLUDED.morning_hour, enabled = EXCLUDED.enabled`,
+        [
+          this.tenantId,
+          row.id,
+          row.name,
+          row.role,
+          row.persona_text,
+          row.profile_name,
+          row.project_ids,
+          row.morning_hour,
+          row.enabled,
+          row.created_at,
+        ]
+      )
+    );
+  }
+
+  async deleteResident(id: string): Promise<void> {
+    await this.tx((c) => c.query('DELETE FROM resident_agents WHERE id = $1', [id]));
+  }
+
+  // ---- Resident memories ----
+
+  listResidentMemories(agentId: string): Promise<ResidentMemoryRow[]> {
+    return this.rows<ResidentMemoryRow>('SELECT * FROM resident_memories WHERE agent_id = $1 ORDER BY at', [agentId]);
+  }
+
+  async upsertResidentMemory(row: ResidentMemoryRow): Promise<void> {
+    await this.tx((c) => this.upsertResidentMemoryIn(c, row));
+  }
+
+  private upsertResidentMemoryIn(c: PoolClient, row: ResidentMemoryRow): Promise<unknown> {
+    return c.query(
+      `INSERT INTO resident_memories (tenant_id, agent_id, key, text, at)
+       VALUES ($1,$2,$3,$4,$5)
+       ON CONFLICT (tenant_id, agent_id, key) DO UPDATE SET text = EXCLUDED.text, at = EXCLUDED.at`,
+      [this.tenantId, row.agent_id, row.key, row.text, row.at]
+    );
+  }
+
+  async deleteResidentMemory(agentId: string, key: string): Promise<void> {
+    await this.tx((c) => c.query('DELETE FROM resident_memories WHERE agent_id = $1 AND key = $2', [agentId, key]));
+  }
+
+  async setResidentMemories(agentId: string, rows: ResidentMemoryRow[]): Promise<void> {
+    await this.tx(async (c) => {
+      await c.query('DELETE FROM resident_memories WHERE agent_id = $1', [agentId]);
+      for (const row of rows) {
+        await this.upsertResidentMemoryIn(c, { ...row, agent_id: agentId });
+      }
+    });
+  }
+
+  // ---- Resident channels + message log ----
+
+  listResidentChannels(): Promise<ResidentChannelRow[]> {
+    return this.rows<ResidentChannelRow>('SELECT * FROM resident_channels ORDER BY created_at');
+  }
+
+  async upsertResidentChannel(row: ResidentChannelRow): Promise<void> {
+    await this.tx((c) =>
+      c.query(
+        `INSERT INTO resident_channels (tenant_id, id, description, members, created_at)
+         VALUES ($1,$2,$3,$4,$5)
+         ON CONFLICT (tenant_id, id) DO UPDATE SET
+           description = EXCLUDED.description, members = EXCLUDED.members`,
+        [this.tenantId, row.id, row.description, row.members, row.created_at]
+      )
+    );
+  }
+
+  async deleteResidentChannel(id: string): Promise<void> {
+    await this.tx(async (c) => {
+      await c.query('DELETE FROM resident_channels WHERE id = $1', [id]);
+      await c.query('DELETE FROM resident_messages WHERE channel = $1', [id]);
+    });
+  }
+
+  async appendResidentMessage(row: ResidentMessageRow): Promise<void> {
+    await this.tx((c) =>
+      c.query(
+        `INSERT INTO resident_messages (tenant_id, id, channel, from_id, from_name, text, at, reply_to)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+        [this.tenantId, row.id, row.channel, row.from_id, row.from_name, row.text, row.at, row.reply_to]
+      )
+    );
+  }
+
+  async deleteResidentMessagesForChannel(channel: string): Promise<void> {
+    await this.tx((c) => c.query('DELETE FROM resident_messages WHERE channel = $1', [channel]));
+  }
+
+  listResidentMessagesAfter(id: number, limit: number): Promise<ResidentMessageRow[]> {
+    return this.rows<ResidentMessageRow>('SELECT * FROM resident_messages WHERE id > $1 ORDER BY id LIMIT $2', [
+      id,
+      limit,
+    ]);
+  }
+
+  listResidentMessages(limit: number): Promise<ResidentMessageRow[]> {
+    return this.rows<ResidentMessageRow>(
+      'SELECT * FROM (SELECT * FROM resident_messages ORDER BY id DESC LIMIT $1) tail ORDER BY id',
+      [limit]
+    );
+  }
+
+  async pruneResidentMessages(keep: number): Promise<void> {
+    // RLS scopes the subquery, so the bound is per tenant.
+    await this.tx((c) =>
+      c.query(
+        'DELETE FROM resident_messages WHERE id NOT IN (SELECT id FROM resident_messages ORDER BY id DESC LIMIT $1)',
+        [keep]
+      )
+    );
+  }
+
+  // ---- Resident alarms ----
+
+  listResidentAlarms(): Promise<ResidentAlarmRow[]> {
+    return this.rows<ResidentAlarmRow>('SELECT * FROM resident_alarms ORDER BY at');
+  }
+
+  async addResidentAlarm(row: ResidentAlarmRow): Promise<void> {
+    await this.tx((c) =>
+      c.query(
+        `INSERT INTO resident_alarms (tenant_id, id, agent_id, at, note, created_at)
+         VALUES ($1,$2,$3,$4,$5,$6)`,
+        [this.tenantId, row.id, row.agent_id, row.at, row.note, row.created_at]
+      )
+    );
+  }
+
+  async deleteResidentAlarm(id: number): Promise<void> {
+    await this.tx((c) => c.query('DELETE FROM resident_alarms WHERE id = $1', [id]));
   }
 }

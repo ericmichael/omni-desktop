@@ -26,6 +26,14 @@ export interface RuntimeTokenClaims {
   tenantId: string;
   /** Authenticated principal that launched the agent (teams mode). Optional for back-compat. */
   principalId?: string;
+  /**
+   * Resident roster id when the sandbox belongs to a resident agent's
+   * process — the MCP route then resolves the acting principal to
+   * `agent:<agentId>` instead of the launching user, so the resident's
+   * tickets and comments are attributable to it
+   * (docs/residents-in-projects-db-plan.md).
+   */
+  agentId?: string;
   sessionId: string;
 }
 
@@ -33,6 +41,8 @@ interface TokenPayload {
   tid: string;
   /** Launching principal (teams mode). */
   pid?: string;
+  /** Resident roster id (resident spawns only). */
+  aid?: string;
   sid: string;
   iat: number;
   exp: number;
@@ -79,6 +89,7 @@ export function signRuntimeToken(
   const payload: TokenPayload = {
     tid: claims.tenantId,
     ...(claims.principalId ? { pid: claims.principalId } : {}),
+    ...(claims.agentId ? { aid: claims.agentId } : {}),
     sid: claims.sessionId,
     iat,
     exp: iat + ttlSec,
@@ -119,5 +130,5 @@ export function verifyRuntimeToken(secret: string, token: string, now = Date.now
   if (payload.exp * 1000 <= now) {
     return null;
   }
-  return { tenantId: payload.tid, principalId: payload.pid, sessionId: payload.sid };
+  return { tenantId: payload.tid, principalId: payload.pid, agentId: payload.aid, sessionId: payload.sid };
 }

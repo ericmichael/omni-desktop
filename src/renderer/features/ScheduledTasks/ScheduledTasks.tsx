@@ -36,6 +36,7 @@ import {
 } from '@/renderer/ds';
 import { getProfileMenuLabel } from '@/renderer/features/SandboxProfile/profile-list';
 import { SandboxPicker } from '@/renderer/features/SandboxProfile/SandboxPicker';
+import { toast } from '@/renderer/features/Toast/state';
 import { emitter } from '@/renderer/services/ipc';
 import { $machines } from '@/renderer/services/machines';
 import { scheduledTaskApi } from '@/renderer/services/scheduled-tasks';
@@ -588,7 +589,12 @@ export const ScheduledTasks = memo(() => {
     if (!run.sessionId) {
       return;
     }
-    await ensureRoutineSessionTab(task, run.sessionId, store, true);
+    try {
+      await ensureRoutineSessionTab(task, run.sessionId, store, true);
+    } catch (err) {
+      toast.error('Cannot open routine session', err instanceof Error ? err.message : String(err));
+      return;
+    }
     await persistedStoreApi.setKey('layoutMode', 'chat');
   };
 

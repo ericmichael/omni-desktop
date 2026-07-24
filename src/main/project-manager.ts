@@ -196,6 +196,13 @@ export class ProjectManager {
   /** Teams/cloud: notify a member when assigned a ticket (cross-principal). */
   private onAssign?: (assignee: string, ticket: Ticket) => void;
 
+  /**
+   * Extra keys merged over every snapshot this manager builds or broadcasts —
+   * the resident manager's durable mirrors ride here so a project-data
+   * broadcast can never clobber them (docs/residents-in-projects-db-plan.md).
+   */
+  private snapshotExtras?: () => Partial<StoreData>;
+
   /** Page lifecycle owner — CRUD, file I/O, root-page seeding, watcher. */
   readonly pages: PageManager;
 
@@ -235,6 +242,8 @@ export class ProjectManager {
       currentPrincipal?: string;
       /** Teams/cloud: notify a member they were assigned a ticket (cross-principal). */
       onAssign?: (assignee: string, ticket: Ticket) => void;
+      /** Extra keys merged over every snapshot/broadcast (resident mirrors). */
+      snapshotExtras?: () => Partial<StoreData>;
     },
     deps?: Partial<ProjectManagerDeps>
   ) {
@@ -244,6 +253,7 @@ export class ProjectManager {
     this.artifactStoreFor = arg.artifactStoreFor;
     this.currentPrincipal = arg.currentPrincipal;
     this.onAssign = arg.onAssign;
+    this.snapshotExtras = arg.snapshotExtras;
     this.processManager = arg.processManager;
     this.appControlManager = arg.appControlManager;
     this.repo = arg.repo;
@@ -284,7 +294,7 @@ export class ProjectManager {
           getPages: () => (this.store.get('pages') ?? []) as Page[],
           setPages: (items) => {
             this.store.set('pages', items);
-            this.sendToWindow('store:changed', this.store.store);
+            this.broadcastStoreSnapshot();
           },
         };
     this.pages = new PageManager({
@@ -310,7 +320,7 @@ export class ProjectManager {
           getInboxItems: () => (this.store.get('inboxItems') ?? []) as InboxItem[],
           setInboxItems: (items) => {
             this.store.set('inboxItems', items);
-            this.sendToWindow('store:changed', this.store.store);
+            this.broadcastStoreSnapshot();
           },
           getTickets: () => this.getTickets(),
           setTickets: (tickets) => this.setTickets(tickets),
@@ -345,7 +355,7 @@ export class ProjectManager {
           getMilestones: () => (this.store.get('milestones') ?? []) as Milestone[],
           setMilestones: (items) => {
             this.store.set('milestones', items);
-            this.sendToWindow('store:changed', this.store.store);
+            this.broadcastStoreSnapshot();
           },
           getTickets: () => this.getTickets(),
           setTickets: (tickets) => this.setTickets(tickets),
@@ -374,7 +384,7 @@ export class ProjectManager {
             this.noteLocalWriteAndBroadcast();
           } else {
             this.store.set('tasks', tasks);
-            this.sendToWindow('store:changed', this.store.store);
+            this.broadcastStoreSnapshot();
           }
         },
         // Per-row task writes — supervisor uses these for the high-frequency
@@ -399,7 +409,7 @@ export class ProjectManager {
         // stays in the electron store even when a projects repo is present.
         appendActivity: (event) => {
           this.store.set('activityLog', appendActivityEvent(this.store.get('activityLog'), event, event.at));
-          this.sendToWindow('store:changed', this.store.store);
+          this.broadcastStoreSnapshot();
         },
       },
       host: {
@@ -604,11 +614,7 @@ export class ProjectManager {
 
   /** Broadcast a full store snapshot to the renderer (projection + electron-store merged). */
   private broadcastStoreSnapshot = (): void => {
-    if (this.repo) {
-      this.sendToWindow('store:changed', this.buildSnapshotFromCache());
-    } else {
-      this.sendToWindow('store:changed', this.store.store);
-    }
+    this.sendToWindow('store:changed', this.getStoreSnapshot());
   };
 
   /**
@@ -622,13 +628,13 @@ export class ProjectManager {
 
   /**
    * Build a full StoreData snapshot. Used by MainProcessManager to serve
-   * `store:get` and `store:get-key` requests.
+   * `store:get` and `store:get-key` requests, and by EVERY `store:changed`
+   * broadcast — a snapshot that skips {@link snapshotExtras} would clobber
+   * the extra keys (e.g. the resident mirrors) in the renderer's atom.
    */
   getStoreSnapshot = (): StoreData => {
-    if (this.repo) {
-      return this.buildSnapshotFromCache();
-    }
-    return this.store.store;
+    const base = this.repo ? this.buildSnapshotFromCache() : this.store.store;
+    return this.snapshotExtras ? { ...base, ...this.snapshotExtras() } : base;
   };
 
   // #endregion
@@ -667,7 +673,7 @@ export class ProjectManager {
       this.noteLocalWriteAndBroadcast();
     } else {
       this.store.set('projects', projects);
-      this.sendToWindow('store:changed', this.store.store);
+      this.broadcastStoreSnapshot();
     }
   };
 
@@ -1034,7 +1040,7 @@ export class ProjectManager {
       this.noteLocalWriteAndBroadcast();
     } else {
       this.store.set('tickets', tickets);
-      this.sendToWindow('store:changed', this.store.store);
+      this.broadcastStoreSnapshot();
     }
   };
 
@@ -1991,8 +1997,13 @@ export const createProjectManager = (arg: {
   repo?: IProjectsRepo;
   /** Optional sync SQLite handle for the change-watcher (omit in Postgres mode). */
   changeSeqRepo?: ProjectsRepo;
+  /** Notify on ticket assignment (resident wakeups; cloud member toasts). */
+  onAssign?: (assignee: string, ticket: Ticket) => void;
+  /** Extra keys merged over every snapshot/broadcast (resident mirrors). */
+  snapshotExtras?: () => Partial<StoreData>;
 }) => {
-  const { ipc, sendToWindow, store, processManager, appControlManager, repo, changeSeqRepo } = arg;
+  const { ipc, sendToWindow, store, processManager, appControlManager, repo, changeSeqRepo, onAssign, snapshotExtras } =
+    arg;
 
   // Run migration
   ProjectManager.migrateToSupervisor(store);
@@ -2004,6 +2015,8 @@ export const createProjectManager = (arg: {
     appControlManager,
     repo,
     changeSeqRepo,
+    onAssign,
+    snapshotExtras,
   });
   const { supervisors, milestones, inbox, pages, bridge } = projectManager;
   // Cache hydration + restorePersistedTasks now run inside ProjectManager.init()

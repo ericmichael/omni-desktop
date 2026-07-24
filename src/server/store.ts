@@ -9,6 +9,12 @@ const STORE_PATH = join(homedir(), '.config', 'Omni Code', 'config.json');
 
 export const DEFAULTS: StoreData = {
   defaultProfileName: 'host',
+  residentAgents: [],
+  residentMemories: {},
+  residentChannels: [],
+  residentChannelDefs: [],
+  residentAlarms: {},
+  residentMorningBeats: {},
   optInToLauncherPrereleases: false,
   previewFeatures: false,
   notifyOnAgentAttention: false,

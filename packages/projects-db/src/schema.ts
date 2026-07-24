@@ -388,4 +388,82 @@ UPDATE pipeline_columns SET category = 'todo' WHERE category <> 'done' AND id IN
 );
 `,
   },
+  {
+    version: 16,
+    sql: `
+-- Resident agents' durable data moves from launcher-store keys into the
+-- shared world model (docs/residents-in-projects-db-plan.md). Runtime state
+-- (cursors, budgets, morning-beat bookkeeping) stays manager-side.
+
+-- Comment authorship graduates from the 'agent'/'human' enum to free
+-- principal strings ('agent:<id>' for resident sessions). Rebuild is
+-- required because SQLite cannot alter CHECK constraints in place (the
+-- v14 inbox pattern).
+PRAGMA foreign_keys = OFF;
+
+CREATE TABLE ticket_comments_new (
+  id         TEXT PRIMARY KEY,
+  ticket_id  TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+  author     TEXT NOT NULL DEFAULT 'human',
+  content    TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+INSERT INTO ticket_comments_new (id, ticket_id, author, content, created_at)
+SELECT id, ticket_id, author, content, created_at FROM ticket_comments;
+
+DROP TABLE ticket_comments;
+ALTER TABLE ticket_comments_new RENAME TO ticket_comments;
+CREATE INDEX idx_comments_ticket ON ticket_comments(ticket_id, created_at);
+
+PRAGMA foreign_keys = ON;
+
+CREATE TABLE resident_agents (
+  id            TEXT PRIMARY KEY,
+  name          TEXT NOT NULL,
+  role          TEXT NOT NULL,
+  persona_text  TEXT NOT NULL,
+  profile_name  TEXT,
+  project_ids   TEXT NOT NULL DEFAULT '[]',
+  morning_hour  INTEGER,
+  enabled       INTEGER NOT NULL DEFAULT 1,
+  created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE resident_memories (
+  agent_id TEXT NOT NULL REFERENCES resident_agents(id) ON DELETE CASCADE,
+  key      TEXT NOT NULL,
+  text     TEXT NOT NULL,
+  at       TEXT NOT NULL,
+  PRIMARY KEY (agent_id, key)
+);
+
+CREATE TABLE resident_channels (
+  id          TEXT PRIMARY KEY,
+  description TEXT,
+  members     TEXT,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE resident_messages (
+  id        INTEGER PRIMARY KEY AUTOINCREMENT,
+  channel   TEXT NOT NULL,
+  from_id   TEXT NOT NULL,
+  from_name TEXT,
+  text      TEXT NOT NULL,
+  at        TEXT NOT NULL,
+  reply_to  INTEGER
+);
+CREATE INDEX idx_resident_messages_channel ON resident_messages(channel, id);
+
+CREATE TABLE resident_alarms (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  agent_id   TEXT NOT NULL REFERENCES resident_agents(id) ON DELETE CASCADE,
+  at         TEXT NOT NULL,
+  note       TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX idx_resident_alarms_agent ON resident_alarms(agent_id);
+`,
+  },
 ];

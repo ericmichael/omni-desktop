@@ -10,6 +10,7 @@ import { Home } from '@/renderer/features/Home/Home';
 import { InboxView } from '@/renderer/features/Inbox/InboxView';
 import { OnboardingWizard } from '@/renderer/features/Onboarding/OnboardingWizard';
 import { PluginsView } from '@/renderer/features/Plugins/PluginsView';
+import { ResidentsTab } from '@/renderer/features/Residents/ResidentsTab';
 import { ScheduledTasks } from '@/renderer/features/ScheduledTasks/ScheduledTasks';
 import { SettingsPage } from '@/renderer/features/SettingsModal/SettingsPage';
 import { Tickets } from '@/renderer/features/Tickets/Tickets';
@@ -101,6 +102,7 @@ export const MainContent = memo(() => {
     { key: 'chat', Component: Code },
     { key: 'dashboards', Component: Dashboards },
     { key: 'routines', Component: ScheduledTasks },
+    { key: 'agents', Component: ResidentsTab },
     { key: 'plugins', Component: PluginsView },
     { key: 'settings', Component: SettingsPage },
     ...(import.meta.env.DEV ? [{ key: 'gallery' as const, Component: Gallery }] : []),

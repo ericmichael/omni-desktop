@@ -41,6 +41,15 @@ export async function ensureRoutineSessionTab(
     return nextExisting;
   }
   const workspaceDir = await resolveRoutineWorkspaceDir(task, sessionId, store);
+  // A tab without a workspaceDir never launches (useAutoLaunch stays parked
+  // in idle), so the run would only die 90s later on the actor timeout with
+  // a generic message. Fail fast with the actionable reason instead.
+  if (!workspaceDir) {
+    throw new Error(
+      'No workspace folder available for this routine — set a workspace folder in Settings, ' +
+        'or attach the routine to a project with a local folder.'
+    );
+  }
   const tab: CodeTab = {
     id: `routine-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     projectId: task.projectId ?? null,

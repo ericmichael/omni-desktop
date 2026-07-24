@@ -10,6 +10,11 @@ import type {
   MilestoneRow,
   PageRow,
   ProjectRow,
+  ResidentAlarmRow,
+  ResidentChannelRow,
+  ResidentMemoryRow,
+  ResidentMessageRow,
+  ResidentRow,
   TaskRow,
   TicketRow,
 } from './types.js';
@@ -741,6 +746,130 @@ export class ProjectsRepo {
       this.bumpChangeSeq();
     });
   }
+
+  // ---- Resident agents ----
+
+  listResidents(): ResidentRow[] {
+    return this.stmts.listResidents.all() as ResidentRow[];
+  }
+
+  upsertResident(row: ResidentRow): void {
+    this.stmts.upsertResident.run(
+      row.id,
+      row.name,
+      row.role,
+      row.persona_text,
+      row.profile_name,
+      row.project_ids,
+      row.morning_hour,
+      row.enabled,
+      row.created_at
+    );
+    this.bumpChangeSeq();
+  }
+
+  /** Cascades memories + alarms; messages are kept (the log is a record). */
+  deleteResident(id: string): void {
+    this.stmts.deleteResident.run(id);
+    this.bumpChangeSeq();
+  }
+
+  // ---- Resident memories ----
+
+  listResidentMemories(agentId: string): ResidentMemoryRow[] {
+    return this.stmts.listResidentMemories.all(agentId) as ResidentMemoryRow[];
+  }
+
+  upsertResidentMemory(row: ResidentMemoryRow): void {
+    this.stmts.upsertResidentMemory.run(row.agent_id, row.key, row.text, row.at);
+    this.bumpChangeSeq();
+  }
+
+  deleteResidentMemory(agentId: string, key: string): void {
+    this.stmts.deleteResidentMemory.run(agentId, key);
+    this.bumpChangeSeq();
+  }
+
+  /** Replace an agent's full memory list (UI edits). */
+  setResidentMemories(agentId: string, rows: ResidentMemoryRow[]): void {
+    tx(this.db, () => {
+      this.stmts.deleteResidentMemories.run(agentId);
+      for (const row of rows) {
+        this.stmts.upsertResidentMemory.run(agentId, row.key, row.text, row.at);
+      }
+      this.bumpChangeSeq();
+    });
+  }
+
+  // ---- Resident channels + message log ----
+
+  listResidentChannels(): ResidentChannelRow[] {
+    return this.stmts.listResidentChannels.all() as ResidentChannelRow[];
+  }
+
+  upsertResidentChannel(row: ResidentChannelRow): void {
+    this.stmts.upsertResidentChannel.run(row.id, row.description, row.members, row.created_at);
+    this.bumpChangeSeq();
+  }
+
+  /** Deletes the channel def and prunes its rows from the log. */
+  deleteResidentChannel(id: string): void {
+    tx(this.db, () => {
+      this.stmts.deleteResidentChannel.run(id);
+      this.stmts.deleteResidentMessagesForChannel.run(id);
+      this.bumpChangeSeq();
+    });
+  }
+
+  appendResidentMessage(row: ResidentMessageRow): void {
+    this.stmts.appendResidentMessage.run(
+      row.id,
+      row.channel,
+      row.from_id,
+      row.from_name,
+      row.text,
+      row.at,
+      row.reply_to
+    );
+    this.bumpChangeSeq();
+  }
+
+  /** Prune the rows of one channel (DM cleanup on resident delete). */
+  deleteResidentMessagesForChannel(channel: string): void {
+    this.stmts.deleteResidentMessagesForChannel.run(channel);
+    this.bumpChangeSeq();
+  }
+
+  listResidentMessagesAfter(id: number, limit: number): ResidentMessageRow[] {
+    return this.stmts.listResidentMessagesAfter.all(id, limit) as ResidentMessageRow[];
+  }
+
+  /** Newest `limit` rows in ascending id order (the snapshot tail). */
+  listResidentMessages(limit: number): ResidentMessageRow[] {
+    return this.stmts.listResidentMessages.all(limit) as ResidentMessageRow[];
+  }
+
+  /** Global log bound: keep the newest `keep` rows. */
+  pruneResidentMessages(keep: number): void {
+    this.stmts.pruneResidentMessages.run(keep);
+    this.bumpChangeSeq();
+  }
+
+  // ---- Resident alarms ----
+
+  listResidentAlarms(): ResidentAlarmRow[] {
+    return this.stmts.listResidentAlarms.all() as ResidentAlarmRow[];
+  }
+
+  addResidentAlarm(row: ResidentAlarmRow): void {
+    this.stmts.addResidentAlarm.run(row.id, row.agent_id, row.at, row.note, row.created_at);
+    this.bumpChangeSeq();
+  }
+
+  deleteResidentAlarm(id: number): void {
+    this.stmts.deleteResidentAlarm.run(id);
+    this.bumpChangeSeq();
+  }
 }
 
 // ---- Prepared statement compilation ----
@@ -905,5 +1034,56 @@ function prepareStatements(db: DatabaseSync) {
     deleteTask: db.prepare('DELETE FROM tasks WHERE id = ?'),
     deleteAllTasks: db.prepare('DELETE FROM tasks'),
     listAllTaskIds: db.prepare('SELECT id FROM tasks'),
+
+    // Resident agents
+    listResidents: db.prepare('SELECT * FROM resident_agents ORDER BY created_at'),
+    upsertResident: db.prepare(`
+      INSERT INTO resident_agents (id, name, role, persona_text, profile_name, project_ids, morning_hour, enabled, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        name = excluded.name, role = excluded.role, persona_text = excluded.persona_text,
+        profile_name = excluded.profile_name, project_ids = excluded.project_ids,
+        morning_hour = excluded.morning_hour, enabled = excluded.enabled
+    `),
+    deleteResident: db.prepare('DELETE FROM resident_agents WHERE id = ?'),
+
+    // Resident memories
+    listResidentMemories: db.prepare('SELECT * FROM resident_memories WHERE agent_id = ? ORDER BY at'),
+    upsertResidentMemory: db.prepare(`
+      INSERT INTO resident_memories (agent_id, key, text, at)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(agent_id, key) DO UPDATE SET text = excluded.text, at = excluded.at
+    `),
+    deleteResidentMemory: db.prepare('DELETE FROM resident_memories WHERE agent_id = ? AND key = ?'),
+    deleteResidentMemories: db.prepare('DELETE FROM resident_memories WHERE agent_id = ?'),
+
+    // Resident channels + message log
+    listResidentChannels: db.prepare('SELECT * FROM resident_channels ORDER BY created_at'),
+    upsertResidentChannel: db.prepare(`
+      INSERT INTO resident_channels (id, description, members, created_at)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET description = excluded.description, members = excluded.members
+    `),
+    deleteResidentChannel: db.prepare('DELETE FROM resident_channels WHERE id = ?'),
+    deleteResidentMessagesForChannel: db.prepare('DELETE FROM resident_messages WHERE channel = ?'),
+    appendResidentMessage: db.prepare(`
+      INSERT INTO resident_messages (id, channel, from_id, from_name, text, at, reply_to)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `),
+    listResidentMessagesAfter: db.prepare('SELECT * FROM resident_messages WHERE id > ? ORDER BY id LIMIT ?'),
+    listResidentMessages: db.prepare(
+      'SELECT * FROM (SELECT * FROM resident_messages ORDER BY id DESC LIMIT ?) ORDER BY id'
+    ),
+    pruneResidentMessages: db.prepare(
+      'DELETE FROM resident_messages WHERE id NOT IN (SELECT id FROM resident_messages ORDER BY id DESC LIMIT ?)'
+    ),
+
+    // Resident alarms
+    listResidentAlarms: db.prepare('SELECT * FROM resident_alarms ORDER BY at'),
+    addResidentAlarm: db.prepare(`
+      INSERT INTO resident_alarms (id, agent_id, at, note, created_at)
+      VALUES (?, ?, ?, ?, ?)
+    `),
+    deleteResidentAlarm: db.prepare('DELETE FROM resident_alarms WHERE id = ?'),
   };
 }

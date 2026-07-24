@@ -5,6 +5,7 @@ import path from 'node:path';
 import { ipcMain } from 'electron';
 
 import { mirrorContainerChangesToHost } from '@/lib/container-sync';
+import { isResidentProcessId } from '@/lib/resident-agent';
 import {
   AgentProcess,
   type AgentProcessMode,
@@ -121,8 +122,12 @@ export class ProcessManager {
    * this Electron) can swap in the cloud-shipped materialized env per-start
    * and restore the original afterwards. The cloud serialises its start calls
    * per machine, so the temporary swap is race-free in that path.
+   *
+   * Receives the process id so per-process identity can ride the env — the
+   * cloud provider mints the runtime token's `agentId` claim from it for
+   * resident (`agent:<id>`) processes.
    */
-  getExtraEnv?: () => Record<string, string> | Promise<Record<string, string>>;
+  getExtraEnv?: (processId?: string) => Record<string, string> | Promise<Record<string, string>>;
   /** Read a git token by credential id (from the SecretStore). Absent → no
    *  private-remote auth (tokens never reach this class except through here). */
   private resolveGitToken?: (credentialId: string) => Promise<string | undefined>;
@@ -161,8 +166,9 @@ export class ProcessManager {
     getStoreData?: () => ProcessManagerStoreData;
     /** Extra env for spawned `omni serve` (e.g. cloud `OMNI_RUNTIME_TOKEN`).
      *  May be async — used by cloud to materialize per-principal codex tokens
-     *  to the spawn's config dir from PgSecretStore before omni-serve starts. */
-    getExtraEnv?: () => Record<string, string> | Promise<Record<string, string>>;
+     *  to the spawn's config dir from PgSecretStore before omni-serve starts.
+     *  Receives the process id (per-process identity, e.g. resident tokens). */
+    getExtraEnv?: (processId?: string) => Record<string, string> | Promise<Record<string, string>>;
     /** Read a git token by credential id, for private-remote auth at clone time. */
     resolveGitToken?: (credentialId: string) => Promise<string | undefined>;
     /** Restrict launches to these profiles (cloud → the ACI profiles). The
@@ -311,7 +317,15 @@ export class ProcessManager {
       },
       fetchFn: this.fetchFn,
       computeClient: computeClient ?? this.platformClient ?? undefined,
-      getExtraEnv: this.getExtraEnv,
+      // Resident processes act as themselves against the omni-projects MCP
+      // server: locally the stdio cli reads OMNI_PROJECTS_PRINCIPAL from the
+      // serve env (a resident's process id IS its principal id); in cloud the
+      // provider-minted runtime token carries the claim instead (and this
+      // extra key is unused).
+      getExtraEnv: async () => {
+        const base = (await this.getExtraEnv?.(processId)) ?? {};
+        return isResidentProcessId(processId) ? { ...base, OMNI_PROJECTS_PRINCIPAL: processId } : base;
+      },
     });
     this.processes.set(processId, proc);
     return proc;
@@ -319,7 +333,13 @@ export class ProcessManager {
 
   private async buildStartArg(opts: AgentProcessStartOptions): Promise<AgentProcessStartArg> {
     const profileName = this.resolveProfileName(opts.projectId, opts.profileNameOverride);
-    const sources = this.resolveProjectSources(opts.workspaceDir, opts.projectId);
+    // Multi-project scope mounts the union of declared sources; the
+    // single-project path additionally synthesizes a source from the bare
+    // workspaceDir (chat scratch dirs, managed project dirs).
+    const sources = opts.projectIds?.length
+      ? this.resolveMultiProjectSources(opts.projectIds)
+      : this.resolveProjectSources(opts.workspaceDir, opts.projectId);
+    this.appendExtraSources(sources, opts.extraSources);
     const startArg: AgentProcessStartArg = {
       profileName,
       sources,
@@ -442,27 +462,7 @@ export class ProcessManager {
       // project) falls through to the synthesized-source path below so its
       // managed directory still seeds the workspace and mirrors back.
       if (project && project.sources.length > 0) {
-        return project.sources.map((source): AgentProcessSource => {
-          if (source.kind === 'git-remote') {
-            const result: AgentProcessSource = {
-              mountName: source.mountName,
-              kind: 'git-remote',
-              repoUrl: source.repoUrl,
-            };
-            if (source.defaultBranch) {
-              result.ref = source.defaultBranch;
-            }
-            return result;
-          }
-          this.ensureWorkspaceDir(source.workspaceDir);
-          // User-attached folders are never launcherOwned — applying
-          // container changes to them stays an explicit user action.
-          return {
-            mountName: source.mountName,
-            kind: this.directoryHasGit(source.workspaceDir) ? 'local-git' : 'local',
-            workspaceDir: source.workspaceDir,
-          };
-        });
+        return project.sources.map((source) => this.mapDeclaredSource(source));
       }
     }
     // No attached sources (chat scratch dir / managed project dir / Personal
@@ -481,6 +481,104 @@ export class ProcessManager {
         ...(isLauncherOwnedDir(workspaceDir) ? { launcherOwned: true } : {}),
       },
     ];
+  }
+
+  /** Translate one declared ``ProjectSource`` into the wire shape. */
+  private mapDeclaredSource(source: Project['sources'][number]): AgentProcessSource {
+    if (source.kind === 'git-remote') {
+      const result: AgentProcessSource = {
+        mountName: source.mountName,
+        kind: 'git-remote',
+        repoUrl: source.repoUrl,
+      };
+      if (source.defaultBranch) {
+        result.ref = source.defaultBranch;
+      }
+      return result;
+    }
+    this.ensureWorkspaceDir(source.workspaceDir);
+    // User-attached folders are never launcherOwned — applying
+    // container changes to them stays an explicit user action.
+    return {
+      mountName: source.mountName,
+      kind: this.directoryHasGit(source.workspaceDir) ? 'local-git' : 'local',
+      workspaceDir: source.workspaceDir,
+    };
+  }
+
+  /**
+   * Multi-project scope (resident agents): the union of every scoped
+   * project's declared sources. Unknown project ids are skipped;
+   * source-less (context-only) projects contribute no mounts — the agent
+   * reaches them through the project MCP tools instead. Duplicate
+   * directories are mounted once; mount-name collisions across projects
+   * get a numeric suffix (first project wins the bare name).
+   */
+  private resolveMultiProjectSources(projectIds: string[]): AgentProcessSource[] {
+    const { projects } = this.getStoreData();
+    const sources: AgentProcessSource[] = [];
+    const mountNames = new Set<string>();
+    const mountedDirs = new Set<string>();
+    for (const projectId of projectIds) {
+      const project = projects.find((p) => p.id === projectId);
+      if (!project) {
+        continue;
+      }
+      for (const declared of project.sources) {
+        const mapped = this.mapDeclaredSource(declared);
+        if (mapped.kind !== 'git-remote') {
+          const resolved = path.resolve(mapped.workspaceDir);
+          if (mountedDirs.has(resolved)) {
+            continue;
+          }
+          mountedDirs.add(resolved);
+        }
+        let mountName = mapped.mountName;
+        for (let n = 2; mountNames.has(mountName); n++) {
+          mountName = `${mapped.mountName}-${n}`;
+        }
+        mountNames.add(mountName);
+        sources.push({ ...mapped, mountName });
+      }
+    }
+    return sources;
+  }
+
+  /**
+   * Append caller-supplied extra mounts (e.g. a resident agent's `home`
+   * dir next to its assigned project's sources). Deduped by directory —
+   * when the extra dir is already among the resolved sources (a
+   * context-only project synthesized it as the primary mount), it is
+   * skipped rather than mounted twice. Mount-name collisions get a
+   * numeric suffix so both mounts survive.
+   */
+  private appendExtraSources(sources: AgentProcessSource[], extras: AgentProcessStartOptions['extraSources']): void {
+    if (!extras?.length) {
+      return;
+    }
+    const mountedDirs = new Set(
+      sources.flatMap((s) => (s.kind === 'git-remote' ? [] : [path.resolve(s.workspaceDir)]))
+    );
+    const mountNames = new Set(sources.map((s) => s.mountName));
+    for (const extra of extras) {
+      const resolved = path.resolve(extra.workspaceDir);
+      if (mountedDirs.has(resolved)) {
+        continue;
+      }
+      let mountName = extra.mountName;
+      for (let n = 2; mountNames.has(mountName); n++) {
+        mountName = `${extra.mountName}-${n}`;
+      }
+      this.ensureWorkspaceDir(extra.workspaceDir);
+      sources.push({
+        mountName,
+        kind: this.directoryHasGit(extra.workspaceDir) ? 'local-git' : 'local',
+        workspaceDir: extra.workspaceDir,
+        ...(isLauncherOwnedDir(extra.workspaceDir) ? { launcherOwned: true } : {}),
+      });
+      mountedDirs.add(resolved);
+      mountNames.add(mountName);
+    }
   }
 
   private directoryHasGit(workspaceDir: string): boolean {
@@ -579,6 +677,7 @@ export class ProcessManager {
       ...((opts.projectId ?? lastOpts?.projectId)
         ? { projectId: (opts.projectId ?? lastOpts?.projectId) as string }
         : {}),
+      ...((opts.projectIds ?? lastOpts?.projectIds) ? { projectIds: opts.projectIds ?? lastOpts?.projectIds } : {}),
       ...((opts.profileNameOverride ?? lastOpts?.profileNameOverride)
         ? { profileNameOverride: (opts.profileNameOverride ?? lastOpts?.profileNameOverride) as string }
         : {}),
@@ -587,6 +686,9 @@ export class ProcessManager {
         : {}),
       ...((opts.containerId ?? lastOpts?.containerId)
         ? { containerId: (opts.containerId ?? lastOpts?.containerId) as string }
+        : {}),
+      ...((opts.extraSources ?? lastOpts?.extraSources)
+        ? { extraSources: opts.extraSources ?? lastOpts?.extraSources }
         : {}),
     };
     const startArg = await this.buildStartArg(merged);
@@ -754,6 +856,11 @@ export class ProcessManager {
    *
    * Returns the first running process's container id (any process for
    * the project is fine — they all share the per-project snapshot).
+   *
+   * Matches on the single `projectId` only, NEVER `projectIds`: a
+   * multi-project resident's container has collision-suffixed mount
+   * names, so the PR machinery's `/workspace/<mountName>` paths are not
+   * guaranteed to hold there.
    */
   getProjectContainerId(projectId: string): string | null {
     for (const [processId, opts] of this.lastStartArgs.entries()) {
@@ -920,7 +1027,7 @@ export const createProcessManager = (arg: {
   fetchFn?: FetchFn;
   getStoreData?: () => ProcessManagerStoreData;
   resolveGitToken?: (credentialId: string) => Promise<string | undefined>;
-  getExtraEnv?: () => Record<string, string> | Promise<Record<string, string>>;
+  getExtraEnv?: (processId?: string) => Record<string, string> | Promise<Record<string, string>>;
 }) => {
   const { ipc, sendToWindow, fetchFn, getStoreData, resolveGitToken, getExtraEnv } = arg;
 

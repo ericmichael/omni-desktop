@@ -39,12 +39,17 @@ export type {
   MilestoneRow,
   PageRow,
   ProjectRow,
+  ResidentAlarmRow,
+  ResidentChannelRow,
+  ResidentMemoryRow,
+  ResidentMessageRow,
+  ResidentRow,
   TaskRow,
   TicketRow,
 } from './types.js';
 
 // IDs
-export { columnId, commentId, inboxId, milestoneId, pageId, projectId, taskId, ticketId } from './ids.js';
+export { columnId, commentId, inboxId, milestoneId, pageId, projectId, residentId, taskId, ticketId } from './ids.js';
 
 // Timestamps
 export { fromIso, nowTimestamp, toIso } from './timestamps.js';

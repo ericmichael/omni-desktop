@@ -1,10 +1,13 @@
 import { makeStyles, tokens } from '@fluentui/react-components';
 import { Bot20Regular, Person20Regular, Send20Regular } from '@fluentui/react-icons';
+import { useStore } from '@nanostores/react';
 import { nanoid } from 'nanoid';
 import { memo, useCallback, useState } from 'react';
 
 import { formatTimestamp } from '@/lib/format-time';
+import { parseResidentPrincipal } from '@/lib/resident-agent';
 import { IconButton, Textarea } from '@/renderer/ds';
+import { persistedStoreApi } from '@/renderer/services/store';
 import type { Ticket, TicketComment } from '@/shared/types';
 
 import { ticketApi } from './state';
@@ -86,7 +89,13 @@ const useStyles = makeStyles({
 
 const CommentRow = memo(({ comment }: { comment: TicketComment }) => {
   const styles = useStyles();
-  const isAgent = comment.author === 'agent';
+  // Resident-authored comments carry the agent's principal (`agent:<id>`);
+  // resolve it to the roster display name. Plain 'agent' stays the generic
+  // task-scoped agent; anything else is the human.
+  const residentId = parseResidentPrincipal(comment.author);
+  const residents = useStore(persistedStoreApi.$atom).residentAgents;
+  const residentName = residentId ? (residents.find((a) => a.id === residentId)?.name ?? residentId) : null;
+  const isAgent = comment.author === 'agent' || residentId !== null;
 
   return (
     <div className={styles.comment}>
@@ -99,7 +108,7 @@ const CommentRow = memo(({ comment }: { comment: TicketComment }) => {
       </div>
       <div className={styles.commentBody}>
         <div className={styles.commentMeta}>
-          <span className={styles.commentAuthor}>{isAgent ? 'Agent' : 'You'}</span>
+          <span className={styles.commentAuthor}>{residentName ?? (isAgent ? 'Agent' : 'You')}</span>
           <span className={styles.commentTime}>{formatTimestamp(comment.createdAt)}</span>
         </div>
         <div className={styles.commentContent}>{comment.content}</div>

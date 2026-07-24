@@ -31,6 +31,16 @@ export class RoutineBridge {
   >();
   private eventHandlers = new Set<RoutineBridgeEventHandler>();
   private nextRequestId = 0;
+  /**
+   * Flipped by `routine:renderer-ready`. Until then dispatches queue instead
+   * of being sent — at boot the ScheduledTaskManager's first tick (missed-run
+   * catch-up) runs before the window exists, and `sendToWindow` into the void
+   * drops the message with no retry.
+   */
+  private rendererReady = false;
+  private sendQueue: Array<{ requestId: string; request: RoutineBridgeRequest }> = [];
+  /** Dispatches already claimed by a client (multi-client dedup). */
+  private claimed = new Set<string>();
 
   constructor(
     private readonly sendToWindow: IWindowSender,
@@ -52,6 +62,7 @@ export class RoutineBridge {
           return;
         }
         bridge.pending.delete(requestId);
+        bridge.claimed.delete(requestId);
         clearTimeout(pending.timer);
         if (ok) {
           pending.resolve(result ?? {});
@@ -69,7 +80,24 @@ export class RoutineBridge {
         }
       }
     });
-    return ['routine:dispatch-result', 'routine:event'];
+    ipc.handle('routine:renderer-ready', (event: unknown) => {
+      const bridge = resolve(event);
+      bridge.rendererReady = true;
+      const queued = bridge.sendQueue.splice(0);
+      for (const item of queued) {
+        bridge.sendToWindow('routine:dispatch', item.requestId, item.request);
+      }
+    });
+    ipc.handle('routine:claim-dispatch', (event: unknown, requestId: string) => {
+      const bridge = resolve(event);
+      // A settled/timed-out request is no longer claimable either.
+      if (bridge.claimed.has(requestId) || !bridge.pending.has(requestId)) {
+        return false;
+      }
+      bridge.claimed.add(requestId);
+      return true;
+    });
+    return ['routine:dispatch-result', 'routine:event', 'routine:renderer-ready', 'routine:claim-dispatch'];
   }
 
   onEvent(handler: RoutineBridgeEventHandler): () => void {
@@ -84,10 +112,16 @@ export class RoutineBridge {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(requestId);
+        this.claimed.delete(requestId);
+        this.sendQueue = this.sendQueue.filter((q) => q.requestId !== requestId);
         reject(new Error(`Routine bridge request timed out: ${request.kind}`));
       }, this.requestTimeoutMs);
       this.pending.set(requestId, { resolve, reject, timer });
-      this.sendToWindow('routine:dispatch', requestId, request);
+      if (this.rendererReady) {
+        this.sendToWindow('routine:dispatch', requestId, request);
+      } else {
+        this.sendQueue.push({ requestId, request });
+      }
     });
   }
 
@@ -117,6 +151,8 @@ export class RoutineBridge {
       pending.reject(new Error('RoutineBridge disposed'));
     }
     this.pending.clear();
+    this.sendQueue = [];
+    this.claimed.clear();
     this.eventHandlers.clear();
   }
 }

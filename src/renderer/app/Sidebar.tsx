@@ -12,6 +12,8 @@ import {
   Home24Regular,
   MailInbox24Filled,
   MailInbox24Regular,
+  PeopleTeam24Filled,
+  PeopleTeam24Regular,
   PuzzlePiece24Filled,
   PuzzlePiece24Regular,
   Settings24Filled,
@@ -73,6 +75,15 @@ const ALL_TABS: {
     icon: <CalendarClock24Regular />,
     iconActive: <CalendarClock24Filled />,
     alwaysVisible: true,
+  },
+  {
+    value: 'agents',
+    label: 'Agents',
+    icon: <PeopleTeam24Regular />,
+    iconActive: <PeopleTeam24Filled />,
+    alwaysVisible: true,
+    // Same mobile-bar budget as Plugins — desktop rail only for now.
+    desktopOnly: true,
   },
   {
     value: 'plugins',

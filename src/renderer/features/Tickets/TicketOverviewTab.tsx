@@ -8,6 +8,7 @@ import { Badge, Button, IconButton, SectionLabel, Select, Textarea } from '@/ren
 import { $milestones } from '@/renderer/features/Initiatives/state';
 import { $members } from '@/renderer/features/Teams/state';
 import { AssigneePicker } from '@/renderer/features/Tickets/AssigneePicker';
+import { persistedStoreApi } from '@/renderer/services/store';
 import type { MilestoneId, Ticket, TicketPriority } from '@/shared/types';
 
 import { $pipeline, $tickets, ticketApi } from './state';
@@ -181,6 +182,7 @@ export const TicketOverviewTab = memo(({ ticket, compact }: TicketOverviewTabPro
   const pipeline = useStore($pipeline);
   const milestones = useStore($milestones);
   const members = useStore($members);
+  const residents = useStore(persistedStoreApi.$atom).residentAgents;
   const [editingDescription, setEditingDescription] = useState(false);
   const [editDescription, setEditDescription] = useState('');
 
@@ -430,7 +432,10 @@ export const TicketOverviewTab = memo(({ ticket, compact }: TicketOverviewTabPro
           </div>
         )}
 
-        {members.length > 0 && (
+        {/* Anyone to assign: human members (teams) or resident agents —
+            local single-user mode has an empty member list but may still
+            have a roster of agents. */}
+        {(members.length > 0 || residents.some((a) => a.enabled)) && (
           <div className={styles.prop}>
             <SectionLabel>Assignee</SectionLabel>
             <div className={styles.metaRow}>

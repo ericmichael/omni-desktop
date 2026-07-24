@@ -105,6 +105,17 @@ async function ensureColumn(request: Extract<RoutineBridgeRequest, { kind: 'ensu
 const DISPATCH_TIMEOUT_MS = 90_000;
 
 async function handleDispatch(requestId: string, request: RoutineBridgeRequest): Promise<void> {
+  // `routine:dispatch` is a broadcast — in server mode every connected client
+  // receives it, and exactly one may act (a double `start-run` would submit
+  // the prompt twice). First claim wins; everyone else drops the request.
+  try {
+    const claimed = await emitter.invoke('routine:claim-dispatch', requestId);
+    if (!claimed) {
+      return;
+    }
+  } catch {
+    return;
+  }
   try {
     if (request.kind === 'ensure-column') {
       await ensureColumn(request);
@@ -145,6 +156,9 @@ export function startRoutineBridge(): void {
   ipc.on('routine:dispatch', (requestId, request) => {
     void handleDispatch(requestId, request);
   });
+  // Tell main the listener is wired — it queues dispatches issued before any
+  // renderer existed (boot-time missed-run catch-up) and flushes them here.
+  void emitter.invoke('routine:renderer-ready').catch(() => {});
 }
 
 startRoutineBridge();
