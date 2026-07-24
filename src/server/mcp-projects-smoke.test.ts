@@ -100,6 +100,16 @@ describe('omni-projects MCP tools (async IProjectsRepo, SQLite)', () => {
     expect(created.root_page_id).toMatch(/^pg_/);
     projectId = created.id;
 
+    const seededColumns = await repo.listColumns(projectId);
+    expect(seededColumns.map((column) => column.category)).toEqual([
+      'todo',
+      'doing',
+      'doing',
+      'doing',
+      'doing',
+      'done',
+    ]);
+
     const listed = await call('list_projects');
     const listedProject = listed.projects.find((p: any) => p.id === projectId);
     expect(listedProject?.label).toBe('Test Project');

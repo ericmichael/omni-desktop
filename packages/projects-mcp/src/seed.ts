@@ -80,6 +80,7 @@ export async function seedProject(
     gate: col.gate ? 1 : 0,
     max_concurrent: col.maxConcurrent ?? null,
     workflow: col.workflow == null ? null : JSON.stringify(col.workflow),
+    category: col.category,
   }));
   await repo.replaceColumnsForProject(id, columns);
 
