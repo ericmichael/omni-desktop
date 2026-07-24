@@ -165,13 +165,29 @@ export class MainProcessManager {
       checkForUpdates(window);
     });
 
+    // Same-window navigation (a plain <a href> in the renderer — e.g. a PR
+    // link in a channel message) must never replace the app UI. External
+    // http(s) URLs go to the default browser, matching the window-open
+    // handler above; everything else is dropped. Dev-server reloads are
+    // same-origin and stay allowed in development.
+    window.webContents.on('will-navigate', (event, url) => {
+      if (isDevelopment()) {
+        try {
+          if (new URL(url).origin === new URL(window.webContents.getURL()).origin) {
+            return;
+          }
+        } catch {
+          // Unparseable target — fall through to prevent.
+        }
+      }
+      event.preventDefault();
+      if (/^https?:/i.test(url)) {
+        void shell.openExternal(url);
+      }
+    });
+
     // Disable a few things in production
     if (!isDevelopment()) {
-      // Prevent navigation and page reload
-      window.webContents.on('will-navigate', (event) => {
-        event.preventDefault();
-      });
-
       // Prevent Ctrl/Cmd+R and F5, which would reload the page
       window.webContents.on('before-input-event', (event, input) => {
         if (input.key === 'r' && (input.control || input.meta) && !input.alt) {
