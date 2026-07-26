@@ -1888,10 +1888,40 @@ export class ResidentAgentManager {
         if (rt.watcher === watcher) {
           rt.watcher = null;
         }
+        // A closed socket can never deliver run_end. Without this reset, a
+        // run in flight at disconnect (process crash, dropped WS) leaves the
+        // agent wedged in "Thinking…" — and the park guard skipping forever.
+        if (rt.thinking || rt.state === 'thinking') {
+          rt.thinking = false;
+          if (rt.state === 'thinking') {
+            rt.state = 'idle';
+          }
+          this.armParkTimer(agentId);
+          this.broadcastStatus();
+        }
       },
     });
     await watcher.connect();
     rt.watcher = watcher;
+    // Chat-idiom rehydration: a run may already be in flight when this
+    // watcher (re)connects — no run_started edge will ever arrive for it,
+    // so ask once and seed the derived state instead of assuming idle
+    // (the mirror of the onClosed reset above). Also registers this
+    // channel with the day session, so the eventual run_end reaches us.
+    try {
+      const runState = (await watcher.call('get_run_state', {
+        session_id: daySessionId(agentId, dayKey(this.now())),
+      })) as { active_run_id?: string | null };
+      if (runState?.active_run_id) {
+        rt.thinking = true;
+        if (rt.state === 'idle') {
+          rt.state = 'thinking';
+        }
+        this.broadcastStatus();
+      }
+    } catch {
+      // Probe is best-effort (older server) — edge events still converge.
+    }
     return watcher;
   }
 
@@ -1905,6 +1935,10 @@ export class ResidentAgentManager {
       this.enqueueChain(agentId, async () => {
         const r = this.runtime(agentId);
         if (r.pending.length > 0 || r.thinking) {
+          // Not parkable right now — check again next window. Returning
+          // without re-arming would leave a busy-at-timer agent unparked
+          // (and unchecked) forever.
+          this.armParkTimer(agentId);
           return;
         }
         await this.park(agentId);
