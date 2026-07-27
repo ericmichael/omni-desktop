@@ -122,7 +122,7 @@ Lockstep rename of every `cloudMode` touchpoint:
   arg becomes `--omni-remote-backend=...`. **Also add `platform: process.platform`
   to `__omniBootstrap`** — the renderer currently has no OS detection and the
   WSL card must be Windows-only. For the `wsl` kind, main resolves the live URL
-  (`http://127.0.0.1:<port>`) *before* window creation and injects a resolved
+  (`http://127.0.0.1:<port>`) _before_ window creation and injects a resolved
   `{ kind: 'wsl', url }` bootstrap shape so `serverOrigin()` keeps working
   unchanged.
 - `src/renderer/services/ipc.ts`: `isCloudLinked` → `remoteKind: 'cloud' | 'wsl' | null`
@@ -137,7 +137,7 @@ Lockstep rename of every `cloudMode` touchpoint:
   (`src/renderer/services/machines.ts`), compute reverse-RPC / host-bridge
   (`src/renderer/services/compute.ts`), tunnel bridge
   (`src/renderer/services/tunnel-bridge.ts`). None of these apply to a WSL
-  backend — the sandbox host *is* the backend.
+  backend — the sandbox host _is_ the backend.
 - Main IPC: `cloud:link`/`cloud:unlink`/`cloud:status` keep their names but
   read/write the union; add `wsl:*` channels (Phase 2). `cloud:unlink` becomes
   the shared "disconnect + relaunch" path for both kinds
@@ -171,8 +171,8 @@ Responsibilities, in boot order:
      no prebuilds; do not compile inside the user's distro)
    - `node/` — pinned Node LTS linux-x64 runtime (unpacked official tarball)
    - `VERSION` — the launcher version string
-   Provisioning runs only when `VERSION` inside the distro ≠ `launcherVersion`
-   (this is also the entire update story — see Phase 6).
+     Provisioning runs only when `VERSION` inside the distro ≠ `launcherVersion`
+     (this is also the entire update story — see Phase 6).
 3. **Reap stale daemons.** Pidfile at `~/.omni/launcher/daemon.pid` inside the
    distro; on boot, `wsl.exe -d <distro> -- sh -c 'kill $(cat ...) 2>/dev/null'`
    before spawning. A daemon from a crashed previous app holds an unknown
@@ -207,7 +207,7 @@ provisions, persists `remoteBackend`, relaunches), `wsl:get-ws-token`,
 `wsl:status`.
 
 Window sequencing in `src/main/index.ts`: when `remoteBackend.kind === 'wsl'`,
-run provision→spawn→health *before* `MainProcessManager` creates the window,
+run provision→spawn→health _before_ `MainProcessManager` creates the window,
 so the bootstrap URL is live. Show a splash/`loading` state if provisioning is
 slow (first boot unpacks the runtime; expect ~10–20s).
 
@@ -231,7 +231,7 @@ Native dialogs (`dialog:*` in local main) return Windows paths; the daemon
 needs Linux paths. Fix at the single write chokepoint, not in consumers:
 
 - New pure helper `src/lib/wsl-path.ts`: `winToWslPath('C:\\Users\\x') →
-  '/mnt/c/Users/x'` (drive-letter lowercase, backslash flip, UNC `\\wsl$\<distro>\...`
+'/mnt/c/Users/x'` (drive-letter lowercase, backslash flip, UNC `\\wsl$\<distro>\...`
   → native path passthrough). Colocated unit tests.
 - In local main's dialog handlers, when `remoteBackend.kind === 'wsl'`,
   translate before returning to the renderer. The renderer and daemon only

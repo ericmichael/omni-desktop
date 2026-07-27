@@ -173,8 +173,7 @@ class VoiceClient {
  * Detected from the boot bootstrap (set by the preload / server template).
  */
 function isVoiceCloudLinked(): boolean {
-  const b = (window as unknown as { __omniBootstrap?: { remoteBackend?: { kind?: unknown } | null } })
-    .__omniBootstrap;
+  const b = (window as unknown as { __omniBootstrap?: { remoteBackend?: { kind?: unknown } | null } }).__omniBootstrap;
   return b?.remoteBackend?.kind === 'cloud';
 }
 
