@@ -74,6 +74,33 @@ export type ProfileSummary = {
   clientType: string;
   /** True for profiles shipped with the launcher (not user-created). */
   builtin: boolean;
+  /** Absolute path of the YAML backing this profile; null for the implicit host profile. */
+  path: string | null;
+  origin: 'builtin' | 'user-override' | 'implicit';
+  /** Parsed highlights for the detail pane; absent fields simply unknown. */
+  details?: { image?: string; services?: string[]; runAs?: string; confine?: boolean };
+};
+
+/**
+ * One Docker container carrying the omni-code label, as shown in the
+ * Sandboxes → Running pane. Ownership is joined main-side against live
+ * agent processes and warm-reattach claims (`codeTabs[].containerId`).
+ */
+export type SandboxContainerSummary = {
+  id: string;
+  name: string;
+  image: string;
+  createdAt: string;
+  state: string;
+  ownerKind: 'process' | 'warm-reattach' | 'orphan';
+  /** Human label for the owner (session/tab title); null for orphans. */
+  ownerLabel: string | null;
+};
+
+/** Result of the Docker substrate probe (Sandboxes → Health pane). */
+export type SandboxSubstrateStatus = {
+  docker: 'ok' | 'missing' | 'daemon-down';
+  dockerVersion?: string;
 };
 
 /**
@@ -3881,6 +3908,29 @@ export type BrowserDownloadEntry = {
 };
 
 /**
+ * Sandbox management IPC (Sandboxes tab). Profile discovery reads bundled +
+ * user YAMLs from disk; container channels shell out to docker with the same
+ * env resolution as the orphan sweep. Registered in both shells
+ * (`src/main/index.ts` and `src/server/managers.ts` wireGlobalHandlers).
+ */
+type SandboxIpcEvents = Namespaced<
+  'sandbox',
+  {
+    'list-profiles': () => ProfileSummary[];
+    /** Raw YAML for the read-only detail view; null for the implicit host profile (no file). */
+    'read-profile': (name: string) => { yaml: string } | null;
+    /** Copy the resolved bundled YAML to `<config>/sandbox/<name>.yml`. Throws if the override exists or the profile is implicit. */
+    'create-override': (name: string) => { path: string };
+    'list-containers': () => SandboxContainerSummary[];
+    /** Force-remove a container. Throws (with the owner label) when the id is protected. */
+    'remove-container': (id: string) => void;
+    /** Run the orphan cleanup pass on demand. */
+    'sweep-orphans': () => { removed: string[] };
+    'substrate-status': () => SandboxSubstrateStatus;
+  }
+>;
+
+/**
  * Intersection of all the events that the renderer can invoke and main process can handle.
  */
 export type IpcEvents = MainProcessIpcEvents &
@@ -3918,7 +3968,8 @@ export type IpcEvents = MainProcessIpcEvents &
   BrowserIpcEvents &
   SupervisorIpcEvents &
   RoutineIpcEvents &
-  ResidentIpcEvents;
+  ResidentIpcEvents &
+  SandboxIpcEvents;
 
 /**
  * Store events. Main process emits these events, renderer process listens to them.

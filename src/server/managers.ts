@@ -48,12 +48,20 @@ import { migrateLegacyPagesToConfigDir } from '@/main/pages-relocation-migration
 import { PlatformClient } from '@/main/platform-client';
 import { createPlatformClient, isEnterpriseBuild, PLATFORM_URL } from '@/main/platform-mode';
 import { ProcessManager, registerProcessHandlers } from '@/main/process-manager';
+import { registerProfileCatalogHandlers } from '@/main/profile-catalog';
+import { getBundledProfilesDir } from '@/main/profile-resolver';
 import { backfillProjectConfigs } from '@/main/project-config-backfill';
 import { closeProjectDb, getDb, openProjectDb } from '@/main/project-db';
 import { registerProjectHandlers } from '@/main/project-handlers';
 import { ProjectManager } from '@/main/project-manager';
 import { registerResidentHandlers, ResidentAgentManager } from '@/main/resident-agent-manager';
 import { RoutineBridge } from '@/main/routine-bridge';
+import {
+  defaultSandboxInventoryDeps,
+  processOwnersFromState,
+  registerSandboxInventoryHandlers,
+  warmReattachOwnersFromTabs,
+} from '@/main/sandbox-inventory';
 import { registerScheduledTaskHandlers, ScheduledTaskManager } from '@/main/scheduled-task-manager';
 import { registerSnapshotHandlers } from '@/main/snapshot-manager';
 import { registerSupervisorHandlers } from '@/main/supervisor-handlers';
@@ -1204,6 +1212,38 @@ export const wireGlobalHandlers = async (arg: {
   // Cascade-delete chat/code-tab snapshots when the renderer closes a tab.
   // Pure file-system op (no per-tenant data), so the global ipc is fine.
   registerSnapshotHandlers(ipc);
+
+  // Sandboxes tab (docs/sandboxes-tab-plan.md Phase 2). Profile discovery
+  // uses the same dirs as `omni serve --profile` resolution: the launcher's
+  // bundled assets/profiles (resolved relative to out/server → repo checkout,
+  // exactly like agent-process's resolveProfile) plus the shared
+  // <config>/sandbox dir (where writeAciProfile lands in cloud). The
+  // availableSandboxProfiles filter is per-tenant — resolved from the same
+  // snapshot the picker reads, so both surfaces always agree.
+  registerProfileCatalogHandlers(ipc, {
+    bundledDir: getBundledProfilesDir(),
+    userDir: join(getOmniConfigDir(), 'sandbox'),
+    getAvailableProfileNames: (event) => {
+      const c = event as HandlerContext;
+      return getStoreSnapshot(c.tenantId, c.principalId ?? c.tenantId).availableSandboxProfiles;
+    },
+  });
+  // Container inventory. dockerd is singular on this backend while tenants
+  // are not, so ownership joins aggregate across EVERY tenant instance —
+  // one tenant's live container must never look like another's orphan.
+  registerSandboxInventoryHandlers(ipc, {
+    ...defaultSandboxInventoryDeps(),
+    getProcessOwners: () =>
+      [...tenants.values()].flatMap((t) =>
+        processOwnersFromState(
+          t.processManager.getContainerOwners(),
+          t.settings.get('codeTabs') ?? [],
+          t.residentAgentManager.getDurableSnapshot().residentAgents
+        )
+      ),
+    getWarmReattachIds: () =>
+      [...tenants.values()].flatMap((t) => warmReattachOwnersFromTabs(t.settings.get('codeTabs') ?? [])),
+  });
 
   // GitHub / Azure DevOps discovery + GitHub status/unlink. All resolve their
   // token from the per-principal SecretStore (matching the Git-credential and

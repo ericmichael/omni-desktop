@@ -7,20 +7,21 @@ import { DEFAULT_ENV } from '@/lib/pty-utils';
 
 const execFileAsync = promisify(execFile);
 
-const LABEL_KEY = 'com.omni.omni-code';
+/** Docker label identifying containers created by omni sandbox. Shared with `sandbox-inventory.ts`. */
+export const OMNI_CONTAINER_LABEL = 'com.omni.omni-code';
 
 // ---------------------------------------------------------------------------
 // Injectable deps
 // ---------------------------------------------------------------------------
 
-type ExecFileFn = (
+export type DockerExecFn = (
   cmd: string,
   args: string[],
   opts: { encoding: 'utf8'; timeout: number; env: Record<string, string> }
 ) => Promise<{ stdout: string; stderr: string }>;
 
 export type DockerCleanupDeps = {
-  execFileFn: ExecFileFn;
+  execFileFn: DockerExecFn;
   getEnv: () => Record<string, string>;
   /**
    * Container ids this launcher instance still has a claim on: warm-reattach
@@ -34,9 +35,18 @@ export type DockerCleanupDeps = {
   getProtectedContainerIds: () => string[];
 };
 
-const defaultDeps = (): DockerCleanupDeps => ({
-  execFileFn: execFileAsync as unknown as ExecFileFn,
+/**
+ * Default exec plumbing for docker CLI calls: real execFile + the login-shell
+ * env (Docker Desktop installs often only extend PATH in the user's shell rc).
+ * Shared with `sandbox-inventory.ts` so both surfaces resolve docker the same way.
+ */
+export const defaultDockerExecDeps = (): Pick<DockerCleanupDeps, 'execFileFn' | 'getEnv'> => ({
+  execFileFn: execFileAsync as unknown as DockerExecFn,
   getEnv: () => ({ ...process.env, ...DEFAULT_ENV, ...shellEnvSync() }) as Record<string, string>,
+});
+
+const defaultDeps = (): DockerCleanupDeps => ({
+  ...defaultDockerExecDeps(),
   getProtectedContainerIds: () => [],
 });
 
@@ -54,9 +64,10 @@ const defaultDeps = (): DockerCleanupDeps => ({
  * Containers reported by `getProtectedContainerIds` are NOT orphans — they are
  * resume targets or live sessions of this launcher instance — and are skipped.
  *
- * Returns the number of containers cleaned up, or -1 if Docker is unavailable.
+ * Returns the ids of the containers removed, or null if Docker is unavailable.
+ * Runs at startup (both shells) and on demand via `sandbox:sweep-orphans`.
  */
-export const cleanupOrphanedContainers = async (deps?: Partial<DockerCleanupDeps>): Promise<number> => {
+export const cleanupOrphanedContainers = async (deps?: Partial<DockerCleanupDeps>): Promise<string[] | null> => {
   const { execFileFn, getEnv, getProtectedContainerIds } = { ...defaultDeps(), ...deps };
   const env = getEnv();
   const opts = { encoding: 'utf8' as const, timeout: 15_000, env };
@@ -65,7 +76,7 @@ export const cleanupOrphanedContainers = async (deps?: Partial<DockerCleanupDeps
   try {
     await execFileFn('docker', ['version'], opts);
   } catch {
-    return -1;
+    return null;
   }
 
   // List containers created by omni sandbox (running or stopped) using the omni-code label.
@@ -75,7 +86,7 @@ export const cleanupOrphanedContainers = async (deps?: Partial<DockerCleanupDeps
   try {
     const { stdout: labelResult } = await execFileFn(
       'docker',
-      ['ps', '-a', '--filter', `label=${LABEL_KEY}`, '--format', '{{.ID}}'],
+      ['ps', '-a', '--filter', `label=${OMNI_CONTAINER_LABEL}`, '--format', '{{.ID}}'],
       opts
     );
     const { stdout: nameResult } = await execFileFn(
@@ -93,11 +104,11 @@ export const cleanupOrphanedContainers = async (deps?: Partial<DockerCleanupDeps
     }
     containerIds = [...ids];
   } catch {
-    return 0;
+    return [];
   }
 
   if (containerIds.length === 0) {
-    return 0;
+    return [];
   }
 
   // `docker ps --format {{.ID}}` yields short (12-char) ids while the store
@@ -107,21 +118,21 @@ export const cleanupOrphanedContainers = async (deps?: Partial<DockerCleanupDeps
   const isProtected = (id: string): boolean => protectedIds.some((p) => p.startsWith(id) || id.startsWith(p));
 
   // Force-remove each orphaned container (stop + rm)
-  let cleaned = 0;
+  const removed: string[] = [];
   for (const id of containerIds) {
     if (isProtected(id)) {
       continue;
     }
     try {
       await execFileFn('docker', ['rm', '-f', id], opts);
-      cleaned++;
+      removed.push(id);
       console.debug(`Cleaned up orphaned container: ${id}`);
     } catch (error) {
       console.warn(`Failed to remove orphaned container ${id}:`, error);
     }
   }
 
-  return cleaned;
+  return removed;
 };
 
 /**
@@ -139,7 +150,11 @@ export const pruneDockerResources = async (deps?: Partial<DockerCleanupDeps>): P
   const opts = { encoding: 'utf8' as const, timeout: 60_000, env };
 
   try {
-    const { stdout } = await execFileFn('docker', ['system', 'prune', '-f', '--filter', `label!=${LABEL_KEY}`], opts);
+    const { stdout } = await execFileFn(
+      'docker',
+      ['system', 'prune', '-f', '--filter', `label!=${OMNI_CONTAINER_LABEL}`],
+      opts
+    );
     const match = stdout.match(/Total reclaimed space:\s*(.+)/);
     const reclaimed = match?.[1]?.trim() ?? null;
     if (reclaimed) {
