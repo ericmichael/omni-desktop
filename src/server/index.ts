@@ -280,7 +280,7 @@ const main = async () => {
 
   // Local voice (Option A) — self-hosted only. STT/TTS run on this host, so it
   // must not be a managed/cloud deployment. The renderer gates on the same
-  // condition (isLocalVoiceCapable → !cloudMode); this is the server-side guard.
+  // condition (isLocalVoiceCapable → not cloud-linked); this is the server-side guard.
   if (!isEnterpriseBuild()) {
     registerVoiceRoutes(fastify);
     console.log(`[voice] local voice routes registered at ${VOICE_HTTP_PREFIX}`);

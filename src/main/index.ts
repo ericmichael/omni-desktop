@@ -884,23 +884,23 @@ const broadcastStore = (): void =>
   main.sendToWindow('store:changed', main.getStoreSnapshot ? main.getStoreSnapshot() : store.store);
 
 const cloudStatusFromStore = (): import('@/shared/types').CloudStatus => {
-  const cm = store.get('cloudMode');
-  if (!cm) {
+  const backend = store.get('remoteBackend');
+  if (backend?.kind !== 'cloud') {
     return { connected: false };
   }
   const live = entraStatus();
   // Belt + suspenders: if the secret store has been cleared out (e.g. user
-  // wiped userData) treat the cloudMode flag as stale and report disconnected
-  // so the renderer drops back to local mode after a restart.
+  // wiped userData) treat the remoteBackend flag as stale and report
+  // disconnected so the renderer drops back to local mode after a restart.
   if (!live.signedIn) {
     return { connected: false };
   }
   return {
     connected: true,
-    url: cm.url,
-    tenantId: cm.tenantId,
-    clientId: cm.clientId,
-    account: cm.account,
+    url: backend.url,
+    tenantId: backend.tenantId,
+    clientId: backend.clientId,
+    account: backend.account,
   };
 };
 
@@ -909,10 +909,10 @@ main.ipc.handle('cloud:status', () => cloudStatusFromStore());
 /** Restart the Electron app on a short delay so the IPC reply (the new
  *  ``CloudStatus``) flushes to the renderer first. The transport choice is
  *  baked into the BrowserWindow at creation via ``additionalArguments``, so
- *  flipping cloud mode requires a fresh process — not just a webContents
- *  reload. 200ms is enough for the response handshake without making the UI
- *  feel laggy. */
-const restartAfterCloudModeChange = (): void => {
+ *  flipping the remote backend requires a fresh process — not just a
+ *  webContents reload. 200ms is enough for the response handshake without
+ *  making the UI feel laggy. */
+const restartAfterRemoteBackendChange = (): void => {
   setTimeout(() => {
     app.relaunch();
     app.exit(0);
@@ -944,9 +944,10 @@ main.ipc.handle('cloud:link', async (_, urlInput) => {
   if (!result.signedIn) {
     throw new Error('Cloud sign-in did not produce an account');
   }
-  // 3. Persist the cloud-mode flag, then restart so the renderer picks up
+  // 3. Persist the remoteBackend flag, then restart so the renderer picks up
   //    the cloud transport on its next boot.
-  store.set('cloudMode', {
+  store.set('remoteBackend', {
+    kind: 'cloud',
     url,
     tenantId: discovered.tenantId,
     clientId: discovered.clientId,
@@ -954,25 +955,30 @@ main.ipc.handle('cloud:link', async (_, urlInput) => {
   });
   broadcastStore();
   const status = cloudStatusFromStore();
-  restartAfterCloudModeChange();
+  restartAfterRemoteBackendChange();
   return status;
 });
 
+// Shared disconnect path for BOTH remote-backend kinds (cloud and wsl):
+// clears the flag and restarts back into standalone-local mode. Entra logout
+// only applies to the cloud kind — a WSL link never signed in.
 main.ipc.handle('cloud:unlink', () => {
-  entraLogout();
-  store.set('cloudMode', null);
+  if (store.get('remoteBackend')?.kind !== 'wsl') {
+    entraLogout();
+  }
+  store.set('remoteBackend', null);
   broadcastStore();
-  // The live renderer is still configured to use the (now broken) cloud
+  // The live renderer is still configured to use the (now broken) backend
   // transport — restart so it falls back to local Electron IPC.
-  restartAfterCloudModeChange();
+  restartAfterRemoteBackendChange();
 });
 
 main.ipc.handle('cloud:get-access-token', async () => {
-  const cm = store.get('cloudMode');
-  if (!cm) {
+  const backend = store.get('remoteBackend');
+  if (backend?.kind !== 'cloud') {
     throw new Error('Not connected to a cloud');
   }
-  return ensureFreshEntraToken(cm.tenantId, cm.clientId);
+  return ensureFreshEntraToken(backend.tenantId, backend.clientId);
 });
 
 // Stable per-install machine identity used by the cloud's "computer-as-
@@ -1012,12 +1018,12 @@ const cleanupTunnelReverse = wireTunnelReverseHandlers((event) => {
 // requests fails the CORS check. Running the fetch in main bypasses CORS
 // entirely (Node's fetch is unrestricted) and returns the opaque WS token.
 main.ipc.handle('cloud:get-ws-token', async () => {
-  const cm = store.get('cloudMode');
-  if (!cm) {
+  const backend = store.get('remoteBackend');
+  if (backend?.kind !== 'cloud') {
     throw new Error('Not connected to a cloud');
   }
-  const accessToken = await ensureFreshEntraToken(cm.tenantId, cm.clientId);
-  const res = await net.fetch(`${cm.url}/api/ws-token`, {
+  const accessToken = await ensureFreshEntraToken(backend.tenantId, backend.clientId);
+  const res = await net.fetch(`${backend.url}/api/ws-token`, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   if (!res.ok) {

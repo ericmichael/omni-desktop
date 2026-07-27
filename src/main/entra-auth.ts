@@ -171,7 +171,7 @@ export function getStatus(): EntraStatus {
 }
 
 /** Clear the stored token bundle. Caller is responsible for clearing the
- *  cloudMode flag in the store. */
+ *  remoteBackend flag in the store. */
 export function logout(): void {
   deleteOauthTokens(STORE_ID);
 }

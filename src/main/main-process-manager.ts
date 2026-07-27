@@ -6,7 +6,14 @@ import path from 'path';
 
 import { PROJECT_KEYS } from '@/main/db-store-bridge';
 import { isDevelopment, manageWindowSize } from '@/main/util';
-import type { IpcEvents, IpcRendererEvents, MainProcessStatus, StoreData, WithTimestamp } from '@/shared/types';
+import type {
+  IpcEvents,
+  IpcRendererEvents,
+  MainProcessStatus,
+  RemoteBackendBootstrap,
+  StoreData,
+  WithTimestamp,
+} from '@/shared/types';
 
 import { checkForUpdates } from './updater';
 
@@ -117,12 +124,16 @@ export class MainProcessManager {
   };
 
   createWindow = () => {
-    // Pass the persisted cloudMode (if any) into the renderer via
+    // Pass the persisted remoteBackend (if any) into the renderer via
     // additionalArguments so the renderer transport can synchronously decide
-    // local-IPC vs. cloud-WS at boot — without an async pre-init step. Re-
+    // local-IPC vs. remote-WS at boot — without an async pre-init step. Re-
     // reading this requires a window reload, which matches the link/unlink
-    // UX (the cloud handlers prompt for a reload after they fire).
-    const cloudMode = this.store.get('cloudMode') ?? null;
+    // UX (the link handlers prompt for a reload after they fire). The wsl
+    // kind is resolved to its live URL here — WslBackendManager has already
+    // picked the port and spawned the daemon before window creation.
+    const backend = this.store.get('remoteBackend') ?? null;
+    const remoteBackend: RemoteBackendBootstrap | null =
+      backend?.kind === 'wsl' ? { ...backend, url: `http://127.0.0.1:${backend.port}` } : backend;
     const window = new BrowserWindow({
       minWidth: 800,
       minHeight: 600,
@@ -133,7 +144,7 @@ export class MainProcessManager {
         contextIsolation: true,
         devTools: isDevelopment(),
         webviewTag: true,
-        additionalArguments: [`--omni-cloud-mode=${JSON.stringify(cloudMode)}`],
+        additionalArguments: [`--omni-remote-backend=${JSON.stringify(remoteBackend)}`],
       },
       autoHideMenuBar: true, // Hide the menu bar
       frame: true, // Keep window frame/chrome

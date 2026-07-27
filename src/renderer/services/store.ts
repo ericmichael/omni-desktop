@@ -40,7 +40,7 @@ const getDefaults = (): StoreData => ({
   theme: 'omni',
   onboardingComplete: false,
   cliCardDismissed: false,
-  cloudMode: null,
+  remoteBackend: null,
   projects: [],
   milestones: [],
   pages: [],

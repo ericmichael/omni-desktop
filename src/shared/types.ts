@@ -114,7 +114,8 @@ export type CloudAccount = {
   email?: string;
 };
 
-export type CloudMode = {
+export type CloudBackend = {
+  kind: 'cloud';
   /** Origin of the launcher cloud (e.g. ``https://omni.example.com``). */
   url: string;
   /** AAD tenant the cloud is registered in. Cached from /.well-known/omni-cloud. */
@@ -123,6 +124,19 @@ export type CloudMode = {
   clientId: string;
   account: CloudAccount;
 };
+
+export type WslBackend = {
+  kind: 'wsl';
+  /** WSL distro name as reported by `wsl.exe -l -q`. */
+  distro: string;
+  /** Port the daemon listens on. Re-picked and persisted by WslBackendManager before window creation. */
+  port: number;
+};
+
+export type RemoteBackend = CloudBackend | WslBackend;
+
+/** Shape injected into the renderer via preload — wsl kind carries the resolved live URL. */
+export type RemoteBackendBootstrap = CloudBackend | (WslBackend & { url: string });
 
 /**
  * One member of the resident-agent roster (docs/resident-agents-plan.md):
@@ -351,22 +365,26 @@ export type StoreData = {
   /** User dismissed the "Use Omni from your terminal" card in Spaces. */
   cliCardDismissed: boolean;
   /**
-   * Set when the Electron app is connected to a deployed cloud launcher.
-   * When non-null the renderer routes its transport to ``url`` over WebSocket
-   * (Bearer-authenticated against AAD) instead of using local Electron IPC,
-   * so chat sessions, projects, tickets etc. live in the cloud's Postgres
-   * and sync to any other Electron / web client signed in as the same user.
+   * Set when the Electron app is linked to a remote launcher backend. When
+   * non-null the renderer routes its transport to the backend over WebSocket
+   * instead of using local Electron IPC, so chat sessions, projects, tickets
+   * etc. live in the backend's store.
    *
-   * ``url`` is the launcher origin (no trailing slash).
+   * ``kind: 'cloud'`` — a deployed cloud launcher (Bearer-authenticated
+   * against AAD). ``url`` is the launcher origin (no trailing slash);
    * ``tenantId`` + ``clientId`` are discovered from
    * ``<url>/.well-known/omni-cloud`` at link time so the renderer doesn't
-   * need them — they're cached here for token refresh.
-   * ``account`` is what we display in the UI; the access + refresh tokens
-   * themselves live in the local secret store (`git-secrets.json`) under the
-   * ``entra`` id.
+   * need them — they're cached here for token refresh. ``account`` is what
+   * we display in the UI; the access + refresh tokens themselves live in
+   * the local secret store (`git-secrets.json`) under the ``entra`` id.
+   *
+   * ``kind: 'wsl'`` — the server build running as a daemon inside a WSL
+   * distro on this machine (Windows only), authenticated by a per-boot
+   * shared secret minted by WslBackendManager.
+   *
    * ``null`` is the standalone-Electron mode (today's default).
    */
-  cloudMode: CloudMode | null;
+  remoteBackend: RemoteBackend | null;
   projects: Project[];
   milestones: Milestone[];
   pages: Page[];
@@ -865,24 +883,43 @@ export const schema: Schema<StoreData> = {
     type: 'boolean',
     default: false,
   },
-  cloudMode: {
+  remoteBackend: {
+    // Discriminated union — see RemoteBackend. Persisted `cloudMode` values
+    // from older builds fail validation here and are wiped by
+    // `clearInvalidConfig: true` (intentional: cloud users relink once).
     type: ['object', 'null'],
     default: null,
-    properties: {
-      url: { type: 'string' },
-      tenantId: { type: 'string' },
-      clientId: { type: 'string' },
-      account: {
+    anyOf: [
+      { type: 'null' },
+      {
         type: 'object',
         properties: {
-          name: { type: 'string' },
-          email: { type: 'string' },
-          oid: { type: 'string' },
+          kind: { const: 'cloud' },
+          url: { type: 'string' },
+          tenantId: { type: 'string' },
+          clientId: { type: 'string' },
+          account: {
+            type: 'object',
+            properties: {
+              name: { type: 'string' },
+              email: { type: 'string' },
+              oid: { type: 'string' },
+            },
+            required: ['oid'],
+          },
         },
-        required: ['oid'],
+        required: ['kind', 'url', 'tenantId', 'clientId', 'account'],
       },
-    },
-    required: ['url', 'tenantId', 'clientId', 'account'],
+      {
+        type: 'object',
+        properties: {
+          kind: { const: 'wsl' },
+          distro: { type: 'string' },
+          port: { type: 'number' },
+        },
+        required: ['kind', 'distro', 'port'],
+      },
+    ],
   },
   wipLimit: {
     type: 'number',
@@ -2611,7 +2648,7 @@ export type CodexDeviceCode = { userCode: string; verificationUri: string };
  * Cloud-link API. ``cloud:link`` opens the AAD device-code flow against the
  * launcher discovered via *url*, surfaces the user code through
  * ``cloud:device-code``, polls until approved, then persists the tokens +
- * the ``cloudMode`` flag in the store. The renderer is expected to reload
+ * the ``remoteBackend`` flag in the store. The renderer is expected to reload
  * after a successful link so the transport switches to the cloud variant
  * at boot. ``cloud:unlink`` clears both. ``cloud:get-access-token`` is the
  * renderer's hook for fetching a fresh Bearer (refreshes via the stored
@@ -2657,6 +2694,43 @@ export type CloudStatus =
       clientId: string;
       account: CloudAccount;
     };
+
+/** One installed WSL distro, from `wsl.exe -l -q` (+ default marker). */
+export type WslDistro = { name: string; isDefault: boolean };
+
+/** Result of probing for WSL on this machine. */
+export type WslDetectResult = { wsl: 'missing' } | { wsl: 'ok'; distros: WslDistro[] };
+
+/** Timestamped WslBackendManager status, mirroring the manager getStatus() pattern. */
+export type WslBackendStatus = {
+  state: 'idle' | 'provisioning' | 'starting' | 'running' | 'error';
+  distro?: string;
+  port?: number;
+  docker: 'ok' | 'missing' | 'daemon-down' | 'unknown';
+  error?: string;
+  timestamp: number;
+};
+
+/**
+ * WSL-backend API (Windows only; all channels resolve in LOCAL Electron
+ * main via `localEmitter`). ``wsl:detect`` probes `wsl.exe` and lists
+ * distros. ``wsl:link`` provisions the daemon payload into *distro*,
+ * persists the ``remoteBackend`` flag, and relaunches the app so the
+ * renderer boots on the WS transport. Disconnecting reuses ``cloud:unlink``
+ * (the shared disconnect + relaunch path for both kinds).
+ * ``wsl:get-ws-token`` mints a WS auth token signed with the daemon's
+ * per-boot shared secret — no HTTP fetch. Handlers are implemented by
+ * WslBackendManager (Phase 2).
+ */
+type WslIpcEvents = Namespaced<
+  'wsl',
+  {
+    detect: () => WslDetectResult;
+    link: (distro: string) => void;
+    'get-ws-token': () => string;
+    status: () => WslBackendStatus;
+  }
+>;
 
 /** Stable identity persisted in `<configDir>/machine.json`. */
 export type MachineIdentity = {
@@ -3762,6 +3836,7 @@ export type IpcEvents = MainProcessIpcEvents &
   ConfigIpcEvents &
   CodexIpcEvents &
   CloudIpcEvents &
+  WslIpcEvents &
   MachineIpcEvents &
   ReverseRpcIpcEvents &
   SettingsConfigIpcEvents &

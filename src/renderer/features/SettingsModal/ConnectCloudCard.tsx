@@ -8,8 +8,8 @@
  *   1. User enters the launcher URL.
  *   2. ``cloud:link`` fetches ``/.well-known/omni-cloud`` to discover the
  *      AAD tenant + client id, runs the device-code flow, persists the
- *      tokens via {@link ElectronSecretStore} and the cloudMode flag in the
- *      store.
+ *      tokens via {@link ElectronSecretStore} and the remoteBackend flag in
+ *      the store.
  *   3. Card prompts the user to restart the app so the renderer transport
  *      switches to the cloud variant at boot.
  *
@@ -60,11 +60,12 @@ export const ConnectCloudCard = memo(() => {
   const [error, setError] = useState<string | null>(null);
   const [restarting, setRestarting] = useState(false);
 
-  // Link state is a LOCAL-main concept (the `cloudMode` electron-store flag).
-  // It must NOT be read from `persistedStoreApi`/`$store` — in cloud-linked
-  // mode that mirror reflects the CLOUD's store, which has no `cloudMode`, so
-  // the card would always look disconnected and the Disconnect button would
-  // never render. Ask local main directly via `cloud:status`.
+  // Link state is a LOCAL-main concept (the `remoteBackend` electron-store
+  // flag). It must NOT be read from `persistedStoreApi`/`$store` — in cloud-
+  // linked mode that mirror reflects the CLOUD's store, which has no
+  // `remoteBackend`, so the card would always look disconnected and the
+  // Disconnect button would never render. Ask local main directly via
+  // `cloud:status`.
   const [cloudStatus, setCloudStatus] = useState<CloudStatus | null>(null);
   useEffect(() => {
     void localEmitter.invoke('cloud:status').then(setCloudStatus);
@@ -80,9 +81,9 @@ export const ConnectCloudCard = memo(() => {
     setDeviceCode(null);
     try {
       // cloud:link / cloud:unlink are handled in LOCAL main (they mutate the
-      // electron-store cloudMode flag + secret store). They must NOT route over
-      // the cloud WS — once linked, `emitter` points at the cloud, so an unlink
-      // sent there would never reach local main. Always use `localEmitter`.
+      // electron-store remoteBackend flag + secret store). They must NOT route
+      // over the cloud WS — once linked, `emitter` points at the cloud, so an
+      // unlink sent there would never reach local main. Always use `localEmitter`.
       await localEmitter.invoke('cloud:link', url);
       // Main relaunches the app on a short delay; show a transient message
       // so the user knows what's happening when the window blanks.
