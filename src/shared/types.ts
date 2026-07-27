@@ -49,7 +49,7 @@ export type WindowProps = {
 /**
  * Data stored in the electron store.
  */
-export type LayoutMode = 'work' | 'chat' | 'dashboards' | 'agents' | 'plugins' | 'settings' | 'gallery';
+export type LayoutMode = 'work' | 'chat' | 'dashboards' | 'agents' | 'plugins' | 'sandboxes' | 'settings' | 'gallery';
 export type OmniTheme =
   | 'omni'
   | 'teams-light'
@@ -880,6 +880,7 @@ export const schema: Schema<StoreData> = {
       'routines',
       'agents',
       'plugins',
+      'sandboxes',
       'settings',
       'more',
       'gallery',

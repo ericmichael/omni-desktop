@@ -12,6 +12,7 @@ import { Gallery } from '@/renderer/features/Gallery/Gallery';
 import { OnboardingWizard } from '@/renderer/features/Onboarding/OnboardingWizard';
 import { PluginsView } from '@/renderer/features/Plugins/PluginsView';
 import { ResidentsTab } from '@/renderer/features/Residents/ResidentsTab';
+import { SandboxesTabContent } from '@/renderer/features/Sandboxes/SandboxesTabContent';
 import { SettingsPage } from '@/renderer/features/SettingsModal/SettingsPage';
 import { Tickets } from '@/renderer/features/Tickets/Tickets';
 import { persistedStoreApi } from '@/renderer/services/store';
@@ -104,6 +105,7 @@ export const MainContent = memo(() => {
     // Agents hosts the resident roster, channels/DMs, and the Routines surface.
     { key: 'agents', Component: ResidentsTab },
     { key: 'plugins', Component: PluginsView },
+    { key: 'sandboxes', Component: SandboxesTabContent },
     { key: 'settings', Component: SettingsPage },
     ...(import.meta.env.DEV ? [{ key: 'gallery' as const, Component: Gallery }] : []),
   ];

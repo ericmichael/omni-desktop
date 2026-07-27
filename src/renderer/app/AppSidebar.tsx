@@ -4,6 +4,7 @@ import {
   Bot20Regular,
   CalendarClock20Regular,
   Compose20Regular,
+  Cube20Regular,
   DataBarVertical24Regular,
   MailInbox20Regular,
   MoreHorizontal20Regular,
@@ -159,6 +160,7 @@ export const AppSidebar = memo(() => {
   }, [closeHome]);
   const handleDashboards = useCallback(() => setMode('dashboards'), [setMode]);
   const handlePlugins = useCallback(() => setMode('plugins'), [setMode]);
+  const handleSandboxes = useCallback(() => setMode('sandboxes'), [setMode]);
   const handleGallery = useCallback(() => setMode('gallery'), [setMode]);
   const handleSettings = useCallback(() => setMode('settings'), [setMode]);
   const handlePalette = useCallback(() => $commandPaletteOpen.set(true), []);
@@ -180,7 +182,12 @@ export const AppSidebar = memo(() => {
   // The More row owns every management surface — it paints selected when
   // any of them is frontmost, so "where am I" survives the collapse.
   const moreSelected =
-    rosterSelected || routinesSelected || mode === 'dashboards' || mode === 'plugins' || mode === 'gallery';
+    rosterSelected ||
+    routinesSelected ||
+    mode === 'dashboards' ||
+    mode === 'plugins' ||
+    mode === 'sandboxes' ||
+    mode === 'gallery';
 
   // Desktop: always visible. Mobile: only as the Home page.
   if (!isDesktop && !mobileHomeOpen) {
@@ -276,6 +283,9 @@ export const AppSidebar = memo(() => {
                 )}
                 <MenuItem icon={<PuzzlePiece20Regular />} onClick={handlePlugins}>
                   Plugins
+                </MenuItem>
+                <MenuItem icon={<Cube20Regular />} onClick={handleSandboxes}>
+                  Sandboxes
                 </MenuItem>
                 {import.meta.env.DEV && (
                   <MenuItem icon={<Beaker20Regular />} onClick={handleGallery}>

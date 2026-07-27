@@ -27,6 +27,7 @@ const TAB_TITLES: Record<LayoutMode, string> = {
   dashboards: 'Dashboards',
   agents: 'Agents',
   plugins: 'Plugins',
+  sandboxes: 'Sandboxes',
   settings: 'Settings',
   gallery: 'Gallery',
 };
