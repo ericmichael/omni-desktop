@@ -5,7 +5,24 @@
  * provider type and Ollama is an OpenAI-compatible server — the UI never
  * mentions either word outside Advanced.
  */
-import type { ModelsConfig, ProviderEntry, ProviderProbe, RuntimeModelList } from '@/shared/types';
+import type { ModelEntry, ModelsConfig, ProviderEntry, ProviderProbe, RuntimeModelList } from '@/shared/types';
+
+/**
+ * Realtime voice models reachable with ChatGPT (Codex) OAuth, seeded on
+ * sign-in because Codex model discovery only ever returns text models.
+ *
+ * The `realtime` flag is load-bearing, not decoration: the runtime's
+ * `resolve_voice_settings_for_realtime` returns `{}` for any model without
+ * it, so a voice_default pointing at a text model is silently ignored.
+ */
+export const CODEX_REALTIME_MODELS: Record<string, ModelEntry> = {
+  'gpt-realtime': { model: 'gpt-realtime', label: 'Realtime', realtime: true },
+  'gpt-realtime-1.5': { model: 'gpt-realtime-1.5', label: 'Realtime 1.5', realtime: true },
+  'gpt-realtime-mini': { model: 'gpt-realtime-mini', label: 'Realtime Mini', realtime: true },
+};
+
+/** Voice model a fresh ChatGPT sign-in adopts — the current realtime default. */
+export const CODEX_DEFAULT_VOICE_MODEL = 'codex/gpt-realtime-1.5';
 
 type ProviderSetupAnswers = {
   kind: 'openai' | 'anthropic' | 'ollama' | 'openai-compatible';
@@ -83,9 +100,15 @@ export function buildProviderConfig(
 
 /**
  * Merge a fresh ChatGPT (Codex) sign-in into the config: ensure the
- * `codex` openai-oauth provider exists (models stay empty — runtime
- * discovery fills them) and promote a Codex model to default when nothing
- * else is configured. Pure core of the Settings/onboarding sign-in flows.
+ * `codex` openai-oauth provider exists (text models stay empty — runtime
+ * discovery fills them; realtime voice models are seeded because discovery
+ * never returns them) and promote a Codex model to the text and voice
+ * defaults when nothing else is configured. Pure core of the
+ * Settings/onboarding sign-in flows.
+ *
+ * Seeding is merge-under, so a user's edits to a realtime entry survive
+ * re-running this. Note a deleted seed does come back on the next sign-in —
+ * the merge cannot tell "removed on purpose" from "never had it".
  */
 export function buildCodexConfig(
   current: ModelsConfig,
@@ -97,18 +120,27 @@ export function buildCodexConfig(
   const preferred = codexNames.find((n) => n.endsWith('/gpt-5.5')) ?? codexNames[0];
 
   const hasOtherProviders = Object.keys(current.providers).some((name) => name !== 'codex');
+  const existingCodex = current.providers.codex;
+  const codex: ProviderEntry = {
+    ...(existingCodex ?? {}),
+    type: 'openai-oauth',
+    models: { ...CODEX_REALTIME_MODELS, ...(existingCodex?.models ?? {}) },
+  };
   const config: ModelsConfig = {
     ...current,
-    providers: {
-      ...current.providers,
-      codex: current.providers.codex ?? { type: 'openai-oauth', models: {} },
-    },
+    providers: { ...current.providers, codex },
   };
 
   let madeDefault: string | undefined;
   if (!hasOtherProviders && preferred) {
     config.default = preferred;
     madeDefault = preferred;
+  }
+  // Voice follows the same rule as the text default: adopt ChatGPT only when
+  // the user has nothing else set up. Someone who already configured a
+  // provider — or already picked a voice model — keeps what they chose.
+  if (!hasOtherProviders && !current.voice_default) {
+    config.voice_default = CODEX_DEFAULT_VOICE_MODEL;
   }
   return { config, madeDefault };
 }

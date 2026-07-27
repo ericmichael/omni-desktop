@@ -12,6 +12,7 @@ import type { ComponentProps } from 'react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 
 import { formatDuration, formatTimestamp } from '@/lib/format-time';
+import { openMobileNav } from '@/renderer/app/mobile-nav';
 import { useIsDesktop } from '@/renderer/common/use-is-desktop';
 import {
   Badge,
@@ -417,9 +418,8 @@ const createEmptyFormState = (defaultProfileName: string | undefined): RoutineFo
  * content plane; opening a routine replaces the plane with its detail —
  * the same shape as Roster → AgentDetail.
  *
- * On mobile the list titles itself with its band header (the bottom bar's
- * Home tab is the way out); detail/create levels render a TopAppBar whose
- * back returns to this list.
+ * On mobile every level renders a TopAppBar: the list leads with the drawer
+ * handle, detail/create levels with a back arrow to this list.
  */
 export const ScheduledTasks = memo(() => {
   const styles = useStyles();
@@ -585,13 +585,13 @@ export const ScheduledTasks = memo(() => {
 
   // ----- panes -----
 
-  // Full-plane list surface — band header on desktop (the Roster shape),
-  // TopAppBar with the host's back on mobile.
+  // Full-plane list surface — band header on desktop (the Roster shape);
+  // on mobile the TopAppBar titles it and the band carries only the action.
   const listSurface = (
     <>
       <div className={styles.bandHeader}>
         <div className={styles.bandTitleRow}>
-          <span className={styles.bandTitle}>Routines</span>
+          {isDesktop && <span className={styles.bandTitle}>Routines</span>}
           <div className={styles.bandSpacer} />
           <Button size="sm" leftIcon={<Add20Regular />} onClick={startCreate}>
             New routine
@@ -710,16 +710,19 @@ export const ScheduledTasks = memo(() => {
 
   // One master per tab: the host's sidebar is the only master. This surface
   // fills the content plane — the list, or (drilled in) a detail/form that
-  // replaces it. Mobile detail levels title themselves with a back to the
-  // list; the list's own header carries the host's back (mobileOnBack).
+  // replaces it. On mobile every level carries a TopAppBar: detail backs
+  // out to the list, the list leads with the drawer handle.
   const surfaceOpen = creating || selectedTask !== null;
 
   return (
     <div className={mergeClasses(styles.root, isGlass && styles.rootGlass)}>
       <div className={mergeClasses(styles.detailPane, isGlass && styles.detailPaneGlass)}>
-        {!isDesktop && surfaceOpen && (
-          <TopAppBar title={creating ? 'New routine' : (selectedTask?.name ?? 'Routine')} onBack={handleBack} />
-        )}
+        {!isDesktop &&
+          (surfaceOpen ? (
+            <TopAppBar title={creating ? 'New routine' : (selectedTask?.name ?? 'Routine')} onBack={handleBack} />
+          ) : (
+            <TopAppBar title="Routines" onMenu={openMobileNav} />
+          ))}
         {surfaceOpen ? detailBody : listSurface}
       </div>
       {deleteDialog}

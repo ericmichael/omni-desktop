@@ -3,9 +3,6 @@ import { useStore } from '@nanostores/react';
 import { memo, useEffect, useState } from 'react';
 
 import { AppSidebar } from '@/renderer/app/AppSidebar';
-import { $mobileHomeOpen } from '@/renderer/app/mobile-home';
-import { Sidebar } from '@/renderer/app/Sidebar';
-import { useIsDesktop } from '@/renderer/common/use-is-desktop';
 import { Code } from '@/renderer/features/Code/Code';
 import { Dashboards } from '@/renderer/features/Dashboards/Dashboards';
 import { Gallery } from '@/renderer/features/Gallery/Gallery';
@@ -22,14 +19,13 @@ import { $glassEnabled } from '@/renderer/theme/use-glass';
 import type { LayoutMode } from '@/shared/types';
 
 const useStyles = makeStyles({
+  /* Mobile: the sidebar is an overlay drawer, so the content plane is the
+     only in-flow child and the same row layout serves both breakpoints. */
   root: {
     display: 'flex',
-    flexDirection: 'column-reverse',
+    flexDirection: 'row',
     width: '100%',
     height: '100%',
-    '@media (min-width: 640px)': {
-      flexDirection: 'row',
-    },
   },
   rootWithDeckBg: {
     backgroundSize: 'cover',
@@ -60,8 +56,6 @@ const useStyles = makeStyles({
  */
 export const MainContent = memo(() => {
   const styles = useStyles();
-  const isDesktop = useIsDesktop();
-  const mobileHomeOpen = useStore($mobileHomeOpen);
   const store = useStore(persistedStoreApi.$atom);
   const active: LayoutMode = store.layoutMode;
   // Glass follows the THEME (one knob). The user's wallpaper, when set, only
@@ -77,6 +71,12 @@ export const MainContent = memo(() => {
   // User wallpapers carry their luminance-detected tone; the built-in
   // backdrop uses the theme's declared tone.
   const glassTone = userBackdrop ? (store.glassTone ?? 'dark') : getThemeBuiltinGlassTone(theme);
+
+  // The mobile nav drawer mounts INSIDE this element rather than in
+  // document.body: the glass vars and the `omni-glass` class live here, and
+  // CSS inheritance follows the DOM tree — a body-portaled drawer would fall
+  // back to the opaque theme surface and drop the blur.
+  const [glassRoot, setGlassRoot] = useState<HTMLDivElement | null>(null);
 
   const [mounted, setMounted] = useState<Set<LayoutMode>>(() => new Set([active]));
 
@@ -112,6 +112,7 @@ export const MainContent = memo(() => {
 
   return (
     <div
+      ref={setGlassRoot}
       className={mergeClasses(styles.root, isGlass && styles.rootWithDeckBg, isGlass && 'omni-glass')}
       style={
         isGlass
@@ -122,13 +123,10 @@ export const MainContent = memo(() => {
           : undefined
       }
     >
-      {/* Mobile bottom bar (self-hides ≥640px) + the unified sidebar —
-          persistent nav on desktop, the Home page when open on mobile. */}
-      <Sidebar />
-      <AppSidebar />
-      {/* Panels stay MOUNTED while the mobile Home page is frontmost —
-          hidden, not unmounted, to preserve webview/session state. */}
-      <div className={styles.content} style={!isDesktop && mobileHomeOpen ? { display: 'none' } : undefined}>
+      {/* The unified sidebar — a persistent column on desktop, an overlay
+          drawer on mobile. */}
+      <AppSidebar mountNode={glassRoot} />
+      <div className={styles.content}>
         {panels.map(
           ({ key, Component }) =>
             mounted.has(key) && (

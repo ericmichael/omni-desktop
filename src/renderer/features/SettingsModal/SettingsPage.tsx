@@ -6,6 +6,7 @@ import {
   Cube20Regular,
   Globe20Regular,
   Keyboard20Regular,
+  LineHorizontal320Regular,
   MicSettings20Regular,
   Person20Regular,
   PuzzlePiece20Regular,
@@ -16,6 +17,7 @@ import {
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useState } from 'react';
 
+import { openMobileNav } from '@/renderer/app/mobile-nav';
 import { IconButton, ListItem, SectionLabel, Subtitle2 } from '@/renderer/ds';
 import { openPlugins } from '@/renderer/features/Plugins/plugins-nav';
 import { $settingsInitialTab } from '@/renderer/features/SettingsModal/settings-nav';
@@ -226,7 +228,12 @@ const useStyles = makeStyles({
     },
   },
   mobileListHeader: {
-    paddingLeft: '20px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+    /* Pulled in on the left: the drawer handle carries its own optical
+       padding, so the title still lands on the 20px list gutter. */
+    paddingLeft: '8px',
     paddingRight: '20px',
     paddingTop: '24px',
     paddingBottom: '12px',
@@ -319,6 +326,12 @@ export const SettingsPage = memo(() => {
       {activeTab === null && (
         <div className={styles.mobileList}>
           <div className={styles.mobileListHeader}>
+            <IconButton
+              aria-label="Open navigation"
+              icon={<LineHorizontal320Regular />}
+              size="sm"
+              onClick={openMobileNav}
+            />
             <Subtitle2>Settings</Subtitle2>
           </div>
           {TAB_GROUPS.map((group) => (
@@ -333,8 +346,8 @@ export const SettingsPage = memo(() => {
               ))}
             </div>
           ))}
-          {/* The desktop rail owns Plugins; the mobile bar is full, so this
-              list is mobile's path to it. */}
+          {/* Plugins is configuration too — kept alongside the settings
+              groups so it's reachable without walking back out to Home. */}
           <ListItem icon={<PuzzlePiece20Regular style={iconStyle} />} label="Plugins" onClick={() => openPlugins()} />
         </div>
       )}

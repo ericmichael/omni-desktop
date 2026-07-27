@@ -47,14 +47,18 @@ const useStyles = makeStyles({
        standalone). On iOS standalone cold start the layout viewport can be
        short by the status bar while the window paints full-bleed — and
        element painting is CLIPPED at the short viewport (verified
-       on-device), so a taller shell just slices the bottom tab bar off.
+       on-device), so a taller shell just slices its bottom edge off.
        That state is handled instead by useAppHeight zeroing
-       --safe-area-bottom: the nav-colored --safe-area-background backstop
-       band below the viewport doubles as the home-indicator clearance. */
+       --safe-area-bottom: the --safe-area-background backstop band below
+       the viewport doubles as the home-indicator clearance. */
     height: 'var(--app-height, 100dvh)',
     paddingTop: 'env(safe-area-inset-top, 0px)',
     paddingLeft: 'env(safe-area-inset-left, 0px)',
     paddingRight: 'env(safe-area-inset-right, 0px)',
+    /* Home-indicator clearance for every surface at once. This used to be
+       owned by the mobile bottom bar; with the bar gone the shell is the
+       single place that reserves it, so no bottom-most surface has to. */
+    paddingBottom: 'var(--safe-area-bottom, env(safe-area-inset-bottom, 0px))',
     position: 'relative',
     overflow: 'hidden',
     // Flex column so the post-migration notice (rendered above the main

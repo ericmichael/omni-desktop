@@ -9,14 +9,17 @@ type BottomSheetProps = {
 };
 
 const useStyles = makeStyles({
+  /* Height travels through Fluent's own var, never a raw `height`/`position`:
+     the var drives BOTH the surface box and the slide-up transform, and
+     Fluent anchors the surface itself. Overriding `position` to `absolute`
+     strands its `top`/`bottom` offsets without a containing block and the
+     sheet computes to zero height; overriding `height` alone desyncs the
+     animation, which then only travels the var's distance.
+     `--app-height` mirrors the app shell: at rest it's absent and 100dvh
+     applies; while an on-screen keyboard overlays the page it's the space
+     actually left. */
   drawer: {
-    position: 'absolute',
-    top: 'max(3rem, env(safe-area-inset-top, 3rem))',
-    bottom: '0',
-    left: '0',
-    right: '0',
-    height: 'auto',
-    maxWidth: '100%',
+    '--fui-Drawer--size': 'calc(var(--app-height, 100dvh) - max(3rem, env(safe-area-inset-top, 3rem)))',
     backgroundColor: tokens.colorNeutralBackground2,
     borderTopLeftRadius: '16px',
     borderTopRightRadius: '16px',

@@ -2,7 +2,9 @@ import { makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
 import { useStore } from '@nanostores/react';
 import { memo } from 'react';
 
-import { PageHeader } from '@/renderer/ds';
+import { openMobileNav } from '@/renderer/app/mobile-nav';
+import { useIsDesktop } from '@/renderer/common/use-is-desktop';
+import { PageHeader, TopAppBar } from '@/renderer/ds';
 import { HealthPane } from '@/renderer/features/Sandboxes/HealthPane';
 import { ProfilesPane } from '@/renderer/features/Sandboxes/ProfilesPane';
 import { RunningPane } from '@/renderer/features/Sandboxes/RunningPane';
@@ -31,16 +33,14 @@ const useStyles = makeStyles({
   rootGlass: {
     backgroundColor: 'transparent',
   },
+  /* Desktop only — mobile renders the list inside the single content pane. */
   listPane: {
     display: 'flex',
     flexDirection: 'column',
-    width: '100%',
     height: '100%',
-    '@media (min-width: 640px)': {
-      width: '320px',
-      flexShrink: 0,
-      borderRight: `1px solid ${tokens.colorNeutralStroke1}`,
-    },
+    width: '320px',
+    flexShrink: 0,
+    borderRight: `1px solid ${tokens.colorNeutralStroke1}`,
   },
   listPaneGlass: {
     backgroundColor: tokens.colorNeutralBackground2,
@@ -110,40 +110,71 @@ const useStyles = makeStyles({
 const selectPane = (pane: SandboxesPane): void => {
   $sandboxesSelectedPane.set(pane);
 };
+const clearPane = (): void => {
+  $sandboxesSelectedPane.set(null);
+};
 
 export const SandboxesTabContent = memo(() => {
   const styles = useStyles();
   const selectedPane = useStore($sandboxesSelectedPane);
+  const isDesktop = useIsDesktop();
   const isGlass = useStore($glassEnabled);
+
+  // Desktop shows both panes at once, so it always has something selected.
+  const shownPane = selectedPane ?? 'health';
+
+  const list = (
+    <div className={styles.list}>
+      {PANES.map((pane) => (
+        <button
+          key={pane.id}
+          type="button"
+          className={mergeClasses(styles.row, isDesktop && shownPane === pane.id && styles.rowSelected)}
+          onClick={selectPane.bind(null, pane.id)}
+        >
+          <span className={styles.rowTitle}>{pane.title}</span>
+          <span className={styles.rowMeta}>{pane.meta}</span>
+        </button>
+      ))}
+    </div>
+  );
+
+  const detail = (
+    <div className={styles.detailBody}>
+      {/* Only the active pane mounts — pane-local pollers (containers,
+          wsl:status) start on mount and clear on pane-switch. */}
+      {shownPane === 'health' && <HealthPane />}
+      {shownPane === 'profiles' && <ProfilesPane />}
+      {shownPane === 'running' && <RunningPane />}
+      {shownPane === 'snapshots' && <SnapshotsPane />}
+    </div>
+  );
+
+  // Mobile: one master per tab — the list fills the plane and a drilled-in
+  // pane replaces it, same as Routines and the agent roster. Side-by-side
+  // here would squeeze the detail to zero width (it did).
+  if (!isDesktop) {
+    return (
+      <div className={mergeClasses(styles.root, isGlass && styles.rootGlass)}>
+        <div className={mergeClasses(styles.detailPane, isGlass && styles.detailPaneGlass)}>
+          {selectedPane ? (
+            <TopAppBar title={PANES.find((p) => p.id === selectedPane)?.title ?? 'Sandboxes'} onBack={clearPane} />
+          ) : (
+            <TopAppBar title="Sandboxes" onMenu={openMobileNav} />
+          )}
+          {selectedPane ? detail : list}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={mergeClasses(styles.root, isGlass && styles.rootGlass)}>
       <div className={mergeClasses(styles.listPane, isGlass && styles.listPaneGlass)}>
         <PageHeader title="Sandboxes" />
-        <div className={styles.list}>
-          {PANES.map((pane) => (
-            <button
-              key={pane.id}
-              type="button"
-              className={mergeClasses(styles.row, selectedPane === pane.id && styles.rowSelected)}
-              onClick={selectPane.bind(null, pane.id)}
-            >
-              <span className={styles.rowTitle}>{pane.title}</span>
-              <span className={styles.rowMeta}>{pane.meta}</span>
-            </button>
-          ))}
-        </div>
+        {list}
       </div>
-      <div className={mergeClasses(styles.detailPane, isGlass && styles.detailPaneGlass)}>
-        <div className={styles.detailBody}>
-          {/* Only the active pane mounts — pane-local pollers (containers,
-              wsl:status) start on mount and clear on pane-switch. */}
-          {selectedPane === 'health' && <HealthPane />}
-          {selectedPane === 'profiles' && <ProfilesPane />}
-          {selectedPane === 'running' && <RunningPane />}
-          {selectedPane === 'snapshots' && <SnapshotsPane />}
-        </div>
-      </div>
+      <div className={mergeClasses(styles.detailPane, isGlass && styles.detailPaneGlass)}>{detail}</div>
     </div>
   );
 });

@@ -18,6 +18,7 @@ import { useCallback, useRef } from 'react';
 import { useHotkeys } from 'react-hotkeys-hook';
 
 import { dmChannelId, USER_PARTICIPANT } from '@/lib/resident-agent';
+import { configuredVoiceMode } from '@/lib/voice-mode';
 import { goToResidentChannel } from '@/renderer/features/Residents/state';
 import { persistedStoreApi } from '@/renderer/services/store';
 import { isLocalVoiceCapable } from '@/renderer/services/voice-client';
@@ -137,7 +138,8 @@ function useVoiceHotkey(
 
 export function VoiceHotkeys(): null {
   const store = useStore(persistedStoreApi.$atom);
-  const voiceOn = store.localVoiceEnabled && isLocalVoiceCapable();
+  // Matches the DM mic these hotkeys drive — local only until DM gets hosted.
+  const voiceOn = configuredVoiceMode(store) === 'local' && isLocalVoiceCapable();
 
   useVoiceHotkey(store.voiceToggleHotkey, Boolean(store.voiceToggleHotkey) && voiceOn, resolveColumnScope);
   useVoiceHotkey(

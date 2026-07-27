@@ -26,6 +26,7 @@ import {
   Chat20Regular,
   FolderOpen20Regular,
   Globe20Regular,
+  LineHorizontal320Regular,
   MoreHorizontal20Regular,
   ReOrderDotsVertical20Regular,
   Subtract20Regular,
@@ -37,10 +38,12 @@ import { createPortal } from 'react-dom';
 
 import { customAppPartition } from '@/lib/app-partition';
 import { uuidv4 } from '@/lib/uuid';
+import { openMobileNav } from '@/renderer/app/mobile-nav';
 import { Webview } from '@/renderer/common/Webview';
 import {
   Button,
   EmptyState,
+  IconButton,
   Menu,
   MenuDivider,
   MenuItem,
@@ -129,8 +132,13 @@ const useStyles = makeStyles({
     backgroundColor: tokens.colorNeutralBackground2,
   },
   layoutToggleWrap: {
-    display: 'none',
-    [`@media (min-width: ${SNAP_SCROLL_WIDTH + 1}px)`]: { display: 'flex' },
+    display: 'flex',
+  },
+  deckMenuWrap: {
+    display: 'flex',
+    alignItems: 'center',
+    marginLeft: `calc(-1 * ${tokens.spacingHorizontalSNudge})`,
+    '@media (min-width: 640px)': { display: 'none' },
   },
   deckHeaderActions: {
     display: 'flex',
@@ -776,8 +784,17 @@ const CodeDeckHeader = memo(
 
     return (
       <div className={mergeClasses(styles.deckHeader, isGlass && styles.glassDeckHeader)}>
+        {/* Mobile-only: the deck is the landing surface, so its header is
+            where the nav drawer is reached. Desktop has the sidebar. */}
+        <span className={styles.deckMenuWrap}>
+          <IconButton
+            aria-label="Open navigation"
+            icon={<LineHorizontal320Regular />}
+            size="sm"
+            onClick={openMobileNav}
+          />
+        </span>
         <div className={styles.deckHeaderActions}>
-          {/* Desktop-only: phones always use the pager layout. */}
           <span className={styles.layoutToggleWrap}>
             <SegmentedControl
               value={layoutMode}
@@ -2089,11 +2106,13 @@ export const CodeDeck = memo(() => {
   // replaces the expand preset and vice versa — the two never combine.
   const [columnWidths, setColumnWidths] = useState<Record<CodeTabId, number>>({});
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
-  // Below the snap breakpoint the deck is always a pager (full-width
-  // snap-scrolled tile columns) — Focus is a desktop layout, and offering a
-  // layout toggle at phone width only added a second way to be lost.
-  const storedLayoutMode = store.codeLayoutMode ?? 'focus';
-  const layoutMode = viewportWidth <= SNAP_SCROLL_WIDTH ? 'tile' : storedLayoutMode;
+  // Phones used to be forced into the pager, because Focus needed its own
+  // session-list sidebar and had nowhere to put it. The unified nav drawer is
+  // that list now, so Focus works at phone width — one full-bleed
+  // conversation, the shape the mobile landing wants — and the stored choice
+  // applies at every size. The toggle ships on phones too, so a `tile` picked
+  // on desktop (the store is shared) is never a trap.
+  const layoutMode = store.codeLayoutMode;
   const [deckViewportWidth, setDeckViewportWidth] = useState(() => window.innerWidth);
 
   useEffect(() => {
@@ -2151,7 +2170,7 @@ export const CodeDeck = memo(() => {
   }, []);
 
   // ── Deck map: which column the phone pager is resting on ──
-  const isPager = viewportWidth <= SNAP_SCROLL_WIDTH;
+  const isPager = layoutMode === 'tile' && viewportWidth <= SNAP_SCROLL_WIDTH;
   const [pagerTabId, setPagerTabId] = useState<CodeTabId | null>(null);
   useEffect(() => {
     if (!isPager) {
@@ -2200,6 +2219,17 @@ export const CodeDeck = memo(() => {
       block: 'nearest',
     });
   }, []);
+
+  // The pager has no other way to express "this column is active": with the
+  // deck as the mobile landing, a fresh chat (boot landing, "New chat", a
+  // deep link) is minted off-screen and the deck looks like it ignored it.
+  // Swiping doesn't change activeTabId, so this never fights the user.
+  useEffect(() => {
+    if (!isPager || !activeTabId) {
+      return;
+    }
+    scrollToColumn(activeTabId);
+  }, [isPager, activeTabId, scrollToColumn]);
 
   useEffect(() => {
     const firstTab = tabs[0];

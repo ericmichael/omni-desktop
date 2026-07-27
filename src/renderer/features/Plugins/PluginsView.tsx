@@ -3,6 +3,8 @@ import { Add20Regular, ArrowDownload20Regular, Globe20Regular, PlugConnected20Re
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 
+import { openMobileNav } from '@/renderer/app/mobile-nav';
+import { useIsDesktop } from '@/renderer/common/use-is-desktop';
 import { Button, FormSkeleton, Input, PageHeader, SectionLabel, SegmentedControl } from '@/renderer/ds';
 import { AppFormDialog } from '@/renderer/features/Plugins/AppFormDialog';
 import { ConnectorConfigDialog } from '@/renderer/features/Plugins/ConnectorConfigDialog';
@@ -102,6 +104,7 @@ function updateMarketplaceAppEntry(app: MarketplaceApp): void {
 export const PluginsView = memo(() => {
   const styles = useStyles();
   const data = usePluginsData();
+  const isDesktop = useIsDesktop();
   const isGlass = useStore($glassEnabled);
   const store = useStore(persistedStoreApi.$atom);
   const storeCustomApps = store.customApps;
@@ -295,6 +298,7 @@ export const PluginsView = memo(() => {
     <div className={mergeClasses(styles.root, isGlass && styles.rootGlass)}>
       <PageHeader
         title="Plugins"
+        onMenu={isDesktop ? undefined : openMobileNav}
         actions={
           <Input
             size="sm"

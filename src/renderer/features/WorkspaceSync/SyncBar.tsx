@@ -9,18 +9,17 @@ import {
 import { useStore } from '@nanostores/react';
 import { memo, useMemo } from 'react';
 
-import { BOTTOM_NAV_MOBILE_HEIGHT } from '@/renderer/app/Sidebar';
 import { $syncStatuses } from '@/renderer/features/WorkspaceSync/state';
 import type { WorkspaceSyncStatus } from '@/shared/types';
 
 const useStyles = makeStyles({
   bar: {
     position: 'fixed',
-    /* Mobile: sit on top of the bottom tab bar (which already covers the
-       safe area) instead of covering it — a long sync must not block tab
-       switching. Desktop (≥640px) has a side rail instead, so the bar can
-       hug the bottom edge and absorb the inset itself. */
-    bottom: `calc(${BOTTOM_NAV_MOBILE_HEIGHT}px + var(--safe-area-bottom, env(safe-area-inset-bottom, 0px)))`,
+    /* Fixed to the viewport, so it sits outside the app shell and absorbs
+       the home-indicator inset itself (the shell's own padding doesn't
+       apply here). */
+    bottom: '0',
+    paddingBottom: 'var(--safe-area-bottom, env(safe-area-inset-bottom, 0px))',
     left: '0',
     right: '0',
     zIndex: 9999,
@@ -38,9 +37,7 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground2,
     boxSizing: 'content-box',
     '@media (min-width: 640px)': {
-      bottom: '0',
-      left: '78px', // sidebar width
-      paddingBottom: 'var(--safe-area-bottom, env(safe-area-inset-bottom, 0px))',
+      left: '260px', // AppSidebar width
     },
   },
   barError: {
@@ -49,8 +46,8 @@ const useStyles = makeStyles({
     color: tokens.colorPaletteRedForeground1,
   },
   /* The idle "Workspace synced" state renders permanently once a sync
-     session exists — ambient info that isn't worth a strip floating over
-     the bottom nav on phones. Mobile shows only active/error states. */
+     session exists — ambient info that isn't worth a permanent strip across
+     the bottom of a phone. Mobile shows only active/error states. */
   barIdleHiddenMobile: {
     '@media (max-width: 639px)': {
       display: 'none',

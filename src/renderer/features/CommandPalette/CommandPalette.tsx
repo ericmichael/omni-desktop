@@ -172,7 +172,7 @@ export const CommandPalette = memo(() => {
     () =>
       buildCommands({
         codeTabs: store.codeTabs ?? [],
-        codeLayoutMode: store.codeLayoutMode ?? 'tile',
+        codeLayoutMode: store.codeLayoutMode,
         resolveTabLabel,
         navigate,
         activateColumn,

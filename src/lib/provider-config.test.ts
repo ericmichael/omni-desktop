@@ -99,9 +99,58 @@ describe('buildCodexConfig', () => {
       default: null,
       voice_default: null,
     });
-    expect(config.providers['codex']).toEqual({ type: 'openai-oauth', models: {} });
+    expect(config.providers['codex']?.type).toBe('openai-oauth');
     expect(madeDefault).toBe('codex/gpt-5.5');
     expect(config.default).toBe('codex/gpt-5.5');
+  });
+
+  it('seeds realtime voice models, which Codex discovery never returns', () => {
+    const { config } = buildCodexConfig(empty(), {
+      models: [{ name: 'codex/gpt-5.5', provider: 'openai-oauth' }],
+      default: null,
+      voice_default: null,
+    });
+    const models = config.providers['codex']?.models ?? {};
+    expect(Object.keys(models).sort()).toEqual(['gpt-realtime', 'gpt-realtime-1.5', 'gpt-realtime-mini']);
+    // The flag is what makes the runtime build voice settings at all.
+    expect(Object.values(models).every((m) => m.realtime === true)).toBe(true);
+    expect(models['gpt-realtime-1.5']?.model).toBe('gpt-realtime-1.5');
+  });
+
+  it('adopts a ChatGPT voice model when the user has nothing else set up', () => {
+    const { config } = buildCodexConfig(empty(), {
+      models: [{ name: 'codex/gpt-5.5', provider: 'openai-oauth' }],
+      default: null,
+      voice_default: null,
+    });
+    expect(config.voice_default).toBe('codex/gpt-realtime-1.5');
+    expect(config.providers['codex']?.models['gpt-realtime-1.5']?.realtime).toBe(true);
+  });
+
+  it('leaves an existing voice choice alone', () => {
+    const current = empty();
+    current.voice_default = 'openai/my-voice';
+    const { config } = buildCodexConfig(current, { models: [], default: null, voice_default: null });
+    expect(config.voice_default).toBe('openai/my-voice');
+  });
+
+  it('does not touch voice when another provider is already configured', () => {
+    const current = empty();
+    current.providers['openai'] = { type: 'openai', models: {} };
+    const { config } = buildCodexConfig(current, { models: [], default: null, voice_default: null });
+    expect(config.voice_default).toBeNull();
+  });
+
+  it('preserves user edits to a seeded realtime model across re-sign-in', () => {
+    const current = empty();
+    current.providers['codex'] = {
+      type: 'openai-oauth',
+      models: { 'gpt-realtime-1.5': { model: 'gpt-realtime-1.5', label: 'My Voice', realtime: true } },
+    };
+    const { config } = buildCodexConfig(current, { models: [], default: null, voice_default: null });
+    expect(config.providers['codex']?.models['gpt-realtime-1.5']?.label).toBe('My Voice');
+    // ...while still filling in the ones they never touched.
+    expect(config.providers['codex']?.models['gpt-realtime-mini']).toBeDefined();
   });
 
   it('leaves the default alone when other providers exist', () => {

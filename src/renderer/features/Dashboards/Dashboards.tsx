@@ -3,6 +3,9 @@ import { ArrowLeft20Regular, DataBarVertical20Regular, Open20Regular } from '@fl
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useState } from 'react';
 
+import { openMobileNav } from '@/renderer/app/mobile-nav';
+import { useIsDesktop } from '@/renderer/common/use-is-desktop';
+import { TopAppBar } from '@/renderer/ds';
 import { emitter } from '@/renderer/services/ipc';
 import { $glassEnabled } from '@/renderer/theme/use-glass';
 import type { PlatformDashboard } from '@/shared/types';
@@ -201,8 +204,10 @@ const DashboardList = memo(
     isGlass: boolean;
   }) => {
     const styles = useStyles();
+    const isDesktop = useIsDesktop();
     return (
       <div className={mergeClasses(styles.root, isGlass && styles.rootGlass)}>
+        {!isDesktop && <TopAppBar title="Dashboards" onMenu={openMobileNav} />}
         <div className={styles.listHeader}>
           <h1 className={styles.listTitle}>Dashboards</h1>
           <p className={styles.listSubtitle}>Your entitled Databricks dashboards</p>

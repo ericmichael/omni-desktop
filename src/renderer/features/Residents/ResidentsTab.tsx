@@ -26,6 +26,7 @@ import {
   Delete20Regular,
   Dismiss20Regular,
   FlashRegular,
+  Mic20Regular,
   MoreHorizontal20Regular,
   PersonAdd20Regular,
   Send20Regular,
@@ -48,6 +49,8 @@ import {
   USER_PARTICIPANT,
 } from '@/lib/resident-agent';
 import { RESIDENT_TEMPLATES } from '@/lib/resident-templates';
+import { configuredVoiceMode } from '@/lib/voice-mode';
+import { openMobileNav } from '@/renderer/app/mobile-nav';
 import { useIsDesktop } from '@/renderer/common/use-is-desktop';
 import {
   Badge,
@@ -79,7 +82,9 @@ import { SandboxPicker } from '@/renderer/features/SandboxProfile/SandboxPicker'
 import { ScheduledTasks } from '@/renderer/features/ScheduledTasks/ScheduledTasks';
 import { OmniAgentsApp } from '@/renderer/omniagents-ui';
 import { LocalVoiceButton } from '@/renderer/omniagents-ui/components/LocalVoiceButton';
+import { VoiceModal } from '@/renderer/omniagents-ui/components/VoiceModal';
 import { MarkdownMessage } from '@/renderer/omniagents-ui/shared/MarkdownMessage';
+import { UiConfigProvider } from '@/renderer/omniagents-ui/ui-config';
 import { emitter, serverOrigin } from '@/renderer/services/ipc';
 import { $machines } from '@/renderer/services/machines';
 import { persistedStoreApi } from '@/renderer/services/store';
@@ -807,7 +812,13 @@ function ActivityFeed({
   // composer for input, spoken replies for output — the agent's reply IS
   // the DM message, so the surface reads it aloud; no session plumbing.
   const isUserDm = dmPair !== null && dmPair.includes(USER_PARTICIPANT);
-  const voiceReady = isUserDm && storeData.localVoiceEnabled === true && isLocalVoiceCapable();
+  const voiceMode = configuredVoiceMode(storeData);
+  const voiceReady = isUserDm && voiceMode === 'local' && isLocalVoiceCapable();
+  // Hosted mode: the realtime VoiceModal against the DM peer's own serve.
+  const hostedVoiceReady = isUserDm && voiceMode === 'hosted' && !!dmPeerId;
+  const [hostedVoiceOpen, setHostedVoiceOpen] = useState(false);
+  const openHostedVoice = useCallback(() => setHostedVoiceOpen(true), []);
+  const closeHostedVoice = useCallback(() => setHostedVoiceOpen(false), []);
   const spokenOn = Boolean(useStore($dmSpokenReplies)[channel ?? '']);
 
   // Threads a user chose to expand (session-local, per feed).
@@ -1293,11 +1304,72 @@ function ActivityFeed({
                 </VoiceScopeContext.Provider>
               </>
             )}
+            {hostedVoiceReady && (
+              <IconButton
+                aria-label="Voice mode"
+                tooltip={`Talk with ${dmPeerName ?? 'agent'}`}
+                icon={<Mic20Regular />}
+                onClick={openHostedVoice}
+              />
+            )}
             <IconButton aria-label="Send" icon={<Send20Regular />} onClick={submit} />
           </form>
+          {hostedVoiceOpen && dmPeerId && (
+            <ResidentHostedVoice agentId={dmPeerId} onClose={closeHostedVoice} onError={setSendError} />
+          )}
         </div>
       )}
     </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Hosted realtime voice on the DM surface — the SAME VoiceModal the chat
+// composer uses, pointed at the resident's own serve. `ensureSession` wakes
+// the agent and returns its uiUrl; UiConfigProvider derives /ws/realtime and
+// the auth token from it, exactly as OmniAgentsApp does for the Session tab.
+// The voice conversation is with the same agent (same spec, same tools) and
+// its transcript lands in the resident's session history.
+// ---------------------------------------------------------------------------
+
+function ResidentHostedVoice({
+  agentId,
+  onClose,
+  onError,
+}: {
+  agentId: string;
+  onClose: () => void;
+  onError: (message: string) => void;
+}): React.JSX.Element | null {
+  const [uiUrl, setUiUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    residentApi
+      .ensureSession(agentId)
+      .then(({ uiUrl: url }) => {
+        if (!cancelled) {
+          setUiUrl(new URL(url, serverOrigin()).toString());
+        }
+      })
+      .catch((err: Error) => {
+        if (!cancelled) {
+          onError(`Voice unavailable: ${err.message}`);
+          onClose();
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [agentId, onClose, onError]);
+
+  if (!uiUrl) {
+    return null; // waking the agent; the modal appears once its serve is up
+  }
+  return (
+    <UiConfigProvider uiUrl={uiUrl}>
+      <VoiceModal isOpen onClose={onClose} />
+    </UiConfigProvider>
   );
 }
 
@@ -2681,9 +2753,8 @@ export function ResidentsTab(): React.JSX.Element {
     // Deleting from the detail header lands back on the roster.
     goToRoster();
   }, []);
-  // Mobile back exists only for hierarchy-internal levels: an open agent
-  // or the create form goes up to the roster. Top-level surfaces have no
-  // back — the bottom bar's Home tab is always the way out.
+  // Mobile back for hierarchy-internal levels: an open agent or the create
+  // form goes up to the roster. Surface roots show the drawer handle.
   const handleBackToRoster = useCallback(() => {
     goToRoster();
   }, []);
@@ -2824,10 +2895,10 @@ export function ResidentsTab(): React.JSX.Element {
     />
   );
 
-  // Mobile: the surface always fills the screen — the bottom bar's Home
-  // tab is the navigator. A TopAppBar titles the surface; back exists only
-  // for hierarchy-internal levels (agent detail / create form → roster).
-  // Routines titles itself at every level (band header + internal bars).
+  // Mobile: the surface always fills the screen. A TopAppBar titles it and
+  // leads with a back arrow at depth (agent detail / create form → roster)
+  // or the drawer handle at a surface root. Routines titles itself at every
+  // level (band header + internal bars).
   if (!isDesktop) {
     if (routinesOpen) {
       return (
@@ -2856,7 +2927,7 @@ export function ResidentsTab(): React.JSX.Element {
     return (
       <div className={mergeClasses(styles.root, isGlass && styles.rootGlass)}>
         <div className={mergeClasses(styles.detailPane, isGlass && styles.detailPaneGlass)}>
-          <TopAppBar title={mobileTitle} {...(mobileBack ? { onBack: mobileBack } : {})} />
+          <TopAppBar title={mobileTitle} {...(mobileBack ? { onBack: mobileBack } : { onMenu: openMobileNav })} />
           {detailBody}
         </div>
         {agentDialogs}

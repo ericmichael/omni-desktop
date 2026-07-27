@@ -1,8 +1,9 @@
-import { makeStyles, mergeClasses, Subtitle2, tokens } from '@fluentui/react-components';
+import { Drawer, DrawerBody, makeStyles, mergeClasses, Subtitle2, tokens } from '@fluentui/react-components';
 import {
   Beaker20Regular,
   Bot20Regular,
   CalendarClock20Regular,
+  ColumnTriple20Regular,
   Compose20Regular,
   Cube20Regular,
   DataBarVertical24Regular,
@@ -16,11 +17,12 @@ import {
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useState } from 'react';
 
-import { $mobileHomeOpen } from '@/renderer/app/mobile-home';
+import { $mobileNavOpen, closeMobileNav } from '@/renderer/app/mobile-nav';
 import { OmniLogo } from '@/renderer/common/AsciiLogo';
 import { useNavTreeStyles } from '@/renderer/common/nav-tree';
 import { useIsDesktop } from '@/renderer/common/use-is-desktop';
 import {
+  Button,
   CounterBadge,
   IconButton,
   Menu,
@@ -52,25 +54,47 @@ import type { LayoutMode } from '@/shared/types';
  * and the per-tab sidebars. Three zones — fixed surface rows (New chat,
  * Inbox, Tasks, Activity) whose badges make the sidebar the attention surface;
  * container sections (Projects, Channels, DMs); and a pinned management
- * cluster (Agents, Routines, Dashboards, Plugins, Settings). Mobile keeps
- * the bottom tab bar until the sidebar becomes the mobile landing (phase 3).
+ * cluster (Agents, Routines, Dashboards, Plugins, Settings).
+ *
+ * On mobile the same nav is an overlay DRAWER (the ChatGPT/Gmail model):
+ * the app lands on the working surface, and each surface's header carries a
+ * leading affordance that slides this over it. There is no bottom tab bar
+ * and no Home screen.
  */
 
 const useStyles = makeStyles({
   root: {
     display: 'flex',
     flexDirection: 'column',
-    // Mobile: the Home page — the same nav rendered full-screen above the
-    // bottom bar (flex child of MainContent's column-reverse root).
     width: '100%',
-    flex: '1 1 0',
+    height: '100%',
     minHeight: 0,
     '@media (min-width: 640px)': {
       width: '260px',
       flex: '0 0 auto',
-      height: '100%',
       borderRight: `1px solid ${tokens.colorNeutralStroke1}`,
     },
+  },
+  /* Mobile drawer — visual chrome only. Do NOT set `position` here: Fluent
+     anchors the surface with `position: fixed` + `top/bottom: 0` + `height:
+     auto`, and forcing `absolute` on the portaled surface leaves those
+     offsets without a resolvable containing block, so the height computes to
+     0 and the drawer renders as an invisible 320×0 strip (measured). Size
+     travels through `--fui-Drawer--size` (the `size` prop; small = 320px),
+     which is also what the slide-in transform is measured from — so a raw
+     `width`/`height` here would desync the animation even if it did render.
+     Safe areas need no handling either: `mountNode` puts this inside the app
+     shell, whose padding already holds them. */
+  drawer: {
+    backgroundColor: tokens.colorNeutralBackground2,
+  },
+  drawerBody: {
+    display: 'flex',
+    flexDirection: 'column',
+    flex: '1 1 0',
+    minHeight: 0,
+    width: '100%',
+    padding: 0,
   },
   rootGlass: {
     backgroundColor: tokens.colorNeutralBackground2,
@@ -89,12 +113,20 @@ const useStyles = makeStyles({
     paddingBottom: tokens.spacingVerticalL,
     flexShrink: 0,
   },
+  /* Hugs its text now: the header's slack belongs to the Spaces button, and
+     the wordmark ellipsizes first when a long team name crowds the row. */
   headerTitle: {
-    flex: '1 1 0',
+    flex: '0 1 auto',
     minWidth: 0,
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
+  },
+  /* Pushed to the right edge so it reads as part of the header's action
+     cluster with the command-palette button, not as a title. */
+  spacesButton: {
+    marginLeft: 'auto',
+    flexShrink: 0,
   },
   scroll: {
     flex: '1 1 0',
@@ -108,7 +140,7 @@ const useStyles = makeStyles({
   },
 });
 
-export const AppSidebar = memo(() => {
+export const AppSidebar = memo(({ mountNode }: { mountNode?: HTMLElement | null }) => {
   const styles = useStyles();
   const nav = useNavTreeStyles();
   const isDesktop = useIsDesktop();
@@ -120,7 +152,7 @@ export const AppSidebar = memo(() => {
   const inboxCount = useStore($activeInboxCount);
   const needsYouCount = useStore($needsYouCount);
 
-  const mobileHomeOpen = useStore($mobileHomeOpen);
+  const mobileNavOpen = useStore($mobileNavOpen);
 
   const [isEnterprise, setIsEnterprise] = useState(false);
   useEffect(() => {
@@ -131,12 +163,21 @@ export const AppSidebar = memo(() => {
   }, []);
 
   // Same-mode navigations (a project while already in Work, a channel while
-  // in Agents) don't change layoutMode, so the Home page closes explicitly;
-  // mode changes close it via the mobile-home subscription.
-  const closeHome = useCallback(() => $mobileHomeOpen.set(false), []);
+  // in Agents) don't change layoutMode, so the drawer closes explicitly;
+  // mode changes close it via the mobile-nav subscription. Either way this
+  // is a navigation, so it sets the atom — `closeMobileNav` (which pops the
+  // drawer's history entry) is for dismissals, and the drawer's own entry is
+  // superseded by the destination instead.
+  const closeDrawer = useCallback(() => $mobileNavOpen.set(false), []);
+  // Scrim tap / Escape / swipe — a dismissal, so it pops.
+  const handleOpenChange = useCallback((_e: unknown, data: { open: boolean }) => {
+    if (!data.open) {
+      closeMobileNav();
+    }
+  }, []);
   const setMode = useCallback((mode: LayoutMode) => {
     persistedStoreApi.setKey('layoutMode', mode);
-    $mobileHomeOpen.set(false);
+    $mobileNavOpen.set(false);
   }, []);
   const handleNewChat = useCallback(() => {
     void codeApi.openFreshChat();
@@ -144,25 +185,34 @@ export const AppSidebar = memo(() => {
   }, [setMode]);
   const handleInbox = useCallback(() => {
     ticketApi.goToInbox();
-    closeHome();
-  }, [closeHome]);
+    closeDrawer();
+  }, [closeDrawer]);
   const handleAllWork = useCallback(() => {
     ticketApi.goToAllWork();
-    closeHome();
-  }, [closeHome]);
+    closeDrawer();
+  }, [closeDrawer]);
   const handleRoster = useCallback(() => {
     goToRoster();
-    closeHome();
-  }, [closeHome]);
+    closeDrawer();
+  }, [closeDrawer]);
   const handleRoutines = useCallback(() => {
     goToRoutine();
-    closeHome();
-  }, [closeHome]);
+    closeDrawer();
+  }, [closeDrawer]);
   const handleDashboards = useCallback(() => setMode('dashboards'), [setMode]);
   const handlePlugins = useCallback(() => setMode('plugins'), [setMode]);
   const handleSandboxes = useCallback(() => setMode('sandboxes'), [setMode]);
   const handleGallery = useCallback(() => setMode('gallery'), [setMode]);
   const handleSettings = useCallback(() => setMode('settings'), [setMode]);
+  // Spaces = the deck as a VIEW over every open session at once (layout
+  // 'tile'), not a destination — so it's an action in the header, never a
+  // nav row. Promoted here from the Sessions section header, where a bare
+  // icon button among the row actions gave the app's headline multitasking
+  // surface no label and no prominence.
+  const handleOpenSpaces = useCallback(() => {
+    codeApi.setLayoutMode('tile');
+    setMode('chat');
+  }, [setMode]);
   const handlePalette = useCallback(() => $commandPaletteOpen.set(true), []);
 
   // Selection derives from (layoutMode, per-feature view atoms) — the same
@@ -189,17 +239,20 @@ export const AppSidebar = memo(() => {
     mode === 'sandboxes' ||
     mode === 'gallery';
 
-  // Desktop: always visible. Mobile: only as the Home page.
-  if (!isDesktop && !mobileHomeOpen) {
-    return null;
-  }
-
-  return (
-    <div className={mergeClasses(styles.root, isGlass && styles.rootGlass)}>
+  const body = (
+    <>
       <div className={styles.header}>
         <OmniLogo />
         <Subtitle2 className={styles.headerTitle}>Omni</Subtitle2>
         <TeamSwitcher />
+        <Button
+          size="sm"
+          className={styles.spacesButton}
+          leftIcon={<ColumnTriple20Regular />}
+          onClick={handleOpenSpaces}
+        >
+          Open Spaces
+        </Button>
         <IconButton aria-label="Open command palette" icon={<Search20Regular />} size="sm" onClick={handlePalette} />
       </div>
       <div className={styles.scroll}>
@@ -247,10 +300,10 @@ export const AppSidebar = memo(() => {
         </Tree>
 
         {/* ── Container sections ── */}
-        <SessionsSection onNavigate={closeHome} />
-        <ProjectsSection onNavigate={closeHome} />
-        <ChannelsSection onNavigate={closeHome} />
-        <DmsSection onNavigate={closeHome} />
+        <SessionsSection onNavigate={closeDrawer} />
+        <ProjectsSection onNavigate={closeDrawer} />
+        <ChannelsSection onNavigate={closeDrawer} />
+        <DmsSection onNavigate={closeDrawer} />
       </div>
 
       {/* ── Management footer — the occasional surfaces live behind "More"
@@ -305,7 +358,24 @@ export const AppSidebar = memo(() => {
           </TreeItem>
         </Tree>
       </div>
-    </div>
+    </>
+  );
+
+  if (isDesktop) {
+    return <div className={mergeClasses(styles.root, isGlass && styles.rootGlass)}>{body}</div>;
+  }
+
+  return (
+    <Drawer
+      open={mobileNavOpen}
+      onOpenChange={handleOpenChange}
+      position="start"
+      type="overlay"
+      {...(mountNode ? { mountNode } : {})}
+      className={mergeClasses(styles.drawer, isGlass && styles.rootGlass)}
+    >
+      <DrawerBody className={styles.drawerBody}>{body}</DrawerBody>
+    </Drawer>
   );
 });
 AppSidebar.displayName = 'AppSidebar';

@@ -2,6 +2,7 @@ import { makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useMemo } from 'react';
 
+import { openMobileNav } from '@/renderer/app/mobile-nav';
 import { useIsDesktop } from '@/renderer/common/use-is-desktop';
 import { TopAppBar } from '@/renderer/ds';
 import { InboxView } from '@/renderer/features/Inbox/InboxView';
@@ -65,9 +66,10 @@ const useStyles = makeStyles({
 
 /**
  * The Work surface: the inbox, all projects, and their tasks. The unified
- * AppSidebar picks the view (desktop sidebar; the mobile Home page). Every
+ * AppSidebar picks the view (desktop column; the mobile nav drawer). Every
  * view fills the content plane (the Basecamp model — one master per tab);
- * on mobile the bottom bar's Home tab is always the way back out.
+ * on mobile the TopAppBar carries the drawer handle at a surface root and a
+ * back arrow at depth.
  */
 export const Tickets = memo(() => {
   const styles = useStyles();
@@ -147,7 +149,9 @@ export const Tickets = memo(() => {
     ticketApi.goBackToPrevious(shellProjectId ?? undefined);
   }, [view.type, shellProjectId]);
 
-  const mobileBackHandler = view.type === 'all' ? undefined : handleBack;
+  // A surface root has no "up" — it shows the drawer handle instead; every
+  // deeper view shows a back arrow.
+  const atSurfaceRoot = view.type === 'all' || (view.type === 'inbox' && inboxView.selectedItemId === null);
 
   // Keyboard shortcut: Cmd/Ctrl+N → new page in current project
   useEffect(() => {
@@ -231,7 +235,7 @@ export const Tickets = memo(() => {
         <div className={styles.mobileHeader}>
           <TopAppBar
             title={mobileHeaderTitle}
-            onBack={mobileBackHandler}
+            {...(atSurfaceRoot ? { onMenu: openMobileNav } : { onBack: handleBack })}
             className={isGlass ? 'omni-glass-mobile-top-app-bar' : 'bg-surface-raised'}
           />
         </div>

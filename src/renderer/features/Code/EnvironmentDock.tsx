@@ -35,8 +35,8 @@ const useStyles = makeStyles({
     backgroundColor: tokens.colorNeutralBackground1,
     boxShadow: `0 1px 12px rgba(0,0,0,0.10), 0 0 0 1px ${tokens.colorNeutralStroke1}`,
     flexShrink: 0,
-    /* No safe-area margin here anymore: the app tab bar now stays below the
-       dock on mobile and owns the home-indicator clearance. */
+    /* No safe-area margin here: the app shell reserves the home-indicator
+       clearance for every surface at once (see App.tsx). */
   },
   dockGlass: {
     backgroundColor: `color-mix(in srgb, ${tokens.colorNeutralBackground1} 18%, transparent)`,

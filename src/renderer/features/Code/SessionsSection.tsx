@@ -1,12 +1,6 @@
 import type { PresenceBadgeStatus } from '@fluentui/react-components';
 import { makeStyles, mergeClasses, PresenceBadge, tokens } from '@fluentui/react-components';
-import {
-  Add20Regular,
-  ColumnTriple20Regular,
-  Delete20Regular,
-  Dismiss20Regular,
-  MoreHorizontal20Regular,
-} from '@fluentui/react-icons';
+import { Add20Regular, Delete20Regular, Dismiss20Regular, MoreHorizontal20Regular } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useMemo, useState } from 'react';
 
@@ -58,8 +52,13 @@ import { useRecentConversations } from './use-recent-conversations';
  */
 
 /** Archived conversations shown initially (and added per "Show more") —
- *  open rows never count against the page. */
-const PAGE_SIZE = 10;
+ *  open rows never count against the page.
+ *
+ *  Kept small on purpose: Sessions is the FIRST of four sections (Projects,
+ *  Channels, DMs follow), so every archived row above the fold costs a
+ *  container section below it. History is the long tail — "Show more" and
+ *  the command palette are the ways into it, not the default view. */
+const PAGE_SIZE = 5;
 
 type SessionEntry =
   | { kind: 'open'; key: string; tab: CodeTab; ts: number }
@@ -319,7 +318,7 @@ export function SessionsSection({ onNavigate }: { onNavigate?: () => void }): Re
 
   const activeTabId = store.activeCodeTabId ?? tabs[0]?.id ?? null;
   // Selection mirrors what fills the plane (see module doc).
-  const selectedKey = store.layoutMode === 'chat' && (store.codeLayoutMode ?? 'tile') === 'focus' ? activeTabId : null;
+  const selectedKey = store.layoutMode === 'chat' && store.codeLayoutMode === 'focus' ? activeTabId : null;
 
   const raiseDeck = useCallback(() => {
     if (persistedStoreApi.$atom.get().layoutMode !== 'chat') {
@@ -346,13 +345,6 @@ export function SessionsSection({ onNavigate }: { onNavigate?: () => void }): Re
     // inert with it — the store-level close is all a remote close needs.
     codeApi.removeTab(id);
   }, []);
-  // The deck is a VIEW over the open sessions (all columns at once), not a
-  // destination — so it lives here as a view affordance, not a nav row.
-  const handleDeckView = useCallback(() => {
-    codeApi.setLayoutMode('tile');
-    raiseDeck();
-    onNavigate?.();
-  }, [raiseDeck, onNavigate]);
   const handleNewChat = useCallback(() => {
     void codeApi.openFreshChat();
     raiseDeck();
@@ -379,17 +371,7 @@ export function SessionsSection({ onNavigate }: { onNavigate?: () => void }): Re
         id="sessions"
         label="Sessions"
         collapsedBadge={attentionCount}
-        actions={
-          <>
-            <IconButton
-              aria-label="Open deck view"
-              icon={<ColumnTriple20Regular />}
-              size="sm"
-              onClick={handleDeckView}
-            />
-            <IconButton aria-label="New chat" icon={<Add20Regular />} size="sm" onClick={handleNewChat} />
-          </>
-        }
+        actions={<IconButton aria-label="New chat" icon={<Add20Regular />} size="sm" onClick={handleNewChat} />}
       >
         {visibleEntries.length > 0 && (
           <Tree aria-label="Sessions" className={nav.tree}>

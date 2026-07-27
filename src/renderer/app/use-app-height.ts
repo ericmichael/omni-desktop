@@ -55,12 +55,12 @@ function measureEnvTop(): number {
  *
  *  Crucially, element painting is CLIPPED at the short layout viewport even
  *  though the window canvas paints full-bleed (verified on-device: a shell
- *  extended to 926 had its bottom nav labels sliced at exactly 879, while
+ *  extended to 926 had its bottom-most content sliced at exactly 879, while
  *  the html background painted to 926). So the zone below the layout
  *  viewport can never hold content — only the backstop color. The shell
  *  must stay at 100dvh; the response to this state is instead to zero
  *  --safe-area-bottom: the home indicator sits entirely inside the
- *  unpaintable band, so the nav-colored backstop band IS the safe-area
+ *  unpaintable band, so the surface-colored backstop band IS the safe-area
  *  clearance and bottom-most surfaces must not pad for it again. */
 function isViewportShortOfFullBleed(layoutHeight: number): boolean {
   if (!isStandaloneDisplayMode()) {
@@ -96,12 +96,12 @@ function isViewportShortOfFullBleed(layoutHeight: number): boolean {
  * innerHeight = clientHeight = vv.height = 100dvh = 879 on a 926 screen,
  * 100vh = 926, env insets 47/34). A previous fix read the 879 values as
  * "lies" and sized the shell to 100vh in standalone — that clipped the
- * bottom tab bar whenever the visible viewport really was 879 (element
+ * bottom-most surface whenever the visible viewport really was 879 (element
  * rects are layout-viewport coordinates, so a rect bottom of 926 does NOT
  * prove pixel 926 is on screen). Always size to the layout viewport: when
- * it's short, the shell fails SHORT — a band below the nav, absorbed by the
- * nav-colored --safe-area-background backstop until kickStandaloneViewport
- * or rotation settles the viewport — instead of clipping the nav behind an
+ * it's short, the shell fails SHORT — a band below its bottom edge, absorbed
+ * by the --safe-area-background backstop until kickStandaloneViewport or
+ * rotation settles the viewport — instead of clipping content behind an
  * overflow:hidden shell. The keyboard branch is safe because it only
  * compares two same-basis measurements against each other.
  */

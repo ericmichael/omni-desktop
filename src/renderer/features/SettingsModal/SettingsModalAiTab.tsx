@@ -30,7 +30,14 @@ import { agentConfigApi } from '@/renderer/services/config';
 import { emitter, ipc } from '@/renderer/services/ipc';
 import { persistedStoreApi } from '@/renderer/services/store';
 import { isLocalVoiceCapable } from '@/renderer/services/voice-client';
-import type { CodexDeviceCode, ModelEntry, ModelsConfig, ProviderEntry, ProviderProbeResult } from '@/shared/types';
+import type {
+  CodexDeviceCode,
+  ModelEntry,
+  ModelsConfig,
+  ProviderEntry,
+  ProviderProbeResult,
+  RuntimeModelEntry,
+} from '@/shared/types';
 
 const PROVIDER_TYPES: ProviderEntry['type'][] = ['openai', 'azure', 'openai-compatible', 'litellm', 'openai-oauth'];
 const REASONING_OPTIONS = ['none', 'low', 'medium', 'high', 'xhigh'] as const;
@@ -43,12 +50,36 @@ function emptyModel(id: string): ModelEntry {
   return { model: id };
 }
 
-/** Collect all "provider/model" keys for default dropdowns */
+/**
+ * "provider/model" keys for the default-model dropdown. Realtime models are
+ * excluded: they only speak the realtime protocol, so picking one as the chat
+ * default breaks every text turn.
+ */
 function collectModelKeys(config: ModelsConfig): string[] {
   const keys: string[] = [];
   for (const [provName, prov] of Object.entries(config.providers)) {
-    for (const modelId of Object.keys(prov.models)) {
-      keys.push(`${provName}/${modelId}`);
+    for (const [modelId, entry] of Object.entries(prov.models)) {
+      if (!entry.realtime) {
+        keys.push(`${provName}/${modelId}`);
+      }
+    }
+  }
+  return keys;
+}
+
+/**
+ * "provider/model" keys flagged `realtime` — the only models a voice_default
+ * may point at. The runtime refuses to build voice settings for anything
+ * else, so offering the full model list here produces a setting that looks
+ * saved but is silently ignored.
+ */
+function collectRealtimeModelKeys(config: ModelsConfig): string[] {
+  const keys: string[] = [];
+  for (const [provName, prov] of Object.entries(config.providers)) {
+    for (const [modelId, entry] of Object.entries(prov.models)) {
+      if (entry.realtime) {
+        keys.push(`${provName}/${modelId}`);
+      }
     }
   }
   return keys;
@@ -166,7 +197,10 @@ export const SettingsModalAiTab = memo(() => {
   const [newModelId, setNewModelId] = useState('');
   // Live merged model list from the runtime (`omni model list --json`), which
   // includes models not in the store — notably OAuth-discovered Codex models.
-  const [runtimeModelNames, setRuntimeModelNames] = useState<string[]>([]);
+  // Entries, not names — the `realtime` flag decides what the voice model
+  // dropdown may offer, and dropping it here would strand voice on text models.
+  const [runtimeModels, setRuntimeModels] = useState<RuntimeModelEntry[]>([]);
+  const runtimeModelNames = useMemo(() => runtimeModels.map((m) => m.name), [runtimeModels]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -188,8 +222,8 @@ export const SettingsModalAiTab = memo(() => {
   useEffect(() => {
     emitter
       .invoke('util:list-models')
-      .then((res) => setRuntimeModelNames(res.models.map((m) => m.name)))
-      .catch(() => setRuntimeModelNames([]));
+      .then((res) => setRuntimeModels(res.models))
+      .catch(() => setRuntimeModels([]));
   }, []);
 
   // Dead ChatGPT sessions must not render a plausible "discovered" model
@@ -204,11 +238,24 @@ export const SettingsModalAiTab = memo(() => {
   }, []);
 
   // Union of store-configured keys and the live runtime list, so discovered
-  // models (e.g. Codex) are selectable as the default/voice model.
+  // models (e.g. Codex) are selectable as the default model. Realtime models
+  // are filtered from both halves — they belong to the Voice row only.
   const modelKeys = useMemo(() => {
     const storeKeys = config ? collectModelKeys(config) : [];
-    return Array.from(new Set([...storeKeys, ...runtimeModelNames])).sort();
-  }, [config, runtimeModelNames]);
+    const runtimeKeys = runtimeModels.filter((m) => !m.realtime).map((m) => m.name);
+    return Array.from(new Set([...storeKeys, ...runtimeKeys])).sort();
+  }, [config, runtimeModels]);
+
+  // Same union, narrowed to realtime-capable models — what Hosted voice may use.
+  const realtimeModelKeys = useMemo(() => {
+    const storeKeys = config ? collectRealtimeModelKeys(config) : [];
+    const runtimeKeys = runtimeModels.filter((m) => m.realtime).map((m) => m.name);
+    return Array.from(new Set([...storeKeys, ...runtimeKeys])).sort();
+  }, [config, runtimeModels]);
+
+  // Offering Hosted with nothing to point it at would write null and bounce
+  // the radio back to Off. An already-set voice_default keeps it reachable.
+  const hostedVoiceAvailable = realtimeModelKeys.length > 0 || (config?.voice_default ?? null) !== null;
 
   /**
    * Called after a successful ChatGPT sign-in. Registers the built-in `codex`
@@ -223,7 +270,7 @@ export const SettingsModalAiTab = memo(() => {
     const runtime = await emitter.invoke('util:list-models').catch(() => null);
     // Push the fresh discovery into state so the default picker and the
     // Codex provider row both reflect sign-in immediately (no modal reopen).
-    setRuntimeModelNames((runtime?.models ?? []).map((m) => m.name));
+    setRuntimeModels(runtime?.models ?? []);
     const { config: next, madeDefault } = buildCodexConfig(current, runtime);
     await agentConfigApi.setModels(next);
     await load();
@@ -311,12 +358,13 @@ export const SettingsModalAiTab = memo(() => {
       updateConfig((c) => ({
         ...c,
         // Hosted needs a non-null model so the row stays selected; seed the
-        // first available one (user refines via the Model dropdown). Off/Local
-        // clear it.
-        voice_default: value === 'hosted' ? (c.voice_default ?? modelKeys[0] ?? null) : null,
+        // first realtime-capable one (user refines via the Model dropdown).
+        // Off/Local clear it. Seeding from the full model list would pick a
+        // text model, which the runtime then ignores.
+        voice_default: value === 'hosted' ? (c.voice_default ?? realtimeModelKeys[0] ?? null) : null,
       }));
     },
-    [updateConfig, modelKeys]
+    [updateConfig, realtimeModelKeys]
   );
 
   const addProvider = useCallback(() => {
@@ -486,7 +534,14 @@ export const SettingsModalAiTab = memo(() => {
             onChange={(_, data) => onChangeVoiceProvider(data.value)}
           >
             <Radio value="off" label="Off" />
-            <Radio value="hosted" label="Hosted" />
+            <Radio
+              value="hosted"
+              label="Hosted"
+              disabled={!hostedVoiceAvailable}
+              title={
+                hostedVoiceAvailable ? undefined : 'No realtime model configured — sign in with ChatGPT or add one'
+              }
+            />
             <Radio
               value="local"
               label="Local"
@@ -499,7 +554,7 @@ export const SettingsModalAiTab = memo(() => {
           <FormField label="Model">
             <Select value={config.voice_default ?? ''} onChange={onChangeVoiceDefault}>
               <option value="">None</option>
-              {modelKeys.map((k) => (
+              {realtimeModelKeys.map((k) => (
                 <option key={k} value={k}>
                   {k}
                 </option>

@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { configuredVoiceMode } from '@/lib/voice-mode';
 import { persistedStoreApi } from '@/renderer/services/store';
 import { isLocalVoiceCapable } from '@/renderer/services/voice-client';
 
@@ -89,11 +90,12 @@ export function Input({
   const [historyIndex, setHistoryIndex] = useState(0);
   const [historyDraft, setHistoryDraft] = useState('');
   const [isVoiceModalOpen, setIsVoiceModalOpen] = useState(false);
-  // Local voice (Option A): shown when the user picked it in Settings → Models
-  // → Voice and the deployment can run it. Takes precedence over the realtime
-  // VoiceModal mic button.
-  const localVoiceEnabled = useStore(persistedStoreApi.$atom).localVoiceEnabled;
-  const localVoiceSupported = localVoiceEnabled && isLocalVoiceCapable();
+  // Which mic to show follows the configured mode, not availability: gating
+  // the hosted button on `voiceEnabled` alone meant a credential existing was
+  // enough to render it, so Voice = Off still showed a mic.
+  const voiceMode = configuredVoiceMode(useStore(persistedStoreApi.$atom));
+  const localVoiceSupported = voiceMode === 'local' && isLocalVoiceCapable();
+  const hostedVoiceSupported = voiceMode === 'hosted' && Boolean(voiceEnabled);
   const speakerToggleLabel = speakRepliesEnabled ? 'Spoken replies on' : 'Spoken replies off';
   const [sandboxMenuOpen, setSandboxMenuOpen] = useState(false);
   const taRef = useRef<HTMLTextAreaElement | null>(null);
@@ -435,7 +437,7 @@ export function Input({
                   </button>
                   <LocalVoiceButton onSubmit={(t) => (onVoiceSubmit ?? onSubmit)(t)} />
                 </>
-              ) : voiceEnabled ? (
+              ) : hostedVoiceSupported ? (
                 <button
                   type="button"
                   onClick={() => setIsVoiceModalOpen(true)}

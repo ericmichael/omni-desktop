@@ -19,8 +19,12 @@ import type {
 /** The four fixed master nodes of the Sandboxes tab. */
 export type SandboxesPane = 'health' | 'profiles' | 'running' | 'snapshots';
 
-/** Detail-pane selection: which fixed master node is open. */
-export const $sandboxesSelectedPane = atom<SandboxesPane>('health');
+/**
+ * Detail-pane selection: which fixed master node is open. `null` = nothing
+ * drilled into yet, which only mobile can show (the list fills the plane
+ * there); the desktop two-pane layout falls back to the first node.
+ */
+export const $sandboxesSelectedPane = atom<SandboxesPane | null>(null);
 
 /** Discovered profile catalog (`sandbox:list-profiles`); [] until the first fetch lands. */
 export const $sandboxProfiles = atom<ProfileSummary[]>([]);
