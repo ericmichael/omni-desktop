@@ -9,9 +9,14 @@ import { describe, expect, it, vi } from 'vitest';
 import type { DockerExecFn } from '@/main/docker-orphan-cleanup';
 import {
   codeTabLabel,
+  getContainerLogs,
+  getImageStatus,
   getSubstrateStatus,
   listContainers,
+  parseReclaimedBytes,
   processOwnersFromState,
+  pruneImages,
+  pullImage,
   removeContainer,
   type SandboxInventoryDeps,
   sweepOrphans,
@@ -21,7 +26,7 @@ import type { CodeTab } from '@/shared/types';
 
 type ExecCall = { cmd: string; args: string[] };
 
-function makeDeps(responses: Map<string, { stdout: string } | Error> = new Map()): {
+function makeDeps(responses: Map<string, { stdout: string; stderr?: string } | Error> = new Map()): {
   deps: SandboxInventoryDeps;
   calls: ExecCall[];
 } {
@@ -34,7 +39,7 @@ function makeDeps(responses: Map<string, { stdout: string } | Error> = new Map()
         if (response instanceof Error) {
           throw response;
         }
-        return { stdout: response.stdout, stderr: '' };
+        return { stdout: response.stdout, stderr: response.stderr ?? '' };
       }
     }
     return { stdout: '', stderr: '' };
@@ -157,6 +162,131 @@ describe('sweepOrphans', () => {
   it('reports an empty list when Docker is unavailable', async () => {
     const { deps } = makeDeps(new Map([['docker version', new Error('not found')]]));
     await expect(sweepOrphans(deps)).resolves.toEqual({ removed: [] });
+  });
+});
+
+describe('getContainerLogs', () => {
+  it('tails logs of a labeled container, concatenating stdout and stderr', async () => {
+    const { deps, calls } = makeDeps(
+      new Map([
+        ['label=com.omni.omni-code', { stdout: `${psLine('abc123')}\n` }],
+        ['logs', { stdout: 'out line\n', stderr: 'err line\n' }],
+      ])
+    );
+    await expect(getContainerLogs(deps, 'abc123', 100)).resolves.toEqual({ logs: 'out line\nerr line\n' });
+    const logsCall = calls.find((c) => c.args[0] === 'logs');
+    expect(logsCall?.args).toEqual(['logs', '--tail', '100', 'abc123']);
+  });
+
+  it('matches short vs full ids and passes the LISTED id to docker', async () => {
+    const { deps, calls } = makeDeps(
+      new Map([['label=com.omni.omni-code', { stdout: `${psLine('0af06484b591')}\n` }]])
+    );
+    await getContainerLogs(deps, FULL_ID, 50);
+    expect(calls.find((c) => c.args[0] === 'logs')?.args).toContain('0af06484b591');
+  });
+
+  it('caps tailLines at 2000 and floors non-positive input at 1', async () => {
+    const { deps, calls } = makeDeps(new Map([['label=com.omni.omni-code', { stdout: `${psLine('abc123')}\n` }]]));
+    await getContainerLogs(deps, 'abc123', 99_999);
+    await getContainerLogs(deps, 'abc123', -5);
+    const tails = calls.filter((c) => c.args[0] === 'logs').map((c) => c.args[2]);
+    expect(tails).toEqual(['2000', '1']);
+  });
+
+  it('refuses ids that are not in the labeled listing, without running docker logs', async () => {
+    const { deps, calls } = makeDeps(new Map([['label=com.omni.omni-code', { stdout: `${psLine('abc123')}\n` }]]));
+    await expect(getContainerLogs(deps, 'not-ours', 100)).rejects.toThrow(/No sandbox container/);
+    expect(calls.some((c) => c.args[0] === 'logs')).toBe(false);
+  });
+});
+
+describe('getImageStatus', () => {
+  it('maps an inspectable image to present + size', async () => {
+    const { deps, calls } = makeDeps(new Map([['image inspect', { stdout: '123456789\n' }]]));
+    await expect(getImageStatus(deps, 'ghcr.io/example/devbox:latest')).resolves.toEqual({
+      image: 'ghcr.io/example/devbox:latest',
+      present: true,
+      sizeBytes: 123_456_789,
+    });
+    expect(calls[0]!.args).toEqual(['image', 'inspect', 'ghcr.io/example/devbox:latest', '--format', '{{.Size}}']);
+  });
+
+  it('maps "No such image" to present: false instead of throwing', async () => {
+    const notFound = Object.assign(new Error('exit 1'), {
+      stderr: 'Error response from daemon: No such image: ghcr.io/example/devbox:latest',
+    });
+    const { deps } = makeDeps(new Map([['image inspect', notFound]]));
+    await expect(getImageStatus(deps, 'ghcr.io/example/devbox:latest')).resolves.toEqual({
+      image: 'ghcr.io/example/devbox:latest',
+      present: false,
+      sizeBytes: null,
+    });
+  });
+
+  it('rethrows docker-unavailable failures', async () => {
+    const down = Object.assign(new Error('Cannot connect to the Docker daemon'), { code: 1 });
+    const { deps } = makeDeps(new Map([['image inspect', down]]));
+    await expect(getImageStatus(deps, 'devbox')).rejects.toThrow(/Cannot connect/);
+  });
+
+  it('rejects flag-shaped references before any exec', async () => {
+    const { deps, calls } = makeDeps();
+    await expect(getImageStatus(deps, '--evil')).rejects.toThrow(/Invalid image reference/);
+    expect(calls).toHaveLength(0);
+  });
+});
+
+describe('pullImage', () => {
+  it('pulls a valid reference (registry port, tag, digest all pass the charset check)', async () => {
+    const { deps, calls } = makeDeps();
+    await pullImage(deps, 'registry.local:5000/team/devbox:1.2@sha256:abc123');
+    expect(calls).toEqual([{ cmd: 'docker', args: ['pull', 'registry.local:5000/team/devbox:1.2@sha256:abc123'] }]);
+  });
+
+  it.each(['--evil', '-q', 'bad ref', 'a;b', 'img\nother', ''])(
+    'rejects unsafe reference %j without running docker',
+    async (ref) => {
+      const { deps, calls } = makeDeps();
+      await expect(pullImage(deps, ref)).rejects.toThrow(/Invalid image reference/);
+      expect(calls).toHaveLength(0);
+    }
+  );
+
+  it('rejects with the stderr tail when the pull fails', async () => {
+    const failure = Object.assign(new Error('exit 1'), {
+      stderr: 'Error response from daemon: manifest unknown: manifest unknown',
+    });
+    const { deps } = makeDeps(new Map([['pull', failure]]));
+    await expect(pullImage(deps, 'ghcr.io/example/nope')).rejects.toThrow(/manifest unknown/);
+  });
+});
+
+describe('image pruning', () => {
+  it.each([
+    ['Total reclaimed space: 234B', 234],
+    ['Total reclaimed space: 1.2kB', 1_200],
+    ['Total reclaimed space: 45.6MB', 45_600_000],
+    ['Total reclaimed space: 1.5GB', 1_500_000_000],
+    ['Total reclaimed space: 2GiB', 2 * 2 ** 30],
+    ['Deleted Images:\nuntagged: foo\n\nTotal reclaimed space: 0B', 0],
+    ['Total reclaimed space: garbage', null],
+    ['', null],
+  ])('parseReclaimedBytes(%j) → %o', (output, expected) => {
+    expect(parseReclaimedBytes(output)).toBe(expected);
+  });
+
+  it('prunes dangling images and reports reclaimed bytes', async () => {
+    const { deps, calls } = makeDeps(
+      new Map([['image prune', { stdout: 'Deleted Images:\nsha256:aaa\n\nTotal reclaimed space: 1.5GB\n' }]])
+    );
+    await expect(pruneImages(deps)).resolves.toEqual({ reclaimedBytes: 1_500_000_000 });
+    expect(calls).toEqual([{ cmd: 'docker', args: ['image', 'prune', '-f'] }]);
+  });
+
+  it('reports null when docker prints no reclaim line', async () => {
+    const { deps } = makeDeps(new Map([['image prune', { stdout: '' }]]));
+    await expect(pruneImages(deps)).resolves.toEqual({ reclaimedBytes: null });
   });
 });
 

@@ -24,7 +24,9 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
+import { codeTabLabel } from '@/main/sandbox-inventory';
 import type { IIpcListener } from '@/shared/ipc-listener';
+import type { ChatConversation, CodeTab, SandboxSnapshotSummary } from '@/shared/types';
 
 import { getSnapshotStore } from './snapshot-blob-store';
 import { getOmniConfigDir } from './util';
@@ -38,9 +40,10 @@ const snapshotsDir = (): string => path.join(getOmniConfigDir(), 'snapshots');
 
 /**
  * Delete one snapshot file. Idempotent — missing file is not an error.
- * Returns true if a file was deleted, false otherwise.
+ * Returns true if a file was deleted, false otherwise. *dir* is a test seam;
+ * production always uses the omni-config snapshots dir.
  */
-export async function deleteSnapshot(sessionId: string): Promise<boolean> {
+export async function deleteSnapshot(sessionId: string, dir: string = snapshotsDir()): Promise<boolean> {
   if (!sessionId) {
     return false;
   }
@@ -53,7 +56,7 @@ export async function deleteSnapshot(sessionId: string): Promise<boolean> {
   }
   let unlinked = false;
   try {
-    await fs.unlink(path.join(snapshotsDir(), filename));
+    await fs.unlink(path.join(dir, filename));
     unlinked = true;
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
@@ -118,13 +121,99 @@ export async function gcStaleSnapshots(opts: { keep: Set<string>; ttlMs: number 
   return deleted;
 }
 
+// ---------------------------------------------------------------------------
+// Snapshot browser (`sandbox:list-snapshots`) + in-use delete guard
+// ---------------------------------------------------------------------------
+
+/** One session's claim on its snapshot tar, with a human label when known. */
+export type SessionClaim = { sessionId: string; label: string | null };
+
+export type SnapshotHandlerDeps = {
+  /**
+   * Sessions an open code tab still claims — the SAME source as the
+   * `gcStaleSnapshots` keep set both shells build (`codeTabs[].sessionId`,
+   * the reserved chat column included). These tars are `inUse` in the
+   * listing and protected from `snapshot:delete`.
+   */
+  getProtectedSessions: () => SessionClaim[];
+  /**
+   * Archived-conversation titles (`chatConversations`) — label-only, never
+   * protective: closing a chat column deliberately deletes its snapshot
+   * (archived chats resume fresh), so a leftover tar is deletable.
+   */
+  getArchivedLabels: () => SessionClaim[];
+  /** Test seam; production defaults to `<omni-config>/snapshots`. */
+  dir?: string;
+};
+
 /**
- * Register the renderer-facing IPC handler for cascade deletion.
- * The startup GC sweep is wired separately by the caller (it needs
- * access to the store snapshot to build the protected set).
+ * Open-tab session claims for {@link SnapshotHandlerDeps.getProtectedSessions}
+ * — mirrors the keep set the Electron shell passes to `gcStaleSnapshots`.
  */
-export function registerSnapshotHandlers(ipc: IIpcListener): void {
-  ipc.handle('snapshot:delete', async (_, sessionId) => {
-    await deleteSnapshot(sessionId);
+export const protectedSessionsFromTabs = (tabs: CodeTab[]): SessionClaim[] =>
+  tabs
+    .filter((t): t is CodeTab & { sessionId: string } => !!t.sessionId)
+    .map((t) => ({ sessionId: t.sessionId, label: codeTabLabel(t) }));
+
+/** Archived-conversation labels for {@link SnapshotHandlerDeps.getArchivedLabels}. */
+export const archivedLabelsFromConversations = (conversations: ChatConversation[]): SessionClaim[] =>
+  conversations.map((c) => ({ sessionId: c.sessionId, label: c.title || null }));
+
+/** Enumerate `<dir>/*.tar` for the Sandboxes tab, newest first. */
+export async function listSnapshots(deps: SnapshotHandlerDeps): Promise<SandboxSnapshotSummary[]> {
+  const dir = deps.dir ?? snapshotsDir();
+  let entries: string[];
+  try {
+    entries = await fs.readdir(dir);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      return [];
+    }
+    throw err;
+  }
+  const protectedClaims = deps.getProtectedSessions();
+  const archived = deps.getArchivedLabels();
+  const summaries: SandboxSnapshotSummary[] = [];
+  for (const entry of entries) {
+    if (!entry.endsWith(SNAPSHOT_SUFFIX)) {
+      continue;
+    }
+    const sessionId = entry.slice(0, -SNAPSHOT_SUFFIX.length);
+    let stat;
+    try {
+      stat = await fs.stat(path.join(dir, entry));
+    } catch {
+      continue;
+    }
+    const claim = protectedClaims.find((c) => c.sessionId === sessionId);
+    summaries.push({
+      sessionId,
+      sizeBytes: stat.size,
+      modifiedAt: stat.mtimeMs,
+      inUse: claim !== undefined,
+      label: claim?.label ?? archived.find((c) => c.sessionId === sessionId)?.label ?? null,
+    });
+  }
+  return summaries.sort((a, b) => b.modifiedAt - a.modifiedAt);
+}
+
+/**
+ * Register the renderer-facing snapshot channels. The startup GC sweep is
+ * wired separately by the caller (same protected-session source).
+ *
+ * `snapshot:delete` guards against ids an open tab still claims — the
+ * Sandboxes browser UI can pass arbitrary ids. The tab-close cascade is not
+ * affected: `removeTab` persists the pruned `codeTabs` (awaited round trip)
+ * BEFORE invoking the delete, so the closed tab's session is already out of
+ * the protected set when the guard evaluates.
+ */
+export function registerSnapshotHandlers(ipc: IIpcListener, deps: SnapshotHandlerDeps): void {
+  ipc.handle('snapshot:delete', async (_, sessionId: string) => {
+    const claim = deps.getProtectedSessions().find((c) => c.sessionId === sessionId);
+    if (claim) {
+      throw new Error(`Snapshot is in use by an open session: ${claim.label ?? sessionId}`);
+    }
+    await deleteSnapshot(sessionId, deps.dir);
   });
+  ipc.handle('sandbox:list-snapshots', () => listSnapshots(deps));
 }
