@@ -67,7 +67,13 @@ import {
 } from '@/main/sandbox-inventory';
 import { registerScheduledTaskHandlers, ScheduledTaskManager } from '@/main/scheduled-task-manager';
 import { LocalSecretStore } from '@/main/secret-store';
-import { DEFAULT_CHAT_SNAPSHOT_TTL_MS, gcStaleSnapshots, registerSnapshotHandlers } from '@/main/snapshot-manager';
+import {
+  archivedLabelsFromConversations,
+  DEFAULT_CHAT_SNAPSHOT_TTL_MS,
+  gcStaleSnapshots,
+  protectedSessionsFromTabs,
+  registerSnapshotHandlers,
+} from '@/main/snapshot-manager';
 import { getStore } from '@/main/store';
 import { wireTunnelReverseHandlers } from '@/main/tunnel-handler';
 import {
@@ -349,7 +355,13 @@ const [, cleanupConsole] = createConsoleManager({
   processManager,
 });
 
-registerSnapshotHandlers(main.ipc);
+// Protected set = the SAME open-tab sessions as the gc keep set below; the
+// tab-close cascade persists the pruned codeTabs before its snapshot:delete,
+// so the guard only ever blocks deletes of sessions still open in the UI.
+registerSnapshotHandlers(main.ipc, {
+  getProtectedSessions: () => protectedSessionsFromTabs(store.get('codeTabs') ?? []),
+  getArchivedLabels: () => archivedLabelsFromConversations(store.get('chatConversations') ?? []),
+});
 
 // Sandboxes tab (docs/sandboxes-tab-plan.md Phase 2): profile discovery +
 // container inventory. Both modules are Electron-free; this shell injects
@@ -1161,6 +1173,24 @@ main.ipc.handle('wsl:set-persistent', async (_, persistent) => {
 // one-shot (UAC; completion unobservable), 'distro' registers Ubuntu without
 // elevation. The card re-runs `wsl:detect` afterwards — no store change here.
 main.ipc.handle('wsl:install', (_, mode) => wslBackend.install(mode === 'platform' ? 'platform' : 'distro'));
+
+// Docker bootstrap inside the linked distro (Sandboxes → Health). Both run
+// as root via `wsl -u root` and end by re-running the docker check, so the
+// `wsl:status-changed` broadcast refreshes `status.docker`. Require an
+// active WSL link — without one the manager has no distro to target.
+const requireWslLink = (): void => {
+  if (store.get('remoteBackend')?.kind !== 'wsl') {
+    throw new Error('No WSL backend is linked');
+  }
+};
+main.ipc.handle('wsl:install-docker', () => {
+  requireWslLink();
+  return wslBackend.installDocker();
+});
+main.ipc.handle('wsl:start-docker', () => {
+  requireWslLink();
+  return wslBackend.startDocker();
+});
 
 //#endregion
 

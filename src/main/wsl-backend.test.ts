@@ -451,6 +451,132 @@ describe('token minting', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Docker bootstrap (`wsl:install-docker` / `wsl:start-docker`)
+// ---------------------------------------------------------------------------
+
+// Root-context in-distro commands carry `-u root` before the `--exec sh -c`.
+const isRootCall = (call: RunCall): boolean => {
+  const idx = call.args.indexOf('-u');
+  return idx >= 0 && call.args[idx + 1] === 'root';
+};
+const scriptOf = (call: RunCall): string => call.args[call.args.length - 1] ?? '';
+const isInstallDockerCall = (call: RunCall): boolean => scriptOf(call).includes('get.docker.com');
+const isStartDockerCall = (call: RunCall): boolean => scriptOf(call).includes('service docker start');
+const isDockerInfoCall = (call: RunCall): boolean => scriptOf(call).includes('docker info');
+
+describe('docker bootstrap', () => {
+  /** Fake distro whose docker CLI appears only after the install script ran. */
+  const makeDockerlessManager = () => {
+    const state = { installed: false };
+    const harness = makeManager({
+      respond: (args) => {
+        const script = args[args.length - 1] ?? '';
+        if (script.includes('get.docker.com')) {
+          state.installed = true;
+          return ok();
+        }
+        if (script.includes('docker info')) {
+          return state.installed ? ok() : fail(127, 'sh: docker: not found');
+        }
+        return ok();
+      },
+      fetchOk: true,
+    });
+    return { ...harness, state };
+  };
+
+  it('installDocker runs the install script as root via --exec, starts the daemon, and refreshes docker status', async () => {
+    vi.useFakeTimers();
+    const { manager, cleanup, runCalls } = makeDockerlessManager();
+    try {
+      await manager.start('Ubuntu-22.04');
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(manager.getStatus().state).toBe('running');
+      expect(manager.getStatus().docker).toBe('missing');
+
+      await manager.installDocker();
+      const install = runCalls.find(isInstallDockerCall);
+      expect(install).toBeDefined();
+      expect(isRootCall(install!)).toBe(true);
+      // `--exec` is load-bearing (see execArgs) — the script is one argv element.
+      expect(install?.args).toContain('--exec');
+      // The default (uid 1000) user joins the docker group best-effort; the
+      // grouping keeps a usermod failure from masking an install failure.
+      expect(scriptOf(install!)).toContain('usermod -aG docker');
+      expect(scriptOf(install!)).toContain('|| true');
+      // Install → start → docker re-check, so status.docker refreshes to ok.
+      expect(runCalls.some(isStartDockerCall)).toBe(true);
+      expect(runCalls.filter(isDockerInfoCall).length).toBeGreaterThanOrEqual(2);
+      expect(manager.getStatus().docker).toBe('ok');
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('installDocker rejects with decoded stderr when the install script fails', async () => {
+    const { manager, cleanup } = makeManager({
+      respond: (args) => {
+        const script = args[args.length - 1] ?? '';
+        if (script.includes('get.docker.com')) {
+          // Linux-side stderr is plain UTF-8 (unlike wsl.exe's UTF-16LE chatter).
+          return fail(1, 'curl: (6) Could not resolve host: get.docker.com');
+        }
+        return ok();
+      },
+      fetchOk: true,
+    });
+    try {
+      await manager.start('Ubuntu-22.04');
+      await expect(manager.installDocker()).rejects.toThrow(/Could not resolve host/);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('startDocker runs one root script: service wrapper first, detached dockerd fallback, then re-checks', async () => {
+    const { manager, cleanup, runCalls, state } = makeDockerlessManager();
+    try {
+      await manager.start('Ubuntu-22.04');
+      state.installed = true;
+      await manager.startDocker();
+      const start = runCalls.find(isStartDockerCall);
+      expect(start).toBeDefined();
+      expect(isRootCall(start!)).toBe(true);
+      expect(start?.args).toContain('--exec');
+      // One script covers both shapes: the init-registered service, else a
+      // dockerd backgrounded in a subshell with its output on a log file.
+      expect(scriptOf(start!)).toContain('service docker start');
+      expect(scriptOf(start!)).toContain('|| (dockerd >/var/log/dockerd.log 2>&1 &)');
+      expect(runCalls.some(isDockerInfoCall)).toBe(true);
+      expect(manager.getStatus().docker).toBe('ok');
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('both throw when no distro is active (linked but never booted)', async () => {
+    const { manager, cleanup } = makeManager({ respond: () => ok() });
+    try {
+      await expect(manager.installDocker()).rejects.toThrow(/not active/);
+      await expect(manager.startDocker()).rejects.toThrow(/not active/);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('no-ops off Windows', async () => {
+    const { manager, cleanup, runCalls } = makeManager({ respond: () => ok(), platform: 'linux' });
+    try {
+      await expect(manager.installDocker()).resolves.toBeUndefined();
+      await expect(manager.startDocker()).resolves.toBeUndefined();
+      expect(runCalls).toHaveLength(0);
+    } finally {
+      cleanup();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Persistent daemon mode — adopt-or-respawn boot, supervision, transitions.
 // ---------------------------------------------------------------------------
 

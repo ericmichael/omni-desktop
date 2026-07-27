@@ -3965,10 +3965,13 @@ export type SandboxSnapshotSummary = {
   sizeBytes: number;
   /** mtime, epoch ms. */
   modifiedAt: number;
-  /** True when the session is still resumable (an existing code tab / chat
-   *  conversation claims it) — deletion is refused for these. */
+  /** True when an OPEN code tab (chat columns included) still claims the
+   *  session — the same set the snapshot GC protects — and deletion is
+   *  refused. Archived conversations do NOT protect: closing a chat column
+   *  deliberately drops its snapshot (archived chats resume fresh). */
   inUse: boolean;
-  /** Human label when the owning tab/conversation is known; else null. */
+  /** Human label when the owning tab (or an archived conversation's title)
+   *  is known; else null. */
   label: string | null;
 };
 

@@ -68,6 +68,43 @@ const REMOTE_ROOT = '~/.omni/launcher';
  */
 const execArgs = (distro: string, script: string): string[] => ['-d', distro, '--exec', 'sh', '-c', script];
 
+/**
+ * Root-context in-distro command — same `--exec sh -c` rule as
+ * {@link execArgs} with `-u root` inserted. Docker install/start need root,
+ * and `wsl.exe -u root` grants it with no password prompt.
+ */
+const rootExecArgs = (distro: string, script: string): string[] => [
+  '-d',
+  distro,
+  '-u',
+  'root',
+  '--exec',
+  'sh',
+  '-c',
+  script,
+];
+
+/**
+ * get.docker.com convenience installer, then the default (uid 1000) user into
+ * the docker group. The script is fetched to a file first because `curl | sh`
+ * hides curl failures (sh reads empty input and exits 0); the usermod is
+ * grouped `{ … || true; }` so ONLY it is best-effort — a bare trailing
+ * `|| true` would swallow install failures too.
+ */
+const INSTALL_DOCKER_SCRIPT =
+  'export DEBIAN_FRONTEND=noninteractive; ' +
+  'curl -fsSL https://get.docker.com -o /tmp/omni-get-docker.sh && sh /tmp/omni-get-docker.sh && ' +
+  '{ usermod -aG docker "$(getent passwd 1000 | cut -d: -f1)" || true; }';
+
+/**
+ * Start dockerd: the sysvinit/openrc service wrapper when one is registered
+ * (Ubuntu/Debian get one from docker-ce), else a raw dockerd backgrounded in
+ * a subshell with its output on /var/log/dockerd.log — WSL distros have no
+ * systemd pid 1 by default, so `service` is the broadest first try. The
+ * trailing sleep gives the daemon socket a moment before the status re-probe.
+ */
+const START_DOCKER_SCRIPT = 'service docker start >/dev/null 2>&1 || (dockerd >/var/log/dockerd.log 2>&1 &); sleep 2';
+
 /** Stage-then-swap unpack: a torn stdin stream can only ever corrupt the tmp
  *  dir, never a live install. */
 const PROVISION_SCRIPT = `rm -rf ${REMOTE_ROOT}.tmp && mkdir -p ${REMOTE_ROOT}.tmp && tar xzf - -C ${REMOTE_ROOT}.tmp && rm -rf ${REMOTE_ROOT} && mv ${REMOTE_ROOT}.tmp ${REMOTE_ROOT}`;
@@ -574,6 +611,49 @@ export class WslBackendManager {
     this.child?.kill();
     this.child = null;
     await this.reapStaleDaemon(distro);
+  }
+
+  /**
+   * `wsl:install-docker` — install docker-ce in the linked distro via the
+   * get.docker.com script, run as root ({@link rootExecArgs}). Long-running
+   * (the runWsl seam applies no timeout — apt downloads can take minutes);
+   * rejects with decoded stderr on failure. On success, {@link startDocker}
+   * brings the daemon up and re-runs the docker check so `status.docker`
+   * refreshes.
+   */
+  async installDocker(): Promise<void> {
+    if (this.platform !== 'win32') {
+      return;
+    }
+    const distro = this.distro;
+    if (!distro) {
+      throw new Error('WSL backend is not active');
+    }
+    const res = await this.runWsl(rootExecArgs(distro, INSTALL_DOCKER_SCRIPT));
+    if (res.code !== 0) {
+      throw new Error(`Docker install failed (exit ${res.code}): ${decodeWslOutput(res.stderr).trim()}`);
+    }
+    await this.startDocker();
+  }
+
+  /**
+   * `wsl:start-docker` — the daemon-down remedy: start dockerd as root
+   * ({@link START_DOCKER_SCRIPT}: service wrapper first, detached dockerd
+   * fallback), then re-run the docker check so `status.docker` refreshes.
+   */
+  async startDocker(): Promise<void> {
+    if (this.platform !== 'win32') {
+      return;
+    }
+    const distro = this.distro;
+    if (!distro) {
+      throw new Error('WSL backend is not active');
+    }
+    const res = await this.runWsl(rootExecArgs(distro, START_DOCKER_SCRIPT));
+    if (res.code !== 0) {
+      throw new Error(`Docker start failed (exit ${res.code}): ${decodeWslOutput(res.stderr).trim()}`);
+    }
+    await this.checkDocker();
   }
 
   /** Mint a WS auth token for the renderer (`wsl:get-ws-token`). */

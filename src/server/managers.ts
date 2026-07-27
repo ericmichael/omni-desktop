@@ -63,7 +63,11 @@ import {
   warmReattachOwnersFromTabs,
 } from '@/main/sandbox-inventory';
 import { registerScheduledTaskHandlers, ScheduledTaskManager } from '@/main/scheduled-task-manager';
-import { registerSnapshotHandlers } from '@/main/snapshot-manager';
+import {
+  archivedLabelsFromConversations,
+  protectedSessionsFromTabs,
+  registerSnapshotHandlers,
+} from '@/main/snapshot-manager';
 import { registerSupervisorHandlers } from '@/main/supervisor-handlers';
 import { getOmniConfigDir } from '@/main/util';
 import { WorkspaceSyncManager } from '@/main/workspace-sync-manager';
@@ -1209,9 +1213,17 @@ export const wireGlobalHandlers = async (arg: {
       sendSnapshot(c.tenantId, c.principalId);
     }
   );
-  // Cascade-delete chat/code-tab snapshots when the renderer closes a tab.
-  // Pure file-system op (no per-tenant data), so the global ipc is fine.
-  registerSnapshotHandlers(ipc);
+  // Cascade-delete chat/code-tab snapshots when the renderer closes a tab,
+  // plus the Sandboxes-tab snapshot browser. The snapshots dir is singular on
+  // this backend while tenants are not, so — like the container inventory
+  // below — the protected set and labels aggregate across EVERY tenant: one
+  // tenant's open session must never be deletable through another's client.
+  registerSnapshotHandlers(ipc, {
+    getProtectedSessions: () =>
+      [...tenants.values()].flatMap((t) => protectedSessionsFromTabs(t.settings.get('codeTabs') ?? [])),
+    getArchivedLabels: () =>
+      [...tenants.values()].flatMap((t) => archivedLabelsFromConversations(t.settings.get('chatConversations') ?? [])),
+  });
 
   // Sandboxes tab (docs/sandboxes-tab-plan.md Phase 2). Profile discovery
   // uses the same dirs as `omni serve --profile` resolution: the launcher's

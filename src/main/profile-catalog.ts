@@ -9,7 +9,7 @@
  * included. Electron-free and dependency-injected so both shells register it.
  */
 
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { parse as parseYaml } from 'yaml';
@@ -200,9 +200,57 @@ export const createOverride = (deps: ProfileCatalogDeps, name: string): { path: 
   return { path: target };
 };
 
+/**
+ * Overwrite a profile's user YAML (`sandbox:write-profile`). Only file-backed
+ * profiles that resolve to the USER dir are writable — an existing override of
+ * a bundled profile, or a purely user-created file. Builtin-origin without an
+ * override throws (create the override first, so launch resolution actually
+ * reads the edited file), as do the implicit host profile and unknown names.
+ *
+ * The YAML is parse-validated (mapping with a `client.type` string — the shape
+ * the catalog parser and `omni serve --profile` expect) BEFORE any disk write;
+ * invalid input throws with the file untouched. The write itself is atomic
+ * (tmp + rename) so `omni serve` can never read a torn YAML mid-write.
+ */
+export const writeProfile = (deps: ProfileCatalogDeps, name: string, yaml: string): void => {
+  if (name === HOST_PROFILE_NAME) {
+    throw new Error(`Profile "${name}" is built into omni serve and cannot be edited.`);
+  }
+  // Name is renderer-supplied — reject anything that could escape userDir.
+  if (name.length === 0 || name.includes('/') || name.includes('\\') || name.includes('..')) {
+    throw new Error(`Invalid profile name: ${JSON.stringify(name)}`);
+  }
+  let doc: unknown;
+  try {
+    doc = parseYaml(yaml);
+  } catch (err) {
+    throw new Error(`Invalid profile YAML: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  const record = doc && typeof doc === 'object' && !Array.isArray(doc) ? (doc as Record<string, unknown>) : null;
+  const client = record?.['client'];
+  const clientType =
+    client && typeof client === 'object' && !Array.isArray(client)
+      ? (client as Record<string, unknown>)['type']
+      : undefined;
+  if (!record || typeof clientType !== 'string' || clientType.length === 0) {
+    throw new Error('Profile YAML must be a mapping with a `client.type` string.');
+  }
+  const target = path.join(deps.userDir, `${name}.yml`);
+  if (!existsSync(target)) {
+    if (existsSync(path.join(deps.bundledDir, `${name}.yml`))) {
+      throw new Error(`"${name}" is a bundled profile — create an override first, then edit the override.`);
+    }
+    throw new Error(`Profile "${name}" has no user file to overwrite.`);
+  }
+  const tmp = `${target}.tmp-${process.pid}`;
+  writeFileSync(tmp, yaml, 'utf8');
+  renameSync(tmp, target);
+};
+
 /** Register the profile channels on either shell's IPC listener. */
 export const registerProfileCatalogHandlers = (ipc: IIpcListener, deps: ProfileCatalogDeps): void => {
   ipc.handle('sandbox:list-profiles', (event) => listProfiles(deps, event));
   ipc.handle('sandbox:read-profile', (_, name: string) => readProfileYaml(deps, name));
   ipc.handle('sandbox:create-override', (_, name: string) => createOverride(deps, name));
+  ipc.handle('sandbox:write-profile', (_, name: string, yaml: string) => writeProfile(deps, name, yaml));
 };

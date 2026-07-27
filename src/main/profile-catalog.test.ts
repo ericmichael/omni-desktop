@@ -3,13 +3,19 @@
  *
  * Uses tmpdir fixtures for the bundled + user dirs; zero vi.mock.
  */
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { createOverride, listProfiles, type ProfileCatalogDeps, readProfileYaml } from '@/main/profile-catalog';
+import {
+  createOverride,
+  listProfiles,
+  type ProfileCatalogDeps,
+  readProfileYaml,
+  writeProfile,
+} from '@/main/profile-catalog';
 
 const DEVBOX_YAML = `
 version: 1
@@ -171,5 +177,63 @@ describe('createOverride', () => {
 
   it('refuses names with no bundled YAML', () => {
     expect(() => createOverride(deps, 'nope')).toThrow(/no bundled YAML/);
+  });
+});
+
+describe('writeProfile', () => {
+  const userFile = (name: string): string => path.join(root, 'user', `${name}.yml`);
+
+  it('overwrites an existing user profile, leaving no tmp file behind', () => {
+    writeUser('custom', 'client:\n  type: docker\n');
+    writeProfile(deps, 'custom', 'client:\n  type: unix_local\n');
+    expect(readFileSync(userFile('custom'), 'utf8')).toBe('client:\n  type: unix_local\n');
+    // Atomic write path: the tmp file is renamed away, never left around.
+    expect(readdirSync(path.join(root, 'user'))).toEqual(['custom.yml']);
+  });
+
+  it('overwrites a user override of a bundled profile', () => {
+    writeBundled('devbox', DEVBOX_YAML);
+    writeUser('devbox', 'client:\n  type: docker\n');
+    writeProfile(deps, 'devbox', 'client:\n  type: docker\nconfine: true\n');
+    expect(readFileSync(userFile('devbox'), 'utf8')).toContain('confine: true');
+    expect(readFileSync(path.join(root, 'bundled', 'devbox.yml'), 'utf8')).toBe(DEVBOX_YAML);
+  });
+
+  it('rejects unparseable YAML without touching the file', () => {
+    writeUser('custom', 'client:\n  type: docker\n');
+    expect(() => writeProfile(deps, 'custom', 'client: [unclosed\n  type: ::::\n')).toThrow(/Invalid profile YAML/);
+    expect(readFileSync(userFile('custom'), 'utf8')).toBe('client:\n  type: docker\n');
+    expect(readdirSync(path.join(root, 'user'))).toEqual(['custom.yml']);
+  });
+
+  it('rejects YAML that is not a mapping with a client.type string, untouched', () => {
+    writeUser('custom', 'client:\n  type: docker\n');
+    for (const bad of ['just a scalar\n', '- a\n- list\n', 'client: {}\n', 'client:\n  type: 3\n']) {
+      expect(() => writeProfile(deps, 'custom', bad)).toThrow(/client\.type/);
+    }
+    expect(readFileSync(userFile('custom'), 'utf8')).toBe('client:\n  type: docker\n');
+  });
+
+  it('rejects a builtin-origin profile with no override, pointing at create-override', () => {
+    writeBundled('devbox', DEVBOX_YAML);
+    expect(() => writeProfile(deps, 'devbox', 'client:\n  type: docker\n')).toThrow(/create an override first/);
+    expect(readFileSync(path.join(root, 'bundled', 'devbox.yml'), 'utf8')).toBe(DEVBOX_YAML);
+    expect(existsSync(userFile('devbox'))).toBe(false);
+  });
+
+  it('rejects the implicit host profile', () => {
+    expect(() => writeProfile(deps, 'host', 'client:\n  type: host\n')).toThrow(/built into/);
+    expect(existsSync(userFile('host'))).toBe(false);
+  });
+
+  it('rejects unknown names — write-profile never creates new files', () => {
+    expect(() => writeProfile(deps, 'nope', 'client:\n  type: docker\n')).toThrow(/no user file/);
+    expect(existsSync(userFile('nope'))).toBe(false);
+  });
+
+  it('rejects path-traversal names', () => {
+    for (const name of ['../evil', 'a/b', 'a\\b', '..', '']) {
+      expect(() => writeProfile(deps, name, 'client:\n  type: docker\n')).toThrow(/Invalid profile name/);
+    }
   });
 });
