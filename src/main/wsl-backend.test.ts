@@ -621,4 +621,28 @@ describe('persistent daemon mode', () => {
       cleanup();
     }
   });
+
+  it('unlink reaps a persistent daemon and deletes the durable secret', async () => {
+    vi.useFakeTimers();
+    const { manager, cleanup, runCalls, secretState } = makeManager({
+      respond: () => ok(),
+      fetchOk: true,
+      storedSecret: STORED_SECRET,
+    });
+    try {
+      await manager.boot({ ...persistentBackend });
+      expect(manager.getStatus().state).toBe('running');
+      const reapsBefore = runCalls.filter(isReapCall).length;
+
+      await manager.unlink('Ubuntu-22.04');
+      // The daemon must not outlive the link — reaped even in persistent mode.
+      expect(runCalls.filter(isReapCall).length).toBe(reapsBefore + 1);
+      expect(secretState.value).toBeNull();
+      expect(manager.getStatus().state).toBe('idle');
+      expect(manager.getStatus().persistent).toBe(false);
+      expect(() => manager.getWsToken()).toThrow(/not running/);
+    } finally {
+      cleanup();
+    }
+  });
 });

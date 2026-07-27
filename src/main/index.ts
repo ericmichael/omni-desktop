@@ -1012,9 +1012,15 @@ main.ipc.handle('cloud:link', async (_, urlInput) => {
 // Shared disconnect path for ALL remote-backend kinds (cloud, wsl, server):
 // clears the flag and restarts back into standalone-local mode. Entra logout
 // only applies to the cloud kind — wsl and server links never signed in.
-main.ipc.handle('cloud:unlink', () => {
-  if (store.get('remoteBackend')?.kind === 'cloud') {
+main.ipc.handle('cloud:unlink', async () => {
+  const prev = store.get('remoteBackend');
+  if (prev?.kind === 'cloud') {
     entraLogout();
+  }
+  // A WSL daemon — persistent or not — must not outlive the link: reap it and
+  // drop the durable secret so nothing keeps running (or listening) orphaned.
+  if (prev?.kind === 'wsl') {
+    await wslBackend.unlink(prev.distro);
   }
   store.set('remoteBackend', null);
   broadcastStore();

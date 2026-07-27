@@ -538,8 +538,33 @@ export class WslBackendManager {
     if (this.persistent === persistent) {
       return;
     }
-    // Tear down the current lifecycle: stop loops/timers, kill the tracked
-    // child, and reap by pidfile (which covers the detached daemon).
+    await this.teardown(distro);
+    this.persistent = persistent;
+    if (!persistent) {
+      await this.secrets.deleteSecret();
+    }
+    await this.start(distro);
+  }
+
+  /**
+   * Unlink cleanup (`cloud:unlink` with a wsl backend): stop and reap the
+   * daemon — including a persistent one, which must not outlive the link —
+   * and delete the durable secret.
+   */
+  async unlink(distro: string): Promise<void> {
+    if (this.platform !== 'win32') {
+      return;
+    }
+    await this.teardown(distro);
+    await this.secrets.deleteSecret();
+    this.persistent = false;
+    this.secret = null;
+    this.setStatus({ state: 'idle', persistent: false });
+  }
+
+  /** Stop loops/timers and the tracked child, then reap by pidfile (which
+   *  covers the detached daemon too). */
+  private async teardown(distro: string): Promise<void> {
     this.enabled = false;
     this.generation += 1;
     if (this.restartTimer) {
@@ -549,11 +574,6 @@ export class WslBackendManager {
     this.child?.kill();
     this.child = null;
     await this.reapStaleDaemon(distro);
-    this.persistent = persistent;
-    if (!persistent) {
-      await this.secrets.deleteSecret();
-    }
-    await this.start(distro);
   }
 
   /** Mint a WS auth token for the renderer (`wsl:get-ws-token`). */
