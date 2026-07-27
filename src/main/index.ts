@@ -419,10 +419,19 @@ const [, cleanupPermissions] = createPermissionsManager({
 // Created unconditionally so `wsl:detect` works pre-link; the daemon itself
 // only boots when `store.remoteBackend.kind === 'wsl'` (see the app-ready
 // sequencing below). Non-Windows platforms no-op inside the manager.
+// Persistent daemon mode signs tokens with a durable secret kept in the
+// LocalSecretStore under a stable id, so a daemon that outlived the previous
+// app session can be adopted on the next boot.
+const WSL_BACKEND_SECRET_ID = 'wsl-backend-secret';
 const [wslBackend, cleanupWslBackend] = createWslBackendManager({
   store,
   sendToWindow: main.sendToWindow,
   launcherVersion: app.getVersion(),
+  secrets: {
+    getSecret: async () => (await secretStore.getGitToken(WSL_BACKEND_SECRET_ID)) ?? null,
+    setSecret: (value) => secretStore.setGitToken(WSL_BACKEND_SECRET_ID, value),
+    deleteSecret: () => secretStore.deleteGitToken(WSL_BACKEND_SECRET_ID),
+  },
 });
 const { cleanup: cleanupPlatform, refreshPolicy: refreshPlatformPolicy } = registerPlatformIpc({
   ipc: main.ipc,
@@ -530,7 +539,9 @@ async function cleanup() {
   cleanupReverseRpc();
   cleanupComputeReverse();
   cleanupTunnelReverse();
-  // Kills the wsl.exe child, which terminates the in-distro daemon.
+  // Non-persistent mode: kills the wsl.exe child, terminating the in-distro
+  // daemon. Persistent mode: only stops timers/loops — the daemon keeps
+  // running and is adopted on the next boot.
   cleanupWslBackend();
   await syncManager.dispose();
   const results = await Promise.allSettled([
@@ -683,7 +694,7 @@ app.on('ready', () => {
   void (async () => {
     const backend = store.get('remoteBackend');
     if (backend?.kind === 'wsl') {
-      await wslBackend.boot(backend.distro);
+      await wslBackend.boot(backend);
     }
     main.createWindow();
   })();
@@ -1103,6 +1114,14 @@ main.ipc.handle('wsl:link', async (_, distroInput) => {
   store.set('remoteBackend', { kind: 'wsl', distro, port: 0 });
   broadcastStore();
   restartAfterRemoteBackendChange();
+});
+
+// Mode transition: the manager persists the flag into `store.remoteBackend`
+// and restarts the daemon into the new lifecycle (tracked child ↔ detached
+// nohup) — the settings card copy warns about the restart.
+main.ipc.handle('wsl:set-persistent', async (_, persistent) => {
+  await wslBackend.setPersistent(Boolean(persistent));
+  broadcastStore();
 });
 
 //#endregion

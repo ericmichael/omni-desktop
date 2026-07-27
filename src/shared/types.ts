@@ -129,8 +129,14 @@ export type WslBackend = {
   kind: 'wsl';
   /** WSL distro name as reported by `wsl.exe -l -q`. */
   distro: string;
-  /** Port the daemon listens on. Re-picked and persisted by WslBackendManager before window creation. */
+  /** Port the daemon listens on. Re-picked and persisted by WslBackendManager
+   *  before window creation on fresh spawns; kept as-is when a healthy
+   *  persistent daemon is adopted. */
   port: number;
+  /** Persistent daemon mode: the daemon detaches from the app (nohup + durable
+   *  secret), survives app quit, and is adopted on the next boot. Absent/false
+   *  = per-boot tracked-child lifecycle. */
+  persistent?: boolean;
 };
 
 /** A self-hosted server-mode launcher (homelab box, Tailscale node, LAN
@@ -930,6 +936,7 @@ export const schema: Schema<StoreData> = {
           kind: { const: 'wsl' },
           distro: { type: 'string' },
           port: { type: 'number' },
+          persistent: { type: 'boolean' },
         },
         required: ['kind', 'distro', 'port'],
       },
@@ -2729,6 +2736,9 @@ export type WslBackendStatus = {
   distro?: string;
   port?: number;
   docker: 'ok' | 'missing' | 'daemon-down' | 'unknown';
+  /** Mirrors WslBackend.persistent so the settings card renders the toggle
+   *  from status alone. */
+  persistent?: boolean;
   error?: string;
   timestamp: number;
 };
@@ -2741,8 +2751,10 @@ export type WslBackendStatus = {
  * renderer boots on the WS transport. Disconnecting reuses ``cloud:unlink``
  * (the shared disconnect + relaunch path for both kinds).
  * ``wsl:get-ws-token`` mints a WS auth token signed with the daemon's
- * per-boot shared secret — no HTTP fetch. Handlers are implemented by
- * WslBackendManager (Phase 2).
+ * shared secret (per-boot, or durable in persistent mode) — no HTTP fetch.
+ * ``wsl:set-persistent`` flips persistent daemon mode, restarting the daemon
+ * into the new lifecycle. Handlers are implemented by WslBackendManager
+ * (Phase 2).
  */
 type WslIpcEvents = Namespaced<
   'wsl',
@@ -2751,6 +2763,7 @@ type WslIpcEvents = Namespaced<
     link: (distro: string) => void;
     'get-ws-token': () => string;
     status: () => WslBackendStatus;
+    'set-persistent': (persistent: boolean) => void;
   }
 >;
 
