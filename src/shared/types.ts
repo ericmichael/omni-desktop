@@ -4087,6 +4087,10 @@ type CodexIpcRendererEvents = Namespaced<'codex', { 'device-code': [CodexDeviceC
 /** Main→renderer: the AAD device-code to display while `cloud:link` polls. */
 type CloudIpcRendererEvents = Namespaced<'cloud', { 'device-code': [CloudDeviceCode] }>;
 
+/** Main→renderer: WslBackendManager status pushes (Windows only). Broadcast
+ *  on every state transition so the settings card tracks the daemon live. */
+type WslIpcRendererEvents = Namespaced<'wsl', { 'status-changed': [WslBackendStatus] }>;
+
 /**
  * Main→renderer: pushed by the cloud whenever a principal's machine list
  * changes (registration, label edit, removal, online/offline). The renderer
@@ -4113,6 +4117,7 @@ export type IpcRendererEvents = TerminalIpcRendererEvents &
   GithubIpcRendererEvents &
   CodexIpcRendererEvents &
   CloudIpcRendererEvents &
+  WslIpcRendererEvents &
   MachineIpcRendererEvents &
   TunnelIpcRendererEvents &
   MainProcessIpcRendererEvents &

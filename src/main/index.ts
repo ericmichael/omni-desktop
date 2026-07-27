@@ -12,6 +12,7 @@ import { pathToFileURL } from 'url';
 import { emptyMcpConfig, emptyModelsConfig, emptyNetworkConfig, parseEnvVars } from '@/lib/agent-config';
 import { getArtifactsDir } from '@/lib/artifacts';
 import { parseResidentPrincipal } from '@/lib/resident-agent';
+import { winToWslPath } from '@/lib/wsl-path';
 import { createAppControlManager } from '@/main/app-control-manager';
 import { listRepos as azureListRepos } from '@/main/azure-repos';
 import { createBrowserManager } from '@/main/browser-manager';
@@ -72,6 +73,7 @@ import {
 } from '@/main/util';
 import { getVoiceService } from '@/main/voice-service';
 import { WorkspaceSyncManager } from '@/main/workspace-sync-manager';
+import { createWslBackendManager } from '@/main/wsl-backend';
 import { registerTeamHandlers } from '@/server/team-handlers';
 import { tokenLast4 } from '@/shared/git-credentials';
 import {
@@ -413,6 +415,15 @@ const [, cleanupPermissions] = createPermissionsManager({
   ipc: main.ipc,
   sendToWindow: main.sendToWindow,
 });
+// WSL backend daemon lifecycle (Windows only; docs/windows-wsl-backend-plan.md).
+// Created unconditionally so `wsl:detect` works pre-link; the daemon itself
+// only boots when `store.remoteBackend.kind === 'wsl'` (see the app-ready
+// sequencing below). Non-Windows platforms no-op inside the manager.
+const [wslBackend, cleanupWslBackend] = createWslBackendManager({
+  store,
+  sendToWindow: main.sendToWindow,
+  launcherVersion: app.getVersion(),
+});
 const { cleanup: cleanupPlatform, refreshPolicy: refreshPlatformPolicy } = registerPlatformIpc({
   ipc: main.ipc,
   sendToWindow: main.sendToWindow,
@@ -519,6 +530,8 @@ async function cleanup() {
   cleanupReverseRpc();
   cleanupComputeReverse();
   cleanupTunnelReverse();
+  // Kills the wsl.exe child, which terminates the in-distro daemon.
+  cleanupWslBackend();
   await syncManager.dispose();
   const results = await Promise.allSettled([
     cleanupConsole(),
@@ -660,7 +673,20 @@ app.on('ready', () => {
     }
   });
 
-  main.createWindow();
+  // WSL backend boot sequencing: provision → reap → spawn → health-wait
+  // BEFORE the window exists, because the renderer's bootstrap URL
+  // (main-process-manager.ts) derives from the port boot() persists into
+  // `store.remoteBackend`. boot() never throws and caps its wait (120s when
+  // it provisioned this boot, else 30s) — on timeout or daemon failure the
+  // window is created anyway; the WS transport auto-reconnects and the
+  // settings card surfaces the error status.
+  void (async () => {
+    const backend = store.get('remoteBackend');
+    if (backend?.kind === 'wsl') {
+      await wslBackend.boot(backend.distro);
+    }
+    main.createWindow();
+  })();
 
   if (process.env.OMNI_CI_AUTOINSTALL) {
     void (async () => {
@@ -833,6 +859,19 @@ registerMigrationHandlers(main.ipc, () => ({
 
 //#region Electron-only util handlers (dialog, shell)
 
+/**
+ * WSL-backend path translation, at this single boundary only (plan Phase 4):
+ * native dialogs return Windows paths, but in WSL mode the renderer and the
+ * daemon only ever see Linux paths. A pick that doesn't translate (e.g. a
+ * non-WSL UNC share) maps to `null` — the same shape as a cancelled dialog.
+ */
+const toBackendPath = (path: string | null): string | null => {
+  if (path === null || store.get('remoteBackend')?.kind !== 'wsl') {
+    return path;
+  }
+  return winToWslPath(path);
+};
+
 main.ipc.handle('util:select-directory', async (_, path) => {
   const mainWindow = main.getWindow();
   assert(mainWindow !== null, 'Main window is not initialized');
@@ -844,7 +883,7 @@ main.ipc.handle('util:select-directory', async (_, path) => {
     defaultPath,
   });
 
-  return result.filePaths[0] ?? null;
+  return toBackendPath(result.filePaths[0] ?? null);
 });
 main.ipc.handle('util:select-file', async (_, path, filters) => {
   const mainWindow = main.getWindow();
@@ -858,7 +897,7 @@ main.ipc.handle('util:select-file', async (_, path, filters) => {
     filters: filters ?? undefined,
   });
 
-  return result.filePaths[0] ?? null;
+  return toBackendPath(result.filePaths[0] ?? null);
 });
 main.ipc.handle('util:open-directory', (_, path) => shell.openPath(path));
 main.ipc.handle('util:open-external', (_, url) => shell.openExternal(url));
@@ -1034,6 +1073,36 @@ main.ipc.handle('cloud:get-ws-token', async () => {
     throw new Error('Cloud ws-token response missing "token" field');
   }
   return data.token;
+});
+
+//#endregion
+
+//#region WSL backend (Windows-only daemon lifecycle — docs/windows-wsl-backend-plan.md)
+
+main.ipc.handle('wsl:detect', () => wslBackend.detect());
+
+main.ipc.handle('wsl:status', () => wslBackend.getStatus());
+
+// Signed locally with the daemon's per-boot shared secret — no HTTP fetch
+// (Decision 4: shared secret, not network trust).
+main.ipc.handle('wsl:get-ws-token', () => wslBackend.getWsToken());
+
+main.ipc.handle('wsl:link', async (_, distroInput) => {
+  const distro = String(distroInput ?? '').trim();
+  if (!distro) {
+    throw new Error('WSL distro name is required');
+  }
+  const detected = await wslBackend.detect();
+  if (detected.wsl !== 'ok' || !detected.distros.some((d) => d.name === distro)) {
+    throw new Error(`WSL distro "${distro}" not found`);
+  }
+  // Provision inline so failures surface to the caller before any restart.
+  await wslBackend.provisionIfNeeded(distro);
+  // port 0 is a placeholder — boot() re-picks and persists the real port
+  // before window creation on the next launch.
+  store.set('remoteBackend', { kind: 'wsl', distro, port: 0 });
+  broadcastStore();
+  restartAfterRemoteBackendChange();
 });
 
 //#endregion
