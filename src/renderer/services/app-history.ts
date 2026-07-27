@@ -30,6 +30,7 @@ const TAB_TITLES: Record<LayoutMode, string> = {
   routines: 'Routines',
   agents: 'Agents',
   plugins: 'Plugins',
+  sandboxes: 'Sandboxes',
   settings: 'Settings',
   gallery: 'Gallery',
 };

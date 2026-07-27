@@ -59,6 +59,10 @@ describe('migrateLayoutMode', () => {
   it('returns null for valid "plugins" mode', () => {
     expect(migrateLayoutMode('plugins')).toBeNull();
   });
+
+  it('returns null for valid "sandboxes" mode', () => {
+    expect(migrateLayoutMode('sandboxes')).toBeNull();
+  });
 });
 
 // ---------------------------------------------------------------------------

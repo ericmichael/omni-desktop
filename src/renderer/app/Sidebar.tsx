@@ -6,6 +6,8 @@ import {
   CalendarClock24Regular,
   Chat24Filled,
   Chat24Regular,
+  Cube24Filled,
+  Cube24Regular,
   DataBarVertical24Filled,
   DataBarVertical24Regular,
   Home24Filled,
@@ -93,6 +95,15 @@ const ALL_TABS: {
     alwaysVisible: true,
     // The mobile bar is full at six tabs — mobile reaches Plugins through
     // the Settings list instead.
+    desktopOnly: true,
+  },
+  {
+    value: 'sandboxes',
+    label: 'Sandboxes',
+    icon: <Cube24Regular />,
+    iconActive: <Cube24Filled />,
+    alwaysVisible: true,
+    // Same mobile-bar budget as Plugins — desktop rail only for now.
     desktopOnly: true,
   },
   { value: 'gallery', label: 'Gallery', icon: <Beaker24Regular />, iconActive: <Beaker24Filled />, devOnly: true },

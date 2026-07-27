@@ -58,6 +58,7 @@ export type LayoutMode =
   | 'routines'
   | 'agents'
   | 'plugins'
+  | 'sandboxes'
   | 'settings'
   | 'gallery';
 export type OmniTheme =
@@ -839,6 +840,7 @@ export const schema: Schema<StoreData> = {
       'routines',
       'agents',
       'plugins',
+      'sandboxes',
       'settings',
       'more',
       'gallery',

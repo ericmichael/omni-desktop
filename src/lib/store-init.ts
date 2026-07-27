@@ -15,6 +15,7 @@ const VALID_LAYOUT_MODES: LayoutMode[] = [
   'dashboards',
   'routines',
   'plugins',
+  'sandboxes',
   'settings',
 ];
 
