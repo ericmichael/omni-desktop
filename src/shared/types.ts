@@ -2796,6 +2796,16 @@ type WslIpcEvents = Namespaced<
     status: () => WslBackendStatus;
     'set-persistent': (persistent: boolean) => void;
     install: (mode: 'platform' | 'distro') => void;
+    /**
+     * Install docker-ce inside the linked distro (get.docker.com script run
+     * as root via `wsl -u root` — no sudo password needed) and add the
+     * default user to the docker group. Long-running; rejects with decoded
+     * stderr on failure.
+     */
+    'install-docker': () => void;
+    /** Start dockerd in the linked distro (`service docker start` as root) —
+     *  the daemon-down remedy on distros where it isn't auto-started. */
+    'start-docker': () => void;
   }
 >;
 
@@ -3927,8 +3937,48 @@ type SandboxIpcEvents = Namespaced<
     /** Run the orphan cleanup pass on demand. */
     'sweep-orphans': () => { removed: string[] };
     'substrate-status': () => SandboxSubstrateStatus;
+    /**
+     * Overwrite a profile YAML. Only file-backed profiles are writable
+     * (`origin: 'user-override'` or user-created — never the implicit host);
+     * builtin-origin profiles must go through `create-override` first. The
+     * YAML is parse-validated (and must contain a `client.type` string)
+     * before the write; invalid input throws without touching the file.
+     */
+    'write-profile': (name: string, yaml: string) => void;
+    /** Workspace snapshot tars (`<config>/snapshots/*.tar`) for the browser UI. */
+    'list-snapshots': () => SandboxSnapshotSummary[];
+    /** Tail of `docker logs` for one labeled container (both streams, capped). */
+    'container-logs': (id: string, tailLines: number) => { logs: string };
+    /** Presence/size of the devbox (or given) image on the backend's dockerd. */
+    'image-status': (image: string) => SandboxImageStatus;
+    /** `docker pull <image>` — resolves when the pull completes (may take minutes). */
+    'pull-image': (image: string) => void;
+    /** `docker image prune -f` (dangling only). Returns reclaimed byte count when docker reports it. */
+    'prune-images': () => { reclaimedBytes: number | null };
   }
 >;
+
+/** One workspace snapshot tar under `<config>/snapshots/`. */
+export type SandboxSnapshotSummary = {
+  /** Session id — the tar's filename stem. */
+  sessionId: string;
+  sizeBytes: number;
+  /** mtime, epoch ms. */
+  modifiedAt: number;
+  /** True when the session is still resumable (an existing code tab / chat
+   *  conversation claims it) — deletion is refused for these. */
+  inUse: boolean;
+  /** Human label when the owning tab/conversation is known; else null. */
+  label: string | null;
+};
+
+export type SandboxImageStatus = {
+  /** Image reference that was queried (as passed in). */
+  image: string;
+  present: boolean;
+  /** Local image size in bytes when present. */
+  sizeBytes: number | null;
+};
 
 /**
  * Intersection of all the events that the renderer can invoke and main process can handle.
