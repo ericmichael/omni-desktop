@@ -130,7 +130,8 @@ export class MainProcessManager {
     // reading this requires a window reload, which matches the link/unlink
     // UX (the link handlers prompt for a reload after they fire). The wsl
     // kind is resolved to its live URL here — WslBackendManager has already
-    // picked the port and spawned the daemon before window creation.
+    // picked the port and spawned the daemon before window creation. The
+    // cloud and server kinds already persist their url and pass through.
     const backend = this.store.get('remoteBackend') ?? null;
     const remoteBackend: RemoteBackendBootstrap | null =
       backend?.kind === 'wsl' ? { ...backend, url: `http://127.0.0.1:${backend.port}` } : backend;

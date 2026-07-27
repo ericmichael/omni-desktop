@@ -998,11 +998,11 @@ main.ipc.handle('cloud:link', async (_, urlInput) => {
   return status;
 });
 
-// Shared disconnect path for BOTH remote-backend kinds (cloud and wsl):
+// Shared disconnect path for ALL remote-backend kinds (cloud, wsl, server):
 // clears the flag and restarts back into standalone-local mode. Entra logout
-// only applies to the cloud kind — a WSL link never signed in.
+// only applies to the cloud kind — wsl and server links never signed in.
 main.ipc.handle('cloud:unlink', () => {
-  if (store.get('remoteBackend')?.kind !== 'wsl') {
+  if (store.get('remoteBackend')?.kind === 'cloud') {
     entraLogout();
   }
   store.set('remoteBackend', null);
@@ -1103,6 +1103,85 @@ main.ipc.handle('wsl:link', async (_, distroInput) => {
   store.set('remoteBackend', { kind: 'wsl', distro, port: 0 });
   broadcastStore();
   restartAfterRemoteBackendChange();
+});
+
+//#endregion
+
+//#region Self-hosted server link (Electron ↔ user-run server-mode launcher)
+
+// The wsl token flow minus wsl.exe: no Entra, no daemon lifecycle — the user
+// runs the server themselves; we only validate reachability + token access
+// at link time and fetch WS tokens from it thereafter. Both fetches run in
+// main (Node fetch, no CORS) because the server gates /api/ws-token by
+// caller address (loopback + OMNI_TRUSTED_CIDRS), not by identity.
+
+/** GET ``<url>/api/ws-token`` and return the opaque token. Shared by link
+ *  validation and the steady-state `server:get-ws-token` handler so the 403
+ *  guidance (OMNI_TRUSTED_CIDRS) is identical in both. */
+const fetchServerWsToken = async (url: string): Promise<string> => {
+  let res: Response;
+  try {
+    res = await net.fetch(`${url}/api/ws-token`);
+  } catch (e) {
+    throw new Error(`Could not reach ${url}/api/ws-token: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  if (res.status === 403) {
+    throw new Error(
+      `${url} refused to mint a token (403). The server only trusts loopback by default — add this machine's network to OMNI_TRUSTED_CIDRS on the server (e.g. 100.64.0.0/10 for Tailscale).`
+    );
+  }
+  if (!res.ok) {
+    throw new Error(`Server ws-token fetch failed: ${res.status} ${res.statusText}`);
+  }
+  const data = (await res.json()) as { token?: string };
+  if (!data.token) {
+    throw new Error('Server ws-token response missing "token" field');
+  }
+  return data.token;
+};
+
+main.ipc.handle('server:link', async (_, urlInput) => {
+  const url = String(urlInput ?? '')
+    .trim()
+    .replace(/\/+$/, '');
+  if (!url) {
+    throw new Error('Server URL is required');
+  }
+  if (!/^https?:\/\//i.test(url)) {
+    throw new Error('Server URL must start with http:// or https://');
+  }
+  // Validate BEFORE persisting — a bad URL must not survive into the store,
+  // or the next boot dials a dead backend and the app looks bricked.
+  let healthRes: Response;
+  try {
+    healthRes = await net.fetch(`${url}/api/health`);
+  } catch (e) {
+    throw new Error(
+      `Could not reach ${url}/api/health: ${e instanceof Error ? e.message : String(e)}. Is the server running and reachable from this machine?`
+    );
+  }
+  if (!healthRes.ok) {
+    throw new Error(`${url}/api/health answered ${healthRes.status}. Is this a launcher server URL?`);
+  }
+  const health = (await healthRes.json().catch(() => null)) as { ok?: boolean } | null;
+  if (health?.ok !== true) {
+    throw new Error(`${url}/api/health did not report ok — is this a launcher server URL?`);
+  }
+  // Token access is the actual gate — proving it now surfaces the
+  // OMNI_TRUSTED_CIDRS misconfiguration at link time instead of as a silent
+  // WS auth loop after the relaunch.
+  await fetchServerWsToken(url);
+  store.set('remoteBackend', { kind: 'server', url });
+  broadcastStore();
+  restartAfterRemoteBackendChange();
+});
+
+main.ipc.handle('server:get-ws-token', async () => {
+  const backend = store.get('remoteBackend');
+  if (backend?.kind !== 'server') {
+    throw new Error('Not connected to a self-hosted server');
+  }
+  return fetchServerWsToken(backend.url);
 });
 
 //#endregion

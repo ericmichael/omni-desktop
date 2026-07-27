@@ -1,6 +1,6 @@
 /**
  * "Remote backend" card for Settings → General: links the desktop app to a
- * backend other than local Electron main. Two link kinds share the card:
+ * backend other than local Electron main. Three link kinds share the card:
  *
  * - **Cloud** — a deployed launcher (server mode) so chat sessions, projects,
  *   tickets etc. live in the cloud's Postgres and sync across devices. The
@@ -11,9 +11,13 @@
  *   a WSL distro, where Docker and the sandboxes are Linux-native.
  *   ``wsl:link`` provisions the payload into the chosen distro and persists
  *   the flag.
+ * - **Self-hosted server** — a server-mode launcher the user runs themselves
+ *   (homelab, Tailscale, LAN). No Entra: ``server:link`` validates the URL
+ *   against ``/api/health`` + ``/api/ws-token`` and persists the flag. The
+ *   server must trust this machine's network (``OMNI_TRUSTED_CIDRS``).
  *
- * Both flows end with main relaunching the app so the renderer transport
- * switches at boot; both disconnect through the shared ``cloud:unlink`` path.
+ * All flows end with main relaunching the app so the renderer transport
+ * switches at boot; all disconnect through the shared ``cloud:unlink`` path.
  *
  * Electron-only (linking is meaningless in server mode — the web app IS the
  * remote client). The card hides itself on the browser build.
@@ -24,7 +28,15 @@ import { memo, useCallback, useEffect, useState } from 'react';
 
 import { Body1, Button, Caption1, Card, FormField, Input, Select, Spinner } from '@/renderer/ds';
 import { MachineIdentityChip } from '@/renderer/features/SettingsModal/MachineIdentityChip';
-import { bootstrapPlatform, ipc, isElectron, isWslLinked, localEmitter } from '@/renderer/services/ipc';
+import {
+  bootstrapPlatform,
+  ipc,
+  isElectron,
+  isServerLinked,
+  isWslLinked,
+  localEmitter,
+  serverOrigin,
+} from '@/renderer/services/ipc';
 import type { CloudDeviceCode, CloudStatus, WslBackendStatus, WslDetectResult } from '@/shared/types';
 
 const useStyles = makeStyles({
@@ -207,11 +219,54 @@ export const RemoteBackendCard = memo(() => {
     }
   }, [wslDistro]);
 
+  // ── Not linked: offer connecting to a self-hosted server-mode launcher ──
+  const [serverUrl, setServerUrl] = useState('');
+  const [serverLinking, setServerLinking] = useState(false);
+  const [serverError, setServerError] = useState<string | null>(null);
+
+  const onServerConnect = useCallback(async () => {
+    setServerLinking(true);
+    setServerError(null);
+    try {
+      // server:link validates /api/health + /api/ws-token in local main (Node
+      // fetch, no CORS), persists the remoteBackend flag, and relaunches.
+      await localEmitter.invoke('server:link', serverUrl);
+      setRestarting(true);
+    } catch (e) {
+      setServerError(e instanceof Error ? e.message : 'Failed to connect to the server');
+    } finally {
+      setServerLinking(false);
+    }
+  }, [serverUrl]);
+
   // Remote-backend linking is an Electron-only flow — the web client IS the
   // remote client. Hide in server/browser mode rather than rendering a
   // confusing no-op control.
   if (!isElectron) {
     return null;
+  }
+
+  if (isServerLinked) {
+    // No account line — a self-hosted link carries no identity; the server
+    // trusts this machine by network address.
+    return (
+      <Card>
+        <div className={styles.card}>
+          <div className={styles.row}>
+            <div className={styles.main}>
+              <Body1>{`Connected to ${serverOrigin()} (self-hosted)`}</Body1>
+              <Caption1 className={error ? styles.error : styles.summary}>
+                {error ?? 'Sessions, projects, and tasks live on your server'}
+              </Caption1>
+            </div>
+            <Button size="sm" variant="ghost" onClick={onDisconnect}>
+              Disconnect
+            </Button>
+          </div>
+          {restarting && <Caption1 className={styles.ok}>Restarting Omni Code…</Caption1>}
+        </div>
+      </Card>
+    );
   }
 
   if (isWslLinked) {
@@ -343,6 +398,34 @@ export const RemoteBackendCard = memo(() => {
                 </div>
               </>
             )}
+          </div>
+        )}
+
+        {!cloudMode && (
+          <div className={styles.form}>
+            <div className={styles.main}>
+              <Body1>Or connect to a self-hosted server</Body1>
+              <Caption1 className={styles.summary}>
+                A server-mode launcher you run yourself — homelab box, Tailscale node, or LAN server. No sign-in.
+              </Caption1>
+            </div>
+            <FormField label="Server URL">
+              <Input
+                value={serverUrl}
+                onChange={(e) => setServerUrl(e.target.value)}
+                placeholder="http://my-server:3001"
+                disabled={serverLinking}
+              />
+            </FormField>
+            <Caption1 className={serverError ? styles.error : styles.summary}>
+              {serverError ??
+                'The server must be reachable from this machine, and its /api/ws-token must trust your network — set OMNI_TRUSTED_CIDRS on the server (loopback and Tailscale with CIDRs are typical setups).'}
+            </Caption1>
+            <div>
+              <Button size="sm" onClick={onServerConnect} isDisabled={serverLinking || !serverUrl.trim()}>
+                {serverLinking ? 'Connecting…' : 'Connect'}
+              </Button>
+            </div>
           </div>
         )}
 

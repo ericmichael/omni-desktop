@@ -133,10 +133,19 @@ export type WslBackend = {
   port: number;
 };
 
-export type RemoteBackend = CloudBackend | WslBackend;
+/** A self-hosted server-mode launcher (homelab box, Tailscale node, LAN
+ *  server). No identity — auth is the server's own ``/api/ws-token``, gated
+ *  to loopback + ``OMNI_TRUSTED_CIDRS``. */
+export type ServerBackend = {
+  kind: 'server';
+  /** Origin of the server (e.g. ``http://my-server:3001``). No trailing slash. */
+  url: string;
+};
+
+export type RemoteBackend = CloudBackend | WslBackend | ServerBackend;
 
 /** Shape injected into the renderer via preload — wsl kind carries the resolved live URL. */
-export type RemoteBackendBootstrap = CloudBackend | (WslBackend & { url: string });
+export type RemoteBackendBootstrap = CloudBackend | (WslBackend & { url: string }) | ServerBackend;
 
 /**
  * One member of the resident-agent roster (docs/resident-agents-plan.md):
@@ -381,6 +390,11 @@ export type StoreData = {
    * ``kind: 'wsl'`` — the server build running as a daemon inside a WSL
    * distro on this machine (Windows only), authenticated by a per-boot
    * shared secret minted by WslBackendManager.
+   *
+   * ``kind: 'server'`` — a self-hosted server-mode launcher the user runs
+   * themselves (homelab, Tailscale, LAN). No identity; auth tokens come
+   * from the server's own ``/api/ws-token`` (loopback +
+   * ``OMNI_TRUSTED_CIDRS``).
    *
    * ``null`` is the standalone-Electron mode (today's default).
    */
@@ -918,6 +932,14 @@ export const schema: Schema<StoreData> = {
           port: { type: 'number' },
         },
         required: ['kind', 'distro', 'port'],
+      },
+      {
+        type: 'object',
+        properties: {
+          kind: { const: 'server' },
+          url: { type: 'string' },
+        },
+        required: ['kind', 'url'],
       },
     ],
   },
@@ -2732,6 +2754,25 @@ type WslIpcEvents = Namespaced<
   }
 >;
 
+/**
+ * Self-hosted-server link API (all channels resolve in LOCAL Electron main
+ * via `localEmitter`). ``server:link`` validates *url* (``/api/health`` +
+ * ``/api/ws-token`` must answer), persists the ``remoteBackend`` flag, and
+ * relaunches the app so the renderer boots on the WS transport. No Entra,
+ * no wsl.exe — auth is the server's own ``/api/ws-token``, which the server
+ * gates to loopback + ``OMNI_TRUSTED_CIDRS``. ``server:get-ws-token`` runs
+ * the fetch in main (Node fetch, no CORS), like the cloud variant.
+ * Disconnecting reuses ``cloud:unlink`` (the shared disconnect + relaunch
+ * path for all kinds).
+ */
+type ServerIpcEvents = Namespaced<
+  'server',
+  {
+    link: (url: string) => void;
+    'get-ws-token': () => string;
+  }
+>;
+
 /** Stable identity persisted in `<configDir>/machine.json`. */
 export type MachineIdentity = {
   machineId: string;
@@ -3837,6 +3878,7 @@ export type IpcEvents = MainProcessIpcEvents &
   CodexIpcEvents &
   CloudIpcEvents &
   WslIpcEvents &
+  ServerIpcEvents &
   MachineIpcEvents &
   ReverseRpcIpcEvents &
   SettingsConfigIpcEvents &

@@ -15,10 +15,11 @@ export const isElectron = typeof window !== 'undefined' && 'electron' in window;
  * ``StoreData.remoteBackend`` (wsl kind resolved to its live URL), copied
  * into the window at BrowserWindow creation (see main-process-manager.ts +
  * preload/index.ts). Non-null means the Electron app is linked to a remote
- * launcher backend — a deployed cloud (``kind: 'cloud'``) or the WSL daemon
- * on this machine (``kind: 'wsl'``) — and the renderer should route its
- * transport over WebSocket to ``url``. ``platform`` is ``process.platform``
- * from preload; ``null`` in the browser build.
+ * launcher backend — a deployed cloud (``kind: 'cloud'``), the WSL daemon
+ * on this machine (``kind: 'wsl'``), or a self-hosted server-mode launcher
+ * (``kind: 'server'``) — and the renderer should route its transport over
+ * WebSocket to ``url``. ``platform`` is ``process.platform`` from preload;
+ * ``null`` in the browser build.
  */
 type OmniBootstrap = { remoteBackend: RemoteBackendBootstrap | null; platform: string | null };
 const bootstrap: OmniBootstrap = ((): OmniBootstrap => {
@@ -32,8 +33,8 @@ const bootstrap: OmniBootstrap = ((): OmniBootstrap => {
 /**
  * True when this Electron renderer is linked to a deployed cloud launcher.
  * Gates cloud-only behavior: machine registration, compute reverse-RPC,
- * tunnel bridge, and the Settings "Disconnect from cloud" affordance. A WSL
- * backend never counts as cloud-linked — the sandbox host IS the backend.
+ * tunnel bridge, and the Settings "Disconnect from cloud" affordance. WSL
+ * and self-hosted server backends never count as cloud-linked.
  */
 export const isCloudLinked = isElectron && bootstrap.remoteBackend?.kind === 'cloud';
 
@@ -45,6 +46,15 @@ export const isCloudLinked = isElectron && bootstrap.remoteBackend?.kind === 'cl
  */
 export const isWslLinked = isElectron && bootstrap.remoteBackend?.kind === 'wsl';
 
+/**
+ * True when this Electron renderer is linked to a self-hosted server-mode
+ * launcher. Transport-wise identical to cloud-linked (WS to
+ * ``remoteBackend.url``); auth is `server:get-ws-token` — main fetching the
+ * server's own ``/api/ws-token`` — with no identity behind it, so none of
+ * the cloud-only behavior (machines, compute, tunnel) activates.
+ */
+export const isServerLinked = isElectron && bootstrap.remoteBackend?.kind === 'server';
+
 /** ``process.platform`` from preload (e.g. ``'win32'``); ``null`` in the browser build. */
 export const bootstrapPlatform: string | null = bootstrap.platform;
 
@@ -52,7 +62,7 @@ export const bootstrapPlatform: string | null = bootstrap.platform;
  * The origin the launcher actually lives at — the same origin that serves
  * ``/proxy/...`` reverse-proxy routes, ``/api/...`` endpoints, and the WS
  * upgrade target. Browser server-mode = same-origin (``window.location.origin``).
- * Remote-linked Electron (cloud or wsl) = the backend's baseUrl, because the
+ * Remote-linked Electron (cloud, wsl, or server) = the backend's baseUrl, because the
  * renderer is loaded from ``localhost:5173`` (dev) or ``file://`` (prod) —
  * neither of which can resolve the launcher's relative URLs.
  *
@@ -76,7 +86,7 @@ export const serverWsOrigin = (): string => {
  * - `emitter` is the renderer's invoke channel. In standalone Electron it is
  *   `ElectronTransportEmitter` (Electron IPC → main). In browser/server mode
  *   it is `WsTransportEmitter` (renderer → server WS). In remote-linked
- *   Electron (cloud or wsl) it routes invokes to the backend WS — so it must
+ *   Electron (cloud, wsl, or server) it routes invokes to the backend WS — so it must
  *   NOT be used for channels handled only in local main (link flows, machine
  *   identity, shell dialogs, etc.); those use {@link localEmitter} instead.
  * - `localEmitter` is Electron IPC → local main. In remote-linked Electron it
@@ -98,21 +108,27 @@ type TransportBundle = {
 
 const createTransport = (): TransportBundle => {
   // Electron + remote-linked → bootstrap a WS against the remote backend.
-  // ws-token fetching is delegated to main in both kinds: for cloud because
+  // ws-token fetching is delegated to main in all kinds: for cloud because
   // the renderer's cross-origin GET + Bearer would trip CORS preflight and
   // EasyAuth's 302-to-AAD on the OPTIONS preflight fails CORS (main has the
   // Entra access token and fetches /api/ws-token from Node, no CORS); for
   // wsl because main holds the daemon's per-boot shared secret and mints
-  // the token locally.
+  // the token locally; for server because the renderer's cross-origin GET
+  // would need the server to speak CORS (main's Node fetch doesn't).
   if (isElectron && bootstrap.remoteBackend) {
     const remoteBackend = bootstrap.remoteBackend;
     const electronEmitter = new ElectronTransportEmitter();
     const wsEmitter = new WsTransportEmitter({
       baseUrl: remoteBackend.url,
       getWsToken: async () => {
-        return (await electronEmitter.invoke(
-          remoteBackend.kind === 'wsl' ? 'wsl:get-ws-token' : 'cloud:get-ws-token'
-        )) as string;
+        switch (remoteBackend.kind) {
+          case 'wsl':
+            return (await electronEmitter.invoke('wsl:get-ws-token')) as string;
+          case 'server':
+            return (await electronEmitter.invoke('server:get-ws-token')) as string;
+          case 'cloud':
+            return (await electronEmitter.invoke('cloud:get-ws-token')) as string;
+        }
       },
     });
     return {
@@ -158,7 +174,7 @@ export const emitter: TransportEmitter = transport.emitter;
 
 /**
  * Electron-IPC-only emitter for channels that ALWAYS resolve in local main —
- * link handlers (`cloud:*`, `wsl:*`), local file dialogs, etc. In
+ * link handlers (`cloud:*`, `wsl:*`, `server:*`), local file dialogs, etc. In
  * standalone Electron and browser/server mode this is the same as
  * {@link emitter}; in remote-linked Electron it is the local Electron IPC and
  * therefore does NOT route over the backend WS.
