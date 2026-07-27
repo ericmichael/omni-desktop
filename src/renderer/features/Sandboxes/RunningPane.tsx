@@ -2,15 +2,30 @@
  * Sandboxes → Running: containers carrying the omni-code label, with the
  * session/tab that owns each. Actions are conservative (sandboxes-tab-plan.md
  * Decision 7): per-row remove for orphans only — protected rows show WHY
- * they're protected — plus the orphan sweep made visible.
+ * they're protected — plus the orphan sweep made visible. Per-row Logs opens
+ * a dialog with the last 500 lines from `sandbox:container-logs`.
  */
 
 import { makeStyles, tokens } from '@fluentui/react-components';
-import { ArrowClockwise16Regular, Delete16Regular } from '@fluentui/react-icons';
+import { ArrowClockwise16Regular, Delete16Regular, DocumentText16Regular } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useState } from 'react';
 
-import { Badge, Body1, Button, Caption1, Card, ConfirmDialog, IconButton, SectionLabel } from '@/renderer/ds';
+import {
+  AnimatedDialog,
+  Badge,
+  Body1,
+  Button,
+  Caption1,
+  Card,
+  ConfirmDialog,
+  DialogBody,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  IconButton,
+  SectionLabel,
+} from '@/renderer/ds';
 import { $sandboxContainers, $sandboxesError, refreshSandboxContainers } from '@/renderer/features/Sandboxes/state';
 import { formatRelativeTime } from '@/renderer/omniagents-ui/lib/utils';
 import { emitter } from '@/renderer/services/ipc';
@@ -35,9 +50,24 @@ const useStyles = makeStyles({
   ok: { color: tokens.colorPaletteGreenForeground1 },
   mono: { fontFamily: tokens.fontFamilyMonospace },
   truncated: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  logsSurface: { maxWidth: '48rem' },
+  logsBlock: {
+    fontFamily: tokens.fontFamilyMonospace,
+    fontSize: tokens.fontSizeBase200,
+    backgroundColor: tokens.colorNeutralBackground2,
+    borderRadius: tokens.borderRadiusMedium,
+    padding: tokens.spacingHorizontalS,
+    overflow: 'auto',
+    whiteSpace: 'pre',
+    margin: 0,
+    maxHeight: '60vh',
+  },
 });
 
 const POLL_MS = 5000;
+
+/** Tail length for the container-logs dialog. */
+const LOG_TAIL_LINES = 500;
 
 const OWNER_KIND_LABELS: Record<SandboxContainerSummary['ownerKind'], string> = {
   process: 'live session',
@@ -63,6 +93,41 @@ export const RunningPane = memo(() => {
   const [actionError, setActionError] = useState<string | null>(null);
   const [sweeping, setSweeping] = useState(false);
   const [sweepResult, setSweepResult] = useState<string | null>(null);
+
+  // Logs dialog. The target is a {id, name} snapshot (not a live row) so the
+  // dialog survives the 5s poll removing/replacing the container entry.
+  const [logsTarget, setLogsTarget] = useState<{ id: string; name: string } | null>(null);
+  const [logs, setLogs] = useState<string | null>(null);
+  const [logsError, setLogsError] = useState<string | null>(null);
+
+  const fetchLogs = useCallback((id: string) => {
+    setLogsError(null);
+    void emitter
+      .invoke('sandbox:container-logs', id, LOG_TAIL_LINES)
+      .then(({ logs: text }) => setLogs(text))
+      .catch((err: unknown) => setLogsError(err instanceof Error ? err.message : String(err)));
+  }, []);
+
+  const openLogs = useCallback(
+    (container: SandboxContainerSummary) => {
+      setLogsTarget({ id: container.id, name: container.name });
+      setLogs(null);
+      fetchLogs(container.id);
+    },
+    [fetchLogs]
+  );
+
+  const closeLogs = useCallback(() => {
+    setLogsTarget(null);
+    setLogs(null);
+    setLogsError(null);
+  }, []);
+
+  const onRefreshLogs = useCallback(() => {
+    if (logsTarget) {
+      fetchLogs(logsTarget.id);
+    }
+  }, [logsTarget, fetchLogs]);
 
   // Poll while visible; the pane unmounts on pane-switch, clearing the timer.
   useEffect(() => {
@@ -141,6 +206,13 @@ export const RunningPane = memo(() => {
                   </Badge>
                 </div>
                 <IconButton
+                  aria-label="Show container logs"
+                  icon={<DocumentText16Regular />}
+                  size="sm"
+                  tooltip="Logs"
+                  onClick={() => openLogs(container)}
+                />
+                <IconButton
                   aria-label={protectedRow ? `In use by ${container.ownerLabel ?? 'a session'}` : 'Remove container'}
                   icon={<Delete16Regular />}
                   size="sm"
@@ -165,6 +237,25 @@ export const RunningPane = memo(() => {
         confirmLabel="Remove"
         destructive
       />
+
+      <AnimatedDialog open={logsTarget !== null} onClose={closeLogs}>
+        <DialogContent className={styles.logsSurface}>
+          <DialogHeader>{`Logs — ${logsTarget?.name ?? ''}`}</DialogHeader>
+          <DialogBody>
+            {logsError && <Caption1 className={styles.error}>{logsError}</Caption1>}
+            {logs !== null ? (
+              <pre className={styles.logsBlock}>{logs.length > 0 ? logs : 'No log output.'}</pre>
+            ) : (
+              !logsError && <Caption1 className={styles.summary}>Loading logs…</Caption1>
+            )}
+          </DialogBody>
+          <DialogFooter>
+            <Button size="sm" variant="ghost" onClick={onRefreshLogs}>
+              Refresh
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </AnimatedDialog>
     </div>
   );
 });

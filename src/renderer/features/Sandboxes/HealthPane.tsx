@@ -5,22 +5,33 @@
  *   WSL/cloud-linked client it reports the daemon's Docker, not Windows'.
  * - WSL daemon row (Windows, WSL-linked only) — fed by polling `wsl:status`
  *   via `localEmitter`; the daemon manager lives in local Electron main.
+ *   Docker bootstrap (`wsl:install-docker` / `wsl:start-docker`) is also
+ *   localEmitter-only — wsl.exe runs on the Windows side.
+ * - Images card (docker `ok` only): presence/size of the devbox image via
+ *   `sandbox:image-status`, with pull + prune-dangling actions.
  * - Read-only backend-link summary. Link management stays in Settings
  *   (sandboxes-tab-plan.md Decision 5) — this only deep-links there.
  * - `MachinesCard` — computer-as-sandbox targets live here (Decision 6).
  *   The card self-hides unless cloud-linked, so it mounts unconditionally.
  */
 
-import { makeStyles, tokens } from '@fluentui/react-components';
+import { makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
 import { ArrowClockwise16Regular } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useState } from 'react';
 
-import { Body1, Button, Caption1, Card, IconButton, SectionLabel } from '@/renderer/ds';
-import { $sandboxesError, $substrateStatus, refreshSandboxSubstrate } from '@/renderer/features/Sandboxes/state';
+import { Body1, Button, Caption1, Card, ConfirmDialog, IconButton, SectionLabel, Spinner } from '@/renderer/ds';
+import { formatBytes } from '@/renderer/features/Sandboxes/format-bytes';
+import {
+  $sandboxesError,
+  $sandboxProfiles,
+  $substrateStatus,
+  refreshSandboxSubstrate,
+} from '@/renderer/features/Sandboxes/state';
 import { MachinesCard } from '@/renderer/features/SettingsModal/MachinesCard';
 import { openSettingsTab } from '@/renderer/features/SettingsModal/settings-nav';
 import {
+  emitter,
   isCloudLinked,
   isElectron,
   isServerLinked,
@@ -28,7 +39,7 @@ import {
   localEmitter,
   serverOrigin,
 } from '@/renderer/services/ipc';
-import type { SandboxSubstrateStatus, WslBackendStatus } from '@/shared/types';
+import type { SandboxImageStatus, SandboxSubstrateStatus, WslBackendStatus } from '@/shared/types';
 
 const useStyles = makeStyles({
   root: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalM },
@@ -36,10 +47,13 @@ const useStyles = makeStyles({
   header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
   row: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalM },
   main: { flex: '1 1 0', minWidth: 0, display: 'flex', flexDirection: 'column', gap: '2px' },
+  actions: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS, flexShrink: 0 },
+  pendingRow: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS },
   summary: { color: tokens.colorNeutralForeground2 },
   error: { color: tokens.colorPaletteRedForeground1 },
   warn: { color: tokens.colorPaletteYellowForeground1 },
   ok: { color: tokens.colorPaletteGreenForeground1 },
+  mono: { fontFamily: tokens.fontFamilyMonospace },
 });
 
 type StatusLine = { text: string; tone: 'ok' | 'warn' | 'error' | 'muted' };
@@ -133,20 +147,107 @@ export const HealthPane = memo(() => {
   // WSL daemon status is a LOCAL-main concern (`wsl:*` never rides the
   // backend WS) — poll while this pane is visible.
   const [wslStatus, setWslStatus] = useState<WslBackendStatus | null>(null);
+  const refreshWslStatus = useCallback(() => {
+    void localEmitter
+      .invoke('wsl:status')
+      .then(setWslStatus)
+      .catch(() => undefined);
+  }, []);
   useEffect(() => {
     if (!isWslLinked) {
       return undefined;
     }
-    const refresh = (): void => {
-      void localEmitter
-        .invoke('wsl:status')
-        .then(setWslStatus)
-        .catch(() => undefined);
-    };
-    refresh();
-    const interval = setInterval(refresh, WSL_STATUS_POLL_MS);
+    refreshWslStatus();
+    const interval = setInterval(refreshWslStatus, WSL_STATUS_POLL_MS);
     return () => clearInterval(interval);
-  }, []);
+  }, [refreshWslStatus]);
+
+  // Docker bootstrap inside the linked distro (missing → install docker-ce,
+  // daemon-down → start dockerd). Both are long-running local-main calls.
+  const [bootstrapping, setBootstrapping] = useState<'install' | 'start' | null>(null);
+  const [bootstrapError, setBootstrapError] = useState<string | null>(null);
+
+  const finishBootstrap = useCallback(async () => {
+    refreshWslStatus();
+    await refreshSandboxSubstrate();
+  }, [refreshWslStatus]);
+
+  const onInstallDocker = useCallback(() => {
+    setBootstrapping('install');
+    setBootstrapError(null);
+    void localEmitter
+      .invoke('wsl:install-docker')
+      .then(finishBootstrap)
+      .catch((err: unknown) => setBootstrapError(err instanceof Error ? err.message : String(err)))
+      .finally(() => setBootstrapping(null));
+  }, [finishBootstrap]);
+
+  const onStartDocker = useCallback(() => {
+    setBootstrapping('start');
+    setBootstrapError(null);
+    void localEmitter
+      .invoke('wsl:start-docker')
+      .then(finishBootstrap)
+      .catch((err: unknown) => setBootstrapError(err instanceof Error ? err.message : String(err)))
+      .finally(() => setBootstrapping(null));
+  }, [finishBootstrap]);
+
+  // Images card: the devbox image reference comes from the discovered
+  // profile catalog; the card hides when it's unknown or docker isn't ok.
+  const profiles = useStore($sandboxProfiles);
+  const devboxImage = profiles.find((p) => p.name === 'devbox')?.details?.image ?? null;
+  const showImages = substrate?.docker === 'ok' && devboxImage !== null;
+
+  const [imageStatus, setImageStatus] = useState<SandboxImageStatus | null>(null);
+  const [imageError, setImageError] = useState<string | null>(null);
+  const [pulling, setPulling] = useState(false);
+  const [pruneConfirmOpen, setPruneConfirmOpen] = useState(false);
+  const [pruneResult, setPruneResult] = useState<string | null>(null);
+
+  const refreshImageStatus = useCallback(() => {
+    if (!devboxImage) {
+      return;
+    }
+    setImageError(null);
+    void emitter
+      .invoke('sandbox:image-status', devboxImage)
+      .then(setImageStatus)
+      .catch((err: unknown) => setImageError(err instanceof Error ? err.message : String(err)));
+  }, [devboxImage]);
+
+  useEffect(() => {
+    if (showImages) {
+      refreshImageStatus();
+    }
+  }, [showImages, refreshImageStatus]);
+
+  const onPull = useCallback(() => {
+    if (!devboxImage) {
+      return;
+    }
+    setPulling(true);
+    setImageError(null);
+    void emitter
+      .invoke('sandbox:pull-image', devboxImage)
+      .then(refreshImageStatus)
+      .catch((err: unknown) => setImageError(err instanceof Error ? err.message : String(err)))
+      .finally(() => setPulling(false));
+  }, [devboxImage, refreshImageStatus]);
+
+  const openPruneConfirm = useCallback(() => setPruneConfirmOpen(true), []);
+  const closePruneConfirm = useCallback(() => setPruneConfirmOpen(false), []);
+
+  const onConfirmPrune = useCallback(() => {
+    setImageError(null);
+    void emitter
+      .invoke('sandbox:prune-images')
+      .then(({ reclaimedBytes }) => {
+        setPruneResult(reclaimedBytes !== null ? `Reclaimed ${formatBytes(reclaimedBytes)}` : 'Prune complete');
+        setTimeout(() => setPruneResult(null), 4000);
+        refreshImageStatus();
+      })
+      .catch((err: unknown) => setImageError(err instanceof Error ? err.message : String(err)));
+  }, [refreshImageStatus]);
 
   const docker = dockerStatusLine(substrate, wslStatus?.distro);
   const wsl = wslStatusLine(wslStatus);
@@ -161,14 +262,35 @@ export const HealthPane = memo(() => {
               <Body1>Docker</Body1>
               <Caption1 className={toneClasses(styles, docker.tone)}>{docker.text}</Caption1>
             </div>
-            <IconButton
-              aria-label="Refresh substrate status"
-              icon={<ArrowClockwise16Regular />}
-              size="sm"
-              tooltip="Refresh"
-              onClick={onRefresh}
-            />
+            <div className={styles.actions}>
+              {isWslLinked && substrate?.docker === 'missing' && (
+                <Button size="sm" variant="ghost" onClick={onInstallDocker} isDisabled={bootstrapping !== null}>
+                  {`Install Docker in ${wslStatus?.distro ?? 'the distro'}`}
+                </Button>
+              )}
+              {isWslLinked && substrate?.docker === 'daemon-down' && (
+                <Button size="sm" variant="ghost" onClick={onStartDocker} isDisabled={bootstrapping !== null}>
+                  Start Docker
+                </Button>
+              )}
+              <IconButton
+                aria-label="Refresh substrate status"
+                icon={<ArrowClockwise16Regular />}
+                size="sm"
+                tooltip="Refresh"
+                onClick={onRefresh}
+              />
+            </div>
           </div>
+          {bootstrapping !== null && (
+            <div className={styles.pendingRow}>
+              <Spinner size="sm" />
+              <Caption1 className={styles.summary}>
+                {bootstrapping === 'install' ? 'Installing Docker — this takes a few minutes…' : 'Starting Docker…'}
+              </Caption1>
+            </div>
+          )}
+          {bootstrapError && <Caption1 className={styles.error}>{bootstrapError}</Caption1>}
           {isWslLinked && (
             <div className={styles.row}>
               <div className={styles.main}>
@@ -180,6 +302,57 @@ export const HealthPane = memo(() => {
           {fetchError && <Caption1 className={styles.error}>{fetchError}</Caption1>}
         </div>
       </Card>
+
+      {showImages && devboxImage && (
+        <>
+          <SectionLabel>Images</SectionLabel>
+          <Card>
+            <div className={styles.card}>
+              <div className={styles.row}>
+                <div className={styles.main}>
+                  <Body1>Devbox image</Body1>
+                  <Caption1 className={mergeClasses(styles.summary, styles.mono)}>{devboxImage}</Caption1>
+                  <Caption1
+                    className={imageStatus === null ? styles.summary : imageStatus.present ? styles.ok : styles.warn}
+                  >
+                    {imageStatus === null
+                      ? 'Checking image…'
+                      : imageStatus.present
+                        ? `Present${imageStatus.sizeBytes !== null ? ` — ${formatBytes(imageStatus.sizeBytes)}` : ''}`
+                        : 'Not pulled'}
+                  </Caption1>
+                </div>
+                <div className={styles.actions}>
+                  <Button size="sm" variant="ghost" onClick={onPull} isDisabled={pulling}>
+                    {pulling ? 'Pulling…' : 'Pull'}
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={openPruneConfirm}>
+                    Prune dangling images
+                  </Button>
+                </div>
+              </div>
+              {pulling && (
+                <div className={styles.pendingRow}>
+                  <Spinner size="sm" />
+                  <Caption1 className={styles.summary}>Pulling — this downloads several GB…</Caption1>
+                </div>
+              )}
+              {pruneResult && <Caption1 className={styles.ok}>{pruneResult}</Caption1>}
+              {imageError && <Caption1 className={styles.error}>{imageError}</Caption1>}
+            </div>
+          </Card>
+        </>
+      )}
+
+      <ConfirmDialog
+        open={pruneConfirmOpen}
+        onClose={closePruneConfirm}
+        onConfirm={onConfirmPrune}
+        title="Prune dangling images?"
+        description="Remove all dangling (untagged) Docker images on the backend. Tagged images are untouched."
+        confirmLabel="Prune"
+        destructive
+      />
 
       <SectionLabel>Backend</SectionLabel>
       <Card>

@@ -1,7 +1,12 @@
 import { atom, onMount, task } from 'nanostores';
 
 import { emitter } from '@/renderer/services/ipc';
-import type { ProfileSummary, SandboxContainerSummary, SandboxSubstrateStatus } from '@/shared/types';
+import type {
+  ProfileSummary,
+  SandboxContainerSummary,
+  SandboxSnapshotSummary,
+  SandboxSubstrateStatus,
+} from '@/shared/types';
 
 /**
  * Sandboxes rail-tab state: the master-list selection plus the data atoms
@@ -11,8 +16,8 @@ import type { ProfileSummary, SandboxContainerSummary, SandboxSubstrateStatus } 
  * cloud).
  */
 
-/** The three fixed master nodes of the Sandboxes tab. */
-export type SandboxesPane = 'health' | 'profiles' | 'running';
+/** The four fixed master nodes of the Sandboxes tab. */
+export type SandboxesPane = 'health' | 'profiles' | 'running' | 'snapshots';
 
 /** Detail-pane selection: which fixed master node is open. */
 export const $sandboxesSelectedPane = atom<SandboxesPane>('health');
@@ -22,6 +27,9 @@ export const $sandboxProfiles = atom<ProfileSummary[]>([]);
 
 /** Containers carrying the omni-code label (`sandbox:list-containers`). */
 export const $sandboxContainers = atom<SandboxContainerSummary[]>([]);
+
+/** Workspace snapshot tars (`sandbox:list-snapshots`). */
+export const $sandboxSnapshots = atom<SandboxSnapshotSummary[]>([]);
 
 /** Docker substrate probe result; null until the first fetch lands. */
 export const $substrateStatus = atom<SandboxSubstrateStatus | null>(null);
@@ -46,6 +54,15 @@ export const refreshSandboxProfiles = async (): Promise<void> => {
 export const refreshSandboxContainers = async (): Promise<void> => {
   try {
     $sandboxContainers.set(await emitter.invoke('sandbox:list-containers'));
+    $sandboxesError.set(null);
+  } catch (err) {
+    $sandboxesError.set(errorText(err));
+  }
+};
+
+export const refreshSandboxSnapshots = async (): Promise<void> => {
+  try {
+    $sandboxSnapshots.set(await emitter.invoke('sandbox:list-snapshots'));
     $sandboxesError.set(null);
   } catch (err) {
     $sandboxesError.set(errorText(err));

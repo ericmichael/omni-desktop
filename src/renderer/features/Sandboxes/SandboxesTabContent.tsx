@@ -6,11 +6,12 @@ import { PageHeader } from '@/renderer/ds';
 import { HealthPane } from '@/renderer/features/Sandboxes/HealthPane';
 import { ProfilesPane } from '@/renderer/features/Sandboxes/ProfilesPane';
 import { RunningPane } from '@/renderer/features/Sandboxes/RunningPane';
+import { SnapshotsPane } from '@/renderer/features/Sandboxes/SnapshotsPane';
 import { $sandboxesSelectedPane, type SandboxesPane } from '@/renderer/features/Sandboxes/state';
 import { $glassEnabled } from '@/renderer/theme/use-glass';
 
 /**
- * The tab's fixed master list — three nodes mapping to detail panes
+ * The tab's fixed master list — four nodes mapping to detail panes
  * (docs/sandboxes-tab-plan.md, Decision 2). Fixed, not data-driven: the
  * data lives in the panes.
  */
@@ -18,6 +19,7 @@ const PANES: { id: SandboxesPane; title: string; meta: string }[] = [
   { id: 'health', title: 'Health', meta: 'Substrate status and machines' },
   { id: 'profiles', title: 'Profiles', meta: 'Discovered sandbox profiles' },
   { id: 'running', title: 'Running', meta: 'Containers and cleanup' },
+  { id: 'snapshots', title: 'Snapshots', meta: 'Workspace rehydration tars' },
 ];
 
 const useStyles = makeStyles({
@@ -139,6 +141,7 @@ export const SandboxesTabContent = memo(() => {
           {selectedPane === 'health' && <HealthPane />}
           {selectedPane === 'profiles' && <ProfilesPane />}
           {selectedPane === 'running' && <RunningPane />}
+          {selectedPane === 'snapshots' && <SnapshotsPane />}
         </div>
       </div>
     </div>

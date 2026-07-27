@@ -1,14 +1,18 @@
 /**
- * Sandboxes → Profiles: the discovered profile catalog. Read-only in v1
- * (sandboxes-tab-plan.md Decision 4): parsed summary + raw YAML, with
- * "Set as default" / "Create override" / copy-path as the only actions.
+ * Sandboxes → Profiles: the discovered profile catalog. File-backed
+ * writable profiles (`origin: 'user-override'` or user-created) are
+ * editable in place (v2): a monospace textarea with dirty-tracked
+ * Save (`sandbox:write-profile`) / Revert. Builtin-origin profiles stay
+ * read-only — "Create override" is the edit path — and the implicit host
+ * profile has no file at all. Navigating away while dirty simply drops the
+ * draft; a confirm guard is intentionally omitted (keep it simple).
  */
 
 import { makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useState } from 'react';
 
-import { Badge, Body1, Button, Caption1, Card, SectionLabel } from '@/renderer/ds';
+import { Badge, Body1, Button, Caption1, Card, SectionLabel, Textarea } from '@/renderer/ds';
 import { $sandboxesError, $sandboxProfiles, refreshSandboxProfiles } from '@/renderer/features/Sandboxes/state';
 import { emitter, isCloudLinked, isElectron, isServerLinked, isWslLinked } from '@/renderer/services/ipc';
 import { persistedStoreApi } from '@/renderer/services/store';
@@ -60,6 +64,15 @@ const useStyles = makeStyles({
     whiteSpace: 'pre',
     margin: 0,
   },
+  yamlEditor: {
+    '& textarea': {
+      fontFamily: tokens.fontFamilyMonospace,
+      fontSize: tokens.fontSizeBase200,
+      whiteSpace: 'pre',
+      overflowX: 'auto',
+    },
+  },
+  editorActions: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS },
   pathRow: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS, minWidth: 0 },
   pathText: {
     fontFamily: tokens.fontFamilyMonospace,
@@ -94,6 +107,10 @@ const copyText = (text: string): void => {
   void navigator.clipboard.writeText(text).catch(() => undefined);
 };
 
+/** File-backed and user-owned — the only profiles `sandbox:write-profile` accepts. */
+const isWritable = (profile: ProfileSummary): boolean =>
+  profile.path !== null && (profile.origin === 'user-override' || !profile.builtin);
+
 export const ProfilesPane = memo(() => {
   const styles = useStyles();
   const profiles = useStore($sandboxProfiles);
@@ -102,6 +119,8 @@ export const ProfilesPane = memo(() => {
 
   const [selectedName, setSelectedName] = useState<string | null>(null);
   const [yaml, setYaml] = useState<string | null>(null);
+  const [draft, setDraft] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [createdPath, setCreatedPath] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -115,12 +134,17 @@ export const ProfilesPane = memo(() => {
   const selectProfile = useCallback((name: string) => {
     setSelectedName(name);
     setYaml(null);
+    setDraft(null);
     setActionError(null);
     setCreatedPath(null);
     setCopied(false);
     void emitter
       .invoke('sandbox:read-profile', name)
-      .then((result) => setYaml(result?.yaml ?? null))
+      .then((result) => {
+        const text = result?.yaml ?? null;
+        setYaml(text);
+        setDraft(text);
+      })
       .catch((err: unknown) => setActionError(err instanceof Error ? err.message : String(err)));
   }, []);
 
@@ -148,6 +172,32 @@ export const ProfilesPane = memo(() => {
       .catch((err: unknown) => setActionError(err instanceof Error ? err.message : String(err)));
   }, [selected, selectProfile]);
 
+  const onDraftChange = useCallback((event: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setDraft(event.target.value);
+  }, []);
+
+  const onRevert = useCallback(() => {
+    setDraft(yaml);
+    setActionError(null);
+  }, [yaml]);
+
+  const onSave = useCallback(() => {
+    if (!selected || draft === null) {
+      return;
+    }
+    setSaving(true);
+    setActionError(null);
+    void emitter
+      .invoke('sandbox:write-profile', selected.name, draft)
+      .then(async () => {
+        setYaml(draft);
+        // The edit may have changed the client type / details — re-discover.
+        await refreshSandboxProfiles();
+      })
+      .catch((err: unknown) => setActionError(err instanceof Error ? err.message : String(err)))
+      .finally(() => setSaving(false));
+  }, [selected, draft]);
+
   const onCopyPath = useCallback(() => {
     if (selected?.path) {
       copyText(selected.path);
@@ -164,6 +214,8 @@ export const ProfilesPane = memo(() => {
 
   const defaultName = store.defaultProfileName ?? 'host';
   const usedByCount = selected ? store.projects.filter((p) => p.sandboxProfile === selected.name).length : 0;
+  const writable = selected !== null && isWritable(selected);
+  const dirty = yaml !== null && draft !== null && draft !== yaml;
 
   return (
     <div className={styles.root}>
@@ -250,7 +302,28 @@ export const ProfilesPane = memo(() => {
             {actionError && <Caption1 className={styles.error}>{actionError}</Caption1>}
 
             {yaml !== null ? (
-              <pre className={styles.yaml}>{yaml}</pre>
+              writable ? (
+                <>
+                  <Textarea
+                    className={styles.yamlEditor}
+                    value={draft ?? ''}
+                    onChange={onDraftChange}
+                    maxHeight={480}
+                    aria-label={`YAML for ${selected.name}`}
+                  />
+                  <div className={styles.editorActions}>
+                    <Button size="sm" variant="primary" onClick={onSave} isDisabled={!dirty || saving}>
+                      {saving ? 'Saving…' : 'Save'}
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={onRevert} isDisabled={!dirty || saving}>
+                      Revert
+                    </Button>
+                    {dirty && !saving && <Caption1 className={styles.summary}>Unsaved changes</Caption1>}
+                  </div>
+                </>
+              ) : (
+                <pre className={styles.yaml}>{yaml}</pre>
+              )
             ) : (
               <Caption1 className={styles.summary}>
                 {selected.origin === 'implicit'
