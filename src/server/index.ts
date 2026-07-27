@@ -169,6 +169,23 @@ const main = async () => {
     reply.send({ status: 'ok' });
   });
 
+  // Readiness + version probe for locally-spawned daemons (WSL backend mode).
+  // The Windows shell polls this after spawning the daemon and before creating
+  // the BrowserWindow. OMNI_LAUNCHER_VERSION is set by the spawner because the
+  // payload layout has no package.json at ../../ (unlike a source checkout).
+  fastify.get('/api/health', (_req, reply) => {
+    let version = process.env['OMNI_LAUNCHER_VERSION'] ?? '';
+    if (!version) {
+      try {
+        const pkg = JSON.parse(readFileSync(join(__dirname, '../../package.json'), 'utf-8'));
+        version = (pkg as { version?: string }).version ?? '0.0.0';
+      } catch {
+        version = '0.0.0';
+      }
+    }
+    reply.send({ ok: true, version });
+  });
+
   // Cloud-discovery endpoint — Electron clients fetch this after the user
   // enters the launcher URL, then run the AAD device-code flow against the
   // returned tenant + client id. Public on purpose (no secrets here; the
