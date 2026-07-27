@@ -29,6 +29,10 @@ npm run build:server       # Build server + browser SPA
 npm run start:server       # Run built server from out/server/index.mjs (default :3001)
 
 npm run build:sandbox      # Rebuild the Rust omni-sandbox binary (requires rustup)
+npm run build:wsl-payload  # Assemble the WSL daemon tarball (Linux/WSL only; run
+                           # build:server first). Required before `wsl:link` works
+                           # in dev — the Windows shell provisions this tarball
+                           # into the distro.
 ```
 
 `npm test` re-runs `electron-rebuild` against node-pty every time — needed because the binary is compiled against Electron's Node ABI, which differs from system Node.
@@ -91,6 +95,16 @@ Managers expose a timestamped `getStatus()` and broadcast updates via `sendToWin
 ### Sandbox binary
 
 `omni-sandbox` is a Rust binary built from a sibling `sandbox-cli/` repo by `scripts/download-sandbox.mjs` during `postinstall`. If Rust is missing, the download is skipped with a warning — run `npm run build:sandbox` later. On Linux, `bubblewrap` is also required at runtime.
+
+### WSL backend mode (Windows)
+
+On Windows the Electron shell can run the backend as a daemon inside a WSL2
+distro (`docs/windows-wsl-backend-plan.md`): `StoreData.remoteBackend` holds a
+`CloudBackend | WslBackend` union, `WslBackendManager` (`src/main/wsl-backend.ts`)
+provisions/spawns/health-checks the daemon via `wsl.exe --exec` (never the plain
+`--` form — it destroys argv quoting), and auth is a per-boot shared secret with
+tokens minted in main. Native file dialogs translate paths at the single
+`toBackendPath` boundary in `src/main/index.ts` via `@/lib/wsl-path`.
 
 ### Enterprise / platform mode
 

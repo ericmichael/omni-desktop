@@ -129,7 +129,9 @@ function makeManager(opts: {
 }
 
 const isProvisionCall = (call: RunCall): boolean => call.args.some((a) => a.includes('tar xzf -'));
-const isVersionCall = (call: RunCall): boolean => call.args.includes('cat');
+// The VERSION read runs as `--exec sh -c 'cat …'` — the script is one argv element.
+const hasCatScript = (args: string[]): boolean => args.some((a) => a.startsWith('cat '));
+const isVersionCall = (call: RunCall): boolean => hasCatScript(call.args);
 
 afterEach(() => {
   vi.useRealTimers();
@@ -138,7 +140,7 @@ afterEach(() => {
 describe('provisioning decision', () => {
   it('skips provisioning when the remote VERSION matches the launcher version', async () => {
     const { manager, cleanup, runCalls } = makeManager({
-      respond: (args) => (args.includes('cat') ? ok('1.2.3\n') : ok()),
+      respond: (args) => (hasCatScript(args) ? ok('1.2.3\n') : ok()),
     });
     try {
       await expect(manager.provisionIfNeeded('Ubuntu-22.04')).resolves.toBe(false);
@@ -151,7 +153,7 @@ describe('provisioning decision', () => {
 
   it('provisions on VERSION mismatch, streaming the payload tarball via stdin', async () => {
     const { manager, cleanup, runCalls } = makeManager({
-      respond: (args) => (args.includes('cat') ? ok('1.0.0\n') : ok()),
+      respond: (args) => (hasCatScript(args) ? ok('1.0.0\n') : ok()),
     });
     try {
       await expect(manager.provisionIfNeeded('Ubuntu-22.04')).resolves.toBe(true);
@@ -160,6 +162,9 @@ describe('provisioning decision', () => {
       expect(provision?.stdinFile).toBe(payloadFile);
       // Stage-then-swap: unpack into launcher.tmp, then atomically replace.
       expect(provision?.args.join(' ')).toContain('launcher.tmp');
+      // `--exec` is load-bearing: the plain `--` form re-joins argv through the
+      // default shell and destroys the sh -c quoting (see execArgs).
+      expect(provision?.args).toContain('--exec');
     } finally {
       cleanup();
     }
@@ -167,7 +172,7 @@ describe('provisioning decision', () => {
 
   it('provisions when the remote VERSION file is missing', async () => {
     const { manager, cleanup, runCalls } = makeManager({
-      respond: (args) => (args.includes('cat') ? fail(1, 'cat: no such file') : ok()),
+      respond: (args) => (hasCatScript(args) ? fail(1, 'cat: no such file') : ok()),
     });
     try {
       await expect(manager.provisionIfNeeded('Ubuntu-22.04')).resolves.toBe(true);
@@ -180,7 +185,7 @@ describe('provisioning decision', () => {
   it('rejects with the captured stderr when the provision command fails', async () => {
     const { manager, cleanup } = makeManager({
       respond: (args) => {
-        if (args.includes('cat')) {
+        if (hasCatScript(args)) {
           return fail(1);
         }
         // Linux-side stderr (tar) is plain UTF-8 — unlike wsl.exe's own

@@ -37,6 +37,17 @@ const STDERR_TAIL_CHARS = 4_096;
  *  live elsewhere, so re-provisioning this path never touches user data. */
 const REMOTE_ROOT = '~/.omni/launcher';
 
+/**
+ * Every in-distro command runs as `wsl.exe -d <distro> --exec <argv…>`.
+ * `--exec` passes argv to execvp exactly; the plain `--` form re-joins argv
+ * with spaces and hands the string to the user's default shell, which destroys
+ * the quoting around `sh -c <script>` (operators leak to the outer shell, env
+ * assignments detach from the final command) and breaks under non-POSIX
+ * default shells. Tilde expansion inside the scripts is done by the `sh -c`
+ * we exec, not by wsl.exe.
+ */
+const execArgs = (distro: string, script: string): string[] => ['-d', distro, '--exec', 'sh', '-c', script];
+
 /** Stage-then-swap unpack: a torn stdin stream can only ever corrupt the tmp
  *  dir, never a live install. */
 const PROVISION_SCRIPT = `rm -rf ${REMOTE_ROOT}.tmp && mkdir -p ${REMOTE_ROOT}.tmp && tar xzf - -C ${REMOTE_ROOT}.tmp && rm -rf ${REMOTE_ROOT} && mv ${REMOTE_ROOT}.tmp ${REMOTE_ROOT}`;
@@ -268,17 +279,21 @@ export class WslBackendManager {
     if (this.platform !== 'win32') {
       return false;
     }
-    const versionRes = await this.runWsl(['-d', distro, '--', 'cat', `${REMOTE_ROOT}/VERSION`]);
+    const versionRes = await this.runWsl(execArgs(distro, `cat ${REMOTE_ROOT}/VERSION`));
     const remoteVersion = versionRes.code === 0 ? decodeWslOutput(versionRes.stdout).trim() : null;
     if (remoteVersion === this.launcherVersion) {
       return false;
     }
     const payload = this.payloadPath();
     if (!existsSync(payload)) {
-      throw new Error(`WSL payload not found at ${payload}`);
+      throw new Error(
+        `WSL payload not found at ${payload}${
+          app.isPackaged ? '' : ' — build it with `npm run build:server && npm run build:wsl-payload`'
+        }`
+      );
     }
     this.setStatus({ state: 'provisioning', distro });
-    const res = await this.runWsl(['-d', distro, '--', 'sh', '-c', PROVISION_SCRIPT], { stdinFile: payload });
+    const res = await this.runWsl(execArgs(distro, PROVISION_SCRIPT), { stdinFile: payload });
     if (res.code !== 0) {
       throw new Error(`WSL provisioning failed (exit ${res.code}): ${decodeWslOutput(res.stderr).trim()}`);
     }
@@ -346,7 +361,7 @@ export class WslBackendManager {
   }
 
   private async reapStaleDaemon(distro: string): Promise<void> {
-    await this.runWsl(['-d', distro, '--', 'sh', '-c', REAP_SCRIPT]);
+    await this.runWsl(execArgs(distro, REAP_SCRIPT));
   }
 
   private spawnDaemon(): void {
@@ -359,7 +374,7 @@ export class WslBackendManager {
     const child = this.spawnWsl([
       '-d',
       distro,
-      '--',
+      '--exec',
       'env',
       `OMNI_RUNTIME_TOKEN_SECRET=${secret}`,
       `PORT=${port}`,
@@ -370,7 +385,9 @@ export class WslBackendManager {
       DAEMON_SCRIPT,
     ]);
     child.stderr?.on('data', (chunk) => {
-      this.stderrTail = (this.stderrTail + String(chunk)).slice(-STDERR_TAIL_CHARS);
+      // wsl.exe's own error messages (bad distro, WSL not running) are
+      // UTF-16LE; the daemon's Linux-side stderr is UTF-8. Decode per chunk.
+      this.stderrTail = (this.stderrTail + decodeWslOutput(chunk)).slice(-STDERR_TAIL_CHARS);
     });
     child.once('exit', (code) => this.onChildExit(gen, code));
     this.child = child;
@@ -441,7 +458,7 @@ export class WslBackendManager {
       return;
     }
     try {
-      const res = await this.runWsl(['-d', distro, '--', 'docker', 'info']);
+      const res = await this.runWsl(execArgs(distro, 'docker info'));
       if (res.code === 0) {
         this.setStatus({ docker: 'ok' });
         return;
