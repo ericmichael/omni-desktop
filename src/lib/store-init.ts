@@ -7,16 +7,7 @@
 
 import type { LayoutMode, OmniTheme } from '@/shared/types';
 
-const VALID_LAYOUT_MODES: LayoutMode[] = [
-  'home',
-  'inbox',
-  'work',
-  'chat',
-  'dashboards',
-  'routines',
-  'plugins',
-  'settings',
-];
+const VALID_LAYOUT_MODES: LayoutMode[] = ['work', 'chat', 'dashboards', 'agents', 'plugins', 'settings'];
 
 /**
  * Migrate legacy layout modes to current valid modes.
@@ -33,6 +24,19 @@ export function migrateLayoutMode(mode: string): LayoutMode | null {
   // project-and-task surface itself lives under Work.
   if (mode === 'projects') {
     return 'work';
+  }
+  // The Inbox rail tab folded into Work (an "Inbox" sidebar row / view).
+  if (mode === 'inbox') {
+    return 'work';
+  }
+  // The Routines rail tab folded into Agents (a "Routines" nav-row surface).
+  if (mode === 'routines') {
+    return 'agents';
+  }
+  // Home retired with the unified sidebar — the sidebar's badges are the
+  // attention surface; the Deck is the landing.
+  if (mode === 'home') {
+    return 'chat';
   }
   // 'spaces' merged into 'chat' (the deck now lives behind the Chat tab);
   // 'code' and 'os' were its earlier names.

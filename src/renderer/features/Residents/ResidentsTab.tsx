@@ -25,12 +25,12 @@ import {
   Checkmark20Regular,
   Delete20Regular,
   Dismiss20Regular,
-  Edit20Regular,
   FlashRegular,
   MoreHorizontal20Regular,
-  PeopleTeamRegular,
   PersonAdd20Regular,
   Send20Regular,
+  Speaker220Regular,
+  SpeakerMute20Regular,
 } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
 import type { ChangeEvent, ComponentProps, FormEvent, KeyboardEvent } from 'react';
@@ -38,12 +38,10 @@ import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState
 
 import { formatDayLabel, formatTimeOfDay, formatTimestamp } from '@/lib/format-time';
 import {
-  channelIdFromName,
   dmChannelId,
   dmParticipants,
   memoryKey,
   parseResidentPrincipal,
-  RESERVED_CHANNEL_IDS,
   residentHandle,
   SYSTEM_CHANNEL,
   TEAM_CHANNEL,
@@ -52,16 +50,12 @@ import {
 import { RESIDENT_TEMPLATES } from '@/lib/resident-templates';
 import { useIsDesktop } from '@/renderer/common/use-is-desktop';
 import {
-  AnimatedDialog,
   Badge,
   Button,
   Caption1,
   Checkbox,
   ConfirmDialog,
   CounterBadge,
-  DialogBody,
-  DialogContent,
-  DialogHeader,
   EmptyState,
   FormSkeleton,
   IconButton,
@@ -76,29 +70,37 @@ import {
   MenuTrigger,
   MessageBar,
   MessageBarBody,
-  PageHeader,
   SaveBar,
-  SectionLabel,
   Select,
   Textarea,
   TopAppBar,
 } from '@/renderer/ds';
 import { SandboxPicker } from '@/renderer/features/SandboxProfile/SandboxPicker';
+import { ScheduledTasks } from '@/renderer/features/ScheduledTasks/ScheduledTasks';
 import { OmniAgentsApp } from '@/renderer/omniagents-ui';
+import { LocalVoiceButton } from '@/renderer/omniagents-ui/components/LocalVoiceButton';
 import { MarkdownMessage } from '@/renderer/omniagents-ui/shared/MarkdownMessage';
 import { emitter, serverOrigin } from '@/renderer/services/ipc';
 import { $machines } from '@/renderer/services/machines';
 import { persistedStoreApi } from '@/renderer/services/store';
+import { isLocalVoiceCapable } from '@/renderer/services/voice-client';
+import { VoiceScopeContext } from '@/renderer/services/voice-recording';
 import { $glassEnabled } from '@/renderer/theme/use-glass';
-import type {
-  Project,
-  ResidentAgent,
-  ResidentAgentRuntime,
-  ResidentChannelDef,
-  ResidentChannelMessage,
-} from '@/shared/types';
+import type { Project, ResidentAgent, ResidentAgentRuntime, ResidentChannelMessage } from '@/shared/types';
 
-import { $residentStatus, $residentsView, markResidentMessagesSeen, residentApi, syncResidentStatus } from './state';
+import { AgentAvatar, presenceStatus } from './agent-avatar';
+import { $dmSpokenReplies, speakDmMessage, toggleDmSpokenReplies } from './dm-voice';
+import {
+  $residentStatus,
+  $residentsView,
+  goToHandbook,
+  goToNewAgent,
+  goToResidentChannel,
+  goToRoster,
+  markResidentMessagesSeen,
+  residentApi,
+  syncResidentStatus,
+} from './state';
 
 type SandboxContext = ComponentProps<typeof SandboxPicker>['context'];
 
@@ -117,7 +119,8 @@ const useStyles = makeStyles({
     width: '100%',
     height: '100%',
     '@media (min-width: 640px)': {
-      width: '320px',
+      // Nav-sidebar width — matches the Work sidebar's NavDrawer.
+      width: '260px',
       flexShrink: 0,
       borderRight: `1px solid ${tokens.colorNeutralStroke1}`,
     },
@@ -167,17 +170,15 @@ const useStyles = makeStyles({
     '&:hover .resident-row-menu': { opacity: 1 },
     '&:focus-within .resident-row-menu': { opacity: 1 },
   },
-  rowSelected: {
-    backgroundColor: tokens.colorSubtleBackgroundSelected,
-  },
   rowTop: {
     display: 'flex',
     alignItems: 'center',
     gap: tokens.spacingHorizontalS,
   },
-  rowTopGrow: {
-    flex: '1 1 0',
-    minWidth: 0,
+  /* Actions slot content on nav TreeItems (the Work sidebar's idiom). */
+  rowActions: {
+    display: 'flex',
+    alignItems: 'center',
   },
   /* Hover/focus-revealed "…" menu on list rows — same idiom as Routines. */
   rowMenu: {
@@ -190,19 +191,6 @@ const useStyles = makeStyles({
   },
   rowMenuOpen: {
     opacity: 1,
-  },
-  sectionHeader: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-    paddingLeft: tokens.spacingHorizontalL,
-    paddingRight: tokens.spacingHorizontalS,
-    paddingTop: tokens.spacingVerticalXL,
-    paddingBottom: tokens.spacingVerticalXS,
-    color: tokens.colorNeutralForeground3,
-  },
-  sectionHeaderLabel: {
-    flex: '1 1 0',
   },
   rowTitle: {
     display: 'flex',
@@ -396,6 +384,20 @@ const useStyles = makeStyles({
   replyMarker: {
     color: tokens.colorNeutralForeground3,
     fontSize: tokens.fontSizeBase100,
+  },
+  /* Conversation tag on Activity rows — a real button, so the tag can open
+     the channel/thread it names. */
+  channelBadgeBtn: {
+    border: 'none',
+    backgroundColor: 'transparent',
+    padding: 0,
+    cursor: 'pointer',
+    display: 'inline-flex',
+    borderRadius: tokens.borderRadiusMedium,
+    ':focus-visible': {
+      outline: `2px solid ${tokens.colorBrandStroke1}`,
+      outlineOffset: '1px',
+    },
   },
   /* "Show N earlier replies" — sits on the thread rail like the replies. */
   threadExpandBtn: {
@@ -676,47 +678,6 @@ const stateBadgeColor = (state: ResidentAgentRuntime['state'] | undefined): 'blu
   return 'default';
 };
 
-/** Runtime state → standard Fluent presence semantics: green = reachable
- *  (idle), red = working a turn, offline = parked/disabled. */
-const presenceStatus = (state: ResidentAgentRuntime['state'] | undefined, enabled = true): PresenceBadgeStatus => {
-  if (!enabled) {
-    return 'offline';
-  }
-  if (state === 'thinking' || state === 'reflecting' || state === 'starting') {
-    return 'busy';
-  }
-  if (state === 'idle') {
-    return 'available';
-  }
-  return 'offline';
-};
-
-/** The tab's one identity mark: colorful Avatar keyed by the STABLE id (a
- *  rename keeps the color), presence composed in where live state matters. */
-const AgentAvatar = memo(function AgentAvatar({
-  name,
-  colorId,
-  presence,
-  size = 32,
-}: {
-  name: string;
-  /** Stable color key — agent id, or the `user` participant. */
-  colorId: string;
-  presence?: PresenceBadgeStatus;
-  size?: 20 | 24 | 28 | 32 | 36 | 40 | 48;
-}): React.JSX.Element {
-  return (
-    <Avatar
-      color="colorful"
-      name={name}
-      idForColor={colorId}
-      size={size}
-      aria-hidden="true"
-      {...(presence ? { badge: { status: presence } } : {})}
-    />
-  );
-});
-
 /** Field label with the doctrine tucked behind an info icon — labels stay
  *  scannable, the manual stays available. */
 const infoLabel = (text: string, info: string): FieldProps['label'] => ({
@@ -812,11 +773,15 @@ function ActivityFeed({
   roster,
   channel,
   readOnly = false,
+  onOpenChannel,
 }: {
   roster: ResidentAgent[];
   channel?: string;
   /** Agent↔agent DM threads are observed, not joined — no composer. */
   readOnly?: boolean;
+  /** All-traffic view only: makes each row's conversation tag a click
+   *  target that opens the channel/thread it names. */
+  onOpenChannel?: (channelId: string) => void;
 }): React.JSX.Element {
   const styles = useStyles();
   const storeData = useStore(persistedStoreApi.$atom);
@@ -835,6 +800,15 @@ function ActivityFeed({
   const dmPair = channel ? dmParticipants(channel) : null;
   // Threads live in named channels; the Activity view and DMs stay flat.
   const isNamedChannel = !!channel && !dmPair;
+  const dmPeerId = dmPair?.find((p) => p !== USER_PARTICIPANT);
+  const dmPeerName = dmPeerId ? (roster.find((a) => a.id === dmPeerId)?.name ?? dmPeerId) : null;
+
+  // Voice lives on the DM surface (user↔agent threads only): mic in the
+  // composer for input, spoken replies for output — the agent's reply IS
+  // the DM message, so the surface reads it aloud; no session plumbing.
+  const isUserDm = dmPair !== null && dmPair.includes(USER_PARTICIPANT);
+  const voiceReady = isUserDm && storeData.localVoiceEnabled === true && isLocalVoiceCapable();
+  const spokenOn = Boolean(useStore($dmSpokenReplies)[channel ?? '']);
 
   // Threads a user chose to expand (session-local, per feed).
   const [expandedThreads, setExpandedThreads] = useState<ReadonlySet<number>>(() => new Set());
@@ -960,6 +934,27 @@ function ActivityFeed({
     markResidentMessagesSeen(messages);
   }, [messages]);
 
+  // Spoken replies: read aloud agent-authored rows that land while this DM
+  // is open. Seeded to the newest row on mount/channel switch so history is
+  // never read back.
+  const lastSpokenIdRef = useRef<number | null>(null);
+  useEffect(() => {
+    lastSpokenIdRef.current = null;
+  }, [channel]);
+  useEffect(() => {
+    const maxId = messages.reduce((max, m) => Math.max(max, m.id), 0);
+    const since = lastSpokenIdRef.current;
+    lastSpokenIdRef.current = maxId;
+    if (since === null || !spokenOn || !dmPeerId) {
+      return;
+    }
+    for (const m of messages) {
+      if (m.id > since && m.from === dmPeerId) {
+        speakDmMessage(m.text);
+      }
+    }
+  }, [messages, spokenOn, dmPeerId]);
+
   const handleReplyClick = useCallback((m: ResidentChannelMessage) => {
     setReplyTarget(m);
     composerRef.current?.focus();
@@ -993,6 +988,31 @@ function ActivityFeed({
     },
     [submit]
   );
+
+  // Voice input: the transcript sends as a normal DM post — the resident
+  // hears it through the standard wake ping, no session-level plumbing.
+  const handleVoiceSubmit = useCallback(
+    (text: string) => {
+      const trimmed = text.trim();
+      if (!trimmed) {
+        return;
+      }
+      setSendError(null);
+      atBottomRef.current = true;
+      residentApi.post(channel ?? TEAM_CHANNEL, trimmed).catch((err: Error) => {
+        // A failed send must not eat the transcript: surface it as the draft.
+        setDraft(trimmed);
+        setSendError(err.message);
+      });
+    },
+    [channel]
+  );
+
+  const handleToggleSpoken = useCallback(() => {
+    if (channel) {
+      toggleDmSpokenReplies(channel);
+    }
+  }, [channel]);
 
   // Mention candidates for the token being typed (prefix on handle or name).
   const mentionCandidates = useMemo((): ResidentAgent[] => {
@@ -1085,8 +1105,6 @@ function ActivityFeed({
     [submit, replyTarget, clearReply, mention, mentionCandidates, mentionIndex, acceptMention]
   );
 
-  const dmPeerId = dmPair?.find((p) => p !== USER_PARTICIPANT);
-  const dmPeerName = dmPeerId ? (roster.find((a) => a.id === dmPeerId)?.name ?? dmPeerId) : null;
   const composerLabel = dmPeerName
     ? `Message ${dmPeerName}`
     : replyTarget
@@ -1170,7 +1188,21 @@ function ActivityFeed({
                   {groupHead && (
                     <div className={styles.messageHead}>
                       <span className={styles.messageFrom}>{m.from === USER_PARTICIPANT ? 'You' : fromName}</span>
-                      {label && <Badge color={isIncident ? 'yellow' : 'purple'}>{label}</Badge>}
+                      {/* Incident (#system) tags stay inert — `system` is a
+                          reserved id with no channel view to open. */}
+                      {label &&
+                        (onOpenChannel && !isIncident ? (
+                          <button
+                            type="button"
+                            className={styles.channelBadgeBtn}
+                            aria-label={`Open ${label}`}
+                            onClick={onOpenChannel.bind(null, m.channel)}
+                          >
+                            <Badge color="purple">{label}</Badge>
+                          </button>
+                        ) : (
+                          <Badge color={isIncident ? 'yellow' : 'purple'}>{label}</Badge>
+                        ))}
                       {showReplyMarker && (
                         <span className={styles.replyMarker} title={rootMsg ? rootMsg.text : undefined}>
                           ↳ replying to {rootMsg ? participantName(rootMsg) : 'an earlier message'}
@@ -1243,6 +1275,24 @@ function ActivityFeed({
               onBlur={dismissMention}
               aria-label={dmPeerName ? `Message ${dmPeerName}` : `Message #${channel ?? TEAM_CHANNEL}`}
             />
+            {voiceReady && (
+              <>
+                <IconButton
+                  aria-label={spokenOn ? 'Spoken replies on' : 'Spoken replies off'}
+                  tooltip={
+                    spokenOn ? `Stop reading ${dmPeerName ?? 'agent'} replies aloud` : 'Read replies aloud in this DM'
+                  }
+                  icon={spokenOn ? <Speaker220Regular /> : <SpeakerMute20Regular />}
+                  onClick={handleToggleSpoken}
+                />
+                {/* Scope = the DM channel id: the mic registry keys the voice
+                    hotkey and recording glow by it (same registry the deck
+                    columns use). */}
+                <VoiceScopeContext.Provider value={channel ?? null}>
+                  <LocalVoiceButton onSubmit={handleVoiceSubmit} />
+                </VoiceScopeContext.Provider>
+              </>
+            )}
             <IconButton aria-label="Send" icon={<Send20Regular />} onClick={submit} />
           </form>
         </div>
@@ -1481,193 +1531,15 @@ function MemberBar({
 }
 
 // ---------------------------------------------------------------------------
-// Channel rows
+// DM preview row (Conversations tab)
 // ---------------------------------------------------------------------------
 
 const stopPropagation = (e: React.SyntheticEvent) => e.stopPropagation();
 
-const ChannelRow = memo(function ChannelRow({
-  channelId,
-  description,
-  selected,
-  manageable,
-  unread,
-  onSelect,
-  onRequestEdit,
-  onRequestDelete,
-}: {
-  channelId: string;
-  description: string | undefined;
-  selected: boolean;
-  /** Built-ins (#team) take no edit/delete menu. */
-  manageable: boolean;
-  unread: number;
-  onSelect: (id: string) => void;
-  onRequestEdit: (id: string) => void;
-  onRequestDelete: (id: string) => void;
-}): React.JSX.Element {
-  const styles = useStyles();
-  const [menuOpen, setMenuOpen] = useState(false);
-  const handleClick = useCallback(() => onSelect(channelId), [onSelect, channelId]);
-  const handleRowKeyDown = useCallback(
-    (e: KeyboardEvent<HTMLDivElement>) => {
-      if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
-        e.preventDefault();
-        onSelect(channelId);
-      }
-    },
-    [onSelect, channelId]
-  );
-  const handleMenuOpenChange = useCallback((_e: unknown, data: { open: boolean }) => setMenuOpen(data.open), []);
-  const handleEdit = useCallback(() => onRequestEdit(channelId), [onRequestEdit, channelId]);
-  const handleDelete = useCallback(() => onRequestDelete(channelId), [onRequestDelete, channelId]);
-  return (
-    // div+role rather than <button>: the row hosts the "…" menu button, and
-    // nesting buttons inside a button is invalid markup.
-    <div
-      role="button"
-      tabIndex={0}
-      className={mergeClasses(styles.row, selected && styles.rowSelected)}
-      onClick={handleClick}
-      onKeyDown={handleRowKeyDown}
-    >
-      <span className={styles.rowTop}>
-        <span className={mergeClasses(styles.rowTitle, styles.rowTopGrow, unread > 0 && styles.rowTitleUnread)}>
-          #{channelId}
-        </span>
-        {!selected && unread > 0 && <CounterBadge count={unread} size="small" color="brand" />}
-        {manageable && (
-          <span
-            role="presentation"
-            className={mergeClasses(styles.rowMenu, 'resident-row-menu', menuOpen && styles.rowMenuOpen)}
-            onClick={stopPropagation}
-          >
-            <Menu open={menuOpen} onOpenChange={handleMenuOpenChange} positioning={{ position: 'below', align: 'end' }}>
-              <MenuTrigger disableButtonEnhancement>
-                <IconButton aria-label={`#${channelId} actions`} icon={<MoreHorizontal20Regular />} size="sm" />
-              </MenuTrigger>
-              <MenuPopover>
-                <MenuList>
-                  <MenuItem icon={<Edit20Regular />} onClick={handleEdit}>
-                    Edit…
-                  </MenuItem>
-                  <MenuDivider />
-                  <MenuItem icon={<Delete20Regular />} className={styles.dangerMenuItem} onClick={handleDelete}>
-                    Delete…
-                  </MenuItem>
-                </MenuList>
-              </MenuPopover>
-            </Menu>
-          </span>
-        )}
-      </span>
-      <span className={styles.rowMeta}>{description}</span>
-    </div>
-  );
-});
-
-/**
- * Inline create row — rendered only while adding (the section header's "+"
- * toggles it). Previews the id slug live (names are slugified at creation and
- * fixed thereafter, like agent DM addresses); an exact match repurposes Enter
- * to OPEN the existing channel instead of erroring; create failures surface
- * inline and keep the row open.
- */
-function NewChannelRow({
-  existingIds,
-  onDone,
-  onOpenExisting,
-}: {
-  existingIds: readonly string[];
-  onDone: () => void;
-  onOpenExisting: (channelId: string) => void;
-}): React.JSX.Element {
-  const styles = useStyles();
-  const [name, setName] = useState('');
-  const [error, setError] = useState<string | null>(null);
-
-  const trimmed = name.trim();
-  const slug = trimmed ? channelIdFromName(trimmed) : null;
-  const exists = slug !== null && existingIds.includes(slug);
-  const reserved = slug !== null && !exists && RESERVED_CHANNEL_IDS.includes(slug);
-
-  const handleChange = useCallback((e: ChangeEvent<HTMLInputElement>) => {
-    setName(e.target.value);
-    setError(null);
-  }, []);
-
-  const create = useCallback(() => {
-    if (!slug) {
-      return;
-    }
-    if (exists) {
-      onOpenExisting(slug);
-      onDone();
-      return;
-    }
-    if (reserved) {
-      return;
-    }
-    residentApi
-      .createChannel(trimmed)
-      .then((def) => {
-        $residentsView.set({ selectedAgentId: null, selectedChannel: def.id });
-        onDone();
-      })
-      .catch((err: Error) => setError(err.message));
-  }, [slug, exists, reserved, trimmed, onOpenExisting, onDone]);
-
-  const handleKeyDown = useCallback(
-    (e: KeyboardEvent<HTMLInputElement>) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        create();
-      } else if (e.key === 'Escape') {
-        e.preventDefault();
-        onDone();
-      }
-    },
-    [create, onDone]
-  );
-
-  const hint = exists
-    ? `#${slug} already exists — press Enter to open it`
-    : reserved
-      ? `#${slug} is reserved`
-      : slug
-        ? `Will be created as #${slug}`
-        : null;
-
-  return (
-    <div className={styles.newChannelWrap}>
-      <div className={styles.newChannelRow}>
-        <Input
-          className={styles.composerInput}
-          value={name}
-          placeholder="New channel…"
-          autoFocus
-          aria-label="New channel name"
-          onChange={handleChange}
-          onKeyDown={handleKeyDown}
-        />
-        <IconButton
-          aria-label={exists ? `Open #${slug}` : 'Create channel'}
-          size="sm"
-          icon={<Add20Regular />}
-          onClick={create}
-        />
-      </div>
-      {error ? (
-        <Caption1 className={styles.newChannelError}>{error}</Caption1>
-      ) : (
-        hint && <Caption1 className={styles.newChannelHint}>{hint}</Caption1>
-      )}
-    </div>
-  );
-}
-
 /** A DM thread row: the peer's identity (avatar + presence for your own
- *  threads, a stacked pair for agent↔agent), last-message snippet, time. */
+ *  threads, a stacked pair for agent↔agent), last-message snippet, time.
+ *  This is the Conversations tab's browse row — sidebar DMs are nav rows
+ *  (`DmNavRow`). */
 const DmRow = memo(function DmRow({
   channelId,
   title,
@@ -1675,7 +1547,6 @@ const DmRow = memo(function DmRow({
   presence,
   snippet,
   lastAt,
-  selected,
   unread,
   onSelect,
 }: {
@@ -1685,9 +1556,8 @@ const DmRow = memo(function DmRow({
   avatars: ReadonlyArray<{ name: string; colorId: string }>;
   /** Live presence for the single-peer case. */
   presence?: PresenceBadgeStatus;
-  snippet: string | null;
-  lastAt: number | null;
-  selected: boolean;
+  snippet: string;
+  lastAt: number;
   unread: number;
   onSelect: (id: string) => void;
 }): React.JSX.Element {
@@ -1695,7 +1565,7 @@ const DmRow = memo(function DmRow({
   const handleClick = useCallback(() => onSelect(channelId), [onSelect, channelId]);
   const single = avatars.length === 1 ? avatars[0] : null;
   return (
-    <button type="button" className={mergeClasses(styles.row, selected && styles.rowSelected)} onClick={handleClick}>
+    <button type="button" className={styles.row} onClick={handleClick}>
       <span className={styles.rowTop}>
         {single ? (
           <AgentAvatar name={single.name} colorId={single.colorId} size={32} {...(presence ? { presence } : {})} />
@@ -1710,105 +1580,25 @@ const DmRow = memo(function DmRow({
           <span className={mergeClasses(styles.rowTitle, unread > 0 && styles.rowTitleUnread)}>
             <span className={styles.rowTitleText}>{title}</span>
           </span>
-          {snippet && <span className={styles.rowMeta}>{snippet}</span>}
+          <span className={styles.rowMeta}>{snippet}</span>
         </span>
-        {lastAt !== null && <span className={styles.rowTime}>{formatTimestamp(lastAt)}</span>}
-        {!selected && unread > 0 && <CounterBadge count={unread} size="small" color="brand" />}
+        <span className={styles.rowTime}>{formatTimestamp(lastAt)}</span>
+        {unread > 0 && <CounterBadge count={unread} size="small" color="brand" />}
       </span>
     </button>
   );
 });
 
-/** Edit a channel's description — the id slug is fixed at creation (it is
- *  the address agents post to), so the dialog shows it read-only. */
-function EditChannelDialog({
-  channel,
-  onClose,
-}: {
-  channel: ResidentChannelDef | null;
-  onClose: () => void;
-}): React.JSX.Element {
-  const styles = useStyles();
-  const [description, setDescription] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (channel) {
-      setDescription(channel.description ?? '');
-      setError(null);
-    }
-  }, [channel]);
-
-  const handleChange = useCallback((e: ChangeEvent<HTMLInputElement>) => setDescription(e.target.value), []);
-
-  const save = useCallback(() => {
-    if (!channel) {
-      return;
-    }
-    setSaving(true);
-    setError(null);
-    residentApi
-      .updateChannel(channel.id, { description })
-      .then(onClose)
-      .catch((err: Error) => setError(err.message))
-      .finally(() => setSaving(false));
-  }, [channel, description, onClose]);
-
-  const handleKeyDown = useCallback(
-    (e: KeyboardEvent<HTMLInputElement>) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        save();
-      }
-    },
-    [save]
-  );
-
-  return (
-    <AnimatedDialog open={channel !== null} onClose={onClose}>
-      <DialogContent>
-        <DialogHeader>Edit #{channel?.id}</DialogHeader>
-        <DialogBody>
-          <div className={styles.dialogForm}>
-            {error && (
-              <MessageBar intent="error">
-                <MessageBarBody>{error}</MessageBarBody>
-              </MessageBar>
-            )}
-            <Field label="Description" hint="One line — what this channel is for. Shown in the list.">
-              <Input
-                value={description}
-                placeholder="Deploys, incidents, and release chatter"
-                autoFocus
-                onChange={handleChange}
-                onKeyDown={handleKeyDown}
-              />
-            </Field>
-            <div className={styles.dialogButtons}>
-              <Button variant="primary" onClick={save} isDisabled={saving}>
-                {saving ? 'Saving…' : 'Save'}
-              </Button>
-              <Button variant="ghost" onClick={onClose} isDisabled={saving}>
-                Cancel
-              </Button>
-            </div>
-          </div>
-        </DialogBody>
-      </DialogContent>
-    </AnimatedDialog>
-  );
-}
-
 // ---------------------------------------------------------------------------
-// Roster rows
+// Roster: the agent directory (the Slack "People" shape). Agents are not
+// sidebar rows — one nav row opens this browse surface, where the richer
+// metadata (role, scope, last wake) and row actions belong.
 // ---------------------------------------------------------------------------
 
 const AgentRow = memo(function AgentRow({
   agent,
   runtime,
   projectLabel,
-  selected,
   onSelect,
   onMessage,
   onWake,
@@ -1818,7 +1608,6 @@ const AgentRow = memo(function AgentRow({
   agent: ResidentAgent;
   runtime: ResidentAgentRuntime | undefined;
   projectLabel: string | null;
-  selected: boolean;
   onSelect: (id: string) => void;
   onMessage: (id: string) => void;
   onWake: (id: string) => void;
@@ -1852,13 +1641,7 @@ const AgentRow = memo(function AgentRow({
   return (
     // div+role rather than <button>: the row hosts the "…" menu button, and
     // nesting buttons inside a button is invalid markup.
-    <div
-      role="button"
-      tabIndex={0}
-      className={mergeClasses(styles.row, selected && styles.rowSelected)}
-      onClick={handleClick}
-      onKeyDown={handleRowKeyDown}
-    >
+    <div role="button" tabIndex={0} className={styles.row} onClick={handleClick} onKeyDown={handleRowKeyDown}>
       <span className={styles.rowTop}>
         <AgentAvatar name={agent.name} colorId={agent.id} size={32} presence={presenceStatus(state, agent.enabled)} />
         <span className={styles.rowLines}>
@@ -1903,6 +1686,89 @@ const AgentRow = memo(function AgentRow({
     </div>
   );
 });
+
+function AgentRoster({
+  roster,
+  projects,
+  onOpenAgent,
+  onMessage,
+  onWake,
+  onToggleEnabled,
+  onRequestDelete,
+  onNewAgent,
+  onOpenHandbook,
+}: {
+  roster: ResidentAgent[];
+  projects: Project[];
+  onOpenAgent: (id: string) => void;
+  onMessage: (id: string) => void;
+  onWake: (id: string) => void;
+  onToggleEnabled: (id: string, enabled: boolean) => void;
+  onRequestDelete: (id: string) => void;
+  onNewAgent: () => void;
+  onOpenHandbook: () => void;
+}): React.JSX.Element {
+  const styles = useStyles();
+  const isDesktop = useIsDesktop();
+  const statuses = useStore($residentStatus);
+  return (
+    <>
+      {/* Mobile titles via the TopAppBar; the band then only carries the
+          action. */}
+      <div className={styles.bandHeader}>
+        <div className={styles.bandTitleRow}>
+          {isDesktop && <span className={styles.bandTitle}>Agents</span>}
+          <div className={styles.bandSpacer} />
+          <Button size="sm" leftIcon={<Add20Regular />} onClick={onNewAgent}>
+            New agent
+          </Button>
+        </div>
+      </div>
+      {roster.length === 0 ? (
+        <EmptyState
+          title="No agents yet"
+          description="Resident agents are named, persistent teammates: they wake on messages and mentions, work in their own sandbox, talk in #team, and distill each day into durable memory."
+          action={
+            <Button size="sm" leftIcon={<Add20Regular />} onClick={onNewAgent}>
+              New agent
+            </Button>
+          }
+        />
+      ) : (
+        <div className={styles.list}>
+          {/* Team-level configuration lives with the team directory. */}
+          <button type="button" className={styles.row} onClick={onOpenHandbook}>
+            <span className={styles.rowTop}>
+              <BookOpen20Regular />
+              <span className={styles.rowTitle}>
+                <span className={styles.rowTitleText}>Handbook</span>
+              </span>
+            </span>
+            <span className={styles.rowMeta}>Shared team rules — every agent receives them on wake</span>
+          </button>
+          {roster.map((agent) => (
+            <AgentRow
+              key={agent.id}
+              agent={agent}
+              runtime={statuses[agent.id]}
+              projectLabel={
+                (agent.projectIds ?? [])
+                  .map((id) => projects.find((p) => p.id === id)?.label)
+                  .filter(Boolean)
+                  .join(', ') || null
+              }
+              onSelect={onOpenAgent}
+              onMessage={onMessage}
+              onWake={onWake}
+              onToggleEnabled={onToggleEnabled}
+              onRequestDelete={onRequestDelete}
+            />
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Assignment fields (shared by settings + create form)
@@ -1992,12 +1858,15 @@ function AgentSettings({
   const savedProfileName = agent.profileName ?? storeData.defaultProfileName ?? 'devbox';
   const savedMorningHour = agent.morningHour;
 
+  const savedSuperuser = agent.superuser ?? false;
+
   const [name, setName] = useState(agent.name);
   const [role, setRole] = useState(agent.role);
   const [persona, setPersona] = useState(agent.personaText);
   const [projectIds, setProjectIds] = useState<string[]>(savedProjectIds);
   const [profileName, setProfileName] = useState(savedProfileName);
   const [morningHour, setMorningHour] = useState<number | null>(savedMorningHour);
+  const [superuser, setSuperuser] = useState(savedSuperuser);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -2008,6 +1877,7 @@ function AgentSettings({
     setProjectIds(agent.projectIds ?? []);
     setProfileName(agent.profileName ?? persistedStoreApi.$atom.get().defaultProfileName ?? 'devbox');
     setMorningHour(agent.morningHour);
+    setSuperuser(agent.superuser ?? false);
     setError(null);
     // Only re-seed the form when a DIFFERENT agent is opened — not when a
     // background store update lands mid-edit.
@@ -2021,13 +1891,18 @@ function AgentSettings({
     persona !== agent.personaText ||
     scopeDirty ||
     profileName !== savedProfileName ||
-    morningHour !== savedMorningHour;
+    morningHour !== savedMorningHour ||
+    superuser !== savedSuperuser;
 
   const handleName = useCallback((e: ChangeEvent<HTMLInputElement>) => setName(e.target.value), []);
   const handleRole = useCallback((e: ChangeEvent<HTMLInputElement>) => setRole(e.target.value), []);
   const handlePersona = useCallback((e: ChangeEvent<HTMLTextAreaElement>) => setPersona(e.target.value), []);
   const handleMorningHour = useCallback((e: ChangeEvent<HTMLSelectElement>) => {
     setMorningHour(e.currentTarget.value === 'off' ? null : Number(e.currentTarget.value));
+  }, []);
+
+  const handleSuperuser = useCallback((_: unknown, data: { checked: boolean }) => {
+    setSuperuser(data.checked);
   }, []);
 
   const save = useCallback(() => {
@@ -2043,6 +1918,7 @@ function AgentSettings({
         ...(scopeDirty ? { projectIds } : {}),
         ...(profileName !== savedProfileName ? { profileName } : {}),
         ...(morningHour !== savedMorningHour ? { morningHour } : {}),
+        ...(superuser !== savedSuperuser ? { superuser } : {}),
       })
       .catch((err: Error) => setError(err.message))
       .finally(() => setSaving(false));
@@ -2057,6 +1933,8 @@ function AgentSettings({
     savedProfileName,
     morningHour,
     savedMorningHour,
+    superuser,
+    savedSuperuser,
   ]);
 
   return (
@@ -2096,6 +1974,14 @@ function AgentSettings({
               </option>
             ))}
           </Select>
+        </Field>
+        <Field
+          label={infoLabel(
+            'Workspace superuser',
+            'Grants tools over your whole deck: see every column (list_workspace), instruct and approve other agents (column_send / column_decide), open and close columns, and drive any column’s apps. The tools work while the app is open; when it’s closed they return an error the agent understands. The global voice hotkey targets the first enabled superuser’s DM.'
+          )}
+        >
+          <Switch label="Can observe and drive the workspace" checked={superuser} onChange={handleSuperuser} />
         </Field>
 
         <SaveBar onSave={save} dirty={dirty} saving={saving} error={error} />
@@ -2212,30 +2098,119 @@ const MemoryRow = memo(function MemoryRow({
 });
 
 // ---------------------------------------------------------------------------
-// Agent detail: header + Session | Settings tabs
+// Conversations tab (the agent's DM threads)
+// ---------------------------------------------------------------------------
+
+/**
+ * Every DM thread this agent is in — with you or with other agents — newest
+ * first. The sidebar's DM section only lists YOUR threads (the Slack
+ * contract); an agent's page is where its agent↔agent conversations are
+ * browsed. Opening one navigates to the thread feed (away from the agent),
+ * like the header's Message button.
+ */
+function AgentConversations({
+  agent,
+  roster,
+  onOpenChannel,
+}: {
+  agent: ResidentAgent;
+  roster: ResidentAgent[];
+  onOpenChannel: (channelId: string) => void;
+}): React.JSX.Element {
+  const styles = useStyles();
+  const storeData = useStore(persistedStoreApi.$atom);
+  const statuses = useStore($residentStatus);
+
+  // Latest message per DM thread containing this agent — the same reduction
+  // the sidebar runs, scoped to one participant.
+  const threads = useMemo(() => {
+    const latest = new Map<string, ResidentChannelMessage>();
+    for (const m of storeData.residentChannels ?? []) {
+      if (dmParticipants(m.channel)?.includes(agent.id)) {
+        latest.set(m.channel, m);
+      }
+    }
+    return [...latest.entries()].map(([id, last]) => ({ id, last })).sort((a, b) => b.last.at - a.last.at);
+  }, [storeData.residentChannels, agent.id]);
+
+  const unreadIn = useMemo(() => {
+    const seen = storeData.residentChannelSeen ?? {};
+    const counts: Record<string, number> = {};
+    for (const m of storeData.residentChannels ?? []) {
+      if (m.id > (seen[m.channel] ?? 0)) {
+        counts[m.channel] = (counts[m.channel] ?? 0) + 1;
+      }
+    }
+    return counts;
+  }, [storeData.residentChannels, storeData.residentChannelSeen]);
+
+  if (threads.length === 0) {
+    return (
+      <EmptyState
+        title="No conversations yet"
+        description={`DMs ${agent.name} has — with you or with other agents — appear here.`}
+      />
+    );
+  }
+
+  return (
+    <div className={styles.list}>
+      {threads.map((t) => {
+        // Rows read from this agent's perspective: the OTHER party names the
+        // thread ("You" for your own thread, the peer agent otherwise).
+        const pair = dmParticipants(t.id);
+        const other = pair?.find((p) => p !== agent.id) ?? USER_PARTICIPANT;
+        const peer = other === USER_PARTICIPANT ? null : roster.find((a) => a.id === other);
+        const presence =
+          other === USER_PARTICIPANT ? undefined : presenceStatus(statuses[other]?.state, peer?.enabled ?? true);
+        const otherName = other === USER_PARTICIPANT ? 'You' : (peer?.name ?? other);
+        return (
+          <DmRow
+            key={t.id}
+            channelId={t.id}
+            title={otherName}
+            avatars={[{ name: otherName, colorId: other }]}
+            {...(presence ? { presence } : {})}
+            snippet={`${t.last.from === USER_PARTICIPANT ? 'You' : (t.last.fromName ?? t.last.from)}: ${t.last.text}`}
+            lastAt={t.last.at}
+            unread={unreadIn[t.id] ?? 0}
+            onSelect={onOpenChannel}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Agent detail: header + Session | Conversations | Memory | Settings tabs
 // ---------------------------------------------------------------------------
 
 function AgentDetail({
   agent,
+  roster,
   projects,
   sandboxContext,
   onMessage,
+  onOpenChannel,
   onDeleted,
 }: {
   agent: ResidentAgent;
+  roster: ResidentAgent[];
   projects: Project[];
   sandboxContext: SandboxContext;
   onMessage: (agentId: string) => void;
+  onOpenChannel: (channelId: string) => void;
   onDeleted: () => void;
 }): React.JSX.Element {
   const styles = useStyles();
   const statuses = useStore($residentStatus);
   const runtime = statuses[agent.id];
-  const [tab, setTab] = useState<'session' | 'memory' | 'settings'>('session');
+  const [tab, setTab] = useState<'session' | 'conversations' | 'memory' | 'settings'>('session');
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const handleTabSelect = useCallback((_: unknown, data: { value: unknown }) => {
-    setTab(data.value as 'session' | 'memory' | 'settings');
+    setTab(data.value as 'session' | 'conversations' | 'memory' | 'settings');
   }, []);
 
   const handleMessage = useCallback(() => onMessage(agent.id), [onMessage, agent.id]);
@@ -2301,7 +2276,10 @@ function AgentDetail({
           {runtime?.lastReason ? ` · last: ${runtime.lastReason}` : ''}
         </Caption1>
         <TabList size="small" selectedValue={tab} onTabSelect={handleTabSelect}>
-          <Tab value="session">Session</Tab>
+          {/* The raw session is the debugging view — DMs are the front door
+              for talking to an agent (the Message button up top). */}
+          <Tab value="session">Session (debug)</Tab>
+          <Tab value="conversations">Conversations</Tab>
           <Tab value="memory">Memory</Tab>
           <Tab value="settings">Settings</Tab>
         </TabList>
@@ -2314,6 +2292,8 @@ function AgentDetail({
             <span>{agent.name} is disabled. Enable it to open its session.</span>
           </div>
         )
+      ) : tab === 'conversations' ? (
+        <AgentConversations agent={agent} roster={roster} onOpenChannel={onOpenChannel} />
       ) : tab === 'memory' ? (
         <AgentMemory agent={agent} />
       ) : (
@@ -2562,8 +2542,9 @@ export function ResidentsTab(): React.JSX.Element {
   const storeData = useStore(persistedStoreApi.$atom);
   const statuses = useStore($residentStatus);
   const view = useStore($residentsView);
-  const seenByChannel = useMemo(() => storeData.residentChannelSeen ?? {}, [storeData.residentChannelSeen]);
-  const [creating, setCreating] = useState(false);
+  // The new-agent form lives in the view atom so the app sidebar can paint
+  // the Agents row while it's open.
+  const creating = view.showNewAgent === true;
 
   const roster: ResidentAgent[] = useMemo(() => storeData.residentAgents ?? [], [storeData.residentAgents]);
   const selected = roster.find((a) => a.id === view.selectedAgentId) ?? null;
@@ -2587,21 +2568,6 @@ export function ResidentsTab(): React.JSX.Element {
     void syncResidentStatus();
   }, []);
 
-  // Per-channel unread counts (messages past that channel's seen cursor);
-  // the Activity row shows the cross-channel total.
-  const unreadByChannel = useMemo(() => {
-    const counts: Record<string, number> = {};
-    for (const m of storeData.residentChannels ?? []) {
-      if (m.id > (seenByChannel[m.channel] ?? 0)) {
-        counts[m.channel] = (counts[m.channel] ?? 0) + 1;
-      }
-    }
-    return counts;
-  }, [storeData.residentChannels, seenByChannel]);
-  const activityUnread = useMemo(
-    () => Object.values(unreadByChannel).reduce((sum, n) => sum + n, 0),
-    [unreadByChannel]
-  );
   const channelDefs = useMemo(() => storeData.residentChannelDefs ?? [], [storeData.residentChannelDefs]);
   const channelIds = useMemo(() => [TEAM_CHANNEL, ...channelDefs.map((c) => c.id)], [channelDefs]);
   // DM threads are first-class rows, derived from the log (newest first),
@@ -2652,47 +2618,26 @@ export function ResidentsTab(): React.JSX.Element {
   // observed (the composer would misroute — post() targets one participant).
   const selectedDmPair = selectedChannel ? dmParticipants(selectedChannel) : null;
   const selectedIsAgentDm = selectedDmPair !== null && !selectedDmPair.includes(USER_PARTICIPANT);
-  const handbookOpen = view.showHandbook === true && !creating;
-
-  // "Activity selected" and "nothing selected" share the same view state
-  // (both ids null); on mobile — where the list is the landing view — an
-  // explicit flag distinguishes tapping the Activity row from being home.
-  const [mobileActivityOpen, setMobileActivityOpen] = useState(false);
-  // On mobile the landing list must NOT paint Activity as selected (nor
-  // swallow its unread badge) just because nothing else is open.
-  const noSelection = !selected && !selectedChannel && !creating && !handbookOpen;
-  const activityOpen = isDesktop ? noSelection : noSelection && mobileActivityOpen;
-
+  // Flags are mutually exclusive: every navigation replaces the whole atom.
+  const handbookOpen = view.showHandbook === true;
+  const rosterOpen = view.showRoster === true;
+  const routinesOpen = view.showRoutines === true;
   const handleSelect = useCallback((id: string) => {
-    setCreating(false);
-    setMobileActivityOpen(false);
     $residentsView.set({ selectedAgentId: id, selectedChannel: null });
   }, []);
 
   const handleSelectChannel = useCallback((channelId: string) => {
-    setCreating(false);
-    setMobileActivityOpen(false);
-    $residentsView.set({ selectedAgentId: null, selectedChannel: channelId });
+    goToResidentChannel(channelId);
   }, []);
 
   // Start (or reopen) your DM thread with an agent — the thread is a valid
   // destination even before its first message.
   const handleMessageAgent = useCallback((agentId: string) => {
-    setCreating(false);
-    setMobileActivityOpen(false);
-    $residentsView.set({ selectedAgentId: null, selectedChannel: dmChannelId(USER_PARTICIPANT, agentId) });
-  }, []);
-
-  const handleSelectActivity = useCallback(() => {
-    setCreating(false);
-    setMobileActivityOpen(true);
-    $residentsView.set({ selectedAgentId: null, selectedChannel: null });
+    goToResidentChannel(dmChannelId(USER_PARTICIPANT, agentId));
   }, []);
 
   const handleSelectHandbook = useCallback(() => {
-    setCreating(false);
-    setMobileActivityOpen(false);
-    $residentsView.set({ selectedAgentId: null, selectedChannel: null, showHandbook: true });
+    goToHandbook();
   }, []);
 
   // Row-menu agent actions (the same operations the detail header offers,
@@ -2717,66 +2662,31 @@ export function ResidentsTab(): React.JSX.Element {
     setPendingDeleteAgent(null);
     void residentApi.delete(agent.id);
     if ($residentsView.get().selectedAgentId === agent.id) {
-      $residentsView.set({ selectedAgentId: null, selectedChannel: null });
+      // Deleting the open agent lands back on the roster it came from.
+      $residentsView.set({ selectedAgentId: null, selectedChannel: null, showRoster: true });
     }
   }, [pendingDeleteAgent]);
 
-  // Channel deletion also purges the channel's message history — confirm.
-  const [pendingDeleteChannel, setPendingDeleteChannel] = useState<string | null>(null);
-  const handleRequestDeleteChannel = useCallback((channelId: string) => setPendingDeleteChannel(channelId), []);
-  const closeDeleteChannel = useCallback(() => setPendingDeleteChannel(null), []);
-  const confirmDeleteChannel = useCallback(() => {
-    const channelId = pendingDeleteChannel;
-    if (!channelId) {
-      return;
-    }
-    void residentApi.deleteChannel(channelId);
-    if ($residentsView.get().selectedChannel === channelId) {
-      $residentsView.set({ selectedAgentId: null, selectedChannel: null });
-    }
-  }, [pendingDeleteChannel]);
-
-  const [addingChannel, setAddingChannel] = useState(false);
-  const startAddChannel = useCallback(() => setAddingChannel(true), []);
-  const stopAddChannel = useCallback(() => setAddingChannel(false), []);
-
-  const [editingChannel, setEditingChannel] = useState<ResidentChannelDef | null>(null);
-  const closeEditChannel = useCallback(() => setEditingChannel(null), []);
-  const handleRequestEditChannel = useCallback(
-    (channelId: string) => {
-      setEditingChannel((storeData.residentChannelDefs ?? []).find((c) => c.id === channelId) ?? null);
-    },
-    [storeData.residentChannelDefs]
-  );
-
-  const startCreate = useCallback(() => setCreating(true), []);
-  const cancelCreate = useCallback(() => setCreating(false), []);
+  const startCreate = useCallback(() => {
+    goToNewAgent();
+  }, []);
+  const cancelCreate = useCallback(() => {
+    // Cancel lands back on the roster the form opened from.
+    goToRoster();
+  }, []);
   const handleCreated = useCallback((id: string) => {
-    setCreating(false);
     $residentsView.set({ selectedAgentId: id, selectedChannel: null });
   }, []);
   const handleDeleted = useCallback(() => {
-    $residentsView.set({ selectedAgentId: null, selectedChannel: null });
+    // Deleting from the detail header lands back on the roster.
+    goToRoster();
   }, []);
-  const handleBack = useCallback(() => {
-    setCreating(false);
-    setMobileActivityOpen(false);
-    $residentsView.set({ selectedAgentId: null, selectedChannel: null });
+  // Mobile back exists only for hierarchy-internal levels: an open agent
+  // or the create form goes up to the roster. Top-level surfaces have no
+  // back — the bottom bar's Home tab is always the way out.
+  const handleBackToRoster = useCallback(() => {
+    goToRoster();
   }, []);
-
-  // DM rows: live threads, plus the just-opened empty thread (start-a-DM)
-  // so the selection has a row while the first message is being written.
-  const dmListRows = useMemo((): { id: string; at: number | null; last: ResidentChannelMessage | null }[] => {
-    const rows: { id: string; at: number | null; last: ResidentChannelMessage | null }[] = dmThreads.map((t) => ({
-      id: t.id,
-      at: t.at,
-      last: t.last,
-    }));
-    if (selectedChannel && dmParticipants(selectedChannel) && !dmThreads.some((t) => t.id === selectedChannel)) {
-      rows.unshift({ id: selectedChannel, at: null, last: null });
-    }
-    return rows;
-  }, [dmThreads, selectedChannel]);
 
   /** Row identity for a DM thread: the agent participants' avatars, and the
    *  peer's live presence when it's a user↔agent thread. */
@@ -2795,128 +2705,6 @@ export function ResidentsTab(): React.JSX.Element {
       return { avatars };
     },
     [roster, statuses]
-  );
-
-  const listPane = (
-    <div className={mergeClasses(styles.listPane, isGlass && styles.listPaneGlass)}>
-      {/* Creation lives on the section headers below, each "+" scoped by its
-          label — the page header stays clean. */}
-      <PageHeader title="Agents" />
-      <div className={styles.list}>
-        <button
-          type="button"
-          className={mergeClasses(styles.row, activityOpen && styles.rowSelected)}
-          onClick={handleSelectActivity}
-        >
-          <span className={styles.rowTitle}>
-            <PeopleTeamRegular />
-            Activity
-            {!activityOpen && activityUnread > 0 && <CounterBadge count={activityUnread} size="small" color="brand" />}
-          </span>
-          <span className={styles.rowMeta}>Every channel and agent conversation, in one feed</span>
-        </button>
-        <button
-          type="button"
-          className={mergeClasses(styles.row, handbookOpen && styles.rowSelected)}
-          onClick={handleSelectHandbook}
-        >
-          <span className={styles.rowTitle}>
-            <BookOpen20Regular />
-            Handbook
-          </span>
-          <span className={styles.rowMeta}>Shared team rules — every agent receives them on wake</span>
-        </button>
-        <div className={styles.sectionHeader}>
-          <SectionLabel className={styles.sectionHeaderLabel}>Channels</SectionLabel>
-          <IconButton aria-label="New channel" icon={<Add20Regular />} size="sm" onClick={startAddChannel} />
-        </div>
-        {channelIds.map((channelId) => {
-          const def = channelDefs.find((c) => c.id === channelId);
-          const meta =
-            def?.description ??
-            (channelId === TEAM_CHANNEL
-              ? 'All-hands — everyone reads it'
-              : def?.members
-                ? `${def.members.length} member${def.members.length === 1 ? '' : 's'}`
-                : 'Open to all agents');
-          return (
-            <ChannelRow
-              key={channelId}
-              channelId={channelId}
-              description={meta}
-              selected={selectedChannel === channelId}
-              manageable={channelId !== TEAM_CHANNEL}
-              unread={unreadByChannel[channelId] ?? 0}
-              onSelect={handleSelectChannel}
-              onRequestEdit={handleRequestEditChannel}
-              onRequestDelete={handleRequestDeleteChannel}
-            />
-          );
-        })}
-        {addingChannel && (
-          <NewChannelRow existingIds={channelIds} onDone={stopAddChannel} onOpenExisting={handleSelectChannel} />
-        )}
-        {dmListRows.length > 0 && (
-          <div className={styles.sectionHeader}>
-            <SectionLabel className={styles.sectionHeaderLabel}>Direct messages</SectionLabel>
-          </div>
-        )}
-        {dmListRows.map((thread) => {
-          const identity = dmRowIdentity(thread.id);
-          const snippet = thread.last
-            ? `${thread.last.from === USER_PARTICIPANT ? 'You' : (thread.last.fromName ?? thread.last.from)}: ${thread.last.text}`
-            : null;
-          return (
-            <DmRow
-              key={thread.id}
-              channelId={thread.id}
-              title={dmTitle(thread.id)}
-              avatars={identity.avatars}
-              {...(identity.presence ? { presence: identity.presence } : {})}
-              snippet={snippet}
-              lastAt={thread.at}
-              selected={selectedChannel === thread.id}
-              unread={unreadByChannel[thread.id] ?? 0}
-              onSelect={handleSelectChannel}
-            />
-          );
-        })}
-        <div className={styles.sectionHeader}>
-          <SectionLabel className={styles.sectionHeaderLabel}>Agents</SectionLabel>
-          <IconButton aria-label="New agent" icon={<Add20Regular />} size="sm" onClick={startCreate} />
-        </div>
-        {roster.map((agent) => (
-          <AgentRow
-            key={agent.id}
-            agent={agent}
-            runtime={statuses[agent.id]}
-            projectLabel={
-              (agent.projectIds ?? [])
-                .map((id) => projects.find((p) => p.id === id)?.label)
-                .filter(Boolean)
-                .join(', ') || null
-            }
-            selected={selected?.id === agent.id}
-            onSelect={handleSelect}
-            onMessage={handleMessageAgent}
-            onWake={handleWakeAgent}
-            onToggleEnabled={handleToggleAgent}
-            onRequestDelete={handleRequestDeleteAgent}
-          />
-        ))}
-        {roster.length === 0 && !isDesktop && (
-          <EmptyState
-            title="No agents yet"
-            description="Resident agents are named, persistent teammates that wake on messages and remember across days."
-            action={
-              <Button size="sm" leftIcon={<Add20Regular />} onClick={startCreate}>
-                New agent
-              </Button>
-            }
-          />
-        )}
-      </div>
-    </div>
   );
 
   // Desktop title band for a channel/DM feed — identity + context up top,
@@ -2978,13 +2766,30 @@ export function ResidentsTab(): React.JSX.Element {
   ) : selected ? (
     <AgentDetail
       agent={selected}
+      roster={roster}
       projects={projects}
       sandboxContext={sandboxContext}
       onMessage={handleMessageAgent}
+      onOpenChannel={handleSelectChannel}
       onDeleted={handleDeleted}
     />
   ) : handbookOpen ? (
     <HandbookPane roster={roster} />
+  ) : routinesOpen ? (
+    // The Routines surface owns its own master-detail (list + detail).
+    <ScheduledTasks />
+  ) : rosterOpen ? (
+    <AgentRoster
+      roster={roster}
+      projects={projects}
+      onOpenAgent={handleSelect}
+      onMessage={handleMessageAgent}
+      onWake={handleWakeAgent}
+      onToggleEnabled={handleToggleAgent}
+      onRequestDelete={handleRequestDeleteAgent}
+      onNewAgent={startCreate}
+      onOpenHandbook={handleSelectHandbook}
+    />
   ) : roster.length === 0 && isDesktop ? (
     <EmptyState
       title="No agents yet"
@@ -3002,38 +2807,38 @@ export function ResidentsTab(): React.JSX.Element {
       <ActivityFeed roster={roster} channel={selectedChannel} readOnly={selectedIsAgentDm} />
     </>
   ) : (
-    <ActivityFeed roster={roster} />
+    <ActivityFeed roster={roster} onOpenChannel={handleSelectChannel} />
   );
 
-  const channelDialogs = (
-    <>
-      <ConfirmDialog
-        open={pendingDeleteChannel !== null}
-        onClose={closeDeleteChannel}
-        onConfirm={confirmDeleteChannel}
-        title={`Delete #${pendingDeleteChannel ?? ''}?`}
-        description="The channel and its message history are removed. This action cannot be undone."
-        confirmLabel="Delete"
-        destructive
-      />
-      <ConfirmDialog
-        open={pendingDeleteAgent !== null}
-        onClose={closeDeleteAgent}
-        onConfirm={confirmDeleteAgent}
-        title={`Delete ${pendingDeleteAgent?.name ?? ''}?`}
-        description="The agent, its durable memories, and its DM threads are removed. Its workspace folder stays on disk."
-        confirmLabel="Delete"
-        destructive
-      />
-      <EditChannelDialog channel={editingChannel} onClose={closeEditChannel} />
-    </>
+  // Channel dialogs live inside ChannelsSection now — only the agent
+  // delete confirm remains at shell level (roster rows + detail share it).
+  const agentDialogs = (
+    <ConfirmDialog
+      open={pendingDeleteAgent !== null}
+      onClose={closeDeleteAgent}
+      onConfirm={confirmDeleteAgent}
+      title={`Delete ${pendingDeleteAgent?.name ?? ''}?`}
+      description="The agent, its durable memories, and its DM threads are removed. Its workspace folder stays on disk."
+      confirmLabel="Delete"
+      destructive
+    />
   );
 
-  // Mobile: the list is the landing view; ANY detail — agent, create form,
-  // channel, DM thread, or the Activity feed — replaces it with a back bar.
-  const mobileDetailOpen =
-    !isDesktop && (selected !== null || creating || selectedChannel !== null || mobileActivityOpen);
-  if (mobileDetailOpen) {
+  // Mobile: the surface always fills the screen — the bottom bar's Home
+  // tab is the navigator. A TopAppBar titles the surface; back exists only
+  // for hierarchy-internal levels (agent detail / create form → roster).
+  // Routines titles itself at every level (band header + internal bars).
+  if (!isDesktop) {
+    if (routinesOpen) {
+      return (
+        <div className={mergeClasses(styles.root, isGlass && styles.rootGlass)}>
+          <div className={mergeClasses(styles.detailPane, isGlass && styles.detailPaneGlass)}>
+            <ScheduledTasks />
+          </div>
+          {agentDialogs}
+        </div>
+      );
+    }
     const mobileTitle = creating
       ? 'New agent'
       : selected
@@ -3042,25 +2847,27 @@ export function ResidentsTab(): React.JSX.Element {
           ? selectedDmPair
             ? dmTitle(selectedChannel)
             : `#${selectedChannel}`
-          : 'Activity';
+          : rosterOpen
+            ? 'Agents'
+            : handbookOpen
+              ? 'Handbook'
+              : 'Activity';
+    const mobileBack = creating || selected !== null ? handleBackToRoster : undefined;
     return (
       <div className={mergeClasses(styles.root, isGlass && styles.rootGlass)}>
         <div className={mergeClasses(styles.detailPane, isGlass && styles.detailPaneGlass)}>
-          <TopAppBar title={mobileTitle} onBack={handleBack} />
+          <TopAppBar title={mobileTitle} {...(mobileBack ? { onBack: mobileBack } : {})} />
           {detailBody}
         </div>
-        {channelDialogs}
+        {agentDialogs}
       </div>
     );
   }
 
   return (
     <div className={mergeClasses(styles.root, isGlass && styles.rootGlass)}>
-      {listPane}
-      {/* Desktop master-detail: the list stays visible, so the detail titles
-          itself with its band header — no mobile back bar. */}
       <div className={mergeClasses(styles.detailPane, isGlass && styles.detailPaneGlass)}>{detailBody}</div>
-      {channelDialogs}
+      {agentDialogs}
     </div>
   );
 }

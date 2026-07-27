@@ -17,6 +17,7 @@ import { useHotkeys } from 'react-hotkeys-hook';
 import { codeApi } from '@/renderer/features/Code/state';
 import { $quickCaptureOpen } from '@/renderer/features/Inbox/QuickCapture';
 import { goToInbox } from '@/renderer/features/Inbox/state';
+import { goToRoutine } from '@/renderer/features/ScheduledTasks/state';
 import { ticketApi } from '@/renderer/features/Tickets/state';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { CodeTab, LayoutMode } from '@/shared/types';
@@ -131,6 +132,10 @@ export const CommandPalette = memo(() => {
     goToInbox();
   }, []);
 
+  const handleGoToRoutines = useCallback(() => {
+    goToRoutine();
+  }, []);
+
   const addInboxItem = useCallback(() => {
     $quickCaptureOpen.set(true);
   }, []);
@@ -172,6 +177,7 @@ export const CommandPalette = memo(() => {
         navigate,
         activateColumn,
         goToInbox: handleGoToInbox,
+        goToRoutines: handleGoToRoutines,
         addInboxItem,
         createProject,
         newSession: () => {
@@ -190,6 +196,7 @@ export const CommandPalette = memo(() => {
       navigate,
       activateColumn,
       handleGoToInbox,
+      handleGoToRoutines,
       addInboxItem,
       createProject,
     ]

@@ -764,6 +764,7 @@ export class ProjectsRepo {
       row.project_ids,
       row.morning_hour,
       row.enabled,
+      row.superuser,
       row.created_at
     );
     this.bumpChangeSeq();
@@ -1050,12 +1051,12 @@ function prepareStatements(db: DatabaseSync) {
     // Resident agents
     listResidents: db.prepare('SELECT * FROM resident_agents ORDER BY created_at'),
     upsertResident: db.prepare(`
-      INSERT INTO resident_agents (id, name, role, persona_text, profile_name, project_ids, morning_hour, enabled, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO resident_agents (id, name, role, persona_text, profile_name, project_ids, morning_hour, enabled, superuser, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         name = excluded.name, role = excluded.role, persona_text = excluded.persona_text,
         profile_name = excluded.profile_name, project_ids = excluded.project_ids,
-        morning_hour = excluded.morning_hour, enabled = excluded.enabled
+        morning_hour = excluded.morning_hour, enabled = excluded.enabled, superuser = excluded.superuser
     `),
     deleteResident: db.prepare('DELETE FROM resident_agents WHERE id = ?'),
 

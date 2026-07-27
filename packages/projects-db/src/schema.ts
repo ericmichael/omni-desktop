@@ -481,4 +481,13 @@ CREATE TABLE team_handbook (
 );
 `,
   },
+  {
+    version: 18,
+    sql: `
+-- Workspace-superuser residents: a flagged agent's watcher declares the
+-- workspace/column client tools (list_workspace, column_send, app_* …),
+-- fulfilled by the launcher renderer. 0|1 flag, default off.
+ALTER TABLE resident_agents ADD COLUMN superuser INTEGER NOT NULL DEFAULT 0;
+`,
+  },
 ];

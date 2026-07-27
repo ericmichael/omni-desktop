@@ -685,4 +685,11 @@ CREATE TRIGGER team_handbook_notify AFTER INSERT OR UPDATE OR DELETE ON team_han
   FOR EACH ROW EXECUTE FUNCTION omni_notify_change();
 `,
   },
+  {
+    version: 18,
+    sql: `
+-- Workspace-superuser residents (mirrors SQLite v18).
+ALTER TABLE resident_agents ADD COLUMN superuser INTEGER NOT NULL DEFAULT 0;
+`,
+  },
 ];

@@ -26,7 +26,6 @@ import {
   hydrateTerminalsForTab,
   type TerminalState,
 } from '@/renderer/features/Console/state';
-import { watchColumnRun } from '@/renderer/features/GlobalAgent/orchestrator-watch';
 import { requestPlanApproval } from '@/renderer/features/Tickets/plan-approval-bridge';
 import { requestPreviewOpen } from '@/renderer/features/Tickets/preview-bridge';
 import { ticketApi } from '@/renderer/features/Tickets/state';
@@ -580,8 +579,8 @@ async function handleVoiceTools(toolName: string, toolArgs: Record<string, unkno
 }
 
 /**
- * Workspace-introspection + column-lifecycle tools (global orchestrator only).
- * `list_workspace` is the orchestrator's map of the deck; `open_column` /
+ * Workspace-introspection + column-lifecycle tools (superuser scope only).
+ * `list_workspace` is the caller's map of the deck; `open_column` /
  * `close_column` manage columns via `codeApi`.
  */
 async function handleWorkspaceTools(
@@ -661,13 +660,14 @@ async function handleWorkspaceTools(
 }
 
 /**
- * Column-control tools (global orchestrator only). Reach into another column's
+ * Column-control tools (superuser scope only). Reach into another column's
  * live agent via the session-control registry — send a message, decide a
  * pending approval, cancel a run.
  */
 async function handleColumnTools(
   toolName: string,
-  toolArgs: Record<string, unknown>
+  toolArgs: Record<string, unknown>,
+  onColumnDispatch?: (tabId: string, runId?: string) => void
 ): Promise<ClientToolResult | null> {
   if (
     toolName !== 'column_send' &&
@@ -712,8 +712,8 @@ async function handleColumnTools(
         }
         const res = (await controller.sendMessage(message)) as { runId?: string } | undefined;
         // Watch this column so its run-end pushes a wakeup back to the
-        // orchestrator (instead of the orchestrator polling list_workspace).
-        watchColumnRun(tabId, res?.runId);
+        // dispatcher (instead of it polling list_workspace).
+        onColumnDispatch?.(tabId, res?.runId);
         return ok({ sent: true, run_id: res?.runId ?? null });
       }
       case 'column_decide': {
@@ -763,10 +763,11 @@ function captureTerminalBuffer(term: TerminalState, maxLines?: number): string {
 }
 
 /**
- * Terminal-copilot tools (global orchestrator only). Drive a column's VISIBLE
+ * Terminal-copilot tools (superuser scope only). Drive a column's VISIBLE
  * terminal the way `tmux send-keys` / `capture-pane` do — type keys, read the
- * screen — so the orchestrator can help the user with terminal work. Column
- * agents have their own `bash`; this is for the shared, watched terminal.
+ * screen — so a superuser resident can help the user with terminal work.
+ * Column agents have their own `bash`; this is for the shared, watched
+ * terminal.
  */
 async function handleTerminalTools(
   toolName: string,
@@ -836,11 +837,17 @@ export function buildClientToolHandler(opts?: {
   tabId?: string;
   allowGlobal?: boolean;
   /**
-   * Workspace-superuser scope for the headless global orchestrator: sees and
-   * drives every column's apps (addressed by handleId) and unlocks the
-   * workspace/column tools.
+   * Workspace-superuser scope (superuser residents): sees and drives every
+   * column's apps (addressed by handleId) and unlocks the workspace/column
+   * tools.
    */
   superuser?: boolean;
+  /**
+   * Called when `column_send` dispatches a run to a column (superuser scope),
+   * with the run id when the column was idle (undefined = queued behind an
+   * in-flight run). The caller registers a run-watch to be woken on its end.
+   */
+  onColumnDispatch?: (tabId: string, runId?: string) => void;
 }): ClientToolCallHandler {
   const superuser = opts?.superuser ?? false;
   const allowGlobal = opts?.allowGlobal ?? true;
@@ -873,7 +880,7 @@ export function buildClientToolHandler(opts?: {
       if (wsResult) {
         return wsResult;
       }
-      const colResult = await handleColumnTools(toolName, toolArgs);
+      const colResult = await handleColumnTools(toolName, toolArgs, opts?.onColumnDispatch);
       if (colResult) {
         return colResult;
       }

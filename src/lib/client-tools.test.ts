@@ -10,7 +10,12 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { buildSessionVariables, extractSafeToolNames, PROJECT_CLIENT_TOOLS } from '@/lib/client-tools';
+import {
+  buildSessionVariables,
+  extractSafeToolNames,
+  PROJECT_CLIENT_TOOLS,
+  RESIDENT_SUPERUSER_TOOLS,
+} from '@/lib/client-tools';
 
 describe('client_tools shape', () => {
   it('every tool has name, description, and parameters', () => {
@@ -55,12 +60,8 @@ describe('client_tools shape', () => {
     expect(names).toContain('browser_list_tabsets');
   });
 
-  it('global surface includes the workspace-orchestrator tools plus everything code has', () => {
-    const vars = buildSessionVariables({ surface: 'global' }) as {
-      client_tools: { name: string }[];
-      additional_instructions: string;
-    };
-    const names = vars.client_tools.map((t) => t.name);
+  it('RESIDENT_SUPERUSER_TOOLS carries the workspace-orchestrator set, without column-render tools', () => {
+    const names = RESIDENT_SUPERUSER_TOOLS.map((t) => t.name);
     // workspace-superuser tools
     expect(names).toContain('list_workspace');
     expect(names).toContain('open_column');
@@ -75,12 +76,15 @@ describe('client_tools shape', () => {
     expect(names).toContain('terminal_list');
     expect(names).toContain('terminal_open');
     expect(names).toContain('launch_app');
-    // inherits code + chat tools
-    expect(names).toContain('browser_open');
+    // app driving + autopilot control ride along
     expect(names).toContain('list_apps');
+    expect(names).toContain('app_snapshot');
+    expect(names).toContain('browser_list_tabsets');
     expect(names).toContain('start_ticket');
-    // role guidance present
-    expect(vars.additional_instructions).toContain('workspace orchestrator');
+    // column-render tools stay out — a resident owns no column to render into
+    expect(names).not.toContain('browser_open');
+    expect(names).not.toContain('display_plan');
+    expect(names).not.toContain('speak');
   });
 
   it('launch_app is available on the code surface, not chat', () => {
@@ -98,19 +102,6 @@ describe('client_tools shape', () => {
       expect(names).not.toContain('list_workspace');
       expect(names).not.toContain('column_send');
     }
-  });
-
-  it('global surface keeps close_column behind approval but column_* + launch_app safe', () => {
-    const vars = buildSessionVariables({ surface: 'global' }) as {
-      safe_tool_overrides: { safe_tool_names?: string[] };
-    };
-    const safe = vars.safe_tool_overrides.safe_tool_names!;
-    expect(safe).toContain('list_workspace');
-    expect(safe).toContain('launch_app');
-    expect(safe).toContain('column_send');
-    expect(safe).toContain('column_cancel');
-    // destructive workspace mutation must require approval
-    expect(safe).not.toContain('close_column');
   });
 
   it('interactive mode uses safe_tool_names (allowlist of read-only tools)', () => {

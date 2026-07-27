@@ -49,17 +49,7 @@ export type WindowProps = {
 /**
  * Data stored in the electron store.
  */
-export type LayoutMode =
-  | 'home'
-  | 'inbox'
-  | 'work'
-  | 'chat'
-  | 'dashboards'
-  | 'routines'
-  | 'agents'
-  | 'plugins'
-  | 'settings'
-  | 'gallery';
+export type LayoutMode = 'work' | 'chat' | 'dashboards' | 'agents' | 'plugins' | 'settings' | 'gallery';
 export type OmniTheme =
   | 'omni'
   | 'teams-light'
@@ -176,6 +166,15 @@ export type ResidentAgent = {
   morningHour: number | null;
   /** Disabled agents receive no events and never wake. */
   enabled: boolean;
+  /**
+   * Workspace superuser: this agent's watcher additionally declares the
+   * workspace/column client tools (`list_workspace`, `column_send`,
+   * `app_*`, …), fulfilled by the launcher renderer — it can observe and
+   * drive every deck column, approve blocked runs, and launch apps. The
+   * tools error honestly when no app window is connected (columns only
+   * exist while the renderer does). Absent = ordinary resident.
+   */
+  superuser?: boolean;
   createdAt: number;
 };
 
@@ -269,6 +268,8 @@ export type ResidentAgentInput = {
   projectIds?: string[];
   /** Hour (0–23) of the daily morning beat; `null` = no morning beat. */
   morningHour?: number | null;
+  /** Workspace superuser — see `ResidentAgent.superuser`. */
+  superuser?: boolean;
 };
 
 /** `projectIds: []` unassigns (undefined = leave unchanged). */
@@ -338,8 +339,9 @@ export type StoreData = {
    */
   voiceToggleHotkey: string | null;
   /**
-   * Separate global hotkey that toggles voice on the workspace (global) agent,
-   * opening its panel. Independent of `voiceToggleHotkey`. Null = unbound.
+   * Separate global hotkey that opens the superuser resident's DM and toggles
+   * voice on its composer mic. Independent of `voiceToggleHotkey`. Null =
+   * unbound.
    */
   globalVoiceToggleHotkey: string | null;
 
@@ -823,9 +825,10 @@ export const schema: Schema<StoreData> = {
   layoutMode: {
     type: 'string',
     // 'code' and 'os' are pre-v20 names for 'spaces'; 'more' is the retired
-    // mobile overflow page; 'projects' is the pre-split container tab. Kept
-    // so existing stores load before the renderer's migrateLayoutMode pass
-    // converts them.
+    // mobile overflow page; 'projects' is the pre-split container tab;
+    // 'inbox' folded into Work, 'routines' into Agents, and 'home' retired
+    // with the unified sidebar. Kept so existing stores load before the
+    // renderer's migrateLayoutMode pass converts them.
     enum: [
       'home',
       'inbox',
@@ -843,7 +846,7 @@ export const schema: Schema<StoreData> = {
       'more',
       'gallery',
     ],
-    default: 'home',
+    default: 'chat',
   },
   theme: {
     type: 'string',
@@ -2306,6 +2309,19 @@ type ResidentIpcEvents = Namespaced<
     /** Shared team handbook (rendered into every agent's identity on wake). */
     'get-handbook': () => { body: string; updatedAt: number; updatedBy: string | null } | null;
     'set-handbook': (body: string) => void;
+    /**
+     * Renderer's answer to a `resident:workspace-tool` request — the inner
+     * result object of the superuser client-tool handler. Main resolves the
+     * pending watcher call by `requestId` (late/duplicate answers are
+     * dropped).
+     */
+    'workspace-tool-result': (requestId: string, result: Record<string, unknown>) => void;
+    /**
+     * A column run dispatched by a superuser resident (`column_send`) ended —
+     * the renderer's run-watch reports it so main wakes the dispatcher with
+     * a `column_done` event.
+     */
+    'column-done': (agentId: string, tabId: string, reason: string) => void;
   }
 >;
 
@@ -3955,6 +3971,12 @@ type ResidentIpcRendererEvents = Namespaced<
   {
     status: [Record<string, ResidentAgentRuntime>];
     attention: [{ agentId: string; message: string; at: number }];
+    /**
+     * A superuser resident called a workspace/column client tool. The
+     * renderer runs it through the superuser tool handler and answers on
+     * `resident:workspace-tool-result` with the same `requestId`.
+     */
+    'workspace-tool': [{ requestId: string; agentId: string; tool: string; args: Record<string, unknown> }];
   }
 >;
 

@@ -1,4 +1,4 @@
-import { atom } from 'nanostores';
+import { atom, computed } from 'nanostores';
 
 import { toast } from '@/renderer/features/Toast/state';
 import { emitter, ipc, wsEmitter } from '@/renderer/services/ipc';
@@ -21,16 +21,78 @@ import type {
 
 export const $residentStatus = atom<Record<string, ResidentAgentRuntime>>({});
 
-/** Detail-pane selection: an agent, a channel, the team handbook, or (all
- *  unset) the all-traffic Activity view. */
+/** Detail-pane selection: an agent, a channel, the team handbook, the
+ *  agent roster/directory, the Routines surface, the new-agent form, or
+ *  (all unset) the all-traffic Activity view. Every surface is derivable
+ *  from this atom so the app sidebar can paint selection. */
 export const $residentsView = atom<{
   selectedAgentId: string | null;
   selectedChannel: string | null;
   showHandbook?: boolean;
+  showRoster?: boolean;
+  showRoutines?: boolean;
+  showNewAgent?: boolean;
 }>({
   selectedAgentId: null,
   selectedChannel: null,
 });
+
+/** Raise the Agents surface for the current view (idempotent). */
+function raiseAgentsTab(): void {
+  if (persistedStoreApi.$atom.get().layoutMode !== 'agents') {
+    persistedStoreApi.setKey('layoutMode', 'agents');
+  }
+}
+
+/** Open a channel or DM thread feed. */
+export function goToResidentChannel(channelId: string): void {
+  $residentsView.set({ selectedAgentId: null, selectedChannel: channelId });
+  raiseAgentsTab();
+}
+
+/** Open the all-traffic Activity feed. */
+export function goToActivity(): void {
+  $residentsView.set({ selectedAgentId: null, selectedChannel: null });
+  raiseAgentsTab();
+}
+
+/** Open the agent roster/directory. */
+export function goToRoster(): void {
+  $residentsView.set({ selectedAgentId: null, selectedChannel: null, showRoster: true });
+  raiseAgentsTab();
+}
+
+/** Open the team handbook. */
+export function goToHandbook(): void {
+  $residentsView.set({ selectedAgentId: null, selectedChannel: null, showHandbook: true });
+  raiseAgentsTab();
+}
+
+/** Open the new-agent form. */
+export function goToNewAgent(): void {
+  $residentsView.set({ selectedAgentId: null, selectedChannel: null, showNewAgent: true });
+  raiseAgentsTab();
+}
+
+/**
+ * Per-channel unread counts (messages past that channel's seen cursor) and
+ * the cross-channel total. Derived from the persisted store so the app
+ * sidebar, the Agents tab, and the sections all read one source.
+ */
+export const $residentUnreadByChannel = computed(persistedStoreApi.$atom, (store) => {
+  const seen = store.residentChannelSeen ?? {};
+  const counts: Record<string, number> = {};
+  for (const m of store.residentChannels ?? []) {
+    if (m.id > (seen[m.channel] ?? 0)) {
+      counts[m.channel] = (counts[m.channel] ?? 0) + 1;
+    }
+  }
+  return counts;
+});
+
+export const $activityUnread = computed($residentUnreadByChannel, (counts) =>
+  Object.values(counts).reduce((sum, n) => sum + n, 0)
+);
 
 /**
  * Seen cursors (highest message id the user has SEEN, per channel) live in

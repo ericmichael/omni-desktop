@@ -1,10 +1,11 @@
-import { makeStyles, mergeClasses, shorthands, tokens } from '@fluentui/react-components';
-import { Navigation20Regular } from '@fluentui/react-icons';
+import { makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
 import { useStore } from '@nanostores/react';
-import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo } from 'react';
 
 import { useIsDesktop } from '@/renderer/common/use-is-desktop';
-import { IconButton, TopAppBar } from '@/renderer/ds';
+import { TopAppBar } from '@/renderer/ds';
+import { InboxView } from '@/renderer/features/Inbox/InboxView';
+import { $inboxItems, $inboxView } from '@/renderer/features/Inbox/state';
 import { $milestones } from '@/renderer/features/Initiatives/state';
 import { PageView } from '@/renderer/features/Pages/PageView';
 import { $pages, pageApi } from '@/renderer/features/Pages/state';
@@ -16,7 +17,6 @@ import { MilestoneDetail } from './MilestoneDetail';
 import { ProjectHome } from './ProjectHome';
 import { ProjectPagesTab } from './ProjectPagesTab';
 import { ProjectSettings } from './ProjectSettings';
-import { TicketsSidebar } from './Sidebar';
 import { $ticketsView, type ProjectTab, ticketApi } from './state';
 import { TicketAutopilotLaunchDialog } from './TicketAutopilotLaunchDialog';
 import { TicketDetail } from './TicketDetail';
@@ -35,22 +35,10 @@ const useStyles = makeStyles({
   // Glass surfaces inherit translucent neutral colors via Fluent token overrides
   // pushed at the deck-bg root in MainContent. These classes only opt in to the
   // blur layer — bg/border colors come from --colorNeutralBackground* / --colorNeutralStroke1.
-  desktopSidebarGlass: {
-    backgroundColor: tokens.colorNeutralBackground2,
-    backdropFilter: 'var(--glass-blur)',
-    WebkitBackdropFilter: 'var(--glass-blur)',
-  },
   contentAreaGlass: {
     backgroundColor: tokens.colorNeutralBackground1,
     backdropFilter: 'var(--glass-blur)',
     WebkitBackdropFilter: 'var(--glass-blur)',
-  },
-  desktopSidebar: {
-    display: 'none',
-    '@media (min-width: 640px)': {
-      display: 'block',
-      ...shorthands.borderRight('1px', 'solid', tokens.colorNeutralStroke1),
-    },
   },
   mainColumn: {
     flex: '1 1 0',
@@ -76,10 +64,10 @@ const useStyles = makeStyles({
 /* ---------- Main export ---------- */
 
 /**
- * The Work tab: all projects and their tasks. Lands on the global all-work
- * list; the sidebar picks a project (shell with Home · Work · Docs ·
- * Settings tabs); detail views render inside the shell. Home and Inbox are
- * separate rail tabs.
+ * The Work surface: the inbox, all projects, and their tasks. The unified
+ * AppSidebar picks the view (desktop sidebar; the mobile Home page). Every
+ * view fills the content plane (the Basecamp model — one master per tab);
+ * on mobile the bottom bar's Home tab is always the way back out.
  */
 export const Tickets = memo(() => {
   const styles = useStyles();
@@ -87,10 +75,11 @@ export const Tickets = memo(() => {
   const isGlass = useStore($glassEnabled);
   const view = useStore($ticketsView);
   const isDesktop = useIsDesktop();
-  const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   const pages = useStore($pages);
   const milestones = useStore($milestones);
+  const inboxView = useStore($inboxView);
+  const inboxItems = useStore($inboxItems);
   const tickets = persistedStore.tickets;
 
   const activeTicket = useMemo(
@@ -113,16 +102,15 @@ export const Tickets = memo(() => {
     [shellProjectId, persistedStore.projects]
   );
 
-  useEffect(() => {
-    if (isDesktop) {
-      setMobileNavOpen(false);
-    }
-  }, [isDesktop]);
-
   // The TopAppBar is the only header on mobile, so it titles the current view.
   const mobileHeaderTitle = useMemo(() => {
     if (view.type === 'all') {
-      return 'Work';
+      return 'Tasks';
+    }
+    if (view.type === 'inbox') {
+      // The open item titles the bar (its own back header is suppressed).
+      const item = inboxView.selectedItemId ? inboxItems[inboxView.selectedItemId] : null;
+      return item?.title || 'Inbox';
     }
     if (view.type === 'ticket') {
       return activeTicket?.title || 'Task';
@@ -147,18 +135,19 @@ export const Tickets = memo(() => {
       return activeProject?.label || 'Project';
     }
     return 'Work';
-  }, [view, pages, milestones, activeTicket?.title, activeProject?.label]);
+  }, [view, pages, milestones, inboxView.selectedItemId, inboxItems, activeTicket?.title, activeProject?.label]);
 
   const handleBack = useCallback(() => {
+    // The inbox view has an internal level: back closes the open item
+    // before leaving the view (its detail's own back header is suppressed).
+    if (view.type === 'inbox' && $inboxView.get().selectedItemId) {
+      $inboxView.set({ selectedItemId: null });
+      return;
+    }
     ticketApi.goBackToPrevious(shellProjectId ?? undefined);
-  }, [shellProjectId]);
+  }, [view.type, shellProjectId]);
 
-  const handleOpenMobileNav = useCallback(() => setMobileNavOpen(true), []);
-  const handleCloseMobileNav = useCallback(() => setMobileNavOpen(false), []);
   const mobileBackHandler = view.type === 'all' ? undefined : handleBack;
-  const mobileNavButton = (
-    <IconButton aria-label="Open navigation" icon={<Navigation20Regular />} size="sm" onClick={handleOpenMobileNav} />
-  );
 
   // Keyboard shortcut: Cmd/Ctrl+N → new page in current project
   useEffect(() => {
@@ -197,6 +186,9 @@ export const Tickets = memo(() => {
   // the hub, and every sub-page — Tasks board, Docs, Settings, details —
   // takes over the full content plane with a breadcrumb as the way back up.
   const content = (() => {
+    if (view.type === 'inbox') {
+      return <InboxView />;
+    }
     if (view.type === 'project') {
       const tab: ProjectTab = view.tab;
       if (tab === 'home') {
@@ -232,18 +224,14 @@ export const Tickets = memo(() => {
 
   return (
     <div className={mergeClasses(styles.root, isGlass && styles.rootGlass)}>
-      {/* Desktop: sidebar always visible */}
-      <div className={mergeClasses(styles.desktopSidebar, isGlass && styles.desktopSidebarGlass)}>
-        <TicketsSidebar />
-      </div>
-
+      {/* Desktop navigation lives in the unified AppSidebar; the mobile
+          overlay drawer below is the only sidebar this surface owns. */}
       <div className={styles.mainColumn}>
         {/* Mobile: header with sidebar access */}
         <div className={styles.mobileHeader}>
           <TopAppBar
             title={mobileHeaderTitle}
             onBack={mobileBackHandler}
-            leading={mobileNavButton}
             className={isGlass ? 'omni-glass-mobile-top-app-bar' : 'bg-surface-raised'}
           />
         </div>
@@ -255,15 +243,6 @@ export const Tickets = memo(() => {
           </div>
         </div>
       </div>
-
-      {!isDesktop && (
-        <TicketsSidebar
-          type="overlay"
-          open={mobileNavOpen}
-          onClose={handleCloseMobileNav}
-          onNavigate={handleCloseMobileNav}
-        />
-      )}
 
       <TicketAutopilotLaunchDialog />
     </div>

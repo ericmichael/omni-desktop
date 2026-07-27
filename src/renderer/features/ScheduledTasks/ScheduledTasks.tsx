@@ -29,7 +29,6 @@ import {
   MenuTrigger,
   MessageBar,
   MessageBarBody,
-  PageHeader,
   Select,
   Textarea,
   TopAppBar,
@@ -67,22 +66,6 @@ const useStyles = makeStyles({
   },
   rootGlass: {
     backgroundColor: 'transparent',
-  },
-  listPane: {
-    display: 'flex',
-    flexDirection: 'column',
-    width: '100%',
-    height: '100%',
-    '@media (min-width: 640px)': {
-      width: '320px',
-      flexShrink: 0,
-      borderRight: `1px solid ${tokens.colorNeutralStroke1}`,
-    },
-  },
-  listPaneGlass: {
-    backgroundColor: tokens.colorNeutralBackground2,
-    backdropFilter: 'var(--glass-blur)',
-    WebkitBackdropFilter: 'var(--glass-blur)',
   },
   list: {
     flex: '1 1 0',
@@ -135,9 +118,6 @@ const useStyles = makeStyles({
   },
   rowMenuOpen: {
     opacity: 1,
-  },
-  rowSelected: {
-    backgroundColor: tokens.colorSubtleBackgroundSelected,
   },
   rowTop: {
     display: 'flex',
@@ -431,9 +411,15 @@ const createEmptyFormState = (defaultProfileName: string | undefined): RoutineFo
 // ---------------------------------------------------------------------------
 
 /**
- * The Routines tab: scheduled agent sessions that run while the app is open.
- * Master-detail like the Work and Inbox tabs — a list pane picks a routine,
- * the detail pane shows/edits it. On mobile the detail replaces the list.
+ * The Routines surface (hosted by the Agents tab): scheduled agent sessions
+ * that run while the app is open. Follows the host's one-master grammar
+ * (the Agents sidebar is the only master): the routines list fills the
+ * content plane; opening a routine replaces the plane with its detail —
+ * the same shape as Roster → AgentDetail.
+ *
+ * On mobile the list titles itself with its band header (the bottom bar's
+ * Home tab is the way out); detail/create levels render a TopAppBar whose
+ * back returns to this list.
  */
 export const ScheduledTasks = memo(() => {
   const styles = useStyles();
@@ -472,13 +458,12 @@ export const ScheduledTasks = memo(() => {
     [store.scheduledTasks]
   );
 
-  // Desktop auto-selects the first routine so the pane is never blank;
-  // mobile requires an explicit tap (the list is the landing view).
-  const explicitSelection = useMemo(
+  // One plane: a routine is open only when explicitly selected — the list
+  // is the surface otherwise (no auto-select; there is no second pane).
+  const selectedTask = useMemo(
     () => sorted.find((task) => task.id === selectedTaskId) ?? null,
     [selectedTaskId, sorted]
   );
-  const selectedTask = explicitSelection ?? (isDesktop && !creating ? (sorted[0] ?? null) : null);
   const isEditing = selectedTask !== null && editingTaskId === selectedTask.id && editForm !== null;
 
   const sandboxContext: ComponentProps<typeof SandboxPicker>['context'] = {
@@ -600,42 +585,46 @@ export const ScheduledTasks = memo(() => {
 
   // ----- panes -----
 
-  const listPane = (
-    <div className={mergeClasses(styles.listPane, isGlass && styles.listPaneGlass)}>
-      <PageHeader
-        title="Routines"
-        actions={<IconButton aria-label="New routine" icon={<Add20Regular />} size="sm" onClick={startCreate} />}
-      />
-      <div className={styles.list}>
-        {/* Desktop leaves an empty list blank — the detail pane carries the
-            empty state; showing it twice side by side reads as a glitch. */}
-        {sorted.length === 0
-          ? !isDesktop && (
-              <EmptyState
-                title="No routines yet"
-                description="Routines are scheduled agent sessions that run while the app is open."
-                action={
-                  <Button size="sm" leftIcon={<Add20Regular />} onClick={startCreate}>
-                    New routine
-                  </Button>
-                }
-              />
-            )
-          : sorted.map((task) => (
-              <RoutineRow
-                key={task.id}
-                task={task}
-                projects={store.projects}
-                selected={!creating && selectedTask?.id === task.id}
-                styles={styles}
-                onSelect={selectTask}
-                onRunNow={runNow}
-                onStartEdit={startEdit}
-                onRequestDelete={setPendingDelete}
-              />
-            ))}
+  // Full-plane list surface — band header on desktop (the Roster shape),
+  // TopAppBar with the host's back on mobile.
+  const listSurface = (
+    <>
+      <div className={styles.bandHeader}>
+        <div className={styles.bandTitleRow}>
+          <span className={styles.bandTitle}>Routines</span>
+          <div className={styles.bandSpacer} />
+          <Button size="sm" leftIcon={<Add20Regular />} onClick={startCreate}>
+            New routine
+          </Button>
+        </div>
       </div>
-    </div>
+      <div className={styles.list}>
+        {sorted.length === 0 ? (
+          <EmptyState
+            title="No routines yet"
+            description="Routines are scheduled agent sessions that run while the app is open."
+            action={
+              <Button size="sm" leftIcon={<Add20Regular />} onClick={startCreate}>
+                New routine
+              </Button>
+            }
+          />
+        ) : (
+          sorted.map((task) => (
+            <RoutineRow
+              key={task.id}
+              task={task}
+              projects={store.projects}
+              styles={styles}
+              onSelect={selectTask}
+              onRunNow={runNow}
+              onStartEdit={startEdit}
+              onRequestDelete={setPendingDelete}
+            />
+          ))
+        )}
+      </div>
+    </>
   );
 
   const detailBody = creating ? (
@@ -705,21 +694,7 @@ export const ScheduledTasks = memo(() => {
       onToggle={(task, enabled) => void scheduledTaskApi.update(task.id, { enabled })}
       onOpenSession={openSession}
     />
-  ) : (
-    <EmptyState
-      title={sorted.length === 0 ? 'No routines yet' : 'Select a routine'}
-      description={
-        sorted.length === 0 ? 'Routines are scheduled agent sessions that run while the app is open.' : undefined
-      }
-      action={
-        sorted.length === 0 ? (
-          <Button size="sm" leftIcon={<Add20Regular />} onClick={startCreate}>
-            New routine
-          </Button>
-        ) : undefined
-      }
-    />
-  );
+  ) : null;
 
   const deleteDialog = (
     <ConfirmDialog
@@ -733,32 +708,20 @@ export const ScheduledTasks = memo(() => {
     />
   );
 
-  // Mobile: list and detail swap; detail gets a back header.
-  if (!isDesktop) {
-    const detailOpen = creating || explicitSelection !== null;
-    if (!detailOpen) {
-      return (
-        <div className={mergeClasses(styles.root, isGlass && styles.rootGlass)}>
-          {listPane}
-          {deleteDialog}
-        </div>
-      );
-    }
-    return (
-      <div className={mergeClasses(styles.root, isGlass && styles.rootGlass)}>
-        <div className={styles.detailPane}>
-          <TopAppBar title={creating ? 'New routine' : (explicitSelection?.name ?? 'Routine')} onBack={handleBack} />
-          {detailBody}
-        </div>
-        {deleteDialog}
-      </div>
-    );
-  }
+  // One master per tab: the host's sidebar is the only master. This surface
+  // fills the content plane — the list, or (drilled in) a detail/form that
+  // replaces it. Mobile detail levels title themselves with a back to the
+  // list; the list's own header carries the host's back (mobileOnBack).
+  const surfaceOpen = creating || selectedTask !== null;
 
   return (
     <div className={mergeClasses(styles.root, isGlass && styles.rootGlass)}>
-      {listPane}
-      <div className={mergeClasses(styles.detailPane, isGlass && styles.detailPaneGlass)}>{detailBody}</div>
+      <div className={mergeClasses(styles.detailPane, isGlass && styles.detailPaneGlass)}>
+        {!isDesktop && surfaceOpen && (
+          <TopAppBar title={creating ? 'New routine' : (selectedTask?.name ?? 'Routine')} onBack={handleBack} />
+        )}
+        {surfaceOpen ? detailBody : listSurface}
+      </div>
       {deleteDialog}
     </div>
   );
@@ -773,7 +736,6 @@ ScheduledTasks.displayName = 'ScheduledTasks';
 type RoutineRowProps = {
   task: ScheduledTask;
   projects: Project[];
-  selected: boolean;
   styles: ReturnType<typeof useStyles>;
   onSelect: (taskId: string) => void;
   onRunNow: (task: ScheduledTask) => Promise<void>;
@@ -784,7 +746,7 @@ type RoutineRowProps = {
 const stopPropagation = (e: React.SyntheticEvent) => e.stopPropagation();
 
 const RoutineRow = memo(
-  ({ task, projects, selected, styles, onSelect, onRunNow, onStartEdit, onRequestDelete }: RoutineRowProps) => {
+  ({ task, projects, styles, onSelect, onRunNow, onStartEdit, onRequestDelete }: RoutineRowProps) => {
     const [menuOpen, setMenuOpen] = useState(false);
     const handleClick = useCallback(() => onSelect(task.id), [onSelect, task.id]);
     const handleKeyDown = useCallback(
@@ -806,13 +768,7 @@ const RoutineRow = memo(
     return (
       // div+role rather than <button>: the row hosts the "…" menu button, and
       // nesting buttons inside a button is invalid markup.
-      <div
-        role="button"
-        tabIndex={0}
-        className={mergeClasses(styles.row, selected && styles.rowSelected)}
-        onClick={handleClick}
-        onKeyDown={handleKeyDown}
-      >
+      <div role="button" tabIndex={0} className={styles.row} onClick={handleClick} onKeyDown={handleKeyDown}>
         <span className={styles.rowTop}>
           <span className={styles.rowTitle}>{task.name}</span>
           {attention && <Badge color={attention.color}>{attention.label}</Badge>}

@@ -27,6 +27,7 @@ const agentRow = (id: string, overrides: Partial<ResidentRow> = {}): ResidentRow
   project_ids: '[]',
   morning_hour: 8,
   enabled: 1,
+  superuser: 0,
   created_at: '2026-07-23 08:00:00.000',
   ...overrides,
 });

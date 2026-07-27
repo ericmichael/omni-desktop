@@ -1,22 +1,20 @@
 import { atom, computed } from 'nanostores';
 
+import { ticketApi } from '@/renderer/features/Tickets/state';
 import { emitter } from '@/renderer/services/ipc';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { InboxItem, InboxItemId, MilestoneId, ProjectId, Ticket } from '@/shared/types';
 
 /**
- * Which inbox item is open in the rail-level Inbox tab (null = the list).
- * The Inbox is its own rail destination — navigation here never touches the
- * Work tab's view state.
+ * Which inbox item is open in the Work tab's inbox view (null = the list).
  */
 export const $inboxView = atom<{ selectedItemId: InboxItemId | null }>({ selectedItemId: null });
 
-/** Raise the Inbox rail tab, optionally landing on a specific item. */
+/** Open the Work tab's inbox view, optionally landing on a specific item. */
 export function goToInbox(selectedItemId?: InboxItemId): void {
   $inboxView.set({ selectedItemId: selectedItemId ?? null });
-  if (persistedStoreApi.$atom.get().layoutMode !== 'inbox') {
-    persistedStoreApi.setKey('layoutMode', 'inbox');
-  }
+  // Raises the Work rail tab and pushes history like any Work navigation.
+  ticketApi.goToInbox();
 }
 
 /**

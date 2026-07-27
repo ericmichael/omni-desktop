@@ -318,6 +318,7 @@ describe('omni-projects MCP tools (async IProjectsRepo, SQLite)', () => {
       profile_name: null,
       project_ids: '[]',
       morning_hour: 8,
+      superuser: 0,
       created_at: '2026-07-23 08:00:00.000',
     };
     await repo.upsertResident({ ...base, id: 'sable', name: 'Sable', enabled: 1 });

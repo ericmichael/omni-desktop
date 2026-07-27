@@ -1,29 +1,22 @@
-import {
-  makeStyles,
-  mergeClasses,
-  NavDrawer,
-  NavDrawerBody,
-  type NavDrawerProps,
-  Subtitle2,
-  tokens,
-} from '@fluentui/react-components';
+import { makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
 import {
   Add20Regular,
   Delete20Regular,
-  Dismiss20Regular,
   Edit20Regular,
   Folder16Regular,
   MoreHorizontal16Regular,
   Pin16Filled,
   Pin16Regular,
-  TaskListSquareLtr20Regular,
 } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useMemo, useState } from 'react';
 
+import { useNavTreeStyles } from '@/renderer/common/nav-tree';
+import { NavSection } from '@/renderer/common/NavSection';
 import {
   Caption1,
   ConfirmDialog,
+  CounterBadge,
   IconButton,
   Input,
   Menu,
@@ -37,90 +30,23 @@ import {
   TreeItemLayout,
 } from '@/renderer/ds';
 import { ProjectCreateDialog } from '@/renderer/features/Projects/ProjectCreateDialog';
-import { TeamSwitcher } from '@/renderer/features/Teams/TeamSwitcher';
 import { persistedStoreApi } from '@/renderer/services/store';
-import type { Project, Ticket } from '@/shared/types';
+import type { Project } from '@/shared/types';
 
-import { $tickets, $ticketsView, ticketApi, type TicketsView } from './state';
+import { $needsYouByProject, $tickets, $ticketsView, ticketApi, viewToNavValue } from './state';
+
+/**
+ * The Projects nav section, self-contained (rows with pin/rename/delete,
+ * the "+" and its create dialog, the delete confirm) so the app sidebar and
+ * the Work surface's mobile overlay render the same component.
+ */
 
 const useStyles = makeStyles({
-  drawer: {
-    width: '260px',
-    height: '100%',
-    /* Fluent's NavDrawer root defaults to colorNeutralBackground4 (#EBEBEB on
-       vscode-light — noticeably darker than the rest of the app). Force bg1
-       to match the Settings sidebar and the rest of the app's page plane. */
-    backgroundColor: tokens.colorNeutralBackground1,
-  },
-  drawerOverlay: {
-    boxSizing: 'border-box',
-    paddingLeft: 'env(safe-area-inset-left, 0px)',
-    paddingRight: 'env(safe-area-inset-right, 0px)',
-  },
-  header: {
-    display: 'flex',
-    alignItems: 'center',
-    paddingLeft: tokens.spacingHorizontalL,
-    paddingRight: tokens.spacingHorizontalXS,
-    paddingTop: tokens.spacingVerticalXXL,
-    paddingBottom: tokens.spacingVerticalL,
-  },
-  headerOverlay: {
-    paddingTop: `calc(${tokens.spacingVerticalXXL} + env(safe-area-inset-top, 0px))`,
-  },
-  headerTitle: {
-    flex: '1 1 0',
-  },
-  body: {
-    flex: '1 1 0',
-  },
-  bodyOverlay: {
-    paddingBottom: `calc(${tokens.spacingVerticalL} + var(--safe-area-bottom, env(safe-area-inset-bottom, 0px)))`,
-  },
-  sectionHeader: {
-    paddingLeft: tokens.spacingHorizontalMNudge,
-    paddingRight: tokens.spacingHorizontalS,
-    paddingTop: tokens.spacingVerticalXL,
-    paddingBottom: tokens.spacingVerticalXS,
-    fontSize: tokens.fontSizeBase200,
-    fontWeight: tokens.fontWeightSemibold,
-    color: tokens.colorNeutralForeground3,
-  },
-  /**
-   * Shared tree geometry for the pinned rows and the project list. Override
-   * `--spacingHorizontalXXL` so Fluent's per-level indent stays tight.
-   */
-  tree: {
-    paddingTop: '2px',
-    paddingBottom: '2px',
-    '--spacingHorizontalXXL': '12px',
-  },
   emptyHint: {
     paddingLeft: tokens.spacingHorizontalL,
     paddingRight: tokens.spacingHorizontalL,
     paddingTop: tokens.spacingVerticalXS,
     paddingBottom: tokens.spacingVerticalXS,
-  },
-  navItem: {
-    position: 'relative',
-  },
-  /** Selected state à la Fluent NavItem: subtle bg + left brand indicator. */
-  navItemSelected: {
-    '& > .fui-TreeItemLayout': {
-      backgroundColor: tokens.colorSubtleBackgroundSelected,
-      fontWeight: tokens.fontWeightSemibold,
-    },
-    '::before': {
-      content: '""',
-      position: 'absolute',
-      left: '2px',
-      top: '6px',
-      bottom: '6px',
-      width: '3px',
-      borderRadius: tokens.borderRadiusCircular,
-      backgroundColor: tokens.colorCompoundBrandForeground1,
-      zIndex: 1,
-    },
   },
   projectItem: {
     '& .fui-TreeItemLayout__main': {
@@ -142,11 +68,6 @@ const useStyles = makeStyles({
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
   },
-  countBadge: {
-    flexShrink: 0,
-    fontSize: tokens.fontSizeBase100,
-    color: tokens.colorNeutralForeground3,
-  },
   pinnedIndicator: {
     color: tokens.colorBrandForeground1,
   },
@@ -164,35 +85,20 @@ const useStyles = makeStyles({
   },
 });
 
-/** Build a unique selectedValue from the current view state. Every
- *  project-scoped view (any tab, page, milestone, ticket) selects its
- *  project's row. */
-function viewToNavValue(view: TicketsView, tickets: Record<string, Ticket>): string | undefined {
-  if (view.type === 'all') {
-    return 'all-work';
-  }
-  if (view.type === 'project' || view.type === 'page' || view.type === 'milestone') {
-    return `project:${view.projectId}`;
-  }
-  if (view.type === 'ticket') {
-    const projectId = tickets[view.ticketId]?.projectId;
-    return projectId ? `project:${projectId}` : undefined;
-  }
-  return undefined;
-}
-
 const stopPropagation = (e: React.SyntheticEvent) => e.stopPropagation();
 
 type ProjectRowProps = {
   project: Project;
-  activeTicketCount: number;
+  /** Tasks in this project waiting on the user (0 = no badge). */
+  needsYou: number;
   selected: boolean;
   onNavigate?: () => void;
   onRequestDelete: (project: Project) => void;
 };
 
-const ProjectRow = memo(({ project, activeTicketCount, selected, onNavigate, onRequestDelete }: ProjectRowProps) => {
+const ProjectRow = memo(({ project, needsYou, selected, onNavigate, onRequestDelete }: ProjectRowProps) => {
   const styles = useStyles();
+  const nav = useNavTreeStyles();
   const pinned = project.pinnedAt != null;
 
   const [menuOpen, setMenuOpen] = useState(false);
@@ -253,12 +159,21 @@ const ProjectRow = memo(({ project, activeTicketCount, selected, onNavigate, onR
     <TreeItem
       itemType="leaf"
       value={`project:${project.id}`}
-      className={mergeClasses(styles.navItem, styles.projectItem, selected && styles.navItemSelected)}
+      className={mergeClasses(nav.navItem, styles.projectItem, selected && nav.navItemSelected)}
       onClick={handleClick}
     >
       <TreeItemLayout
         iconBefore={<Folder16Regular />}
-        aside={pinned ? <Pin16Filled className={styles.pinnedIndicator} /> : undefined}
+        aside={
+          pinned || needsYou > 0 ? (
+            <>
+              {/* Badges mean attention everywhere in the sidebar — this is
+                  the project's needs-you count, not a task census. */}
+              {needsYou > 0 && <CounterBadge count={needsYou} size="small" color="brand" />}
+              {pinned && <Pin16Filled className={styles.pinnedIndicator} />}
+            </>
+          ) : undefined
+        }
         actions={{
           // Fluent shows the actions slot on hover/focus; force it while the
           // menu is open so it doesn't vanish under the popover.
@@ -322,7 +237,6 @@ const ProjectRow = memo(({ project, activeTicketCount, selected, onNavigate, onR
         ) : (
           <span className={styles.titleRow}>
             <span className={styles.titleRowMain}>{project.label}</span>
-            <span className={styles.countBadge}>({activeTicketCount})</span>
           </span>
         )}
       </TreeItemLayout>
@@ -331,32 +245,26 @@ const ProjectRow = memo(({ project, activeTicketCount, selected, onNavigate, onR
 });
 ProjectRow.displayName = 'ProjectRow';
 
-type TicketsSidebarProps = {
-  onNavigate?: () => void;
-  type?: NavDrawerProps['type'];
-  open?: boolean;
-  onClose?: () => void;
-};
-
-/**
- * Flat navigation sidebar for the Work tab: an "All work" row (the global
- * cross-project task list) plus one row per project. Intra-project
- * navigation (pages, work list, settings) lives in the project shell's tabs
- * — the sidebar only picks the scope. Rows carry a hover "…" menu for
- * rename / pin / delete, mirroring the task rows' overflow idiom.
- */
-export const TicketsSidebar = memo(({ onNavigate, type = 'inline', open = true, onClose }: TicketsSidebarProps) => {
+/** The Projects nav section: header + "+", rows, create + delete dialogs. */
+export const ProjectsSection = memo(({ onNavigate }: { onNavigate?: () => void }) => {
   const styles = useStyles();
+  const nav = useNavTreeStyles();
   const store = useStore(persistedStoreApi.$atom);
   const view = useStore($ticketsView);
   const tickets = useStore($tickets);
+  const needsYouByProject = useStore($needsYouByProject);
   const [createOpen, setCreateOpen] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<Project | null>(null);
 
-  const projects = store.projects;
-  // NavDrawer's own selectedValue only styles NavItems, not TreeItems —
-  // selection is computed here and rendered by the rows themselves.
-  const selectedValue = viewToNavValue(view, tickets);
+  // Pinned projects float — stable partition, so relative order within
+  // each group is untouched.
+  const projects = useMemo(
+    () => [...store.projects.filter((p) => p.pinnedAt != null), ...store.projects.filter((p) => p.pinnedAt == null)],
+    [store.projects]
+  );
+  // Selection paints only while the Work surface is frontmost — the view
+  // atom keeps its value across tab switches (keep-mounted panels).
+  const selectedValue = store.layoutMode === 'work' ? viewToNavValue(view, tickets) : undefined;
 
   const handleOpenCreate = useCallback(() => setCreateOpen(true), []);
   const handleCloseCreate = useCallback(() => setCreateOpen(false), []);
@@ -367,20 +275,6 @@ export const TicketsSidebar = memo(({ onNavigate, type = 'inline', open = true, 
     },
     [onNavigate]
   );
-
-  const handleOpenChange = useCallback(
-    (_event: unknown, data: { open: boolean }) => {
-      if (!data.open) {
-        onClose?.();
-      }
-    },
-    [onClose]
-  );
-
-  const handleGoAllWork = useCallback(() => {
-    ticketApi.goToAllWork();
-    onNavigate?.();
-  }, [onNavigate]);
 
   const handleRequestDelete = useCallback((project: Project) => setPendingDelete(project), []);
   const handleCloseDelete = useCallback(() => setPendingDelete(null), []);
@@ -397,58 +291,26 @@ export const TicketsSidebar = memo(({ onNavigate, type = 'inline', open = true, 
     });
   }, [pendingDelete]);
 
-  const activeCounts = useMemo(() => {
-    const counts: Record<string, number> = {};
-    for (const ticket of Object.values(tickets)) {
-      if (!ticket.resolution && !ticket.archivedAt) {
-        counts[ticket.projectId] = (counts[ticket.projectId] ?? 0) + 1;
-      }
-    }
-    return counts;
-  }, [tickets]);
+  // Aggregate attention for the collapsed header: tasks waiting on you.
+  const needsYouTotal = Object.values(needsYouByProject).reduce((sum, n) => sum + n, 0);
 
   return (
-    <NavDrawer
-      type={type}
-      open={open}
-      onOpenChange={handleOpenChange}
-      className={mergeClasses(styles.drawer, type === 'overlay' && styles.drawerOverlay)}
-      size="small"
-    >
-      {/* ── Header ── */}
-      <div className={mergeClasses(styles.header, type === 'overlay' && styles.headerOverlay)}>
-        <Subtitle2 className={styles.headerTitle}>Work</Subtitle2>
-        <TeamSwitcher />
-        <IconButton aria-label="New project" icon={<Add20Regular />} size="sm" onClick={handleOpenCreate} />
-        {type === 'overlay' && (
-          <IconButton aria-label="Close navigation" icon={<Dismiss20Regular />} size="sm" onClick={onClose} />
-        )}
-      </div>
-
-      <NavDrawerBody className={mergeClasses(styles.body, type === 'overlay' && styles.bodyOverlay)}>
-        {/* ── All work ── */}
-        <Tree aria-label="All work" className={styles.tree}>
-          <TreeItem
-            itemType="leaf"
-            value="all-work"
-            className={mergeClasses(styles.navItem, selectedValue === 'all-work' && styles.navItemSelected)}
-            onClick={handleGoAllWork}
-          >
-            <TreeItemLayout iconBefore={<TaskListSquareLtr20Regular />}>All work</TreeItemLayout>
-          </TreeItem>
-        </Tree>
-
-        {/* ── Projects ── */}
-        <div className={styles.sectionHeader}>Projects</div>
+    <>
+      <NavSection
+        id="projects"
+        label="Projects"
+        collapsedBadge={needsYouTotal}
+        actions={<IconButton aria-label="New project" icon={<Add20Regular />} size="sm" onClick={handleOpenCreate} />}
+      >
         {projects.length === 0 ? (
           <Caption1 className={styles.emptyHint}>No projects yet</Caption1>
         ) : (
-          <Tree aria-label="Projects" className={styles.tree}>
+          <Tree aria-label="Projects" className={nav.tree}>
             {projects.map((project) => (
               <ProjectRow
                 key={project.id}
                 project={project}
-                activeTicketCount={activeCounts[project.id] ?? 0}
+                needsYou={needsYouByProject[project.id] ?? 0}
                 selected={selectedValue === `project:${project.id}`}
                 onNavigate={onNavigate}
                 onRequestDelete={handleRequestDelete}
@@ -456,8 +318,7 @@ export const TicketsSidebar = memo(({ onNavigate, type = 'inline', open = true, 
             ))}
           </Tree>
         )}
-      </NavDrawerBody>
-
+      </NavSection>
       <ProjectCreateDialog open={createOpen} onClose={handleCloseCreate} onCreated={handleCreated} />
       <ConfirmDialog
         open={pendingDelete !== null}
@@ -468,7 +329,7 @@ export const TicketsSidebar = memo(({ onNavigate, type = 'inline', open = true, 
         confirmLabel="Delete"
         destructive
       />
-    </NavDrawer>
+    </>
   );
 });
-TicketsSidebar.displayName = 'TicketsSidebar';
+ProjectsSection.displayName = 'ProjectsSection';

@@ -2,6 +2,7 @@ import { useStore } from '@nanostores/react';
 import { useEffect, useMemo, useState } from 'react';
 
 import { MAX_CHAT_CONVERSATIONS } from '@/lib/chat-conversations';
+import { isResidentSessionId } from '@/lib/resident-agent';
 import type { SessionItem } from '@/renderer/omniagents-ui/components/SessionList';
 import { generateSessionTitle } from '@/renderer/omniagents-ui/lib/utils';
 import { getSessionController, onColumnRunEnd } from '@/renderer/services/session-control';
@@ -72,6 +73,11 @@ export function useRecentConversations(tabs: CodeTab[]): {
     const open = new Set(tabs.map((t) => t.sessionId).filter(Boolean));
     const bySession = new Map<string, ChatConversation>();
     for (const s of liveSessions) {
+      // Resident agents' sessions belong to the Agents surface (their DMs and
+      // Session tab), not the user's conversation history.
+      if (isResidentSessionId(s.id)) {
+        continue;
+      }
       if (s.message_count > 0) {
         bySession.set(s.id, {
           sessionId: s.id,

@@ -36,7 +36,7 @@ const getDefaults = (): StoreData => ({
     autoGainControl: true,
   },
 
-  layoutMode: 'home',
+  layoutMode: 'chat',
   theme: 'omni',
   onboardingComplete: false,
   cliCardDismissed: false,

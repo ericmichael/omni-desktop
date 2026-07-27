@@ -42,10 +42,24 @@ describe('migrateLayoutMode', () => {
     expect(migrateLayoutMode('spaces')).toBe('chat');
   });
 
-  it('returns null for the rail tabs of the attention-centric IA', () => {
-    expect(migrateLayoutMode('home')).toBeNull();
-    expect(migrateLayoutMode('inbox')).toBeNull();
+  it('migrates the folded "inbox" tab to "work"', () => {
+    expect(migrateLayoutMode('inbox')).toBe('work');
+  });
+
+  it('migrates the folded "routines" tab to "agents"', () => {
+    expect(migrateLayoutMode('routines')).toBe('agents');
+  });
+
+  it('migrates the retired "home" tab to "chat"', () => {
+    expect(migrateLayoutMode('home')).toBe('chat');
+  });
+
+  it('returns null for valid "work" mode', () => {
     expect(migrateLayoutMode('work')).toBeNull();
+  });
+
+  it('returns null for valid "agents" mode', () => {
+    expect(migrateLayoutMode('agents')).toBeNull();
   });
 
   it('returns null for valid "dashboards" mode', () => {

@@ -142,6 +142,8 @@ export type ResidentRow = {
   /** Local hour (0-23) of the daily morning beat; NULL = beat disabled. */
   morning_hour: number | null;
   enabled: number;
+  /** Workspace superuser (0|1): declares the workspace/column client tools. */
+  superuser: number;
   created_at: string;
 };
 

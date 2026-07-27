@@ -22,12 +22,9 @@ type AppHistoryState = {
 };
 
 const TAB_TITLES: Record<LayoutMode, string> = {
-  home: 'Home',
-  inbox: 'Inbox',
   work: 'Work',
   chat: 'Chat',
   dashboards: 'Dashboards',
-  routines: 'Routines',
   agents: 'Agents',
   plugins: 'Plugins',
   settings: 'Settings',
@@ -55,9 +52,9 @@ const normalizeTicketsView = (view: TicketsView): TicketsView => {
   if (legacy.type === 'board' && legacy.projectId) {
     return { type: 'project', projectId: legacy.projectId, tab: 'board' };
   }
-  // 'dashboard' and 'inbox' moved to their own rail tabs; an old Work-view
-  // entry carrying them lands on the all-work list.
-  if (legacy.type === 'dashboard' || legacy.type === 'inbox') {
+  // 'dashboard' moved to its own rail tab; an old Work-view entry carrying
+  // it lands on the all-work list. ('inbox' is a valid Work view again.)
+  if (legacy.type === 'dashboard') {
     return { type: 'all' };
   }
   if (view.type === 'project' && !legacy.tab) {

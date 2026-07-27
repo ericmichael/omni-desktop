@@ -1,7 +1,7 @@
 /**
  * Hotkeys settings. Two voice bindings: one that toggles recording on the
  * hovered code-deck column / active chat, and a separate one that opens and
- * records to the workspace (global) agent. The recorder captures a key combo and
+ * records to the superuser resident's DM. The recorder captures a key combo and
  * stores it in react-hotkeys-hook format (e.g. `alt+v`).
  */
 
@@ -156,10 +156,10 @@ export function SettingsModalHotkeysTab(): React.ReactElement {
           </div>
           <div className={styles.row}>
             <div className={styles.label}>
-              <Body1Strong>Workspace agent hotkey</Body1Strong>
+              <Body1Strong>Orchestrator hotkey</Body1Strong>
               <Caption1>
-                Opens the workspace (global) agent and records to it. Same tap-to-toggle / hold-to-talk gesture. A
-                separate binding from the column hotkey above. Tile mode only.
+                Opens your workspace-superuser agent’s DM and records to it (set the superuser flag on an agent in the
+                Agents tab). Same tap-to-toggle / hold-to-talk gesture. A separate binding from the column hotkey above.
               </Caption1>
             </div>
             <HotkeyRecorder value={globalHotkey} onChange={setGlobalVoiceHotkey} />

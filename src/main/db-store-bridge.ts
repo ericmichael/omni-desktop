@@ -551,6 +551,7 @@ export function rowToResidentAgent(row: ResidentRow): ResidentAgent {
     ...(projectIds.length > 0 ? { projectIds } : {}),
     morningHour: row.morning_hour,
     enabled: row.enabled === 1,
+    ...(row.superuser === 1 ? { superuser: true } : {}),
     createdAt: fromIso(row.created_at),
   };
 }
@@ -565,6 +566,7 @@ export function residentAgentToRow(agent: ResidentAgent): ResidentRow {
     project_ids: JSON.stringify(agent.projectIds ?? []),
     morning_hour: agent.morningHour,
     enabled: agent.enabled ? 1 : 0,
+    superuser: agent.superuser ? 1 : 0,
     created_at: toIso(agent.createdAt),
   };
 }

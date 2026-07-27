@@ -20,9 +20,6 @@ export const $recordingScope = atom<string | null>(null);
  */
 export const $hoveredVoiceScope = atom<string | null>(null);
 
-/** Stable scope id for the headless global orchestrator's voice surface. */
-export const GLOBAL_VOICE_SCOPE = 'global';
-
 /** Per-column scope id, provided around the agent UI subtree. */
 export const VoiceScopeContext = createContext<string | null>(null);
 

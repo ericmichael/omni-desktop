@@ -1,12 +1,14 @@
 import { objectEquals } from '@observ33r/object-equals';
 import { atom, computed, map } from 'nanostores';
 
+import { groupTasks } from '@/lib/task-attention';
 import { STATUS_POLL_INTERVAL_MS } from '@/renderer/constants';
 import { milestoneApi } from '@/renderer/features/Initiatives/state';
 import { $pages, pageApi } from '@/renderer/features/Pages/state';
 import { projectsApi } from '@/renderer/features/Projects/state';
 import { emitter, ipc } from '@/renderer/services/ipc';
 import { persistedStoreApi } from '@/renderer/services/store';
+import { DEFAULT_PIPELINE } from '@/shared/pipeline-defaults';
 import { isActivePhase } from '@/shared/ticket-phase';
 import type {
   ArtifactFileContent,
@@ -87,12 +89,53 @@ export type ProjectTab = 'home' | 'board' | 'pages' | 'settings';
  */
 export type TicketsView =
   | { type: 'all' }
+  | { type: 'inbox' }
   | { type: 'project'; projectId: ProjectId; tab: ProjectTab }
   | { type: 'ticket'; ticketId: TicketId }
   | { type: 'page'; pageId: PageId; projectId: ProjectId }
   | { type: 'milestone'; milestoneId: MilestoneId; projectId: ProjectId };
 
 export const $ticketsView = atom<TicketsView>({ type: 'all' });
+
+/** Build a unique nav value from the current view state, for sidebar
+ *  selection painting. Every project-scoped view (any tab, page, milestone,
+ *  ticket) selects its project's row. */
+export function viewToNavValue(view: TicketsView, tickets: Record<string, Ticket>): string | undefined {
+  if (view.type === 'all') {
+    return 'all-work';
+  }
+  if (view.type === 'inbox') {
+    return 'inbox';
+  }
+  if (view.type === 'project' || view.type === 'page' || view.type === 'milestone') {
+    return `project:${view.projectId}`;
+  }
+  if (view.type === 'ticket') {
+    const projectId = tickets[view.ticketId]?.projectId;
+    return projectId ? `project:${projectId}` : undefined;
+  }
+  return undefined;
+}
+
+/**
+ * Per-project "Needs you" counts for the sidebar badges — non-archived
+ * tickets whose derived attention demands a human. Unfiltered on purpose
+ * (the badges are global; WorkAllView applies its own filters).
+ */
+export const $needsYouByProject = computed(persistedStoreApi.$atom, (store) => {
+  const pipelines = new Map<ProjectId, Pipeline>(store.projects.map((p) => [p.id, p.pipeline ?? DEFAULT_PIPELINE]));
+  const active = store.tickets.filter((t) => !t.archivedAt);
+  const counts: Record<ProjectId, number> = {};
+  for (const { ticket } of groupTasks(active, (projectId) => pipelines.get(projectId)).needsYou) {
+    counts[ticket.projectId] = (counts[ticket.projectId] ?? 0) + 1;
+  }
+  return counts;
+});
+
+/** Cross-project total, for the Tasks row's badge. */
+export const $needsYouCount = computed($needsYouByProject, (counts) =>
+  Object.values(counts).reduce((sum, n) => sum + n, 0)
+);
 
 /** The project a view is scoped to, or null for the global all-work view.
  *  Ticket views don't carry a projectId — callers resolve it from the ticket. */
@@ -164,6 +207,8 @@ const applyTicketsView = (view: TicketsView): void => {
       break;
     }
     case 'all':
+    case 'inbox':
+      // Inbox state is derived from the persisted store — nothing to fetch.
       break;
   }
 };
@@ -456,6 +501,9 @@ export const ticketApi = {
   // Navigation
   goToAllWork: (): void => {
     navigateTo({ type: 'all' });
+  },
+  goToInbox: (): void => {
+    navigateTo({ type: 'inbox' });
   },
   goToProject: (projectId: ProjectId, tab: ProjectTab = 'home'): void => {
     navigateTo({ type: 'project', projectId, tab });

@@ -7,24 +7,21 @@
  *                            sent on release.
  *
  * `voiceToggleHotkey` drives the hovered code-deck column or the active chat.
- * `globalVoiceToggleHotkey` drives the workspace (global) agent and opens its
- * panel. Renders nothing. No-op when local voice is off/unsupported or the combo
- * is unset.
+ * `globalVoiceToggleHotkey` opens the superuser resident's DM and drives its
+ * mic — talk to your orchestrator from anywhere. Renders nothing. No-op when
+ * local voice is off/unsupported, the combo is unset, or (for the global
+ * binding) no enabled superuser resident exists.
  */
 
 import { useStore } from '@nanostores/react';
 import { useCallback, useRef } from 'react';
 import { useHotkeys } from 'react-hotkeys-hook';
 
-import { activateGlobalAgent } from '@/renderer/features/GlobalAgent/state';
+import { dmChannelId, USER_PARTICIPANT } from '@/lib/resident-agent';
+import { goToResidentChannel } from '@/renderer/features/Residents/state';
 import { persistedStoreApi } from '@/renderer/services/store';
 import { isLocalVoiceCapable } from '@/renderer/services/voice-client';
-import {
-  $hoveredVoiceScope,
-  getVoiceMic,
-  GLOBAL_VOICE_SCOPE,
-  startOrArmVoiceMic,
-} from '@/renderer/services/voice-recording';
+import { $hoveredVoiceScope, getVoiceMic, startOrArmVoiceMic } from '@/renderer/services/voice-recording';
 
 // keyup too, so a hold can send on release.
 const hotkeyOptions = { enableOnFormTags: true, preventDefault: true, keydown: true, keyup: true } as const;
@@ -40,14 +37,26 @@ function resolveColumnScope(): string | null {
   return null;
 }
 
-/** The global agent always resolves to its own scope. */
-const resolveGlobalScope = (): string => GLOBAL_VOICE_SCOPE;
+/** The first enabled superuser resident — the workspace orchestrator. */
+const superuserAgentId = (): string | null =>
+  persistedStoreApi.get().residentAgents.find((a) => a.enabled && a.superuser)?.id ?? null;
+
+/** The orchestrator's voice surface is its user-DM composer mic. */
+const resolveGlobalScope = (): string | null => {
+  const agentId = superuserAgentId();
+  return agentId ? dmChannelId(USER_PARTICIPANT, agentId) : null;
+};
 
 /**
- * Activate the orchestrator in the background (mount its session + mic) WITHOUT
- * opening the panel — the app-level ambient glow signals it's listening.
+ * Open the orchestrator's DM so its composer (and mic) mounts — the DM is the
+ * conversation surface, so the hotkey lands you where the reply will appear.
  */
-const armGlobalAgent = (): void => activateGlobalAgent();
+const openSuperuserDm = (): void => {
+  const agentId = superuserAgentId();
+  if (agentId) {
+    goToResidentChannel(dmChannelId(USER_PARTICIPANT, agentId));
+  }
+};
 
 /**
  * Bind one gesture-smart voice hotkey to a resolved scope.
@@ -135,8 +144,8 @@ export function VoiceHotkeys(): null {
     store.globalVoiceToggleHotkey,
     Boolean(store.globalVoiceToggleHotkey) && voiceOn,
     resolveGlobalScope,
-    armGlobalAgent,
-    true // arm a cold mic — the orchestrator may still be booting
+    openSuperuserDm,
+    true // arm a cold mic — the DM composer may still be mounting
   );
 
   return null;

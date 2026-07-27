@@ -61,6 +61,9 @@ export { $agentStatuses as $codeTabStatuses, $agentXTerms as $codeTabXTerms };
 export const $codeTabPhases = map<Record<CodeTabId, AutoLaunchPhase>>({});
 export const $codeTabErrors = map<Record<CodeTabId, string | null>>({});
 
+/** The synthetic app-launcher column id ("Apps" grid). */
+export const APP_LAUNCHER_ID = '__launcher__';
+
 export const codeApi = {
   startSandbox: (tabId: CodeTabId, arg: { workspaceDir: string }) => {
     clearStatus(tabId);
@@ -75,6 +78,24 @@ export const codeApi = {
   rebuildSandbox: (tabId: CodeTabId, fallbackArg: { workspaceDir: string }) => {
     clearStatus(tabId);
     agentProcessApi.rebuild(tabId, fallbackArg);
+  },
+
+  /**
+   * Land in a fresh chat: reuse a pristine chat column (one whose session
+   * never produced a conversation) or create one — idempotent, so boot
+   * landings and repeated "New chat" clicks never stack empty columns.
+   */
+  openFreshChat: async (): Promise<void> => {
+    const tabs = persistedStoreApi.getKey('codeTabs') ?? [];
+    const known = new Set((persistedStoreApi.getKey('chatConversations') ?? []).map((c) => c.sessionId));
+    const pristine = tabs.find(
+      (t) => !t.projectId && !t.customAppId && !t.ticketId && !t.routineId && (!t.sessionId || !known.has(t.sessionId))
+    );
+    if (pristine) {
+      await persistedStoreApi.setKey('activeCodeTabId', pristine.id);
+      return;
+    }
+    await codeApi.addTab();
   },
 
   addTab: async (): Promise<CodeTab> => {

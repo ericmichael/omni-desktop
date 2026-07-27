@@ -118,7 +118,8 @@ export type ResidentEvent = {
     | 'channel_post'
     | 'catch_up'
     | 'scheduled'
-    | 'assignment';
+    | 'assignment'
+    | 'column_done';
   /** Participant id that caused the event, when there is one. */
   from?: string;
   /** Message text, when the event carries one. */
@@ -144,6 +145,7 @@ const WAKE_NOW_KINDS: ReadonlySet<ResidentEvent['kind']> = new Set([
   'catch_up', // digest backlog aged out — the eventual-delivery guarantee
   'scheduled', // a self-set alarm fired (the game's plan() appointments)
   'assignment', // a ticket was assigned to this agent — direct delegation
+  'column_done', // a column run this agent dispatched (column_send) ended
 ]);
 
 export const isWakeNow = (event: ResidentEvent): boolean => WAKE_NOW_KINDS.has(event.kind);
@@ -163,6 +165,11 @@ export const dayKey = (ts: number): string => {
 /** One session per agent per calendar day — continuity across days lives in
  *  durable memory, not transcript (the plan's no-infinite-compaction call). */
 export const daySessionId = (agentId: string, key: string): string => `resident-${agentId}-${key}`;
+
+/** Whether a serve session id belongs to a resident agent — the stable serve
+ *  session (`resident-<id>`) or a day session (`resident-<id>-YYYY-MM-DD`).
+ *  User chat sessions are UUIDs, so the prefix cannot collide. */
+export const isResidentSessionId = (sessionId: string): boolean => sessionId.startsWith('resident-');
 
 // ---------------------------------------------------------------------------
 // DM round budget (agent↔agent pacing)
@@ -412,6 +419,10 @@ const eventLine = (e: ResidentEvent): string => {
       // The detail carries the ticket reference; the agent pulls the full
       // ticket through the project tools (get_ticket) — delta, not dump.
       return e.detail ?? 'a ticket was assigned to you — check your tickets';
+    case 'column_done':
+      // The detail carries the column reference; the agent reads the outcome
+      // through column_transcript — delta, not dump.
+      return e.detail ?? 'an agent you dispatched to a workspace column finished its run';
   }
 };
 
@@ -541,7 +552,7 @@ export const renderReflectPrompt = (r: ReflectionInput): string => {
  * Persona is prior; memories are posterior and may override it.
  */
 export const renderIdentityInstructions = (
-  agent: Pick<ResidentAgent, 'id' | 'name' | 'role' | 'personaText'>,
+  agent: Pick<ResidentAgent, 'id' | 'name' | 'role' | 'personaText' | 'superuser'>,
   memories: ResidentMemoryEntry[],
   roster: Array<Pick<ResidentAgent, 'id' | 'name' | 'role'>>,
   assignment?: {
@@ -576,6 +587,25 @@ export const renderIdentityInstructions = (
   );
   if (agent.personaText.trim()) {
     parts.push(`\n## Who you are\n${agent.personaText.trim()}`);
+  }
+  if (agent.superuser) {
+    parts.push(
+      `\n## You are the workspace orchestrator\n` +
+        `Beyond your own workspace, you hold superuser tools over the user's Tile deck — ` +
+        `the columns of agent sessions in their app.\n` +
+        `- \`list_workspace\` is your map: open columns, their sessions, bound project/ticket, and run state. ` +
+        `\`list_apps\` shows every app across all columns (each with a \`handle_id\`) plus the global dock apps.\n` +
+        `- Act inside a column with \`column_send\` (instruct its agent), \`column_decide\` (approve/reject what ` +
+        `it is blocked on), \`column_cancel\` (stop it), and \`start_ticket\` / \`stop_ticket\` (autopilot). ` +
+        `Shape the deck with \`open_column\`, \`close_column\`, and \`launch_app\`.\n` +
+        `- Drive any column's apps with the \`app_*\` tools using the \`handle_id\` from \`list_apps\` — not a ` +
+        `bare name, because the same app (e.g. \`terminal\`) exists in many columns.\n` +
+        `- When you dispatch work with \`column_send\`, you are woken when that run ends — no need to poll.\n` +
+        `- These tools live in the user's app window: when it is closed they return an error. That is normal — ` +
+        `note it, work with what you have, and try again later.\n` +
+        `- Report through your speech tools like everything else (\`dm\` the user, post to channels). ` +
+        `Confirm with the user before anything destructive (closing a column, cancelling a run).`
+    );
   }
   if (handbook?.trim()) {
     parts.push(

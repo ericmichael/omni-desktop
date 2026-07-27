@@ -6,6 +6,7 @@ import '@xterm/xterm/css/xterm.css';
 import '@/renderer/features/Toast/ipc-toast-listener';
 import '@/renderer/features/Toast/status-toast-listener';
 import '@/renderer/features/WorkspaceSync/state'; // side-effect: registers IPC listener
+import '@/renderer/features/Residents/workspace-tool-bridge'; // side-effect: superuser residents' workspace tools
 
 import { FluentProvider, makeStyles, tokens } from '@fluentui/react-components';
 import { useStore } from '@nanostores/react';
@@ -13,6 +14,7 @@ import { MotionConfig } from 'framer-motion';
 import { useEffect, useMemo } from 'react';
 import { ErrorBoundary } from 'react-error-boundary';
 
+import { initBootLanding } from '@/renderer/app/boot-landing';
 import { ErrorBoundaryFallback } from '@/renderer/app/ErrorBoundaryFallback';
 import { MainContent } from '@/renderer/app/MainContent';
 import { StatusAnnouncer } from '@/renderer/app/StatusAnnouncer';
@@ -20,8 +22,6 @@ import { syncTheme } from '@/renderer/constants';
 import { SystemInfoLoadingGate, SystemInfoProvider } from '@/renderer/contexts/SystemInfoContext';
 import { AuthGate } from '@/renderer/features/Auth/AuthGate';
 import { CommandPalette } from '@/renderer/features/CommandPalette/CommandPalette';
-import { GlobalAgent } from '@/renderer/features/GlobalAgent/GlobalAgent';
-import { GlobalAgentAmbientGlow } from '@/renderer/features/GlobalAgent/GlobalAgentAmbientGlow';
 import { QuickCapture } from '@/renderer/features/Inbox/QuickCapture';
 import { MigrationNotice } from '@/renderer/features/MigrationNotice/MigrationNotice';
 import { ToastContainer } from '@/renderer/features/Toast/ToastContainer';
@@ -87,6 +87,7 @@ export const App = () => {
     initAppHistory();
     initAgentAttention();
     initPwaInstall();
+    initBootLanding();
   }, []);
 
   const themeName = store.theme ?? 'omni';
@@ -129,8 +130,6 @@ export const App = () => {
                     <MainContent />
                   </div>
                   <QuickCapture />
-                  <GlobalAgent />
-                  <GlobalAgentAmbientGlow />
                   <VoiceHotkeys />
                   <CommandPalette />
                   <SyncBar />

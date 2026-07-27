@@ -710,12 +710,12 @@ export class PgProjectsRepo implements IProjectsRepo {
   async upsertResident(row: ResidentRow): Promise<void> {
     await this.tx((c) =>
       c.query(
-        `INSERT INTO resident_agents (tenant_id, id, name, role, persona_text, profile_name, project_ids, morning_hour, enabled, created_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+        `INSERT INTO resident_agents (tenant_id, id, name, role, persona_text, profile_name, project_ids, morning_hour, enabled, superuser, created_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
          ON CONFLICT (tenant_id, id) DO UPDATE SET
            name = EXCLUDED.name, role = EXCLUDED.role, persona_text = EXCLUDED.persona_text,
            profile_name = EXCLUDED.profile_name, project_ids = EXCLUDED.project_ids,
-           morning_hour = EXCLUDED.morning_hour, enabled = EXCLUDED.enabled`,
+           morning_hour = EXCLUDED.morning_hour, enabled = EXCLUDED.enabled, superuser = EXCLUDED.superuser`,
         [
           this.tenantId,
           row.id,
@@ -726,6 +726,7 @@ export class PgProjectsRepo implements IProjectsRepo {
           row.project_ids,
           row.morning_hour,
           row.enabled,
+          row.superuser,
           row.created_at,
         ]
       )

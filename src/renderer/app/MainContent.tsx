@@ -2,16 +2,16 @@ import { makeStyles, mergeClasses } from '@fluentui/react-components';
 import { useStore } from '@nanostores/react';
 import { memo, useEffect, useState } from 'react';
 
+import { AppSidebar } from '@/renderer/app/AppSidebar';
+import { $mobileHomeOpen } from '@/renderer/app/mobile-home';
 import { Sidebar } from '@/renderer/app/Sidebar';
+import { useIsDesktop } from '@/renderer/common/use-is-desktop';
 import { Code } from '@/renderer/features/Code/Code';
 import { Dashboards } from '@/renderer/features/Dashboards/Dashboards';
 import { Gallery } from '@/renderer/features/Gallery/Gallery';
-import { Home } from '@/renderer/features/Home/Home';
-import { InboxView } from '@/renderer/features/Inbox/InboxView';
 import { OnboardingWizard } from '@/renderer/features/Onboarding/OnboardingWizard';
 import { PluginsView } from '@/renderer/features/Plugins/PluginsView';
 import { ResidentsTab } from '@/renderer/features/Residents/ResidentsTab';
-import { ScheduledTasks } from '@/renderer/features/ScheduledTasks/ScheduledTasks';
 import { SettingsPage } from '@/renderer/features/SettingsModal/SettingsPage';
 import { Tickets } from '@/renderer/features/Tickets/Tickets';
 import { persistedStoreApi } from '@/renderer/services/store';
@@ -59,6 +59,8 @@ const useStyles = makeStyles({
  */
 export const MainContent = memo(() => {
   const styles = useStyles();
+  const isDesktop = useIsDesktop();
+  const mobileHomeOpen = useStore($mobileHomeOpen);
   const store = useStore(persistedStoreApi.$atom);
   const active: LayoutMode = store.layoutMode;
   // Glass follows the THEME (one knob). The user's wallpaper, when set, only
@@ -93,15 +95,13 @@ export const MainContent = memo(() => {
   }
 
   const panels: { key: LayoutMode; Component: React.ComponentType }[] = [
-    { key: 'home', Component: Home },
-    { key: 'inbox', Component: InboxView },
-    // Work owns projects, tasks, pages, and milestones (the old Projects tab).
+    // Work owns the inbox, projects, tasks, pages, and milestones.
     { key: 'work', Component: Tickets },
     // Chat IS the deck since the tab merge: chat columns and work sessions
     // share one surface (Tile/Focus), so there's a single panel for both.
     { key: 'chat', Component: Code },
     { key: 'dashboards', Component: Dashboards },
-    { key: 'routines', Component: ScheduledTasks },
+    // Agents hosts the resident roster, channels/DMs, and the Routines surface.
     { key: 'agents', Component: ResidentsTab },
     { key: 'plugins', Component: PluginsView },
     { key: 'settings', Component: SettingsPage },
@@ -120,8 +120,13 @@ export const MainContent = memo(() => {
           : undefined
       }
     >
+      {/* Mobile bottom bar (self-hides ≥640px) + the unified sidebar —
+          persistent nav on desktop, the Home page when open on mobile. */}
       <Sidebar />
-      <div className={styles.content}>
+      <AppSidebar />
+      {/* Panels stay MOUNTED while the mobile Home page is frontmost —
+          hidden, not unmounted, to preserve webview/session state. */}
+      <div className={styles.content} style={!isDesktop && mobileHomeOpen ? { display: 'none' } : undefined}>
         {panels.map(
           ({ key, Component }) =>
             mounted.has(key) && (

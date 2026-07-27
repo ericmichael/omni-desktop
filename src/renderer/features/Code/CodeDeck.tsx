@@ -13,7 +13,6 @@ import {
   SortableContext,
   sortableKeyboardCoordinates,
   useSortable,
-  verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { makeStyles, mergeClasses, shorthands, tokens } from '@fluentui/react-components';
@@ -41,6 +40,7 @@ import { uuidv4 } from '@/lib/uuid';
 import { Webview } from '@/renderer/common/Webview';
 import {
   Button,
+  EmptyState,
   Menu,
   MenuDivider,
   MenuItem,
@@ -52,7 +52,6 @@ import {
 import { $appLaunchRequest, clearAppLaunchRequest } from '@/renderer/features/AppControl/app-launch-bridge';
 import { BrowserView } from '@/renderer/features/Browser/BrowserView';
 import { ConsoleStarted } from '@/renderer/features/Console/ConsoleRunning';
-import { GlobalAgentToggle } from '@/renderer/features/GlobalAgent/GlobalAgentToggle';
 import { $previewRequest, clearPreviewRequest } from '@/renderer/features/Tickets/preview-bridge';
 import { PullRequestBanner } from '@/renderer/features/Tickets/PullRequestBanner';
 import { ticketApi } from '@/renderer/features/Tickets/state';
@@ -63,7 +62,7 @@ import {
 } from '@/renderer/features/Tickets/TicketControls';
 import { type TicketPanel, TicketPanelOverlay } from '@/renderer/features/Tickets/TicketPanelOverlay';
 import { $columnActivity, activityStatusText } from '@/renderer/services/column-activity';
-import { $initialized, persistedStoreApi } from '@/renderer/services/store';
+import { persistedStoreApi } from '@/renderer/services/store';
 import { ENTER_ANIMATE, ENTER_INITIAL, FADE_DURATION_S, SPRING_GENTLE, SPRING_STANDARD } from '@/renderer/theme/motion';
 import { $glassEnabled } from '@/renderer/theme/use-glass';
 import type { AppHandleScope } from '@/shared/app-control-types';
@@ -71,29 +70,17 @@ import { makeAppHandleId } from '@/shared/app-control-types';
 import type { AppDescriptor, AppId, CustomAppEntry } from '@/shared/app-registry';
 import { buildAppRegistry } from '@/shared/app-registry';
 import type { AutoLaunchPhase } from '@/shared/machines/auto-launch.machine';
-import type {
-  ChatConversation,
-  CodeLayoutMode,
-  CodeTab,
-  CodeTabId,
-  ProjectId,
-  TicketId,
-  TicketResolution,
-} from '@/shared/types';
+import type { CodeLayoutMode, CodeTab, CodeTabId, ProjectId, TicketId, TicketResolution } from '@/shared/types';
 import { firstSource, isChatColumn, projectHasRepoSource } from '@/shared/types';
 
 import { AppIcon } from './AppIcon';
 import { AttachProjectMenu } from './AttachProjectMenu';
 import { CodeTabContent } from './CodeTabContent';
 import { ColumnAura } from './ColumnAura';
-import { $codeTabPhases, $codeTabStatuses, codeApi } from './state';
+import { $codeTabPhases, $codeTabStatuses, APP_LAUNCHER_ID, codeApi } from './state';
 import { useRecentConversations } from './use-recent-conversations';
 
 /** Sentinel customAppId meaning "show the app launcher picker". */
-const APP_LAUNCHER_ID = '__launcher__';
-
-/** Recent conversations shown before (and added per) "Show more". */
-const RECENT_PAGE_SIZE = 10;
 
 const BROWSER_APP_ID = 'browser';
 const BROWSER_START_URL = 'https://duckduckgo.com';
@@ -407,9 +394,6 @@ const useStyles = makeStyles({
     opacity: 1,
     animationName: 'none',
   },
-  focusListItemLive: {
-    color: tokens.colorBrandForeground1,
-  },
   deckColumn: {
     display: 'grid',
     gridTemplateRows: 'subgrid',
@@ -475,12 +459,6 @@ const useStyles = makeStyles({
   // Glass surface colors come from --colorNeutralBackground* / --colorNeutralStroke1
   // pushed at the deck-bg root in MainContent. These classes only opt in to the
   // blur layer and any unique embellishments (insets / shadows / shapes).
-  glassFocusSidebar: {
-    backgroundColor: tokens.colorNeutralBackground1,
-    backdropFilter: 'var(--glass-blur)',
-    WebkitBackdropFilter: 'var(--glass-blur)',
-  },
-  glassFocusSidebarHeader: {},
   glassSessionPane: {
     backgroundColor: tokens.colorNeutralBackground1,
     backdropFilter: 'var(--glass-blur)',
@@ -588,52 +566,12 @@ const useStyles = makeStyles({
     backgroundColor: tokens.colorNeutralBackground2,
   },
   sessionPaneHidden: { display: 'none' },
-  focusListItem: { position: 'relative' },
-  focusListItemDragging: { opacity: 0.7 },
-  focusListItemRow: {
+  emptyDeck: {
+    flex: '1 1 0',
+    minHeight: 0,
     display: 'flex',
     alignItems: 'center',
-    gap: tokens.spacingHorizontalM,
-    width: '100%',
-    paddingLeft: tokens.spacingHorizontalM,
-    paddingRight: tokens.spacingHorizontalM,
-    paddingTop: '6px',
-    paddingBottom: '6px',
-    textAlign: 'left',
-    transitionProperty: 'background-color',
-    transitionDuration: '150ms',
-    cursor: 'pointer',
-    border: 'none',
-    backgroundColor: 'transparent',
-    ':hover .revealOnHover': { opacity: 1 },
-    ':focus-within .revealOnHover': { opacity: 1 },
-  },
-  focusListItemActive: { backgroundColor: tokens.colorSubtleBackgroundSelected, color: tokens.colorNeutralForeground1 },
-  focusListItemInactive: {
-    color: tokens.colorNeutralForeground2,
-    ':hover': { backgroundColor: tokens.colorSubtleBackgroundHover, color: tokens.colorNeutralForeground1 },
-  },
-  focusListItemContent: {
-    flex: '1 1 0',
-    minWidth: 0,
-    textAlign: 'left',
-    border: 'none',
-    backgroundColor: 'transparent',
-    cursor: 'pointer',
-  },
-  focusListItemInner: { display: 'flex', flexDirection: 'column', minWidth: 0 },
-  focusListItemLabel: {
-    fontSize: tokens.fontSizeBase300,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-  },
-  focusListItemSub: {
-    fontSize: tokens.fontSizeBase200,
-    color: tokens.colorNeutralForeground3,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
+    justifyContent: 'center',
   },
   deckScroll: {
     flex: '1 1 0',
@@ -706,68 +644,6 @@ const useStyles = makeStyles({
     display: 'flex',
     flexDirection: 'column',
     [`@media (min-width: ${SNAP_SCROLL_WIDTH + 1}px)`]: { flexDirection: 'row' },
-  },
-  focusSidebar: {
-    display: 'none',
-    flexDirection: 'column',
-    height: '100%',
-    width: '240px',
-    ...shorthands.borderRight('1px', 'solid', tokens.colorNeutralStroke1),
-    backgroundColor: tokens.colorNeutralBackground1,
-    flexShrink: 0,
-    [`@media (min-width: ${SNAP_SCROLL_WIDTH + 1}px)`]: { display: 'flex' },
-  },
-  focusSidebarHeader: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingLeft: tokens.spacingHorizontalM,
-    paddingRight: tokens.spacingHorizontalM,
-    paddingTop: tokens.spacingVerticalS,
-    paddingBottom: tokens.spacingVerticalS,
-    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
-  },
-  focusSidebarTitle: {
-    fontSize: tokens.fontSizeBase200,
-    fontWeight: tokens.fontWeightSemibold,
-    color: tokens.colorNeutralForeground2,
-    textTransform: 'uppercase',
-    letterSpacing: '0.05em',
-  },
-  focusSidebarCount: { fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 },
-  focusSidebarList: { flex: '1 1 0', minHeight: 0, overflowY: 'auto', paddingTop: '4px', paddingBottom: '4px' },
-  /* "Show more" row at the end of a truncated Recent section. */
-  focusSidebarShowMore: {
-    display: 'block',
-    width: '100%',
-    textAlign: 'left',
-    paddingLeft: tokens.spacingHorizontalM,
-    paddingRight: tokens.spacingHorizontalM,
-    paddingTop: '6px',
-    paddingBottom: '6px',
-    fontSize: tokens.fontSizeBase200,
-    color: tokens.colorNeutralForeground3,
-    border: 'none',
-    backgroundColor: 'transparent',
-    cursor: 'pointer',
-    ':hover': { color: tokens.colorNeutralForeground1, backgroundColor: tokens.colorSubtleBackgroundHover },
-    ':focus-visible': {
-      outline: `2px solid ${tokens.colorStrokeFocus2}`,
-      outlineOffset: '-2px',
-      borderRadius: tokens.borderRadiusMedium,
-    },
-  },
-  /* "Recent" section label inside the sidebar scroll (below the open columns). */
-  focusSidebarSubheader: {
-    paddingLeft: tokens.spacingHorizontalM,
-    paddingRight: tokens.spacingHorizontalM,
-    paddingTop: tokens.spacingVerticalM,
-    paddingBottom: tokens.spacingVerticalXS,
-    fontSize: tokens.fontSizeBase200,
-    fontWeight: tokens.fontWeightSemibold,
-    color: tokens.colorNeutralForeground3,
-    textTransform: 'uppercase',
-    letterSpacing: '0.05em',
   },
   focusContent: { flex: '1 1 0', minWidth: 0, minHeight: 0 },
   metaBadge: {
@@ -932,7 +808,6 @@ const CodeDeckHeader = memo(
               </MenuList>
             </MenuPopover>
           </Menu>
-          <GlobalAgentToggle />
         </div>
       </div>
     );
@@ -2175,145 +2050,6 @@ const TabContentSlot = memo(({ host }: { host: HTMLDivElement }) => {
 });
 TabContentSlot.displayName = 'TabContentSlot';
 
-/**
- * One archived conversation in the Focus sidebar's Recent section. Opening it
- * rebuilds a chat column from the entry (or activates the column already
- * showing it); deleting destroys the entry AND its workspace snapshot.
- */
-const RecentConversationRow = memo(
-  ({
-    conversation,
-    onOpen,
-    onDelete,
-  }: {
-    conversation: ChatConversation;
-    onOpen: (conversation: ChatConversation) => void;
-    onDelete: (conversation: ChatConversation) => void;
-  }) => {
-    const styles = useStyles();
-    return (
-      <div className={mergeClasses(styles.focusListItemRow, styles.focusListItemInactive)}>
-        <button type="button" onClick={() => onOpen(conversation)} className={styles.focusListItemContent}>
-          <div className={styles.focusListItemInner}>
-            <span className={styles.focusListItemLabel} title={conversation.title}>
-              {conversation.title}
-            </span>
-          </div>
-        </button>
-        <Menu positioning={{ position: 'below', align: 'end', fallbackPositions: ['above-end'] }}>
-          <MenuTrigger>
-            <SessionActionButton
-              icon={<MoreHorizontal20Regular style={{ width: 16, height: 16 }} />}
-              label="Conversation menu"
-            />
-          </MenuTrigger>
-          <MenuPopover>
-            <MenuList>
-              <MenuItem onClick={() => onOpen(conversation)}>Open</MenuItem>
-              <MenuItem onClick={() => onDelete(conversation)}>Delete conversation</MenuItem>
-            </MenuList>
-          </MenuPopover>
-        </Menu>
-      </div>
-    );
-  }
-);
-RecentConversationRow.displayName = 'RecentConversationRow';
-
-const FocusListItem = memo(
-  ({
-    tab,
-    label,
-    subLabel,
-    isActive,
-    onSelect,
-    onClose,
-  }: {
-    tab: CodeTab;
-    label: string;
-    subLabel?: string | null;
-    isActive: boolean;
-    onSelect: (id: CodeTabId) => void;
-    onClose: (id: CodeTabId) => void;
-  }) => {
-    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-      id: tab.id,
-      transition: { duration: 220, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' },
-    });
-    const style = {
-      transform: CSS.Transform.toString(transform),
-      transition,
-    };
-
-    const styles = useStyles();
-    // Live activity wins over static identity: a working column shows what
-    // it's doing; ticket/routine columns show their binding. Idle chat
-    // columns show nothing — the title and newest-first order say enough.
-    const activity = useStore($columnActivity, { keys: [tab.id] })[tab.id];
-    const liveText = activityStatusText(activity);
-    const displaySub = liveText ?? subLabel ?? null;
-    return (
-      <div
-        ref={setNodeRef}
-        style={style}
-        className={mergeClasses(styles.focusListItem, isDragging && styles.focusListItemDragging)}
-      >
-        {/* The whole row is the drag surface (same idiom as tile column
-            headers): mouse drags after 6px, touch after a long-press, so
-            clicks and the menu still work. The hidden button is the
-            keyboard-accessible reorder handle — visible only when focused. */}
-        <div
-          className={mergeClasses(
-            styles.focusListItemRow,
-            styles.dragSurface,
-            isActive ? styles.focusListItemActive : styles.focusListItemInactive
-          )}
-          {...listeners}
-        >
-          <button
-            type="button"
-            className={styles.dragHandleA11y}
-            {...attributes}
-            {...listeners}
-            aria-label={`Reorder ${label}`}
-          >
-            <ReOrderDotsVertical20Regular style={{ width: 14, height: 14 }} />
-          </button>
-          <button type="button" onClick={() => onSelect(tab.id)} className={styles.focusListItemContent}>
-            <div className={styles.focusListItemInner}>
-              <span className={styles.focusListItemLabel} title={label}>
-                {label}
-              </span>
-              {displaySub && (
-                <span
-                  className={mergeClasses(styles.focusListItemSub, !!liveText && styles.focusListItemLive)}
-                  title={displaySub}
-                >
-                  {displaySub}
-                </span>
-              )}
-            </div>
-          </button>
-          <Menu positioning={{ position: 'below', align: 'end', fallbackPositions: ['above-end'] }}>
-            <MenuTrigger>
-              <SessionActionButton
-                icon={<MoreHorizontal20Regular style={{ width: 16, height: 16 }} />}
-                label="Session menu"
-              />
-            </MenuTrigger>
-            <MenuPopover>
-              <MenuList>
-                <MenuItem onClick={() => onClose(tab.id)}>Close session</MenuItem>
-              </MenuList>
-            </MenuPopover>
-          </Menu>
-        </div>
-      </div>
-    );
-  }
-);
-FocusListItem.displayName = 'FocusListItem';
-
 export const CodeDeck = memo(() => {
   const styles = useStyles();
   const store = useStore(persistedStoreApi.$atom);
@@ -2472,23 +2208,6 @@ export const CodeDeck = memo(() => {
     }
   }, [activeTabId, tabs]);
 
-  // An empty deck lands on a ready-to-type chat column instead of a blank
-  // canvas. Un-activated chat columns are free (lazy launch — no sandbox
-  // until the first message), so minting one on every empty state is safe.
-  const initialized = useStore($initialized);
-  const autoCreatedRef = useRef(false);
-  useEffect(() => {
-    if (!initialized || tabs.length > 0) {
-      autoCreatedRef.current = false;
-      return;
-    }
-    if (autoCreatedRef.current) {
-      return;
-    }
-    autoCreatedRef.current = true;
-    void codeApi.addTab();
-  }, [initialized, tabs.length]);
-
   useEffect(() => {
     setExpandedTabIds((current) => {
       const validIds = new Set(tabs.map((t) => t.id));
@@ -2578,7 +2297,9 @@ export const CodeDeck = memo(() => {
   // Conversation titles come from the launcher index ∪ the live session
   // listing, so open columns are titled even when the conversation predates
   // the index (migrated or resumed-from-server sessions).
-  const { recent: recentConversations, sessionTitles } = useRecentConversations(tabs);
+  // Recent conversations moved to the app sidebar's Sessions section; the
+  // deck still needs the title union for open-column labels.
+  const { sessionTitles } = useRecentConversations(tabs);
 
   const resolveLabel = useCallback(
     (tab: CodeTab) => {
@@ -2609,19 +2330,6 @@ export const CodeDeck = memo(() => {
 
   const handleNewSession = useCallback(() => {
     codeApi.addTab();
-  }, []);
-
-  const handleOpenConversation = useCallback((conversation: ChatConversation) => {
-    void codeApi.addTabForConversation(conversation);
-  }, []);
-  const handleDeleteConversation = useCallback((conversation: ChatConversation) => {
-    void codeApi.deleteConversation(conversation.sessionId);
-  }, []);
-  // Recent starts short and grows in pages; the fetch/merge cap (50) bounds
-  // the total either way.
-  const [recentVisible, setRecentVisible] = useState(RECENT_PAGE_SIZE);
-  const handleShowMoreRecent = useCallback(() => {
-    setRecentVisible((count) => count + RECENT_PAGE_SIZE);
   }, []);
 
   const handleOpenApps = useCallback(() => {
@@ -2681,10 +2389,6 @@ export const CodeDeck = memo(() => {
       next.delete(tabId);
       return next;
     });
-  }, []);
-
-  const handleSelect = useCallback((id: CodeTabId) => {
-    codeApi.setActiveTab(id);
   }, []);
 
   const handleToggleExpand = useCallback((id: CodeTabId) => {
@@ -2909,7 +2613,23 @@ export const CodeDeck = memo(() => {
           onOpenApps={handleOpenApps}
           isGlass={isGlass}
         />
-        {layoutMode === 'tile' && (
+        {/* Closing the last column leaves the deck genuinely empty — nothing
+            re-mints a column behind the user's back. (The boot landing still
+            opens a fresh chat on app launch; that's a launch gesture.) */}
+        {tabs.length === 0 && (
+          <div className={styles.emptyDeck}>
+            <EmptyState
+              title="No open sessions"
+              description="Start a chat, or launch an app from the header. Past conversations live in the sidebar's Sessions list."
+              action={
+                <Button variant="primary" leftIcon={<Add20Regular />} onClick={handleNewSession}>
+                  New chat
+                </Button>
+              }
+            />
+          </div>
+        )}
+        {layoutMode === 'tile' && tabs.length > 0 && (
           <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
             <SortableContext items={tabs.map((t) => t.id)} strategy={horizontalListSortingStrategy}>
               <div ref={deckScrollRef} className={styles.deckScroll}>
@@ -3026,148 +2746,100 @@ export const CodeDeck = memo(() => {
         {layoutMode === 'tile' && (
           <DeckMap tabs={tabs} currentTabId={pagerTabId} resolveLabel={resolveLabel} onSelect={scrollToColumn} />
         )}
-        {layoutMode === 'focus' && (
-          <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
-            <SortableContext items={tabs.map((t) => t.id)} strategy={verticalListSortingStrategy}>
-              <div className={styles.focusLayout}>
-                <div className={mergeClasses(styles.focusSidebar, isGlass && styles.glassFocusSidebar)}>
-                  <div className={mergeClasses(styles.focusSidebarHeader, isGlass && styles.glassFocusSidebarHeader)}>
-                    <span className={styles.focusSidebarTitle}>Sessions</span>
-                    <span className={mergeClasses(styles.flexItemsCenter, styles.gap1)}>
-                      {tabs.length > 0 && <span className={styles.focusSidebarCount}>{tabs.length}</span>}
-                      <SessionActionButton
-                        icon={<Add20Regular style={{ width: 14, height: 14 }} />}
-                        label="New chat"
-                        onClick={handleNewSession}
-                      />
-                    </span>
-                  </div>
-                  <div className={styles.focusSidebarList}>
-                    {tabs.map((tab) => (
-                      <FocusListItem
-                        key={tab.id}
-                        tab={tab}
-                        label={resolveLabel(tab)}
-                        subLabel={resolveTicketTitle(tab) ?? resolveRoutineName(tab)}
-                        isActive={tab.id === activeTab?.id}
-                        onSelect={handleSelect}
-                        onClose={handleClose}
-                      />
-                    ))}
-                    {recentConversations.length > 0 && (
-                      <>
-                        <div className={styles.focusSidebarSubheader}>Recent</div>
-                        {recentConversations.slice(0, recentVisible).map((conversation) => (
-                          <RecentConversationRow
-                            key={conversation.sessionId}
-                            conversation={conversation}
-                            onOpen={handleOpenConversation}
-                            onDelete={handleDeleteConversation}
+        {layoutMode === 'focus' && tabs.length > 0 && (
+          <div className={styles.focusLayout}>
+            <div className={styles.focusContent}>
+              {tabs.map((tab) => {
+                const isLauncher = tab.customAppId === APP_LAUNCHER_ID;
+                const appEntry =
+                  tab.customAppId && !isLauncher ? customApps.find((a) => a.id === tab.customAppId) : undefined;
+                if (isLauncher) {
+                  return (
+                    <div
+                      key={tab.id}
+                      style={{
+                        width: '100%',
+                        height: '100%',
+                        display: tab.id === activeTab?.id ? 'flex' : 'none',
+                        flexDirection: 'column',
+                      }}
+                    >
+                      <div className={mergeClasses(styles.launcherBody, isGlass && styles.launcherBodyGlass)}>
+                        {customApps.length === 0 ? (
+                          <div className={styles.launcherEmpty}>No apps installed. Add apps in Settings.</div>
+                        ) : (
+                          <AppLauncherGrid
+                            apps={customApps}
+                            onPick={(appId) => codeApi.setTabAppId(tab.id, appId)}
+                            isGlass={isGlass}
                           />
-                        ))}
-                        {recentConversations.length > recentVisible && (
-                          <button type="button" className={styles.focusSidebarShowMore} onClick={handleShowMoreRecent}>
-                            Show more ({recentConversations.length - recentVisible})
-                          </button>
                         )}
-                      </>
-                    )}
-                  </div>
-                </div>
-                <div className={styles.focusContent}>
-                  {tabs.map((tab) => {
-                    const isLauncher = tab.customAppId === APP_LAUNCHER_ID;
-                    const appEntry =
-                      tab.customAppId && !isLauncher ? customApps.find((a) => a.id === tab.customAppId) : undefined;
-                    if (isLauncher) {
-                      return (
-                        <div
-                          key={tab.id}
-                          style={{
-                            width: '100%',
-                            height: '100%',
-                            display: tab.id === activeTab?.id ? 'flex' : 'none',
-                            flexDirection: 'column',
-                          }}
-                        >
-                          <div className={mergeClasses(styles.launcherBody, isGlass && styles.launcherBodyGlass)}>
-                            {customApps.length === 0 ? (
-                              <div className={styles.launcherEmpty}>No apps installed. Add apps in Settings.</div>
-                            ) : (
-                              <AppLauncherGrid
-                                apps={customApps}
-                                onPick={(appId) => codeApi.setTabAppId(tab.id, appId)}
-                                isGlass={isGlass}
-                              />
-                            )}
-                          </div>
-                        </div>
-                      );
-                    }
-                    if (appEntry?.id === BROWSER_APP_ID) {
-                      return (
-                        <div
-                          key={tab.id}
-                          style={{
-                            width: '100%',
-                            height: '100%',
-                            display: tab.id === activeTab?.id ? 'flex' : 'none',
-                            flexDirection: 'column',
-                          }}
-                        >
-                          <BrowserView tabsetId={`col:${tab.id}`} isGlass={isGlass} />
-                        </div>
-                      );
-                    }
-                    if (appEntry) {
-                      const scope: AppHandleScope = appEntry.columnScoped ? 'column' : 'global';
-                      return (
-                        <div
-                          key={tab.id}
-                          style={{
-                            width: '100%',
-                            height: '100%',
-                            display: tab.id === activeTab?.id ? 'block' : 'none',
-                          }}
-                        >
-                          <Webview
-                            src={appEntry.url}
-                            showUnavailable={false}
-                            registry={{
-                              handleId: makeAppHandleId(scope, appEntry.id, scope === 'column' ? tab.id : undefined),
-                              appId: appEntry.id,
-                              kind: 'webview',
-                              scope,
-                              ...(scope === 'column' ? { tabId: tab.id } : {}),
-                              label: appEntry.label,
-                            }}
-                          />
-                        </div>
-                      );
-                    }
-                    return (
-                      <CodeSessionPane
-                        key={tab.id}
-                        tab={tab}
-                        label={resolveLabel(tab)}
-                        ticketTitle={resolveTicketTitle(tab)}
-                        routineName={resolveRoutineName(tab)}
-                        routineSchedule={resolveRoutineSchedule(tab)}
-                        ticketColumnBadge={renderTicketColumnBadge(tab)}
-                        ticketMetaBadge={renderTicketMetaBadge(tab)}
-                        ticketActions={renderTicketBannerActions(tab)}
-                        actions={renderSessionActions(tab)}
-                        onClose={handleClose}
-                        isVisible={tab.id === activeTab?.id}
-                        content={<TabContentSlot host={getContentHost(tab.id)} />}
-                        isGlass={isGlass}
+                      </div>
+                    </div>
+                  );
+                }
+                if (appEntry?.id === BROWSER_APP_ID) {
+                  return (
+                    <div
+                      key={tab.id}
+                      style={{
+                        width: '100%',
+                        height: '100%',
+                        display: tab.id === activeTab?.id ? 'flex' : 'none',
+                        flexDirection: 'column',
+                      }}
+                    >
+                      <BrowserView tabsetId={`col:${tab.id}`} isGlass={isGlass} />
+                    </div>
+                  );
+                }
+                if (appEntry) {
+                  const scope: AppHandleScope = appEntry.columnScoped ? 'column' : 'global';
+                  return (
+                    <div
+                      key={tab.id}
+                      style={{
+                        width: '100%',
+                        height: '100%',
+                        display: tab.id === activeTab?.id ? 'block' : 'none',
+                      }}
+                    >
+                      <Webview
+                        src={appEntry.url}
+                        showUnavailable={false}
+                        registry={{
+                          handleId: makeAppHandleId(scope, appEntry.id, scope === 'column' ? tab.id : undefined),
+                          appId: appEntry.id,
+                          kind: 'webview',
+                          scope,
+                          ...(scope === 'column' ? { tabId: tab.id } : {}),
+                          label: appEntry.label,
+                        }}
                       />
-                    );
-                  })}
-                </div>
-              </div>
-            </SortableContext>
-          </DndContext>
+                    </div>
+                  );
+                }
+                return (
+                  <CodeSessionPane
+                    key={tab.id}
+                    tab={tab}
+                    label={resolveLabel(tab)}
+                    ticketTitle={resolveTicketTitle(tab)}
+                    routineName={resolveRoutineName(tab)}
+                    routineSchedule={resolveRoutineSchedule(tab)}
+                    ticketColumnBadge={renderTicketColumnBadge(tab)}
+                    ticketMetaBadge={renderTicketMetaBadge(tab)}
+                    ticketActions={renderTicketBannerActions(tab)}
+                    actions={renderSessionActions(tab)}
+                    onClose={handleClose}
+                    isVisible={tab.id === activeTab?.id}
+                    content={<TabContentSlot host={getContentHost(tab.id)} />}
+                    isGlass={isGlass}
+                  />
+                );
+              })}
+            </div>
+          </div>
         )}
         {sessionTabs.map((tab) => {
           const tile = layoutMode === 'tile';

@@ -22,6 +22,7 @@ export type PaletteContext = {
   resolveTabLabel: (tab: CodeTab) => string;
   navigate: (mode: LayoutMode) => void;
   goToInbox: () => void;
+  goToRoutines: () => void;
   activateColumn: (tabId: string) => void;
   addInboxItem: () => void;
   createProject: () => void;
@@ -35,15 +36,9 @@ export const paletteColumns = (codeTabs: CodeTab[]): CodeTab[] => codeTabs.filte
 export function buildCommands(ctx: PaletteContext): PaletteCommand[] {
   const commands: PaletteCommand[] = [
     {
-      id: 'nav-home',
-      label: 'Go to Home',
-      keywords: 'mission control attention needs you running',
-      run: () => ctx.navigate('home'),
-    },
-    {
       id: 'nav-work',
-      label: 'Go to Work',
-      keywords: 'tasks tickets board projects all work',
+      label: 'Go to Tasks',
+      keywords: 'work tickets board projects all tasks',
       run: () => ctx.navigate('work'),
     },
     {
@@ -62,8 +57,8 @@ export function buildCommands(ctx: PaletteContext): PaletteCommand[] {
     {
       id: 'nav-routines',
       label: 'Go to Routines',
-      keywords: 'scheduled tasks automation recurring',
-      run: () => ctx.navigate('routines'),
+      keywords: 'scheduled tasks automation recurring agents',
+      run: ctx.goToRoutines,
     },
     { id: 'add-inbox-item', label: 'Add inbox item', keywords: 'capture idea todo quick', run: ctx.addInboxItem },
     { id: 'create-project', label: 'Create project', keywords: 'new workspace initiative', run: ctx.createProject },

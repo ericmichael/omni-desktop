@@ -49,6 +49,27 @@ export const PROJECT_CLIENT_TOOLS = [
   },
 ] as const;
 
+const LAUNCH_APP_TOOL = {
+  name: 'launch_app',
+  safe: true,
+  description:
+    'Open (mount) an app in a workspace column so it becomes drivable. Apps mount lazily — an app `list_apps` reports with `running: false` has no live surface until you launch it. For column-scoped apps (`code`, `desktop`/VNC, `terminal`, `browser`) pass the target column via `tab_id`; omit it to use your own column. Returns `{ handle_id }` — pass that as `app_id` to the `app_*` tools. Note: a column shows one non-chat app at a time, so launching one replaces whatever was mounted in that column.',
+  parameters: {
+    type: 'object',
+    properties: {
+      app_id: {
+        type: 'string',
+        description: 'App id from `list_apps` (e.g. "terminal", "code", "desktop", "browser").',
+      },
+      tab_id: {
+        type: 'string',
+        description: 'Target column id (from `list_workspace`). Omit to use your own column.',
+      },
+    },
+    required: ['app_id'],
+  },
+} as const;
+
 /** Code-deck-only UI tools — require the overlay panel infrastructure. */
 export const CODE_UI_TOOLS = [
   {
@@ -64,34 +85,15 @@ export const CODE_UI_TOOLS = [
       required: ['url'],
     },
   },
-  {
-    name: 'launch_app',
-    safe: true,
-    description:
-      'Open (mount) an app in a workspace column so it becomes drivable. Apps mount lazily — an app `list_apps` reports with `running: false` has no live surface until you launch it. For column-scoped apps (`code`, `desktop`/VNC, `terminal`, `browser`) pass the target column via `tab_id`; omit it to use your own column. Returns `{ handle_id }` — pass that as `app_id` to the `app_*` tools. Note: a column shows one non-chat app at a time, so launching one replaces whatever was mounted in that column.',
-    parameters: {
-      type: 'object',
-      properties: {
-        app_id: {
-          type: 'string',
-          description: 'App id from `list_apps` (e.g. "terminal", "code", "desktop", "browser").',
-        },
-        tab_id: {
-          type: 'string',
-          description: 'Target column id (from `list_workspace`). Omit to use your own column.',
-        },
-      },
-      required: ['app_id'],
-    },
-  },
+  LAUNCH_APP_TOOL,
 ] as const;
 
 /**
- * Global-orchestrator-only tools. Registered solely for the headless global
- * agent (`surface: 'global'`) — the workspace superuser that owns no column but
- * observes and drives every one. `list_workspace` is its map; `column_*` reach
- * into another column's agent (send / approve / cancel) via the renderer's
- * per-column RPC clients; `open_column` / `close_column` manage the deck itself.
+ * Workspace-superuser-only tools. Registered for superuser residents — agents
+ * that own no column but observe and drive every one. `list_workspace` is the
+ * map; `column_*` reach into another column's agent (send / approve / cancel)
+ * via the renderer's per-column RPC clients; `open_column` / `close_column`
+ * manage the deck itself.
  *
  * Autopilot start/stop is NOT here — that's the shared `start_ticket` /
  * `stop_ticket` in {@link PROJECT_CLIENT_TOOLS}.
@@ -1110,7 +1112,7 @@ const buildOutputGuidance = (opts?: ContextIdentifierOpts): string => {
  * whitelists were the source of the "tool calls require approval" bug.
  */
 export type SessionVariablesArgs = {
-  surface: 'chat' | 'code' | 'global';
+  surface: 'chat' | 'code';
   autopilot?: boolean;
   context?: ContextIdentifierOpts;
   /** Prepended to additional_instructions when autopilot is true. */
@@ -1155,39 +1157,28 @@ const CHAT_CLIENT_TOOLS: readonly ClientToolDef[] = [
 const CODE_CLIENT_TOOLS: readonly ClientToolDef[] = [...CHAT_CLIENT_TOOLS, ...CODE_UI_TOOLS];
 
 /**
- * The headless workspace orchestrator: everything a code column has, plus the
- * workspace-superuser tools. App-scope enforcement (this caller may drive every
- * column's apps, addressed by `handle_id`) lives in the renderer's
- * `buildClientToolHandler`, not in the tool list.
+ * The client tools a workspace-superuser RESIDENT declares (via its watcher,
+ * alongside the speech tools): the whole-workspace observe/drive set. App-scope
+ * enforcement (this caller may drive every column's apps, addressed by
+ * `handle_id`) lives in the renderer's `buildClientToolHandler`, not here.
+ * Column-bound render tools (`browser_open`, `display_plan`, …) stay out — a
+ * resident owns no column to render into.
  */
-const GLOBAL_CLIENT_TOOLS: readonly ClientToolDef[] = [...CODE_CLIENT_TOOLS, ...WORKSPACE_CLIENT_TOOLS];
-
-/**
- * Persona/role guidance for the global orchestrator, appended to
- * additional_instructions when `surface: 'global'`. Explains the superuser
- * stance and the addressing rule the tool schemas can't convey (the same app
- * id exists in many columns → address by `handle_id`).
- */
-const GLOBAL_GUIDANCE = [
-  '## You are the workspace orchestrator',
-  '',
-  'You operate the entire Tile workspace on the user’s behalf — usually by voice. You own no column of your own; instead you observe and drive every column.',
-  '',
-  '- `list_workspace` is your map: open columns, their sessions, sandbox profiles, bound project/ticket, and run state. `list_apps` shows every app across all columns (each with a `handle_id`) plus the global dock apps.',
-  '- Act inside a column with `column_send` (instruct its agent), `column_decide` (approve/reject what it is blocked on), `column_cancel` (stop it), and `start_ticket` / `stop_ticket` (autopilot). Shape the deck with `open_column`, `close_column`, and `launch_app`.',
-  '- Drive any column’s apps with the `app_*` tools using the `handle_id` from `list_apps` — not a bare name, because the same app (e.g. `terminal`) exists in many columns.',
-  '- Narrate what you are doing, and confirm with the user before anything destructive (closing a column, cancelling a run).',
-].join('\n');
+export const RESIDENT_SUPERUSER_TOOLS: readonly ClientToolDef[] = [
+  ...PROJECT_CLIENT_TOOLS,
+  LAUNCH_APP_TOOL,
+  ...WORKSPACE_CLIENT_TOOLS,
+  ...APP_CONTROL_TOOLS,
+  ...BROWSER_CLIENT_TOOLS,
+];
 
 export const buildSessionVariables = (args: SessionVariablesArgs): Record<string, unknown> => {
   const { surface, autopilot = false, context, supervisorPrompt, voice = false, personaInstructions } = args;
-  const baseTools =
-    surface === 'global' ? GLOBAL_CLIENT_TOOLS : surface === 'code' ? CODE_CLIENT_TOOLS : CHAT_CLIENT_TOOLS;
+  const baseTools = surface === 'code' ? CODE_CLIENT_TOOLS : CHAT_CLIENT_TOOLS;
   const tools: readonly ClientToolDef[] = voice ? [...baseTools, ...VOICE_CLIENT_TOOLS] : baseTools;
   const baseInstructions = buildContextIdentifiers(context);
   const parts = [
     autopilot && supervisorPrompt ? supervisorPrompt : '',
-    surface === 'global' ? GLOBAL_GUIDANCE : '',
     voice ? VOICE_GUIDANCE : '',
     voice && personaInstructions ? personaInstructions : '',
     baseInstructions,

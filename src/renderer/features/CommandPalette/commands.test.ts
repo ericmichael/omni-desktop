@@ -18,6 +18,7 @@ const ctx = (codeTabs: CodeTab[] = []) => ({
   navigate: vi.fn(),
   activateColumn: vi.fn(),
   goToInbox: vi.fn(),
+  goToRoutines: vi.fn(),
   addInboxItem: vi.fn(),
   createProject: vi.fn(),
   newSession: vi.fn(),
@@ -43,7 +44,6 @@ describe('buildCommands', () => {
     const ids = commands.map((cmd) => cmd.id);
     expect(ids).toEqual(
       expect.arrayContaining([
-        'nav-home',
         'nav-work',
         'nav-chat',
         'nav-inbox',
@@ -74,10 +74,10 @@ describe('buildCommands', () => {
     const commands = buildCommands(c);
     commands.find((cmd) => cmd.id === 'nav-work')!.run();
     expect(c.navigate).toHaveBeenCalledWith('work');
-    commands.find((cmd) => cmd.id === 'nav-home')!.run();
-    expect(c.navigate).toHaveBeenCalledWith('home');
     commands.find((cmd) => cmd.id === 'nav-inbox')!.run();
     expect(c.goToInbox).toHaveBeenCalled();
+    commands.find((cmd) => cmd.id === 'nav-routines')!.run();
+    expect(c.goToRoutines).toHaveBeenCalled();
     commands.find((cmd) => cmd.id === 'add-inbox-item')!.run();
     expect(c.addInboxItem).toHaveBeenCalled();
     commands.find((cmd) => cmd.id === 'create-project')!.run();

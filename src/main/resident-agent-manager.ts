@@ -23,6 +23,7 @@
  * approval is declined with an explanation and surfaced to the UI).
  */
 
+import { randomUUID } from 'node:crypto';
 import { rmSync } from 'node:fs';
 import path from 'node:path';
 
@@ -30,6 +31,7 @@ import type Store from 'electron-store';
 import { fromIso, type IProjectsRepo, residentId, toIso } from 'omni-projects-db';
 import { WebSocket as WsWebSocket } from 'ws';
 
+import { RESIDENT_SUPERUSER_TOOLS } from '@/lib/client-tools';
 import {
   advanceThread,
   channelIdFromName,
@@ -137,6 +139,18 @@ const MAX_OPEN_ALARMS = 10;
 type ResidentStore = Pick<Store<StoreData>, 'get' | 'set'>;
 type SendToWindow = <T extends keyof IpcRendererEvents>(channel: T, ...args: IpcRendererEvents[T]) => void;
 
+/** Workspace-superuser tool names the watcher fulfills by forwarding to the
+ *  renderer (only declared for `superuser` agents). */
+const WORKSPACE_TOOL_NAMES: ReadonlySet<string> = new Set(RESIDENT_SUPERUSER_TOOLS.map((t) => t.name));
+
+/**
+ * Upper bound on a forwarded workspace tool call. Most are quick renderer
+ * actions; the slow ones (`app_wait_for`, `app_pdf`) carry their own internal
+ * timeouts well under this. Firing means no renderer answered — closed app
+ * window, or a window that died mid-call.
+ */
+const WORKSPACE_TOOL_TIMEOUT_MS = 120_000;
+
 // ---------------------------------------------------------------------------
 // Watcher — one persistent JSON-RPC WS per running resident agent
 // ---------------------------------------------------------------------------
@@ -163,6 +177,9 @@ class ResidentWatcher {
       /** Fulfill a speech tool call; the returned object is the tool result
        *  the running agent sees (corrective `Error: …` messages included). */
       onSpeechTool: (tool: string, args: Record<string, unknown>) => Record<string, unknown>;
+      /** Fulfill a workspace-superuser tool call (async — round-trips to the
+       *  renderer). Resolves with the tool result; never rejects. */
+      onWorkspaceTool: (tool: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>;
       onClosed: () => void;
     }
   ) {}
@@ -260,12 +277,18 @@ class ResidentWatcher {
       }
       const call = (params.args ?? {}) as Record<string, unknown>;
       const toolName = typeof call.tool === 'string' ? call.tool : '';
-      if (!SPEECH_TOOL_NAMES.includes(toolName)) {
-        return;
-      }
       const toolArgs = (call.arguments ?? {}) as Record<string, unknown>;
-      const res = this.callbacks.onSpeechTool(toolName, toolArgs);
-      void this.call('client_response', { request_id: requestId, ok: true, result: res }).catch(() => {});
+      if (SPEECH_TOOL_NAMES.includes(toolName)) {
+        const res = this.callbacks.onSpeechTool(toolName, toolArgs);
+        void this.call('client_response', { request_id: requestId, ok: true, result: res }).catch(() => {});
+      } else if (WORKSPACE_TOOL_NAMES.has(toolName)) {
+        // Superuser workspace tools round-trip through the renderer; the
+        // callback resolves with a corrective error when no window answers.
+        void this.callbacks
+          .onWorkspaceTool(toolName, toolArgs)
+          .then((res) => this.call('client_response', { request_id: requestId, ok: true, result: res }))
+          .catch(() => {});
+      }
     } else if (method === 'tool_approval_requested') {
       // Residents are working agents (autopilot semantics): approvals are
       // auto-granted, same as a ticket autopilot run. The human gate is the
@@ -836,6 +859,7 @@ export class ResidentAgentManager {
       ...(input.projectIds?.length ? { projectIds: [...new Set(input.projectIds)] } : {}),
       morningHour: input.morningHour === undefined ? MORNING_HOUR : input.morningHour,
       enabled: true,
+      ...(input.superuser ? { superuser: true } : {}),
       createdAt: this.now(),
     };
     this.data.agents = [...this.roster(), agent];
@@ -880,6 +904,14 @@ export class ResidentAgentManager {
       ...(patch.morningHour !== undefined ? { morningHour: patch.morningHour } : {}),
       ...(patch.enabled !== undefined ? { enabled: patch.enabled } : {}),
     };
+    // Flag semantics: present-true or absent (never stored false).
+    if (patch.superuser !== undefined) {
+      if (patch.superuser) {
+        updated.superuser = true;
+      } else {
+        delete updated.superuser;
+      }
+    }
     // `[]` unscopes; a non-empty list rescopes; undefined leaves it alone.
     if (patch.projectIds !== undefined) {
       if (patch.projectIds.length === 0) {
@@ -1737,10 +1769,85 @@ export class ResidentAgentManager {
    *  the stored set rather than merging. */
   private sessionVariables(agentId: string): Record<string, unknown> {
     return {
-      client_tools: speechClientTools(this.memberChannelsOf(agentId)),
+      client_tools: [
+        ...speechClientTools(this.memberChannelsOf(agentId)),
+        // Superuser agents additionally hold the workspace/column tools,
+        // fulfilled by the renderer (forwardWorkspaceTool). Toggling the
+        // flag lands on the next variables refresh (update() does one).
+        ...(this.agent(agentId)?.superuser ? RESIDENT_SUPERUSER_TOOLS : []),
+      ],
       additional_instructions: this.identityInstructions(agentId),
     };
   }
+
+  // ------------------------------------------ workspace tools (superuser)
+
+  /** In-flight workspace tool calls awaiting a renderer answer. */
+  private pendingWorkspaceCalls = new Map<
+    string,
+    { resolve: (result: Record<string, unknown>) => void; timer: NodeJS.Timeout }
+  >();
+
+  /**
+   * Fulfill a workspace-superuser tool by round-tripping through the
+   * renderer, which runs it in the superuser client-tool handler (columns,
+   * apps, and terminals only exist there). Resolves with a corrective
+   * in-band error when no window answers — the agent is told the workspace
+   * is closed, not crashed.
+   */
+  private forwardWorkspaceTool(
+    agentId: string,
+    tool: string,
+    args: Record<string, unknown>
+  ): Promise<Record<string, unknown>> {
+    if (!this.agent(agentId)?.superuser) {
+      // Undeclared for non-superuser agents; a call still landing here means
+      // a stale session declared before the flag was cleared.
+      return Promise.resolve({ error: 'You do not hold workspace tools.' });
+    }
+    return new Promise((resolve) => {
+      const requestId = randomUUID();
+      const timer = setTimeout(() => {
+        this.pendingWorkspaceCalls.delete(requestId);
+        resolve({
+          error:
+            "The workspace is not available right now — these tools live in the user's app window, " +
+            'which appears to be closed. Work with what you have (projects, tickets, your own workspace) ' +
+            'and try again later; dm the user if this blocks something urgent.',
+        });
+      }, WORKSPACE_TOOL_TIMEOUT_MS);
+      timer.unref?.();
+      this.pendingWorkspaceCalls.set(requestId, { resolve, timer });
+      this.sendToWindow('resident:workspace-tool', { requestId, agentId, tool, args });
+    });
+  }
+
+  /** Renderer's answer to a forwarded workspace tool call (first one wins). */
+  resolveWorkspaceTool = (requestId: string, result: Record<string, unknown>): void => {
+    const pending = this.pendingWorkspaceCalls.get(requestId);
+    if (!pending) {
+      return; // timed out, or a second window answered after the first
+    }
+    this.pendingWorkspaceCalls.delete(requestId);
+    clearTimeout(pending.timer);
+    pending.resolve(result);
+  };
+
+  /**
+   * A column run dispatched by this agent (`column_send`) ended — the
+   * renderer's run-watch reports it here. WAKE_NOW: the agent asked for
+   * this work and decides the next step (the push that replaces polling
+   * `list_workspace`).
+   */
+  deliverColumnDone = (agentId: string, tabId: string, reason: string): void => {
+    this.dispatchEvent(agentId, {
+      kind: 'column_done',
+      detail:
+        `the agent you dispatched in column ${tabId} finished its run (${reason}); ` +
+        `review what it did with column_transcript(tab_id: "${tabId}") and decide the next step — ` +
+        `if this completes the user's request, report briefly and stop`,
+    });
+  };
 
   /** Persona + durable memory + roster + mount map, rendered for the
    *  system prompt. Mount names are the declared base names; the launch
@@ -1874,6 +1981,7 @@ export class ResidentAgentManager {
         this.broadcastStatus();
       },
       onSpeechTool: (tool, toolArgs) => this.handleSpeechTool(agentId, tool, toolArgs),
+      onWorkspaceTool: (tool, toolArgs) => this.forwardWorkspaceTool(agentId, tool, toolArgs),
       onRunEnd: () => {
         rt.thinking = false;
         if (rt.state === 'thinking') {
@@ -2138,6 +2246,8 @@ export function registerResidentHandlers(
   h('resident:set-memories', (m, agentId, memories) => m.setMemories(agentId, memories));
   h('resident:get-handbook', (m) => m.getHandbook());
   h('resident:set-handbook', (m, body) => m.setHandbook(body));
+  h('resident:workspace-tool-result', (m, requestId, result) => m.resolveWorkspaceTool(requestId, result));
+  h('resident:column-done', (m, agentId, tabId, reason) => m.deliverColumnDone(agentId, tabId, reason));
   return channels;
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */
