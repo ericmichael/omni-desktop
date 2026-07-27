@@ -29,9 +29,10 @@ export type ResolvedProfile =
 
 /**
  * Where the launcher ships bundled profile YAMLs. Sibling of the bundled bin
- * directory so the packaging story is symmetric.
+ * directory so the packaging story is symmetric. Also feeds the profile
+ * catalog (Sandboxes tab discovery) in both shells.
  */
-const getBundledProfilesDir = (): string => {
+export const getBundledProfilesDir = (): string => {
   if (isDevelopment()) {
     return path.resolve(path.join(__dirname, '..', '..', 'assets', 'profiles'));
   }

@@ -902,14 +902,23 @@ export class ProcessManager {
    * already attached to.
    */
   getAllContainerIds(): string[] {
-    const ids: string[] = [];
-    for (const proc of this.processes.values()) {
+    return this.getContainerOwners().map((o) => o.containerId);
+  }
+
+  /**
+   * Same live-container set as {@link getAllContainerIds}, but keyed by the
+   * owning process id — the Sandboxes inventory joins these to tab/session
+   * titles for the "who owns this container" column.
+   */
+  getContainerOwners(): Array<{ processId: string; containerId: string }> {
+    const owners: Array<{ processId: string; containerId: string }> = [];
+    for (const [processId, proc] of this.processes.entries()) {
       const status = proc.getStatus();
       if ((status.type === 'running' || status.type === 'connecting') && status.data.containerId) {
-        ids.push(status.data.containerId);
+        owners.push({ processId, containerId: status.data.containerId });
       }
     }
-    return ids;
+    return owners;
   }
 
   /**

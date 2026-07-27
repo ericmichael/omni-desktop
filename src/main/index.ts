@@ -50,12 +50,20 @@ import { registerPlatformIpc } from '@/main/platform-ipc';
 import { createPlatformClient } from '@/main/platform-mode';
 import { createProcessManager } from '@/main/process-manager';
 import { refreshProductRuntimeInfo } from '@/main/product-runtime';
+import { registerProfileCatalogHandlers } from '@/main/profile-catalog';
+import { getBundledProfilesDir } from '@/main/profile-resolver';
 import { backfillProjectConfigs } from '@/main/project-config-backfill';
 import { closeProjectDb, getDb, openProjectDb } from '@/main/project-db';
 import { createProjectManager } from '@/main/project-manager';
 import { registerResidentHandlers, ResidentAgentManager } from '@/main/resident-agent-manager';
 import { wireReverseRpcRouter } from '@/main/reverse-rpc-bridge';
 import { RoutineBridge } from '@/main/routine-bridge';
+import {
+  defaultSandboxInventoryDeps,
+  processOwnersFromState,
+  registerSandboxInventoryHandlers,
+  warmReattachOwnersFromTabs,
+} from '@/main/sandbox-inventory';
 import { registerScheduledTaskHandlers, ScheduledTaskManager } from '@/main/scheduled-task-manager';
 import { LocalSecretStore } from '@/main/secret-store';
 import { DEFAULT_CHAT_SNAPSHOT_TTL_MS, gcStaleSnapshots, registerSnapshotHandlers } from '@/main/snapshot-manager';
@@ -340,6 +348,25 @@ const [, cleanupConsole] = createConsoleManager({
 });
 
 registerSnapshotHandlers(main.ipc);
+
+// Sandboxes tab (docs/sandboxes-tab-plan.md Phase 2): profile discovery +
+// container inventory. Both modules are Electron-free; this shell injects
+// its paths and ownership providers.
+registerProfileCatalogHandlers(main.ipc, {
+  bundledDir: getBundledProfilesDir(),
+  userDir: join(OMNI_CONFIG_DIR, 'sandbox'),
+  getAvailableProfileNames: () => store.get('availableSandboxProfiles'),
+});
+registerSandboxInventoryHandlers(main.ipc, {
+  ...defaultSandboxInventoryDeps(),
+  getProcessOwners: () =>
+    processOwnersFromState(
+      processManager.getContainerOwners(),
+      store.get('codeTabs') ?? [],
+      residentAgentManager.getDurableSnapshot().residentAgents
+    ),
+  getWarmReattachIds: () => warmReattachOwnersFromTabs(store.get('codeTabs') ?? []),
+});
 
 // Startup snapshot GC. Code tabs cascade-delete on remove; this sweep
 // catches stale conversation snapshots older than 14 days (and any tar
@@ -693,11 +720,11 @@ app.on('ready', () => {
         ...processManager.getAllContainerIds(),
       ],
     });
-    if (cleaned > 0) {
+    if (cleaned && cleaned.length > 0) {
       main.sendToWindow('toast:show', {
         level: 'info',
         title: 'Cleaned up orphaned containers',
-        description: `Removed ${cleaned} Docker container${cleaned === 1 ? '' : 's'} from a previous session.`,
+        description: `Removed ${cleaned.length} Docker container${cleaned.length === 1 ? '' : 's'} from a previous session.`,
       });
     }
 

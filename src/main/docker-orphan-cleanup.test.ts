@@ -49,19 +49,19 @@ describe('cleanupOrphanedContainers', () => {
   it('returns -1 when Docker is unavailable', async () => {
     const { deps } = makeDeps(new Map([['docker version', new Error('not found')]]));
     const result = await cleanupOrphanedContainers(deps);
-    expect(result).toBe(-1);
+    expect(result).toBeNull();
   });
 
-  it('returns 0 when no containers are found', async () => {
+  it('returns an empty list when no containers are found', async () => {
     const { deps } = makeDeps();
     const result = await cleanupOrphanedContainers(deps);
-    expect(result).toBe(0);
+    expect(result).toEqual([]);
   });
 
   it('removes containers found by label', async () => {
     const { deps, calls } = makeDeps(new Map([['label=com.omni.omni-code', { stdout: 'abc123\ndef456\n' }]]));
     const result = await cleanupOrphanedContainers(deps);
-    expect(result).toBe(2);
+    expect(result).toEqual(['abc123', 'def456']);
     // Should have called docker rm -f for each
     const rmCalls = calls.filter((c) => c.args.includes('rm'));
     expect(rmCalls).toHaveLength(2);
@@ -72,7 +72,7 @@ describe('cleanupOrphanedContainers', () => {
   it('removes containers found by name prefix', async () => {
     const { deps } = makeDeps(new Map([['name=omni-sandbox-', { stdout: 'xyz789\n' }]]));
     const result = await cleanupOrphanedContainers(deps);
-    expect(result).toBe(1);
+    expect(result).toEqual(['xyz789']);
   });
 
   it('deduplicates containers found by both label and name', async () => {
@@ -83,10 +83,10 @@ describe('cleanupOrphanedContainers', () => {
       ])
     );
     const result = await cleanupOrphanedContainers(deps);
-    expect(result).toBe(1);
+    expect(result).toEqual(['abc123']);
   });
 
-  it('returns partial count when some removals fail', async () => {
+  it('returns partial list when some removals fail', async () => {
     let rmCount = 0;
     const { deps } = makeDeps(new Map([['label=com.omni.omni-code', { stdout: 'a1\nb2\nc3\n' }]]));
     // Override execFileFn to fail on the second rm
@@ -102,7 +102,7 @@ describe('cleanupOrphanedContainers', () => {
     }) as typeof deps.execFileFn;
 
     const result = await cleanupOrphanedContainers(deps);
-    expect(result).toBe(2); // 3 containers, 1 failed = 2 cleaned
+    expect(result).toEqual(['a1', 'c3']); // 3 containers, 1 failed = 2 cleaned
   });
 
   it('skips protected containers, matching short listed ids against full stored ids', async () => {
@@ -116,7 +116,7 @@ describe('cleanupOrphanedContainers', () => {
       '0bda09d477b1',
     ];
     const result = await cleanupOrphanedContainers(deps);
-    expect(result).toBe(1);
+    expect(result).toEqual(['def456']);
     const rmCalls = calls.filter((c) => c.args.includes('rm'));
     expect(rmCalls).toHaveLength(1);
     expect(rmCalls[0]!.args).toEqual(['rm', '-f', 'def456']);
@@ -126,10 +126,10 @@ describe('cleanupOrphanedContainers', () => {
     const { deps } = makeDeps(new Map([['label=com.omni.omni-code', { stdout: 'abc123\n' }]]));
     deps.getProtectedContainerIds = () => [''];
     const result = await cleanupOrphanedContainers(deps);
-    expect(result).toBe(1);
+    expect(result).toEqual(['abc123']);
   });
 
-  it('returns 0 when listing fails', async () => {
+  it('returns an empty list when listing fails', async () => {
     const { deps } = makeDeps(
       new Map([
         // docker version succeeds but ps fails
@@ -137,7 +137,7 @@ describe('cleanupOrphanedContainers', () => {
       ])
     );
     const result = await cleanupOrphanedContainers(deps);
-    expect(result).toBe(0);
+    expect(result).toEqual([]);
   });
 });
 
