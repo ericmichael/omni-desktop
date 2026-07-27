@@ -8,6 +8,12 @@
  * with `signRuntimeToken`, no HTTP token fetch and no reliance on the WSL2
  * NAT loopback allowlist.
  *
+ * Persistent mode (`WslBackend.persistent`): the daemon is spawned detached
+ * (`nohup … &` via a one-shot runWsl) with a durable secret from the injected
+ * secret store, survives app quit, and is adopted on the next boot when it is
+ * healthy and version-matched. Failure detection has no exit event, so a
+ * supervision health-poll drives the same backoff/terminal progression.
+ *
  * Windows-only: every entry point no-ops (or reports `{ wsl: 'missing' }` /
  * idle status) on other platforms.
  */
@@ -22,7 +28,7 @@ import { app } from 'electron';
 import { uuidv4 } from '@/lib/uuid';
 import { signRuntimeToken } from '@/server/runtime-token';
 import { DEFAULT_TENANT } from '@/server/ws-handler';
-import type { IpcRendererEvents, RemoteBackend, WslBackendStatus, WslDetectResult } from '@/shared/types';
+import type { IpcRendererEvents, RemoteBackend, WslBackend, WslBackendStatus, WslDetectResult } from '@/shared/types';
 
 const HEALTH_POLL_INTERVAL_MS = 500;
 const HEALTH_PROBE_TIMEOUT_MS = 1_000;
@@ -32,6 +38,20 @@ const MAX_CONSECUTIVE_FAILURES = 5;
 const MAX_BACKOFF_MS = 30_000;
 /** Rolling stderr capture for error status — enough for a stack trace. */
 const STDERR_TAIL_CHARS = 4_096;
+/** Persistent-mode supervision cadence once the daemon is `running`. */
+const SUPERVISION_INTERVAL_MS = 5_000;
+/** Quick re-probe spacing after a failed supervision probe — a slow GC pause
+ *  or transient stall must not read as a death. */
+const SUPERVISION_RETRY_MS = 1_000;
+/** Consecutive failed supervision probes (initial + quick re-probes) before
+ *  the detached daemon is declared dead. */
+const SUPERVISION_MAX_MISSES = 3;
+/** Detached daemons emit no exit event, so the startup health wait is bounded
+ *  — a crash-looping daemon must still reach the backoff/terminal path. */
+const STARTUP_PROBE_ATTEMPTS = 60;
+/** Truncated at spawn time once it exceeds {@link MAX_DAEMON_LOG_BYTES} — a
+ *  daemon that outlives the app would otherwise grow it unbounded. */
+const MAX_DAEMON_LOG_BYTES = 1_000_000;
 
 /** In-distro install root. Data dirs (`~/.config/Omni Code`, projects SQLite)
  *  live elsewhere, so re-provisioning this path never touches user data. */
@@ -59,6 +79,22 @@ const REAP_SCRIPT = `test -f ${REMOTE_ROOT}/daemon.pid && kill $(cat ${REMOTE_RO
 /** `exec` keeps the pidfile pointing at the node process itself, so REAP_SCRIPT
  *  kills the daemon and not a wrapper shell. */
 const DAEMON_SCRIPT = `echo $$ > ${REMOTE_ROOT}/daemon.pid && exec ${REMOTE_ROOT}/node/bin/node ${REMOTE_ROOT}/server/index.mjs`;
+
+const DAEMON_LOG = `${REMOTE_ROOT}/daemon.log`;
+
+/**
+ * Persistent-mode spawn: `nohup … &` detaches the daemon from wsl.exe, so it
+ * (and the WSL VM) survives app quit. `env` execs into node keeping its pid,
+ * so `$!` lands the node pid in the pidfile and REAP_SCRIPT works unchanged
+ * across both modes. `;` separators keep the log-truncate check from
+ * short-circuiting the spawn when the log doesn't exist yet.
+ */
+const detachedDaemonScript = (secret: string, port: number, launcherVersion: string): string =>
+  `mkdir -p ${REMOTE_ROOT}; ` +
+  `[ -f ${DAEMON_LOG} ] && [ "$(wc -c < ${DAEMON_LOG})" -gt ${MAX_DAEMON_LOG_BYTES} ] && : > ${DAEMON_LOG}; ` +
+  `nohup env OMNI_RUNTIME_TOKEN_SECRET=${secret} PORT=${port} HOST=127.0.0.1 OMNI_LAUNCHER_VERSION=${launcherVersion} ` +
+  `${REMOTE_ROOT}/node/bin/node ${REMOTE_ROOT}/server/index.mjs >> ${DAEMON_LOG} 2>&1 & ` +
+  `echo $! > ${REMOTE_ROOT}/daemon.pid`;
 
 /**
  * `wsl.exe` writes UTF-16LE to pipes (the classic silent parser bug — every
@@ -119,6 +155,14 @@ export type WslDaemonChild = {
 };
 
 export type SpawnWsl = (args: string[]) => WslDaemonChild;
+
+/** Durable-secret persistence seam (persistent mode only). Production wraps
+ *  the LocalSecretStore under a stable id; tests inject an in-memory fake. */
+export type WslSecretStore = {
+  getSecret(): Promise<string | null>;
+  setSecret(value: string): Promise<void>;
+  deleteSecret(): Promise<void>;
+};
 
 const defaultRunWsl: RunWsl = (args, opts) =>
   new Promise((resolve, reject) => {
@@ -185,6 +229,8 @@ type WslBackendManagerArgs = {
   store: { set(key: 'remoteBackend', value: RemoteBackend): void };
   sendToWindow: <T extends keyof IpcRendererEvents>(channel: T, ...args: IpcRendererEvents[T]) => void;
   launcherVersion: string;
+  /** Durable token-signing secret for persistent daemon mode. */
+  secrets: WslSecretStore;
   /** Injectable exec/spawn/net/fs seams — required by the unit tests. */
   runWsl?: RunWsl;
   spawnWsl?: SpawnWsl;
@@ -192,24 +238,31 @@ type WslBackendManagerArgs = {
   platform?: NodeJS.Platform;
   payloadPath?: () => string;
   pickFreePort?: () => Promise<number>;
+  supervisionIntervalMs?: number;
 };
 
 export class WslBackendManager {
   private readonly store: WslBackendManagerArgs['store'];
   private readonly sendToWindow: WslBackendManagerArgs['sendToWindow'];
   private readonly launcherVersion: string;
+  private readonly secrets: WslSecretStore;
   private readonly runWsl: RunWsl;
   private readonly spawnWsl: SpawnWsl;
   private readonly fetchFn: typeof globalThis.fetch;
   private readonly platform: NodeJS.Platform;
   private readonly payloadPath: () => string;
   private readonly pickFreePort: () => Promise<number>;
+  private readonly supervisionIntervalMs: number;
 
   private status: WslBackendStatus = { state: 'idle', docker: 'unknown', timestamp: Date.now() };
   private distro: string | null = null;
   private port: number | null = null;
-  /** Per-boot token-signing secret; held in memory only, never persisted. */
+  /** Token-signing secret. Per-boot random in tracked mode (memory only);
+   *  the durable stored secret in persistent mode. */
   private secret: string | null = null;
+  /** Current lifecycle; set from the stored flag in boot() and flipped by
+   *  setPersistent(). */
+  private persistent = false;
   private child: WslDaemonChild | null = null;
   /** Bumped on every spawn (and on dispose) so stale exit handlers and health
    *  poll loops from a previous child can recognize themselves and bail. */
@@ -224,12 +277,14 @@ export class WslBackendManager {
     this.store = arg.store;
     this.sendToWindow = arg.sendToWindow;
     this.launcherVersion = arg.launcherVersion;
+    this.secrets = arg.secrets;
     this.runWsl = arg.runWsl ?? defaultRunWsl;
     this.spawnWsl = arg.spawnWsl ?? defaultSpawnWsl;
     this.fetchFn = arg.fetchFn ?? globalThis.fetch;
     this.platform = arg.platform ?? process.platform;
     this.payloadPath = arg.payloadPath ?? defaultPayloadPath;
     this.pickFreePort = arg.pickFreePort ?? defaultPickFreePort;
+    this.supervisionIntervalMs = arg.supervisionIntervalMs ?? SUPERVISION_INTERVAL_MS;
   }
 
   getStatus(): WslBackendStatus {
@@ -301,20 +356,25 @@ export class WslBackendManager {
   }
 
   /**
-   * Full boot sequence: provision-if-needed → reap stale daemon → spawn →
-   * health-wait. Never throws and never hangs past the cap — on timeout or
-   * error the caller creates the window anyway (the WS transport reconnects
-   * and the settings card shows the error status).
+   * Full boot sequence: adopt-or-respawn (persistent mode) → provision-if-
+   * needed → reap stale daemon → spawn → health-wait. Never throws and never
+   * hangs past the cap — on timeout or error the caller creates the window
+   * anyway (the WS transport reconnects and the settings card shows the error
+   * status).
    */
-  async boot(distro: string): Promise<void> {
+  async boot(backend: WslBackend): Promise<void> {
     if (this.platform !== 'win32') {
+      return;
+    }
+    this.persistent = backend.persistent === true;
+    if (this.persistent && (await this.tryAdopt(backend))) {
       return;
     }
     let provisioned = false;
     try {
-      provisioned = await this.provisionIfNeeded(distro);
-      await this.reapStaleDaemon(distro);
-      await this.start(distro);
+      provisioned = await this.provisionIfNeeded(backend.distro);
+      await this.reapStaleDaemon(backend.distro);
+      await this.start(backend.distro);
     } catch (err) {
       this.setStatus({ state: 'error', error: errorMessage(err) });
       return;
@@ -324,9 +384,42 @@ export class WslBackendManager {
   }
 
   /**
+   * Persistent-mode fast path: if the store points at a daemon left running by
+   * a previous app session AND it is healthy AND it reports this exact
+   * launcher version (renderer/daemon must never skew), adopt it — keep the
+   * stored secret + port, run the docker check, no respawn. Anything else
+   * falls through to the normal reap + provision + fresh-spawn boot, whose
+   * REAP_SCRIPT kills the stale daemon by pidfile.
+   */
+  private async tryAdopt(backend: WslBackend): Promise<boolean> {
+    if (backend.port <= 0) {
+      return false;
+    }
+    const secret = await this.secrets.getSecret();
+    if (!secret) {
+      return false;
+    }
+    this.distro = backend.distro;
+    this.port = backend.port;
+    const health = await this.fetchHealth();
+    if (!health || health.version !== this.launcherVersion) {
+      return false;
+    }
+    this.secret = secret;
+    this.enabled = true;
+    this.consecutiveFailures = 0;
+    const gen = ++this.generation;
+    this.setStatus({ state: 'running', distro: backend.distro, port: backend.port });
+    void this.checkDocker();
+    void this.supervise(gen);
+    return true;
+  }
+
+  /**
    * Pick a port, persist it into `store.remoteBackend` (the bootstrap URL in
    * main-process-manager derives from this, so it must land BEFORE window
-   * creation), generate the per-boot secret, and spawn the daemon.
+   * creation), resolve the secret (per-boot random, or the durable stored one
+   * in persistent mode), and spawn the daemon.
    */
   async start(distro: string): Promise<void> {
     if (this.platform !== 'win32') {
@@ -334,11 +427,64 @@ export class WslBackendManager {
     }
     this.distro = distro;
     this.port = await this.pickFreePort();
-    this.secret = randomBytes(32).toString('hex');
-    this.store.set('remoteBackend', { kind: 'wsl', distro, port: this.port });
+    this.secret = this.persistent ? await this.ensureDurableSecret() : randomBytes(32).toString('hex');
+    this.store.set('remoteBackend', {
+      kind: 'wsl',
+      distro,
+      port: this.port,
+      ...(this.persistent ? { persistent: true } : {}),
+    });
     this.enabled = true;
     this.consecutiveFailures = 0;
     this.spawnDaemon();
+  }
+
+  /** Persistent mode signs tokens with a durable secret so a daemon left
+   *  running by this session can be adopted next boot; reused on respawns. */
+  private async ensureDurableSecret(): Promise<string> {
+    const existing = await this.secrets.getSecret();
+    if (existing) {
+      return existing;
+    }
+    const generated = randomBytes(32).toString('hex');
+    await this.secrets.setSecret(generated);
+    return generated;
+  }
+
+  /**
+   * Mode transition (`wsl:set-persistent`): restart the daemon into the new
+   * lifecycle — tracked child (off) ↔ detached nohup (on). Turning on stores
+   * a durable secret; turning off deletes it, back to per-boot. start()
+   * persists the flag into `store.remoteBackend`. The restart interrupts any
+   * agent work running in the daemon — the settings card copy warns about it.
+   */
+  async setPersistent(persistent: boolean): Promise<void> {
+    if (this.platform !== 'win32') {
+      return;
+    }
+    const distro = this.distro;
+    if (!distro) {
+      throw new Error('WSL backend is not active');
+    }
+    if (this.persistent === persistent) {
+      return;
+    }
+    // Tear down the current lifecycle: stop loops/timers, kill the tracked
+    // child, and reap by pidfile (which covers the detached daemon).
+    this.enabled = false;
+    this.generation += 1;
+    if (this.restartTimer) {
+      clearTimeout(this.restartTimer);
+      this.restartTimer = null;
+    }
+    this.child?.kill();
+    this.child = null;
+    await this.reapStaleDaemon(distro);
+    this.persistent = persistent;
+    if (!persistent) {
+      await this.secrets.deleteSecret();
+    }
+    await this.start(distro);
   }
 
   /** Mint a WS auth token for the renderer (`wsl:get-ws-token`). */
@@ -356,7 +502,12 @@ export class WslBackendManager {
       clearTimeout(this.restartTimer);
       this.restartTimer = null;
     }
-    this.child?.kill();
+    // Persistent mode: the daemon outliving the app is the whole point — stop
+    // the poll/supervision loops (generation bump above) but leave the process
+    // running to be adopted on the next boot.
+    if (!this.persistent) {
+      this.child?.kill();
+    }
     this.child = null;
   }
 
@@ -371,6 +522,11 @@ export class WslBackendManager {
     }
     const gen = ++this.generation;
     this.stderrTail = '';
+    if (this.persistent) {
+      this.setStatus({ state: 'starting', distro, port });
+      void this.spawnDetached(gen, distro, port, secret);
+      return;
+    }
     const child = this.spawnWsl([
       '-d',
       distro,
@@ -389,13 +545,41 @@ export class WslBackendManager {
       // UTF-16LE; the daemon's Linux-side stderr is UTF-8. Decode per chunk.
       this.stderrTail = (this.stderrTail + decodeWslOutput(chunk)).slice(-STDERR_TAIL_CHARS);
     });
-    child.once('exit', (code) => this.onChildExit(gen, code));
+    child.once('exit', (code) => this.onDaemonDied(gen, code));
     this.child = child;
     this.setStatus({ state: 'starting', distro, port });
     void this.pollUntilHealthy(gen);
   }
 
-  private onChildExit(gen: number, code: number | null): void {
+  /** Persistent-mode spawn: the wsl.exe invocation backgrounds the daemon and
+   *  returns immediately — from here on, failure is only observable through
+   *  the health probes (bounded startup wait, then supervision). */
+  private async spawnDetached(gen: number, distro: string, port: number, secret: string): Promise<void> {
+    let res: RunWslResult;
+    try {
+      res = await this.runWsl(execArgs(distro, detachedDaemonScript(secret, port, this.launcherVersion)));
+    } catch (err) {
+      if (gen !== this.generation || !this.enabled) {
+        return;
+      }
+      this.stderrTail = errorMessage(err);
+      this.onDaemonDied(gen, null);
+      return;
+    }
+    if (gen !== this.generation || !this.enabled) {
+      return;
+    }
+    if (res.code !== 0) {
+      this.stderrTail = decodeWslOutput(res.stderr).slice(-STDERR_TAIL_CHARS);
+      this.onDaemonDied(gen, res.code);
+      return;
+    }
+    void this.pollUntilHealthy(gen);
+  }
+
+  /** Shared death handler for both lifecycles: a tracked child's `exit`
+   *  event, or a detached daemon's failed startup/supervision probes. */
+  private onDaemonDied(gen: number, code: number | null): void {
     if (gen !== this.generation || !this.enabled) {
       return;
     }
@@ -406,17 +590,42 @@ export class WslBackendManager {
       this.enabled = false;
       this.setStatus({
         state: 'error',
-        error: this.stderrTail.trim() || `daemon exited with code ${code ?? 'unknown'}`,
+        error:
+          this.stderrTail.trim() ||
+          (this.persistent && code === null
+            ? `daemon became unreachable — check ${DAEMON_LOG} in the distro`
+            : `daemon exited with code ${code ?? 'unknown'}`),
       });
       return;
     }
     this.restartTimer = setTimeout(() => {
       this.restartTimer = null;
-      this.spawnDaemon();
+      void this.restartDaemon();
     }, backoffDelayMs(this.consecutiveFailures));
   }
 
+  /** Backoff restart. A detached daemon has no tracked child to kill, and a
+   *  half-dead one may still hold the port — reap by pidfile before
+   *  respawning in persistent mode. */
+  private async restartDaemon(): Promise<void> {
+    if (!this.enabled) {
+      return;
+    }
+    if (this.persistent && this.distro) {
+      const gen = this.generation;
+      await this.reapStaleDaemon(this.distro);
+      if (gen !== this.generation || !this.enabled) {
+        return;
+      }
+    }
+    this.spawnDaemon();
+  }
+
   private async pollUntilHealthy(gen: number): Promise<void> {
+    // Detached daemons emit no exit event, so persistent mode bounds the
+    // startup wait; tracked children keep the unbounded wait (their exit
+    // event drives failure detection).
+    let attempts = 0;
     while (gen === this.generation && this.enabled) {
       if (await this.probeHealth()) {
         if (gen !== this.generation || !this.enabled) {
@@ -427,27 +636,73 @@ export class WslBackendManager {
         this.consecutiveFailures = 0;
         this.setStatus({ state: 'running' });
         void this.checkDocker();
+        if (this.persistent) {
+          void this.supervise(gen);
+        }
+        return;
+      }
+      attempts += 1;
+      if (this.persistent && attempts >= STARTUP_PROBE_ATTEMPTS) {
+        this.onDaemonDied(gen, null);
         return;
       }
       await sleep(HEALTH_POLL_INTERVAL_MS);
     }
   }
 
+  /**
+   * Persistent-mode failure detection — there is no `exit` event, so poll the
+   * health endpoint after reaching `running`. A failed probe is re-probed
+   * twice more quickly (a slow GC pause must not read as a death); three
+   * consecutive misses reap + respawn through the same backoff/terminal
+   * progression as a tracked child exit. A successful probe resets both the
+   * miss count and the consecutive-failure counter. Respects `generation` and
+   * `enabled` exactly like pollUntilHealthy.
+   */
+  private async supervise(gen: number): Promise<void> {
+    let misses = 0;
+    while (gen === this.generation && this.enabled) {
+      await sleep(misses === 0 ? this.supervisionIntervalMs : SUPERVISION_RETRY_MS);
+      if (gen !== this.generation || !this.enabled) {
+        return;
+      }
+      if (await this.probeHealth()) {
+        misses = 0;
+        this.consecutiveFailures = 0;
+        continue;
+      }
+      misses += 1;
+      if (misses >= SUPERVISION_MAX_MISSES) {
+        if (gen !== this.generation || !this.enabled) {
+          return;
+        }
+        this.onDaemonDied(gen, null);
+        return;
+      }
+    }
+  }
+
   private async probeHealth(): Promise<boolean> {
+    return (await this.fetchHealth()) !== null;
+  }
+
+  /** GET /api/health → `{ ok, version }`; null on any failure. The version is
+   *  only consulted by the adopt path — probes just need liveness. */
+  private async fetchHealth(): Promise<{ version: string } | null> {
     if (this.port === null) {
-      return false;
+      return null;
     }
     try {
       const res = await this.fetchFn(`http://127.0.0.1:${this.port}/api/health`, {
         signal: AbortSignal.timeout(HEALTH_PROBE_TIMEOUT_MS),
       });
       if (!res.ok) {
-        return false;
+        return null;
       }
-      const body = (await res.json()) as { ok?: boolean };
-      return body.ok === true;
+      const body = (await res.json()) as { ok?: boolean; version?: string };
+      return body.ok === true ? { version: body.version ?? '' } : null;
     } catch {
-      return false;
+      return null;
     }
   }
 
@@ -485,7 +740,7 @@ export class WslBackendManager {
   }
 
   private setStatus(patch: Partial<Omit<WslBackendStatus, 'timestamp'>>): void {
-    const next: WslBackendStatus = { ...this.status, ...patch, timestamp: Date.now() };
+    const next: WslBackendStatus = { ...this.status, ...patch, persistent: this.persistent, timestamp: Date.now() };
     if (patch.state && patch.state !== 'error') {
       delete next.error;
     }

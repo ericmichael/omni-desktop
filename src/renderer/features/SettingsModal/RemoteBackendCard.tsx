@@ -22,7 +22,7 @@
 import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
 import { memo, useCallback, useEffect, useState } from 'react';
 
-import { Body1, Button, Caption1, Card, FormField, Input, Select, Spinner } from '@/renderer/ds';
+import { Body1, Button, Caption1, Card, FormField, Input, Select, Spinner, Switch } from '@/renderer/ds';
 import { MachineIdentityChip } from '@/renderer/features/SettingsModal/MachineIdentityChip';
 import { bootstrapPlatform, ipc, isElectron, isWslLinked, localEmitter } from '@/renderer/services/ipc';
 import type { CloudDeviceCode, CloudStatus, WslBackendStatus, WslDetectResult } from '@/shared/types';
@@ -119,20 +119,34 @@ export const RemoteBackendCard = memo(() => {
 
   // ── WSL-linked: live daemon + Docker status, polled while visible ──
   const [wslStatus, setWslStatus] = useState<WslBackendStatus | null>(null);
+  const refreshWslStatus = useCallback(() => {
+    void localEmitter
+      .invoke('wsl:status')
+      .then(setWslStatus)
+      .catch(() => undefined);
+  }, []);
   useEffect(() => {
     if (!isWslLinked) {
       return undefined;
     }
-    const poll = (): void => {
-      void localEmitter
-        .invoke('wsl:status')
-        .then(setWslStatus)
-        .catch(() => undefined);
-    };
-    poll();
-    const interval = setInterval(poll, WSL_STATUS_POLL_MS);
+    refreshWslStatus();
+    const interval = setInterval(refreshWslStatus, WSL_STATUS_POLL_MS);
     return () => clearInterval(interval);
-  }, []);
+  }, [refreshWslStatus]);
+
+  // Persistent daemon mode toggle — the flag round-trips through
+  // `wsl:set-persistent` (local main restarts the daemon into the new
+  // lifecycle) and renders back from `wsl:status` alone.
+  const onPersistentChange = useCallback(
+    (checked: boolean) => {
+      setError(null);
+      void localEmitter
+        .invoke('wsl:set-persistent', checked)
+        .then(refreshWslStatus)
+        .catch((e: unknown) => setError(e instanceof Error ? e.message : 'Failed to change the backend mode'));
+    },
+    [refreshWslStatus]
+  );
 
   // ── Not linked, on Windows: offer running the backend in WSL ──
   const showWslSection = isElectron && bootstrapPlatform === 'win32' && !isWslLinked;
@@ -224,6 +238,9 @@ export const RemoteBackendCard = memo(() => {
           : statusLine.tone === 'ok'
             ? styles.ok
             : styles.summary;
+    // Freeze the toggle while the daemon is mid-transition — a second restart
+    // on top of a provision/spawn in flight would race the first.
+    const wslBusy = wslStatus?.state === 'provisioning' || wslStatus?.state === 'starting';
     return (
       <Card>
         <div className={styles.card}>
@@ -235,6 +252,16 @@ export const RemoteBackendCard = memo(() => {
             <Button size="sm" variant="ghost" onClick={onDisconnect}>
               Disconnect
             </Button>
+          </div>
+          <div className={styles.row}>
+            <div className={styles.main}>
+              <Body1>Keep backend running when the app is closed</Body1>
+              <Caption1 className={styles.summary}>
+                Changing this restarts the backend daemon — active sessions reconnect, but agent work running in the
+                daemon is interrupted.
+              </Caption1>
+            </div>
+            <Switch checked={wslStatus?.persistent === true} onCheckedChange={onPersistentChange} disabled={wslBusy} />
           </div>
           {restarting && <Caption1 className={styles.ok}>Restarting Omni Code…</Caption1>}
         </div>
