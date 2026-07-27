@@ -6,6 +6,7 @@ import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { Button, Card, FormField, MessageBar, MessageBarBody, SectionLabel, Select } from '@/renderer/ds';
 import { $launcherVersion } from '@/renderer/features/Banner/state';
 import { $omniInstallProcessStatus, $omniRuntimeInfo, omniInstallApi } from '@/renderer/features/Omni/state';
+import { $sandboxProfiles } from '@/renderer/features/Sandboxes/state';
 import { getAvailableProfileNames, getProfileMenuLabel } from '@/renderer/features/SandboxProfile/profile-list';
 import { emitter, isElectron } from '@/renderer/services/ipc';
 import { persistedStoreApi, selectWorkspaceDir } from '@/renderer/services/store';
@@ -74,9 +75,12 @@ export const SettingsModalWorkspaceTab = memo(() => {
     }
   }, [checkCliStatus]);
 
+  // Subscribing keeps the options current as discovery lands (and triggers
+  // the atom's fetch-on-first-subscribe).
+  const discovered = useStore($sandboxProfiles);
   const availableProfiles = useMemo<string[]>(
-    () => getAvailableProfileNames({ isEnterprise, available: store.availableSandboxProfiles }),
-    [isEnterprise, store.availableSandboxProfiles]
+    () => getAvailableProfileNames({ isEnterprise, available: store.availableSandboxProfiles, discovered }),
+    [isEnterprise, store.availableSandboxProfiles, discovered]
   );
 
   const onChangeProfile = useCallback((e: ChangeEvent<HTMLSelectElement>) => {

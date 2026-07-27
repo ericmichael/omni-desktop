@@ -17,6 +17,7 @@ import { useStore } from '@nanostores/react';
 import { memo, useCallback } from 'react';
 
 import { Menu, MenuItem, MenuList, MenuPopover, MenuTrigger } from '@/renderer/ds';
+import { $sandboxProfiles } from '@/renderer/features/Sandboxes/state';
 import { $machines } from '@/renderer/services/machines';
 
 import { getAvailableProfileNames, getProfileMenuLabel, isLocalProfile, type ProfileListContext } from './profile-list';
@@ -47,7 +48,10 @@ export type SandboxPickerProps = {
 
 export const SandboxPicker = memo(({ value, onChange, context, disabled, compact = false }: SandboxPickerProps) => {
   const machines = useStore($machines);
-  const names = getAvailableProfileNames({ ...context, machines });
+  // Subscribe so the menu re-renders as discovery lands (and triggers the
+  // atom's fetch-on-first-subscribe).
+  const discovered = useStore($sandboxProfiles);
+  const names = getAvailableProfileNames({ ...context, machines, discovered });
 
   const handleSelect = useCallback(
     (name: string) => {

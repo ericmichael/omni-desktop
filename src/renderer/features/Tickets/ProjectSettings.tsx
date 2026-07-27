@@ -3,6 +3,7 @@ import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 
 import { Button, Caption1, ConfirmDialog, Input, SectionLabel, Select, Switch } from '@/renderer/ds';
+import { $sandboxProfiles } from '@/renderer/features/Sandboxes/state';
 import { getAvailableProfileNames, getProfileMenuLabel } from '@/renderer/features/SandboxProfile/profile-list';
 import { emitter } from '@/renderer/services/ipc';
 import { persistedStoreApi } from '@/renderer/services/store';
@@ -106,9 +107,11 @@ export const ProjectSettings = memo(({ projectId }: { projectId: ProjectId }) =>
   useEffect(() => {
     emitter.invoke('platform:is-enterprise').then(setIsEnterprise);
   }, []);
+  // Subscribing keeps the options current as discovery lands.
+  const discovered = useStore($sandboxProfiles);
   const availableProfiles = useMemo(
-    () => getAvailableProfileNames({ isEnterprise, available: store.availableSandboxProfiles }),
-    [isEnterprise, store.availableSandboxProfiles]
+    () => getAvailableProfileNames({ isEnterprise, available: store.availableSandboxProfiles, discovered }),
+    [isEnterprise, store.availableSandboxProfiles, discovered]
   );
 
   const handleNameChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => setName(e.target.value), []);

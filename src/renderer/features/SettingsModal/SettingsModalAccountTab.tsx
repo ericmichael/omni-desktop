@@ -11,7 +11,6 @@ import {
   SectionLabel,
   Spinner,
 } from '@/renderer/ds';
-import { MachinesCard } from '@/renderer/features/SettingsModal/MachinesCard';
 import { RemoteBackendCard } from '@/renderer/features/SettingsModal/RemoteBackendCard';
 import { emitter, ipc, isCloudLinked, isElectron } from '@/renderer/services/ipc';
 import type { PlatformCredentials } from '@/shared/types';
@@ -137,14 +136,9 @@ export const SettingsModalAccountTab = memo(() => {
     return <FormSkeleton fields={3} />;
   }
 
-  // Cloud link + linked machines moved here from General: they're identity,
-  // not app behavior.
-  const cloudCards = (
-    <>
-      {isElectron && <RemoteBackendCard />}
-      {isCloudLinked && <MachinesCard />}
-    </>
-  );
+  // Cloud link moved here from General: it's identity, not app behavior.
+  // MachinesCard lives in Sandboxes → Health (sandboxes-tab-plan.md Decision 6).
+  const cloudCards = <>{isElectron && <RemoteBackendCard />}</>;
 
   if (!isEnterprise) {
     return (

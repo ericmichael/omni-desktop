@@ -12,6 +12,7 @@ import {
   Input,
   Select,
 } from '@/renderer/ds';
+import { $sandboxProfiles } from '@/renderer/features/Sandboxes/state';
 import { getAvailableProfileNames, getProfileMenuLabel } from '@/renderer/features/SandboxProfile/profile-list';
 import { emitter } from '@/renderer/services/ipc';
 import { persistedStoreApi } from '@/renderer/services/store';
@@ -65,9 +66,11 @@ export const ProjectCreateDialog = memo(
       emitter.invoke('platform:is-enterprise').then(setIsEnterprise);
     }, []);
     const storeData = useStore(persistedStoreApi.$atom);
+    // Subscribing keeps the options current as discovery lands.
+    const discovered = useStore($sandboxProfiles);
     const availableProfiles = useMemo(
-      () => getAvailableProfileNames({ isEnterprise, available: storeData.availableSandboxProfiles }),
-      [isEnterprise, storeData.availableSandboxProfiles]
+      () => getAvailableProfileNames({ isEnterprise, available: storeData.availableSandboxProfiles, discovered }),
+      [isEnterprise, storeData.availableSandboxProfiles, discovered]
     );
 
     const isValid = label.trim().length > 0;

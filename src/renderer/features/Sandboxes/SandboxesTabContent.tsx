@@ -2,7 +2,10 @@ import { makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
 import { useStore } from '@nanostores/react';
 import { memo } from 'react';
 
-import { Body1Strong, Caption1, Card, PageHeader } from '@/renderer/ds';
+import { PageHeader } from '@/renderer/ds';
+import { HealthPane } from '@/renderer/features/Sandboxes/HealthPane';
+import { ProfilesPane } from '@/renderer/features/Sandboxes/ProfilesPane';
+import { RunningPane } from '@/renderer/features/Sandboxes/RunningPane';
 import { $sandboxesSelectedPane, type SandboxesPane } from '@/renderer/features/Sandboxes/state';
 import { $glassEnabled } from '@/renderer/theme/use-glass';
 
@@ -11,25 +14,10 @@ import { $glassEnabled } from '@/renderer/theme/use-glass';
  * (docs/sandboxes-tab-plan.md, Decision 2). Fixed, not data-driven: the
  * data lives in the panes.
  */
-const PANES: { id: SandboxesPane; title: string; meta: string; placeholder: string }[] = [
-  {
-    id: 'health',
-    title: 'Health',
-    meta: 'Substrate status and machines',
-    placeholder: 'Docker reachability, the WSL daemon status, and the machine registry will live here.',
-  },
-  {
-    id: 'profiles',
-    title: 'Profiles',
-    meta: 'Discovered sandbox profiles',
-    placeholder: 'The profile catalog — parsed summaries, raw YAML, and override actions — will live here.',
-  },
-  {
-    id: 'running',
-    title: 'Running',
-    meta: 'Containers and cleanup',
-    placeholder: 'Running containers with their owning sessions, protected state, and orphan sweep will live here.',
-  },
+const PANES: { id: SandboxesPane; title: string; meta: string }[] = [
+  { id: 'health', title: 'Health', meta: 'Substrate status and machines' },
+  { id: 'profiles', title: 'Profiles', meta: 'Discovered sandbox profiles' },
+  { id: 'running', title: 'Running', meta: 'Containers and cleanup' },
 ];
 
 const useStyles = makeStyles({
@@ -126,8 +114,6 @@ export const SandboxesTabContent = memo(() => {
   const selectedPane = useStore($sandboxesSelectedPane);
   const isGlass = useStore($glassEnabled);
 
-  const active = PANES.find((p) => p.id === selectedPane) ?? PANES[0];
-
   return (
     <div className={mergeClasses(styles.root, isGlass && styles.rootGlass)}>
       <div className={mergeClasses(styles.listPane, isGlass && styles.listPaneGlass)}>
@@ -148,12 +134,11 @@ export const SandboxesTabContent = memo(() => {
       </div>
       <div className={mergeClasses(styles.detailPane, isGlass && styles.detailPaneGlass)}>
         <div className={styles.detailBody}>
-          {active && (
-            <Card>
-              <Body1Strong>{active.title}</Body1Strong>
-              <Caption1>{active.placeholder}</Caption1>
-            </Card>
-          )}
+          {/* Only the active pane mounts — pane-local pollers (containers,
+              wsl:status) start on mount and clear on pane-switch. */}
+          {selectedPane === 'health' && <HealthPane />}
+          {selectedPane === 'profiles' && <ProfilesPane />}
+          {selectedPane === 'running' && <RunningPane />}
         </div>
       </div>
     </div>

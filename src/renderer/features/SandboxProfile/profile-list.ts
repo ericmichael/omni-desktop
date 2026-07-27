@@ -3,14 +3,16 @@
  * the user. Settings UI (default-profile picker) and the per-launch
  * SandboxPicker both consume this so they never drift.
  *
- * Currently the list is hard-coded against the launcher's bundled
- * profiles plus an opt-in `platform` entry when the build is enterprise.
- * A follow-up profile-manager UI will discover user-created profile YAMLs
- * under ``<config>/sandbox/`` and merge them in here.
+ * Options come from backend discovery (`$sandboxProfiles`, filled by
+ * `sandbox:list-profiles`) so user-created YAMLs under ``<config>/sandbox/``
+ * appear everywhere. The hard-coded list survives only as the fallback
+ * while the atom is empty (pre-first-fetch / fetch error), so no picker
+ * regresses to an empty menu.
  */
 
+import { $sandboxProfiles } from '@/renderer/features/Sandboxes/state';
 import { $machines } from '@/renderer/services/machines';
-import type { MachineSummary } from '@/shared/types';
+import type { MachineSummary, ProfileSummary } from '@/shared/types';
 
 const OPEN_SOURCE_PROFILES = ['host', 'devbox'] as const;
 const ENTERPRISE_EXTRA_PROFILES = ['platform'] as const;
@@ -39,11 +41,24 @@ export type ProfileListContext = {
    * truncated id.
    */
   machines?: MachineSummary[];
+  /**
+   * Discovered profile catalog. Defaults to a non-reactive `$sandboxProfiles`
+   * read (same idiom as `machines`/`$machines` below); pass a
+   * `useStore($sandboxProfiles)` value where the options must re-render as
+   * discovery lands.
+   */
+  discovered?: ProfileSummary[];
 };
 
 export const getAvailableProfileNames = (ctx: ProfileListContext): string[] => {
+  // Deployment restriction stays authoritative — it can carry names discovery
+  // can't know (cloud appends `local:<machineId>` computer-as-sandbox entries).
   if (ctx.available && ctx.available.length > 0) {
     return [...ctx.available];
+  }
+  const discovered = ctx.discovered ?? $sandboxProfiles.get();
+  if (discovered.length > 0) {
+    return discovered.map((p) => p.name);
   }
   return ctx.isEnterprise ? [...OPEN_SOURCE_PROFILES, ...ENTERPRISE_EXTRA_PROFILES] : [...OPEN_SOURCE_PROFILES];
 };
@@ -82,5 +97,8 @@ export const getProfileMenuLabel = (name: string, machines: MachineSummary[] = $
     }
     return `Local · ${machineId.slice(0, 8)}`;
   }
-  return PROFILE_LABELS[name] ?? titleCase(name);
+  // Names outside the hard-coded map (user-created profiles) get their
+  // catalog label from discovery before the title-case fallback.
+  const discovered = $sandboxProfiles.get().find((p) => p.name === name);
+  return discovered?.label ?? titleCase(name);
 };
