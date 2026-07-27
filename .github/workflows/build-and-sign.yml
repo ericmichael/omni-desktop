@@ -297,8 +297,60 @@ jobs:
             dist/*.yaml
           retention-days: 90
 
+  build-wsl-payload:
+    # Linux-built payload shipped inside the Windows installer: out/server +
+    # out/browser + linux-x64 node_modules for the server externals + a pinned
+    # Node runtime. See docs/windows-wsl-backend-plan.md (Phase 5).
+    if: github.event_name == 'push' || github.event.inputs.build_windows == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.release_tag || github.ref }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Generate lockfile hash without version
+        id: lockfile-hash
+        run: echo "hash=$(node .github/scripts/generate-lockfile-hash.js)" >> $GITHUB_OUTPUT
+
+      - name: Cache node modules
+        id: cache-node-modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            node_modules
+            ~/.electron-gyp
+            .cache/electron
+            .cache/electron-builder
+          key: ${{ runner.os }}-node-${{ env.NODE_VERSION }}-modules-v2-${{ steps.lockfile-hash.outputs.hash }}
+
+      - name: Install dependencies
+        if: steps.cache-node-modules.outputs.cache-hit != 'true'
+        run: npm ci
+
+      - name: Build server + browser
+        run: npm run build:server
+
+      - name: Build WSL payload
+        run: npm run build:wsl-payload
+
+      - name: Upload payload
+        uses: actions/upload-artifact@v4
+        with:
+          name: wsl-payload
+          path: out/wsl-payload/omni-wsl-payload.tar.gz
+          if-no-files-found: error
+
   build-windows:
     if: github.event_name == 'push' || github.event.inputs.build_windows == 'true'
+    needs: build-wsl-payload
     runs-on: windows-latest
     environment: code-signing
     timeout-minutes: 15
@@ -361,6 +413,14 @@ jobs:
         if: steps.cache-uv.outputs.cache-hit != 'true'
         run: npm run download win
 
+      - name: Download WSL payload
+        # Lands outside out/ because `npm run publish` starts with `npm run
+        # clean` (rimraf out/); OMNI_WSL_PAYLOAD points electron-builder at it.
+        uses: actions/download-artifact@v4
+        with:
+          name: wsl-payload
+          path: wsl-payload
+
       - name: Set tool paths for signing
         run: |
           echo "C:\Program Files (x86)\Windows Kits\10\App Certification Kit" >> $GITHUB_PATH
@@ -371,6 +431,7 @@ jobs:
       - name: Build and sign application
         run: npm run publish
         env:
+          OMNI_WSL_PAYLOAD: wsl-payload/omni-wsl-payload.tar.gz
           ENABLE_SIGNING: true
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SM_HOST: ${{ secrets.SM_HOST }}

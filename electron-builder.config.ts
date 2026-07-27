@@ -1,4 +1,25 @@
+import { existsSync } from 'node:fs';
+import { resolve } from 'node:path';
+
 import type { Configuration, WindowsConfiguration } from 'electron-builder';
+
+// WSL backend payload (Windows installers only): a Linux-built tarball of the
+// server bundle + pinned Node runtime that Electron main streams into a WSL
+// distro (docs/windows-wsl-backend-plan.md, Phase 5). Built by
+// `npm run build:wsl-payload` on Linux into out/wsl-payload/; CI instead
+// downloads the artifact elsewhere and points OMNI_WSL_PAYLOAD at it, because
+// `npm run clean` wipes out/ before electron-builder runs. Optional so
+// mac/linux/dev packaging without the payload still works.
+const getWslPayloadResources = (): { from: string; to: string }[] => {
+  const payloadPath = resolve(process.env.OMNI_WSL_PAYLOAD || 'out/wsl-payload/omni-wsl-payload.tar.gz');
+  if (!existsSync(payloadPath)) {
+    console.warn(
+      `omni-wsl-payload.tar.gz not found at ${payloadPath} — Windows targets will not bundle the WSL backend.`
+    );
+    return [];
+  }
+  return [{ from: payloadPath, to: 'omni-wsl-payload.tar.gz' }];
+};
 
 const getWindowsSigningOptions = (): Partial<WindowsConfiguration> => {
   if (process.env.ENABLE_SIGNING) {
@@ -88,6 +109,9 @@ export default {
   },
   win: {
     target: ['nsis'],
+    // Merged with the top-level extraResources for Windows targets; lands at
+    // process.resourcesPath/omni-wsl-payload.tar.gz.
+    extraResources: getWslPayloadResources(),
     ...getWindowsSigningOptions(),
   },
   linux: {
