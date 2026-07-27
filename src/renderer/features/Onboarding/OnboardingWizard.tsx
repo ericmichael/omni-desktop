@@ -17,13 +17,15 @@ import { OnboardingModelPickStep } from '@/renderer/features/Onboarding/Onboardi
 import { OnboardingModelStep } from '@/renderer/features/Onboarding/OnboardingModelStep';
 import { OnboardingProviderTypeStep } from '@/renderer/features/Onboarding/OnboardingProviderTypeStep';
 import { OnboardingValidationStep } from '@/renderer/features/Onboarding/OnboardingValidationStep';
+import { OnboardingWslStep } from '@/renderer/features/Onboarding/OnboardingWslStep';
 import { agentConfigApi } from '@/renderer/services/config';
-import { isElectron } from '@/renderer/services/ipc';
+import { bootstrapPlatform, isCloudLinked, isElectron, isWslLinked } from '@/renderer/services/ipc';
 import { persistedStoreApi } from '@/renderer/services/store';
 import { resolveModelChoices } from '@/shared/model-catalog';
 import type { ProviderEntry } from '@/shared/types';
 
 type Step =
+  | 'wsl'
   | 'choose'
   | 'chatgpt'
   | 'key-entry'
@@ -60,6 +62,12 @@ const ADVANCED_PROVIDER_LABELS: Record<string, string> = {
 };
 
 type ConnectedInfo = { providerLabel: string; modelLabel: string; maskedKey?: string };
+
+// The WSL step runs FIRST (before provider setup) so the config the rest of
+// the wizard writes lands in the backend that will actually be used — choosing
+// WSL relaunches the app against a fresh data root inside the distro. Only on
+// Windows Electron that isn't already linked to a remote backend.
+const WSL_STEP_ELIGIBLE = isElectron && bootstrapPlatform === 'win32' && !isCloudLinked && !isWslLinked;
 
 const useStyles = makeStyles({
   root: {
@@ -100,7 +108,7 @@ const stepVariants = {
 
 export const OnboardingWizard = memo(() => {
   const styles = useStyles();
-  const [step, setStep] = useState<Step>('choose');
+  const [step, setStep] = useState<Step>(WSL_STEP_ELIGIBLE ? 'wsl' : 'choose');
   const [identity, setIdentity] = useState<IdentityKind | null>(null);
 
   // Identity-flow state
@@ -120,6 +128,8 @@ export const OnboardingWizard = memo(() => {
   const branch = identity ? BRANCH_STEPS[identity] : null;
   const stepIndex = branch ? branch.indexOf(step) : -1;
   const showProgress = branch !== null && stepIndex > 0 && step !== 'connected';
+
+  const handleWslSkip = useCallback(() => setStep('choose'), []);
 
   const handleChoose = useCallback((kind: IdentityKind) => {
     setIdentity(kind);
@@ -288,6 +298,8 @@ export const OnboardingWizard = memo(() => {
             exit="exit"
             transition={{ duration: 0.2, ease: 'easeOut' }}
           >
+            {step === 'wsl' && <OnboardingWslStep onSkip={handleWslSkip} />}
+
             {step === 'choose' && <OnboardingChooseStep showLocal={isElectron} onSelect={handleChoose} />}
 
             {step === 'chatgpt' && (

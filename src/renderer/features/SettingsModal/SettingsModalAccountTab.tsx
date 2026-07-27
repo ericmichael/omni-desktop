@@ -11,8 +11,8 @@ import {
   SectionLabel,
   Spinner,
 } from '@/renderer/ds';
-import { ConnectCloudCard } from '@/renderer/features/SettingsModal/ConnectCloudCard';
 import { MachinesCard } from '@/renderer/features/SettingsModal/MachinesCard';
+import { RemoteBackendCard } from '@/renderer/features/SettingsModal/RemoteBackendCard';
 import { emitter, ipc, isCloudLinked, isElectron } from '@/renderer/services/ipc';
 import type { PlatformCredentials } from '@/shared/types';
 
@@ -141,7 +141,7 @@ export const SettingsModalAccountTab = memo(() => {
   // not app behavior.
   const cloudCards = (
     <>
-      {isElectron && <ConnectCloudCard />}
+      {isElectron && <RemoteBackendCard />}
       {isCloudLinked && <MachinesCard />}
     </>
   );
