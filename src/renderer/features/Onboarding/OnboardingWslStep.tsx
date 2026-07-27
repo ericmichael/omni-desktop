@@ -60,12 +60,17 @@ const useStyles = makeStyles({
 export const OnboardingWslStep = memo(({ onSkip }: Props) => {
   const styles = useStyles();
   const [defaultDistro, setDefaultDistro] = useState<WslDistro | null>(null);
+  // WSL is present but has zero distros — offer registering Ubuntu inline
+  // (`wsl:install` needs no elevation once the platform exists).
+  const [needsDistro, setNeedsDistro] = useState(false);
+  const [installing, setInstalling] = useState(false);
   const [linking, setLinking] = useState(false);
   const [restarting, setRestarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Probe local main for WSL; when it's missing (or the probe fails) skip the
-  // step entirely rather than showing a dead-end choice.
+  // Probe local main for WSL. Missing WSL (or a failed probe) skips the step
+  // entirely — installing the platform needs elevation + a reboot, a flow
+  // that belongs in the settings card, not onboarding.
   useEffect(() => {
     let cancelled = false;
     void localEmitter
@@ -74,12 +79,15 @@ export const OnboardingWslStep = memo(({ onSkip }: Props) => {
         if (cancelled) {
           return;
         }
-        const preferred =
-          result.wsl === 'ok' ? (result.distros.find((d) => d.isDefault) ?? result.distros[0]) : undefined;
+        if (result.wsl !== 'ok') {
+          onSkip();
+          return;
+        }
+        const preferred = result.distros.find((d) => d.isDefault) ?? result.distros[0];
         if (preferred) {
           setDefaultDistro(preferred);
         } else {
-          onSkip();
+          setNeedsDistro(true);
         }
       })
       .catch(() => {
@@ -91,6 +99,29 @@ export const OnboardingWslStep = memo(({ onSkip }: Props) => {
       cancelled = true;
     };
   }, [onSkip]);
+
+  const handleInstallUbuntu = useCallback(async () => {
+    setInstalling(true);
+    setError(null);
+    try {
+      // Registers Ubuntu (the WSL default) from the Store — can take minutes.
+      await localEmitter.invoke('wsl:install', 'distro');
+      // Re-detect and fall into the normal WSL-vs-Windows choice.
+      const result = await localEmitter.invoke('wsl:detect');
+      const preferred =
+        result.wsl === 'ok' ? (result.distros.find((d) => d.isDefault) ?? result.distros[0]) : undefined;
+      if (preferred) {
+        setDefaultDistro(preferred);
+        setNeedsDistro(false);
+      } else {
+        setError('Ubuntu did not show up after the install — you can retry from Settings later');
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to install Ubuntu');
+    } finally {
+      setInstalling(false);
+    }
+  }, []);
 
   const handleUseWsl = useCallback(async () => {
     if (!defaultDistro) {
@@ -111,12 +142,67 @@ export const OnboardingWslStep = memo(({ onSkip }: Props) => {
   }, [defaultDistro]);
 
   if (!defaultDistro) {
+    if (!needsDistro) {
+      return (
+        <div className={styles.root}>
+          <div className={styles.pendingRow}>
+            <Spinner size="sm" />
+            <Caption1>Checking for WSL…</Caption1>
+          </div>
+        </div>
+      );
+    }
+    // Zero-distro machine: same two-way choice, but the WSL path first
+    // registers Ubuntu; success re-detects and lands in the normal choice.
     return (
       <div className={styles.root}>
-        <div className={styles.pendingRow}>
-          <Spinner size="sm" />
-          <Caption1>Checking for WSL…</Caption1>
+        <div className={styles.header}>
+          <Body1Strong>Where should the Omni backend run?</Body1Strong>
+          <Caption1>You can switch later from Settings.</Caption1>
         </div>
+
+        <div className={styles.list}>
+          <motion.button
+            type="button"
+            className={styles.option}
+            onClick={handleInstallUbuntu}
+            disabled={installing}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.25, ease: 'easeOut' }}
+          >
+            <span className={styles.optionBody}>
+              <Body1Strong>Install Ubuntu in WSL (recommended)</Body1Strong>
+              <Caption1>WSL 2 is installed but has no Linux distribution — Ubuntu runs sandboxes natively</Caption1>
+            </span>
+            <ChevronRight20Regular className={styles.chevron} />
+          </motion.button>
+
+          <motion.button
+            type="button"
+            className={styles.option}
+            onClick={onSkip}
+            disabled={installing}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.25, delay: 0.05, ease: 'easeOut' }}
+          >
+            <span className={styles.optionBody}>
+              <Body1Strong>Run everything on Windows</Body1Strong>
+              <Caption1>Keep the backend on this machine — no WSL involved</Caption1>
+            </span>
+            <ChevronRight20Regular className={styles.chevron} />
+          </motion.button>
+        </div>
+
+        {installing && (
+          <div className={styles.pendingRow}>
+            <Spinner size="sm" />
+            <Caption1>Installing Ubuntu — this downloads a few hundred MB…</Caption1>
+          </div>
+        )}
+
+        {error && <span className={styles.error}>{error}</span>}
       </div>
     );
   }

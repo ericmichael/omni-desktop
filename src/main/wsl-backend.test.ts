@@ -10,6 +10,7 @@ import {
   createWslBackendManager,
   parseWslDefaultDistro,
   parseWslDistroNames,
+  type RunElevated,
   type RunWsl,
   type RunWslResult,
   type SpawnWsl,
@@ -100,12 +101,19 @@ function makeManager(opts: {
   fetchImpl?: () => Promise<Response>;
   /** Preloaded durable secret, as if a previous session stored one. */
   storedSecret?: string;
+  /** Result of the elevated-launch seam (`install('platform')`). */
+  elevatedResult?: RunWslResult;
   platform?: NodeJS.Platform;
 }) {
   const runCalls: RunCall[] = [];
   const runWsl: RunWsl = (args, o) => {
     runCalls.push({ args, ...(o?.stdinFile ? { stdinFile: o.stdinFile } : {}) });
     return Promise.resolve(opts.respond(args));
+  };
+  const elevatedCalls: { exe: string; args: string[] }[] = [];
+  const runElevated: RunElevated = (exe, args) => {
+    elevatedCalls.push({ exe, args });
+    return Promise.resolve(opts.elevatedResult ?? ok());
   };
   const spawns: { args: string[]; child: FakeChild }[] = [];
   const spawnWsl: SpawnWsl = (args) => {
@@ -145,11 +153,12 @@ function makeManager(opts: {
     platform: opts.platform ?? 'win32',
     runWsl,
     spawnWsl,
+    runElevated,
     fetchFn,
     payloadPath: () => payloadFile,
     pickFreePort: () => Promise.resolve(43_210),
   });
-  return { manager, cleanup, runCalls, spawns, storeSet, secretState };
+  return { manager, cleanup, runCalls, elevatedCalls, spawns, storeSet, secretState };
 }
 
 const isProvisionCall = (call: RunCall): boolean => call.args.some((a) => a.includes('tar xzf -'));
@@ -235,6 +244,68 @@ describe('provisioning decision', () => {
       expect(runCalls).toHaveLength(0);
       expect(await manager.detect()).toEqual({ wsl: 'missing' });
       expect(manager.getStatus().state).toBe('idle');
+    } finally {
+      cleanup();
+    }
+  });
+});
+
+describe('install', () => {
+  it("'distro' runs the exact wsl.exe flag invocation (no --exec — not an in-distro command)", async () => {
+    const { manager, cleanup, runCalls, elevatedCalls } = makeManager({ respond: () => ok() });
+    try {
+      await expect(manager.install('distro')).resolves.toBeUndefined();
+      expect(runCalls).toEqual([{ args: ['--install', '-d', 'Ubuntu', '--no-launch'] }]);
+      expect(elevatedCalls).toHaveLength(0);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("'distro' rejects with decoded UTF-16LE stderr on a non-zero exit", async () => {
+    // wsl.exe's own errors arrive UTF-16LE — reject messages must decode them.
+    const stderr = Buffer.from('Wsl/InstallDistro/E_UNEXPECTED\r\n', 'utf16le');
+    const { manager, cleanup } = makeManager({
+      respond: () => ({ code: 1, stdout: Buffer.alloc(0), stderr }),
+    });
+    try {
+      await expect(manager.install('distro')).rejects.toThrow(/Wsl\/InstallDistro\/E_UNEXPECTED/);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("'platform' launches an elevated `wsl.exe --install --no-launch` and resolves on exit 0", async () => {
+    const { manager, cleanup, runCalls, elevatedCalls } = makeManager({ respond: () => ok() });
+    try {
+      await expect(manager.install('platform')).resolves.toBeUndefined();
+      expect(elevatedCalls).toEqual([{ exe: 'wsl.exe', args: ['--install', '--no-launch'] }]);
+      // The elevated one-shot never routes through the unelevated runWsl seam.
+      expect(runCalls).toHaveLength(0);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("'platform' rejects when the elevated launch exits non-zero (declined UAC)", async () => {
+    const { manager, cleanup } = makeManager({
+      respond: () => ok(),
+      elevatedResult: fail(1, 'The operation was canceled by the user.'),
+    });
+    try {
+      await expect(manager.install('platform')).rejects.toThrow(/canceled by the user/);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('no-ops off Windows', async () => {
+    const { manager, cleanup, runCalls, elevatedCalls } = makeManager({ respond: () => ok(), platform: 'linux' });
+    try {
+      await expect(manager.install('platform')).resolves.toBeUndefined();
+      await expect(manager.install('distro')).resolves.toBeUndefined();
+      expect(runCalls).toHaveLength(0);
+      expect(elevatedCalls).toHaveLength(0);
     } finally {
       cleanup();
     }

@@ -166,10 +166,9 @@ export const RemoteBackendCard = memo(() => {
   const [wslDistro, setWslDistro] = useState('');
   const [wslLinking, setWslLinking] = useState(false);
   const [wslError, setWslError] = useState<string | null>(null);
-  useEffect(() => {
-    if (!showWslSection) {
-      return;
-    }
+  // Shared by the mount effect and the post-`wsl:install` refresh, so a
+  // freshly registered Ubuntu falls straight into the distro-select flow.
+  const refreshWslDetect = useCallback(() => {
     void localEmitter
       .invoke('wsl:detect')
       .then((result) => {
@@ -180,7 +179,48 @@ export const RemoteBackendCard = memo(() => {
         }
       })
       .catch(() => undefined);
-  }, [showWslSection]);
+  }, []);
+  useEffect(() => {
+    if (!showWslSection) {
+      return;
+    }
+    refreshWslDetect();
+  }, [showWslSection, refreshWslDetect]);
+
+  // ── `wsl:install` flows for machines with no usable WSL ──
+  const [wslInstalling, setWslInstalling] = useState(false);
+  // 'platform' launched: the elevated install is unobservable from here
+  // (UAC + likely reboot), so the section swaps to a static what-happens-next
+  // note instead of pretending to track progress.
+  const [wslInstallStarted, setWslInstallStarted] = useState(false);
+
+  const onWslInstallPlatform = useCallback(async () => {
+    setWslInstalling(true);
+    setWslError(null);
+    try {
+      await localEmitter.invoke('wsl:install', 'platform');
+      setWslInstallStarted(true);
+    } catch {
+      // Non-zero powershell exit = declined UAC (or a launch failure) — the
+      // raw Start-Process stderr is noise, not guidance.
+      setWslError('Installation was cancelled or failed');
+    } finally {
+      setWslInstalling(false);
+    }
+  }, []);
+
+  const onWslInstallDistro = useCallback(async () => {
+    setWslInstalling(true);
+    setWslError(null);
+    try {
+      await localEmitter.invoke('wsl:install', 'distro');
+      refreshWslDetect();
+    } catch (e) {
+      setWslError(e instanceof Error ? e.message : 'Failed to install Ubuntu');
+    } finally {
+      setWslInstalling(false);
+    }
+  }, [refreshWslDetect]);
 
   const onConnect = useCallback(async () => {
     setConnecting(true);
@@ -400,9 +440,44 @@ export const RemoteBackendCard = memo(() => {
               </Caption1>
             </div>
             {wslDetect?.wsl === 'missing' ? (
-              <Caption1 className={styles.summary}>
-                WSL 2 not detected — install it with <span className={styles.mono}>wsl --install</span>
-              </Caption1>
+              wslInstallStarted ? (
+                <Caption1 className={styles.summary}>
+                  Windows will ask for permission and may need a reboot. After WSL finishes installing, come back here.
+                </Caption1>
+              ) : (
+                <>
+                  <Caption1 className={wslError ? styles.error : styles.summary}>
+                    {wslError ?? (
+                      <>
+                        WSL 2 not detected — install it with <span className={styles.mono}>wsl --install</span>
+                      </>
+                    )}
+                  </Caption1>
+                  <div>
+                    <Button size="sm" onClick={onWslInstallPlatform} isDisabled={wslInstalling}>
+                      {wslInstalling ? 'Installing…' : 'Install WSL 2'}
+                    </Button>
+                  </div>
+                </>
+              )
+            ) : wslDetect?.wsl === 'ok' && wslDetect.distros.length === 0 ? (
+              <>
+                <Caption1 className={wslError ? styles.error : styles.summary}>
+                  {wslError ?? 'WSL 2 is installed but has no Linux distribution.'}
+                </Caption1>
+                {wslInstalling ? (
+                  <div className={styles.pending}>
+                    <Spinner size="sm" />
+                    <Caption1>Installing Ubuntu — this downloads a few hundred MB…</Caption1>
+                  </div>
+                ) : (
+                  <div>
+                    <Button size="sm" onClick={onWslInstallDistro}>
+                      Install Ubuntu
+                    </Button>
+                  </div>
+                )}
+              </>
             ) : (
               <>
                 <FormField label="WSL distro">

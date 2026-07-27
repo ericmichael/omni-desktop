@@ -1124,6 +1124,11 @@ main.ipc.handle('wsl:set-persistent', async (_, persistent) => {
   broadcastStore();
 });
 
+// `wsl --install` driven from the app: 'platform' launches an elevated
+// one-shot (UAC; completion unobservable), 'distro' registers Ubuntu without
+// elevation. The card re-runs `wsl:detect` afterwards — no store change here.
+main.ipc.handle('wsl:install', (_, mode) => wslBackend.install(mode === 'platform' ? 'platform' : 'distro'));
+
 //#endregion
 
 //#region Self-hosted server link (Electron ↔ user-run server-mode launcher)

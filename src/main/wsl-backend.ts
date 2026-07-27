@@ -156,6 +156,14 @@ export type WslDaemonChild = {
 
 export type SpawnWsl = (args: string[]) => WslDaemonChild;
 
+/**
+ * Launch `exe args…` elevated (UAC) — used by `install('platform')`, where
+ * enabling the WSL Windows features requires admin. The elevated process is
+ * detached and unobservable; the result reflects only the launcher process
+ * (powershell) — non-zero when the UAC prompt is declined.
+ */
+export type RunElevated = (exe: string, args: string[]) => Promise<RunWslResult>;
+
 /** Durable-secret persistence seam (persistent mode only). Production wraps
  *  the LocalSecretStore under a stable id; tests inject an in-memory fake. */
 export type WslSecretStore = {
@@ -189,6 +197,31 @@ const defaultRunWsl: RunWsl = (args, opts) =>
 
 const defaultSpawnWsl: SpawnWsl = (args) =>
   spawn('wsl.exe', args, { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true });
+
+/**
+ * `Start-Process -Verb RunAs` is the supported way to trigger a UAC prompt
+ * from an unelevated process. Powershell itself exits promptly: 0 once the
+ * elevated (detached) process has been launched, non-zero when the prompt is
+ * declined — that exit is all the caller can observe.
+ */
+const defaultRunElevated: RunElevated = (exe, args) =>
+  new Promise((resolve, reject) => {
+    const argumentList = args.map((a) => `'${a}'`).join(',');
+    const child = spawn(
+      'powershell.exe',
+      ['-NoProfile', '-Command', `Start-Process ${exe} -ArgumentList ${argumentList} -Verb RunAs`],
+      { windowsHide: true }
+    );
+    const stdout: Buffer[] = [];
+    const stderr: Buffer[] = [];
+    child.stdout.on('data', (chunk: Buffer) => stdout.push(chunk));
+    child.stderr.on('data', (chunk: Buffer) => stderr.push(chunk));
+    child.once('error', reject);
+    child.once('close', (code) => {
+      resolve({ code: code ?? -1, stdout: Buffer.concat(stdout), stderr: Buffer.concat(stderr) });
+    });
+    child.stdin.end();
+  });
 
 /**
  * Bind-probe a free port on the Windows loopback. WSL2 NAT maps localhost
@@ -234,6 +267,7 @@ type WslBackendManagerArgs = {
   /** Injectable exec/spawn/net/fs seams — required by the unit tests. */
   runWsl?: RunWsl;
   spawnWsl?: SpawnWsl;
+  runElevated?: RunElevated;
   fetchFn?: typeof globalThis.fetch;
   platform?: NodeJS.Platform;
   payloadPath?: () => string;
@@ -248,6 +282,7 @@ export class WslBackendManager {
   private readonly secrets: WslSecretStore;
   private readonly runWsl: RunWsl;
   private readonly spawnWsl: SpawnWsl;
+  private readonly runElevated: RunElevated;
   private readonly fetchFn: typeof globalThis.fetch;
   private readonly platform: NodeJS.Platform;
   private readonly payloadPath: () => string;
@@ -280,6 +315,7 @@ export class WslBackendManager {
     this.secrets = arg.secrets;
     this.runWsl = arg.runWsl ?? defaultRunWsl;
     this.spawnWsl = arg.spawnWsl ?? defaultSpawnWsl;
+    this.runElevated = arg.runElevated ?? defaultRunElevated;
     this.fetchFn = arg.fetchFn ?? globalThis.fetch;
     this.platform = arg.platform ?? process.platform;
     this.payloadPath = arg.payloadPath ?? defaultPayloadPath;
@@ -322,6 +358,39 @@ export class WslBackendManager {
       // Default marker is best-effort — the list itself is still useful.
     }
     return { wsl: 'ok', distros: names.map((name) => ({ name, isDefault: name === defaultName })) };
+  }
+
+  /**
+   * `wsl:install` — get a usable WSL onto a machine that has none.
+   *
+   * - `'platform'` (WSL entirely missing): enabling the Windows features
+   *   needs elevation, so launch a one-shot elevated
+   *   `wsl.exe --install --no-launch` via {@link RunElevated}. Fire-and-
+   *   forget — the elevated process is detached and unobservable (likely
+   *   ends in a reboot), so resolution only means the UAC prompt was
+   *   accepted; a declined prompt exits non-zero and rejects.
+   * - `'distro'` (WSL present, zero distros): `wsl.exe --install -d Ubuntu
+   *   --no-launch` registers the WSL-default Ubuntu — no elevation, but the
+   *   Store download can take minutes. This is a wsl.exe flag invocation,
+   *   not an in-distro command, so it does NOT go through execArgs/--exec.
+   *
+   * Windows-only no-op elsewhere.
+   */
+  async install(mode: 'platform' | 'distro'): Promise<void> {
+    if (this.platform !== 'win32') {
+      return;
+    }
+    if (mode === 'platform') {
+      const res = await this.runElevated('wsl.exe', ['--install', '--no-launch']);
+      if (res.code !== 0) {
+        throw new Error(`WSL install did not start (exit ${res.code}): ${decodeWslOutput(res.stderr).trim()}`);
+      }
+      return;
+    }
+    const res = await this.runWsl(['--install', '-d', 'Ubuntu', '--no-launch']);
+    if (res.code !== 0) {
+      throw new Error(`Ubuntu install failed (exit ${res.code}): ${decodeWslOutput(res.stderr).trim()}`);
+    }
   }
 
   /**

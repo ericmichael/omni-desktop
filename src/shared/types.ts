@@ -2753,8 +2753,11 @@ export type WslBackendStatus = {
  * ``wsl:get-ws-token`` mints a WS auth token signed with the daemon's
  * shared secret (per-boot, or durable in persistent mode) — no HTTP fetch.
  * ``wsl:set-persistent`` flips persistent daemon mode, restarting the daemon
- * into the new lifecycle. Handlers are implemented by WslBackendManager
- * (Phase 2).
+ * into the new lifecycle. ``wsl:install`` drives `wsl --install`:
+ * ``'platform'`` launches an elevated one-shot (UAC prompt; completion is
+ * unobservable — likely reboot), ``'distro'`` registers Ubuntu via a plain
+ * `wsl.exe --install -d Ubuntu --no-launch` (no elevation, minutes-long
+ * Store download). Handlers are implemented by WslBackendManager (Phase 2).
  */
 type WslIpcEvents = Namespaced<
   'wsl',
@@ -2764,6 +2767,7 @@ type WslIpcEvents = Namespaced<
     'get-ws-token': () => string;
     status: () => WslBackendStatus;
     'set-persistent': (persistent: boolean) => void;
+    install: (mode: 'platform' | 'distro') => void;
   }
 >;
 
