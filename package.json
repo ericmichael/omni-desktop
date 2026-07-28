@@ -62,6 +62,7 @@
     "seed": "node scripts/seed.mjs",
     "seed:reset": "node scripts/seed.mjs --reset",
     "protocol:check": "node scripts/sync-omniagents-gui-v1.mjs --check",
+    "protocol:verify-source": "node scripts/sync-omniagents-gui-v1.mjs --verify-source-root",
     "protocol:sync": "node scripts/sync-omniagents-gui-v1.mjs --sync"
   },
   "devDependencies": {

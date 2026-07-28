@@ -1,0 +1,2250 @@
+{
+  "components": {
+    "errors": {
+      "InternalError": {
+        "code": -32603,
+        "message": "Internal error"
+      },
+      "InvalidParams": {
+        "code": -32602,
+        "message": "Invalid params"
+      },
+      "InvalidRequest": {
+        "code": -32600,
+        "message": "Invalid Request"
+      },
+      "MethodNotFound": {
+        "code": -32601,
+        "message": "Method not found"
+      }
+    }
+  },
+  "info": {
+    "description": "JSON-RPC 2.0 protocol for the main OmniAgents /ws endpoint.",
+    "title": "OmniAgents GUI Protocol",
+    "version": "1.0.0",
+    "x-omni-compatibility": "additive-only-v1"
+  },
+  "methods": [
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        }
+      ],
+      "name": "start_run",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "prompt",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/start_run/properties/prompt"
+          }
+        },
+        {
+          "name": "session_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/start_run/properties/session_id"
+          }
+        },
+        {
+          "name": "variables",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/start_run/properties/variables"
+          }
+        },
+        {
+          "name": "context",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/start_run/properties/context"
+          }
+        },
+        {
+          "name": "content",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/start_run/properties/content"
+          }
+        },
+        {
+          "name": "workflow_name",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/start_run/properties/workflow_name"
+          }
+        },
+        {
+          "name": "group_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/start_run/properties/group_id"
+          }
+        },
+        {
+          "name": "safe_tool_overrides",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/start_run/properties/safe_tool_overrides"
+          }
+        },
+        {
+          "name": "prompt_role",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/start_run/properties/prompt_role"
+          }
+        }
+      ],
+      "result": {
+        "name": "start_run_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation start_run",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/start_run"
+      },
+      "x-omni-stability": "stable"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        }
+      ],
+      "name": "stop_run",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "run_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/stop_run/properties/run_id"
+          }
+        }
+      ],
+      "result": {
+        "name": "stop_run_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation stop_run",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/stop_run"
+      },
+      "x-omni-stability": "stable"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        }
+      ],
+      "name": "send_user_message",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "run_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/send_user_message/properties/run_id"
+          }
+        },
+        {
+          "name": "content",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/send_user_message/properties/content"
+          }
+        }
+      ],
+      "result": {
+        "name": "send_user_message_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation send_user_message",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/send_user_message"
+      },
+      "x-omni-stability": "stable"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        }
+      ],
+      "name": "get_session_history",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "session_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/get_session_history/properties/session_id"
+          }
+        }
+      ],
+      "result": {
+        "name": "get_session_history_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation get_session_history",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/get_session_history"
+      },
+      "x-omni-stability": "stable"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        }
+      ],
+      "name": "list_sessions",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "limit",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/list_sessions/properties/limit"
+          }
+        },
+        {
+          "name": "offset",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/list_sessions/properties/offset"
+          }
+        }
+      ],
+      "result": {
+        "name": "list_sessions_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation list_sessions",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/list_sessions"
+      },
+      "x-omni-stability": "stable"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        }
+      ],
+      "name": "archive_session",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "session_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/archive_session/properties/session_id"
+          }
+        }
+      ],
+      "result": {
+        "name": "archive_session_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation archive_session",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/archive_session"
+      },
+      "x-omni-stability": "stable"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        }
+      ],
+      "name": "delete_session",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "session_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/delete_session/properties/session_id"
+          }
+        }
+      ],
+      "result": {
+        "name": "delete_session_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation delete_session",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/delete_session"
+      },
+      "x-omni-stability": "stable"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        }
+      ],
+      "name": "get_user_history",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "limit",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/get_user_history/properties/limit"
+          }
+        },
+        {
+          "name": "include_archived",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/get_user_history/properties/include_archived"
+          }
+        }
+      ],
+      "result": {
+        "name": "get_user_history_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation get_user_history",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/get_user_history"
+      },
+      "x-omni-stability": "stable"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        }
+      ],
+      "name": "get_agent_info",
+      "paramStructure": "by-name",
+      "params": [],
+      "result": {
+        "name": "get_agent_info_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation get_agent_info",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/get_agent_info"
+      },
+      "x-omni-stability": "stable"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        }
+      ],
+      "name": "tool_approval_response",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "call_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/tool_approval_response/properties/call_id"
+          }
+        },
+        {
+          "name": "decision",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/tool_approval_response/properties/decision"
+          }
+        },
+        {
+          "name": "always_approve",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/tool_approval_response/properties/always_approve"
+          }
+        },
+        {
+          "name": "rejection_message",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/tool_approval_response/properties/rejection_message"
+          }
+        }
+      ],
+      "result": {
+        "name": "tool_approval_response_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation tool_approval_response",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/tool_approval_response"
+      },
+      "x-omni-stability": "stable"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        }
+      ],
+      "name": "mcp_approval_response",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "request_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_approval_response/properties/request_id"
+          }
+        },
+        {
+          "name": "decision",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_approval_response/properties/decision"
+          }
+        },
+        {
+          "name": "rejection_message",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_approval_response/properties/rejection_message"
+          }
+        }
+      ],
+      "result": {
+        "name": "mcp_approval_response_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation mcp_approval_response",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_approval_response"
+      },
+      "x-omni-stability": "stable"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        }
+      ],
+      "name": "client_functions",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "functions",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/client_functions/properties/functions"
+          }
+        },
+        {
+          "name": "version",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/client_functions/properties/version"
+          }
+        }
+      ],
+      "result": {
+        "name": "client_functions_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation client_functions",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/client_functions"
+      },
+      "x-omni-stability": "stable"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        }
+      ],
+      "name": "client_response",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "request_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/client_response/properties/request_id"
+          }
+        },
+        {
+          "name": "ok",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/client_response/properties/ok"
+          }
+        },
+        {
+          "name": "result",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/client_response/properties/result"
+          }
+        },
+        {
+          "name": "error",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/client_response/properties/error"
+          }
+        }
+      ],
+      "result": {
+        "name": "client_response_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation client_response",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/client_response"
+      },
+      "x-omni-stability": "stable"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        }
+      ],
+      "name": "list_server_functions",
+      "paramStructure": "by-name",
+      "params": [],
+      "result": {
+        "name": "list_server_functions_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation list_server_functions",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/list_server_functions"
+      },
+      "x-omni-stability": "stable"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        }
+      ],
+      "name": "server_call",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "function",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/server_call/properties/function"
+          }
+        },
+        {
+          "name": "args",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/server_call/properties/args"
+          }
+        },
+        {
+          "name": "session_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/server_call/properties/session_id"
+          }
+        }
+      ],
+      "result": {
+        "name": "server_call_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation server_call",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/server_call"
+      },
+      "x-omni-stability": "stable"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        }
+      ],
+      "name": "enqueue_message",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "session_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/enqueue_message/properties/session_id"
+          }
+        },
+        {
+          "name": "content",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/enqueue_message/properties/content"
+          }
+        },
+        {
+          "name": "role",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/enqueue_message/properties/role"
+          }
+        },
+        {
+          "name": "trigger_run",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/enqueue_message/properties/trigger_run"
+          }
+        },
+        {
+          "name": "variables",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/enqueue_message/properties/variables"
+          }
+        },
+        {
+          "name": "safe_tool_overrides",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/enqueue_message/properties/safe_tool_overrides"
+          }
+        },
+        {
+          "name": "source",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/enqueue_message/properties/source"
+          }
+        }
+      ],
+      "result": {
+        "name": "enqueue_message_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation enqueue_message",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/enqueue_message"
+      },
+      "x-omni-stability": "stable"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        }
+      ],
+      "name": "list_queue",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "session_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/list_queue/properties/session_id"
+          }
+        }
+      ],
+      "result": {
+        "name": "list_queue_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation list_queue",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/list_queue"
+      },
+      "x-omni-stability": "stable"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        }
+      ],
+      "name": "cancel_queued_message",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "session_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/cancel_queued_message/properties/session_id"
+          }
+        },
+        {
+          "name": "item_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/cancel_queued_message/properties/item_id"
+          }
+        }
+      ],
+      "result": {
+        "name": "cancel_queued_message_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation cancel_queued_message",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/cancel_queued_message"
+      },
+      "x-omni-stability": "stable"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        }
+      ],
+      "name": "fork_session",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "session_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fork_session/properties/session_id"
+          }
+        },
+        {
+          "name": "new_session_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fork_session/properties/new_session_id"
+          }
+        }
+      ],
+      "result": {
+        "name": "fork_session_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation fork_session",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/fork_session"
+      },
+      "x-omni-stability": "experimental"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        }
+      ],
+      "name": "set_session_hold",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "session_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/set_session_hold/properties/session_id"
+          }
+        },
+        {
+          "name": "hold",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/set_session_hold/properties/hold"
+          }
+        }
+      ],
+      "result": {
+        "name": "set_session_hold_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation set_session_hold",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/set_session_hold"
+      },
+      "x-omni-stability": "experimental"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        }
+      ],
+      "name": "queue_status",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "session_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/queue_status/properties/session_id"
+          }
+        }
+      ],
+      "result": {
+        "name": "queue_status_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation queue_status",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/queue_status"
+      },
+      "x-omni-stability": "experimental"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        }
+      ],
+      "name": "enqueue_notification",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "session_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/enqueue_notification/properties/session_id"
+          }
+        },
+        {
+          "name": "content",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/enqueue_notification/properties/content"
+          }
+        },
+        {
+          "name": "source",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/enqueue_notification/properties/source"
+          }
+        },
+        {
+          "name": "safe_tool_overrides",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/enqueue_notification/properties/safe_tool_overrides"
+          }
+        }
+      ],
+      "result": {
+        "name": "enqueue_notification_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation enqueue_notification",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/enqueue_notification"
+      },
+      "x-omni-stability": "experimental"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        }
+      ],
+      "name": "update_session_variables",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "session_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/update_session_variables/properties/session_id"
+          }
+        },
+        {
+          "name": "updates",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/update_session_variables/properties/updates"
+          }
+        }
+      ],
+      "result": {
+        "name": "update_session_variables_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation update_session_variables",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/update_session_variables"
+      },
+      "x-omni-stability": "experimental"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        }
+      ],
+      "name": "set_client_status",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "text",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/set_client_status/properties/text"
+          }
+        }
+      ],
+      "result": {
+        "name": "set_client_status_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation set_client_status",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/set_client_status"
+      },
+      "x-omni-stability": "experimental"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        }
+      ],
+      "name": "disable_tool",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "tool_name",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/disable_tool/properties/tool_name"
+          }
+        }
+      ],
+      "result": {
+        "name": "disable_tool_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation disable_tool",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/disable_tool"
+      },
+      "x-omni-stability": "experimental"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        }
+      ],
+      "name": "disable_mcp_server",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "server_name",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/disable_mcp_server/properties/server_name"
+          }
+        }
+      ],
+      "result": {
+        "name": "disable_mcp_server_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation disable_mcp_server",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/disable_mcp_server"
+      },
+      "x-omni-stability": "experimental"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        }
+      ],
+      "name": "report_incident",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "session_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/report_incident/properties/session_id"
+          }
+        },
+        {
+          "name": "description",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/report_incident/properties/description"
+          }
+        },
+        {
+          "name": "disable_tools",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/report_incident/properties/disable_tools"
+          }
+        },
+        {
+          "name": "disable_mcp_servers",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/report_incident/properties/disable_mcp_servers"
+          }
+        }
+      ],
+      "result": {
+        "name": "report_incident_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation report_incident",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/report_incident"
+      },
+      "x-omni-stability": "experimental"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        }
+      ],
+      "name": "export_session",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "session_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/export_session/properties/session_id"
+          }
+        },
+        {
+          "name": "redact",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/export_session/properties/redact"
+          }
+        }
+      ],
+      "result": {
+        "name": "export_session_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation export_session",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/export_session"
+      },
+      "x-omni-stability": "experimental"
+    },
+    {
+      "name": "run_started",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "run_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/run_started/properties/run_id"
+          }
+        },
+        {
+          "name": "session_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/run_started/properties/session_id"
+          }
+        },
+        {
+          "name": "prompt",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/run_started/properties/prompt"
+          }
+        },
+        {
+          "name": "prompt_role",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/run_started/properties/prompt_role"
+          }
+        }
+      ],
+      "result": {
+        "name": "run_started_result",
+        "schema": {
+          "type": "null"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation run_started",
+      "x-omni-direction": "server_to_client",
+      "x-omni-kind": "notification",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/run_started"
+      },
+      "x-omni-stability": "stable"
+    },
+    {
+      "name": "run_status",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "run_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/run_status/properties/run_id"
+          }
+        },
+        {
+          "name": "session_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/run_status/properties/session_id"
+          }
+        },
+        {
+          "name": "status",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/run_status/properties/status"
+          }
+        },
+        {
+          "name": "message",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/run_status/properties/message"
+          }
+        },
+        {
+          "name": "attempt",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/run_status/properties/attempt"
+          }
+        },
+        {
+          "name": "total",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/run_status/properties/total"
+          }
+        },
+        {
+          "name": "next_delay",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/run_status/properties/next_delay"
+          }
+        }
+      ],
+      "result": {
+        "name": "run_status_result",
+        "schema": {
+          "type": "null"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation run_status",
+      "x-omni-direction": "server_to_client",
+      "x-omni-kind": "notification",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/run_status"
+      },
+      "x-omni-stability": "stable"
+    },
+    {
+      "name": "tool_called",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "run_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/tool_called/properties/run_id"
+          }
+        },
+        {
+          "name": "session_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/tool_called/properties/session_id"
+          }
+        },
+        {
+          "name": "tool",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/tool_called/properties/tool"
+          }
+        },
+        {
+          "name": "input",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/tool_called/properties/input"
+          }
+        },
+        {
+          "name": "call_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/tool_called/properties/call_id"
+          }
+        }
+      ],
+      "result": {
+        "name": "tool_called_result",
+        "schema": {
+          "type": "null"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation tool_called",
+      "x-omni-direction": "server_to_client",
+      "x-omni-kind": "notification",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/tool_called"
+      },
+      "x-omni-stability": "stable"
+    },
+    {
+      "name": "tool_result",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "run_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/tool_result/properties/run_id"
+          }
+        },
+        {
+          "name": "session_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/tool_result/properties/session_id"
+          }
+        },
+        {
+          "name": "tool",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/tool_result/properties/tool"
+          }
+        },
+        {
+          "name": "output",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/tool_result/properties/output"
+          }
+        },
+        {
+          "name": "call_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/tool_result/properties/call_id"
+          }
+        },
+        {
+          "name": "metadata",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/tool_result/properties/metadata"
+          }
+        }
+      ],
+      "result": {
+        "name": "tool_result_result",
+        "schema": {
+          "type": "null"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation tool_result",
+      "x-omni-direction": "server_to_client",
+      "x-omni-kind": "notification",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/tool_result"
+      },
+      "x-omni-stability": "stable"
+    },
+    {
+      "name": "message_output",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "run_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/message_output/properties/run_id"
+          }
+        },
+        {
+          "name": "session_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/message_output/properties/session_id"
+          }
+        },
+        {
+          "name": "content",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/message_output/properties/content"
+          }
+        }
+      ],
+      "result": {
+        "name": "message_output_result",
+        "schema": {
+          "type": "null"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation message_output",
+      "x-omni-direction": "server_to_client",
+      "x-omni-kind": "notification",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/message_output"
+      },
+      "x-omni-stability": "stable"
+    },
+    {
+      "name": "token",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "run_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/token/properties/run_id"
+          }
+        },
+        {
+          "name": "session_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/token/properties/session_id"
+          }
+        },
+        {
+          "name": "delta",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/token/properties/delta"
+          }
+        },
+        {
+          "name": "totals",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/token/properties/totals"
+          }
+        },
+        {
+          "name": "turn",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/token/properties/turn"
+          }
+        },
+        {
+          "name": "response_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/token/properties/response_id"
+          }
+        },
+        {
+          "name": "model",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/token/properties/model"
+          }
+        },
+        {
+          "name": "max_input_tokens",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/token/properties/max_input_tokens"
+          }
+        },
+        {
+          "name": "max_output_tokens",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/token/properties/max_output_tokens"
+          }
+        },
+        {
+          "name": "truncation",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/token/properties/truncation"
+          }
+        }
+      ],
+      "result": {
+        "name": "token_result",
+        "schema": {
+          "type": "null"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation token",
+      "x-omni-direction": "server_to_client",
+      "x-omni-kind": "notification",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/token"
+      },
+      "x-omni-stability": "stable"
+    },
+    {
+      "name": "run_end",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "run_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/run_end/properties/run_id"
+          }
+        },
+        {
+          "name": "session_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/run_end/properties/session_id"
+          }
+        },
+        {
+          "name": "end_reason",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/run_end/properties/end_reason"
+          }
+        },
+        {
+          "name": "usage",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/run_end/properties/usage"
+          }
+        },
+        {
+          "name": "model",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/run_end/properties/model"
+          }
+        },
+        {
+          "name": "max_input_tokens",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/run_end/properties/max_input_tokens"
+          }
+        },
+        {
+          "name": "max_output_tokens",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/run_end/properties/max_output_tokens"
+          }
+        },
+        {
+          "name": "truncation",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/run_end/properties/truncation"
+          }
+        },
+        {
+          "name": "error",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/run_end/properties/error"
+          }
+        }
+      ],
+      "result": {
+        "name": "run_end_result",
+        "schema": {
+          "type": "null"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation run_end",
+      "x-omni-direction": "server_to_client",
+      "x-omni-kind": "notification",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/run_end"
+      },
+      "x-omni-stability": "stable"
+    },
+    {
+      "name": "tool_approval_requested",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "call_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/tool_approval_requested/properties/call_id"
+          }
+        },
+        {
+          "name": "tool_name",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/tool_approval_requested/properties/tool_name"
+          }
+        },
+        {
+          "name": "arguments",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/tool_approval_requested/properties/arguments"
+          }
+        },
+        {
+          "name": "metadata",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/tool_approval_requested/properties/metadata"
+          }
+        },
+        {
+          "name": "session_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/tool_approval_requested/properties/session_id"
+          }
+        },
+        {
+          "name": "run_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/tool_approval_requested/properties/run_id"
+          }
+        }
+      ],
+      "result": {
+        "name": "tool_approval_requested_result",
+        "schema": {
+          "type": "null"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation tool_approval_requested",
+      "x-omni-direction": "server_to_client",
+      "x-omni-kind": "notification",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/tool_approval_requested"
+      },
+      "x-omni-stability": "stable"
+    },
+    {
+      "name": "tool_approval_resolved",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "call_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/tool_approval_resolved/properties/call_id"
+          }
+        },
+        {
+          "name": "session_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/tool_approval_resolved/properties/session_id"
+          }
+        }
+      ],
+      "result": {
+        "name": "tool_approval_resolved_result",
+        "schema": {
+          "type": "null"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation tool_approval_resolved",
+      "x-omni-direction": "server_to_client",
+      "x-omni-kind": "notification",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/tool_approval_resolved"
+      },
+      "x-omni-stability": "stable"
+    },
+    {
+      "name": "mcp_approval_requested",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "kind",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_approval_requested/properties/kind"
+          }
+        },
+        {
+          "name": "request_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_approval_requested/properties/request_id"
+          }
+        },
+        {
+          "name": "server_label",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_approval_requested/properties/server_label"
+          }
+        },
+        {
+          "name": "tool_name",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_approval_requested/properties/tool_name"
+          }
+        },
+        {
+          "name": "arguments",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_approval_requested/properties/arguments"
+          }
+        },
+        {
+          "name": "session_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_approval_requested/properties/session_id"
+          }
+        },
+        {
+          "name": "run_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_approval_requested/properties/run_id"
+          }
+        }
+      ],
+      "result": {
+        "name": "mcp_approval_requested_result",
+        "schema": {
+          "type": "null"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation mcp_approval_requested",
+      "x-omni-direction": "server_to_client",
+      "x-omni-kind": "notification",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_approval_requested"
+      },
+      "x-omni-stability": "stable"
+    },
+    {
+      "name": "mcp_approval_resolved",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "request_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_approval_resolved/properties/request_id"
+          }
+        },
+        {
+          "name": "session_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_approval_resolved/properties/session_id"
+          }
+        }
+      ],
+      "result": {
+        "name": "mcp_approval_resolved_result",
+        "schema": {
+          "type": "null"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation mcp_approval_resolved",
+      "x-omni-direction": "server_to_client",
+      "x-omni-kind": "notification",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_approval_resolved"
+      },
+      "x-omni-stability": "stable"
+    },
+    {
+      "name": "client_request",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "request_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/client_request/properties/request_id"
+          }
+        },
+        {
+          "name": "function",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/client_request/properties/function"
+          }
+        },
+        {
+          "name": "args",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/client_request/properties/args"
+          }
+        },
+        {
+          "name": "session_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/client_request/properties/session_id"
+          }
+        },
+        {
+          "name": "idempotency_key",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/client_request/properties/idempotency_key"
+          }
+        },
+        {
+          "name": "run_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/client_request/properties/run_id"
+          }
+        }
+      ],
+      "result": {
+        "name": "client_request_result",
+        "schema": {
+          "type": "null"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation client_request",
+      "x-omni-correlation": {
+        "requestField": "request_id",
+        "responseMethod": "client_response"
+      },
+      "x-omni-direction": "server_to_client",
+      "x-omni-kind": "correlated_notification",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/client_request"
+      },
+      "x-omni-stability": "stable"
+    },
+    {
+      "name": "client_request_resolved",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "request_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/client_request_resolved/properties/request_id"
+          }
+        }
+      ],
+      "result": {
+        "name": "client_request_resolved_result",
+        "schema": {
+          "type": "null"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation client_request_resolved",
+      "x-omni-direction": "server_to_client",
+      "x-omni-kind": "notification",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/client_request_resolved"
+      },
+      "x-omni-stability": "stable"
+    },
+    {
+      "name": "queue_changed",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "session_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/queue_changed/properties/session_id"
+          }
+        },
+        {
+          "name": "depth",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/queue_changed/properties/depth"
+          }
+        },
+        {
+          "name": "items",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/queue_changed/properties/items"
+          }
+        }
+      ],
+      "result": {
+        "name": "queue_changed_result",
+        "schema": {
+          "type": "null"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation queue_changed",
+      "x-omni-direction": "server_to_client",
+      "x-omni-kind": "notification",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/queue_changed"
+      },
+      "x-omni-stability": "stable"
+    },
+    {
+      "name": "session_forked",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "session_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/session_forked/properties/session_id"
+          }
+        },
+        {
+          "name": "new_session_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/session_forked/properties/new_session_id"
+          }
+        }
+      ],
+      "result": {
+        "name": "session_forked_result",
+        "schema": {
+          "type": "null"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation session_forked",
+      "x-omni-direction": "server_to_client",
+      "x-omni-kind": "notification",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/session_forked"
+      },
+      "x-omni-stability": "experimental"
+    },
+    {
+      "name": "session_variables_changed",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "session_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/session_variables_changed/properties/session_id"
+          }
+        },
+        {
+          "name": "changed",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/session_variables_changed/properties/changed"
+          }
+        },
+        {
+          "name": "variables",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/session_variables_changed/properties/variables"
+          }
+        }
+      ],
+      "result": {
+        "name": "session_variables_changed_result",
+        "schema": {
+          "type": "null"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation session_variables_changed",
+      "x-omni-direction": "server_to_client",
+      "x-omni-kind": "notification",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/session_variables_changed"
+      },
+      "x-omni-stability": "experimental"
+    }
+  ],
+  "openrpc": "1.3.2",
+  "x-omni-jsonrpc-version": "2.0",
+  "x-omni-schema-dialect": "https://json-schema.org/draft/2020-12/schema"
+}
