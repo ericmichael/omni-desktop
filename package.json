@@ -34,6 +34,7 @@
     "lint:dpdm": "dpdm --no-warning --no-tree --transform --exit-code circular:1 src/main/index.ts src/renderer/index.ts src/preload/index.ts",
     "lint:eslint": "eslint --max-warnings=0 .",
     "lint:prettier": "prettier --check .",
+    "lint:protocol": "npm run protocol:check",
     "lint:tsc": "npm run build:packages && tsc --noEmit",
     "lint": "concurrently -g -c red,green,yellow,blue,magenta npm:lint:*",
     "fix": "eslint --fix . && prettier --log-level warn --write .",
@@ -59,7 +60,9 @@
     "dev:server": "npm run build:packages && npm run rebuild:node && vite build --config vite.server.config.ts --mode development && concurrently -k -n server-build,browser-dev -c blue,magenta \"NODE_OPTIONS=--max-old-space-size=8192 vite build --config vite.server.config.ts --mode development --watch\" \"vite --config vite.browser.config.ts --mode development --host 0.0.0.0 --port 5173 --strictPort\"",
     "start:server": "npm run rebuild:node && node out/server/index.mjs",
     "seed": "node scripts/seed.mjs",
-    "seed:reset": "node scripts/seed.mjs --reset"
+    "seed:reset": "node scripts/seed.mjs --reset",
+    "protocol:check": "node scripts/sync-omniagents-gui-v1.mjs --check",
+    "protocol:sync": "node scripts/sync-omniagents-gui-v1.mjs --sync"
   },
   "devDependencies": {
     "@electron-toolkit/preload": "^3.0.2",
