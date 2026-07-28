@@ -31,6 +31,7 @@ import type Store from 'electron-store';
 import { fromIso, type IProjectsRepo, residentId, toIso } from 'omni-projects-db';
 import { WebSocket as WsWebSocket } from 'ws';
 
+import type { JsonRpcError, RpcMethodMap } from '@/generated/omniagents-gui-v1/gui-v1';
 import { RESIDENT_SUPERUSER_TOOLS } from '@/lib/client-tools';
 import {
   advanceThread,
@@ -77,6 +78,7 @@ import {
 import type { ProcessManager } from '@/main/process-manager';
 import { getDefaultWorkspaceDir } from '@/main/util';
 import type { IIpcListener } from '@/shared/ipc-listener';
+import { OmniagentsRpcError } from '@/shared/omniagents-rpc';
 import type {
   IpcRendererEvents,
   ResidentAgent,
@@ -231,7 +233,7 @@ class ResidentWatcher {
       }
       this.pending.delete(msg.id);
       if (msg.error && typeof msg.error === 'object') {
-        p.reject(new Error(String((msg.error as Record<string, unknown>).message ?? 'rpc error')));
+        p.reject(new OmniagentsRpcError(msg.error as JsonRpcError));
       } else {
         p.resolve(msg.result);
       }
@@ -312,13 +314,18 @@ class ResidentWatcher {
     }
   }
 
-  call<T = unknown>(method: string, params: Record<string, unknown>): Promise<T> {
+  call<Method extends keyof RpcMethodMap>(
+    method: Method,
+    params: RpcMethodMap[Method]['params']
+  ): Promise<RpcMethodMap[Method]['result']>;
+  call(method: 'get_run_state', params: { session_id: string }): Promise<{ active_run_id?: string | null }>;
+  call(method: string, params: Record<string, unknown>): Promise<unknown> {
     const ws = this.ws;
     if (!ws || ws.readyState !== WsWebSocket.OPEN) {
       return Promise.reject(new Error('watcher socket not open'));
     }
     const id = this.nextId++;
-    return new Promise<T>((resolve, reject) => {
+    return new Promise<unknown>((resolve, reject) => {
       this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject });
       ws.send(JSON.stringify({ jsonrpc: '2.0', id, method, params }), (err) => {
         if (err) {

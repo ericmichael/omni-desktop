@@ -10,6 +10,7 @@ index.html
 .yalc/
 *.scss
 src/services/api/schema.ts
+src/generated/**
 static/
 src/theme/css/overlayscrollbars.css
 src/theme_/css/overlayscrollbars.css

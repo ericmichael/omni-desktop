@@ -1,5 +1,6 @@
 import { createActor } from 'xstate';
 
+import type { JsonRpcError, JsonRpcId, RpcMethodMap, RpcNotificationMap } from '@/generated/omniagents-gui-v1/gui-v1';
 import { createMachineLogger } from '@/shared/machines/machine-logger';
 import {
   MAX_PENDING_CALLS,
@@ -7,21 +8,13 @@ import {
   type RPCClientActor,
   rpcClientMachine,
 } from '@/shared/machines/rpc-client.machine';
-
-type JSONRPCId = number | string;
-
-type JSONRPCRequest = {
-  jsonrpc: '2.0';
-  id: JSONRPCId;
-  method: string;
-  params?: Record<string, unknown>;
-};
+import { OmniagentsRpcError } from '@/shared/omniagents-rpc';
 
 type JSONRPCResponse = {
   jsonrpc: '2.0';
-  id: JSONRPCId;
+  id: JsonRpcId;
   result?: unknown;
-  error?: { code?: number; message: string; data?: unknown };
+  error?: JsonRpcError;
 };
 
 type JSONRPCNotification = {
@@ -33,6 +26,8 @@ type JSONRPCNotification = {
 export type ServerEvent = JSONRPCNotification;
 
 type Listener = (payload: any) => void;
+
+export { OmniagentsRpcError } from '@/shared/omniagents-rpc';
 
 type PendingEntry = {
   resolve: (v: any) => void;
@@ -62,7 +57,7 @@ export class RPCClient {
   private url: string;
   private token?: string;
   private nextId = 0;
-  private pending = new Map<JSONRPCId, PendingEntry>();
+  private pending = new Map<JsonRpcId, PendingEntry>();
   private listeners = new Map<string, Set<Listener>>();
   private disposed = false;
   private reconnectSub: { unsubscribe(): void } | null = null;
@@ -250,7 +245,7 @@ export class RPCClient {
               );
             }
             if ((msg as JSONRPCResponse).error) {
-              pending.reject(new Error((msg as JSONRPCResponse).error!.message));
+              pending.reject(new OmniagentsRpcError((msg as JSONRPCResponse).error!));
             } else {
               pending.resolve((msg as JSONRPCResponse).result);
             }
@@ -350,12 +345,17 @@ export class RPCClient {
     this.actor.stop();
   }
 
+  on<Event extends keyof RpcNotificationMap>(
+    event: Event,
+    handler: (payload: RpcNotificationMap[Event]) => void
+  ): () => void;
+  on(event: string, handler: Listener): () => void;
   on(event: string, handler: Listener): () => void {
     if (!this.listeners.has(event)) {
       this.listeners.set(event, new Set());
     }
     const set = this.listeners.get(event)!;
-    set.add(handler);
+    set.add(handler as Listener);
     return () => set.delete(handler);
   }
 
@@ -371,7 +371,12 @@ export class RPCClient {
     }
   }
 
-  private async call<T = any>(method: string, params?: Record<string, unknown>): Promise<T> {
+  private async call<Method extends keyof RpcMethodMap>(
+    method: Method,
+    ...args: keyof RpcMethodMap[Method]['params'] extends never
+      ? [params?: RpcMethodMap[Method]['params']]
+      : [params: RpcMethodMap[Method]['params']]
+  ): Promise<RpcMethodMap[Method]['result']> {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       throw new Error('WebSocket not connected');
     }
@@ -380,11 +385,11 @@ export class RPCClient {
     }
 
     const id = ++this.nextId;
-    const req: JSONRPCRequest = { jsonrpc: '2.0', id, method, params };
+    const req = { jsonrpc: '2.0' as const, id, method, params: args[0] };
     const serialized = JSON.stringify(req);
     const startedAt = performance.now();
 
-    const p = new Promise<T>((resolve, reject) => {
+    const p = new Promise<RpcMethodMap[Method]['result']>((resolve, reject) => {
       const timer = setTimeout(() => {
         if (this.pending.has(id)) {
           this.pending.delete(id);
@@ -435,7 +440,7 @@ export class RPCClient {
     variables?: Record<string, unknown>,
     content?: unknown
   ): Promise<{ run_id: string; session_id: string }> {
-    const params: Record<string, unknown> = { prompt };
+    const params: RpcMethodMap['start_run']['params'] = { prompt };
     if (sessionId) {
       params.session_id = sessionId;
     }
@@ -446,11 +451,11 @@ export class RPCClient {
         params.variables = rest;
       }
       if (safe_tool_overrides) {
-        params.safe_tool_overrides = safe_tool_overrides;
+        params.safe_tool_overrides = safe_tool_overrides as Record<string, unknown>;
       }
     }
     if (content != null) {
-      params.content = content;
+      params.content = content as string;
     }
     return this.call('start_run', params);
   }
@@ -460,7 +465,9 @@ export class RPCClient {
   }
 
   async getSessionHistory(sessionId: string): Promise<Array<{ role: string; content: unknown; timestamp: string }>> {
-    return this.call('get_session_history', { session_id: sessionId });
+    return this.call('get_session_history', { session_id: sessionId }) as Promise<
+      Array<{ role: string; content: unknown; timestamp: string }>
+    >;
   }
 
   async listSessions(opts?: { limit: number; offset?: number }): Promise<
@@ -474,23 +481,16 @@ export class RPCClient {
     }>
   > {
     if (!opts) {
-      return this.call('list_sessions', {});
+      return this.call('list_sessions') as ReturnType<RPCClient['listSessions']>;
     }
     try {
-      return await this.call('list_sessions', { limit: opts.limit, offset: opts.offset ?? 0 });
+      return (await this.call('list_sessions', { limit: opts.limit, offset: opts.offset ?? 0 })) as Awaited<
+        ReturnType<RPCClient['listSessions']>
+      >;
     } catch {
       // Released runtimes predating pagination reject unknown params
       // (JSON-RPC -32602). Fall back to the full listing and cap locally.
-      const all = await this.call<
-        Array<{
-          id: string;
-          created_at: string;
-          archived: boolean;
-          message_count: number;
-          first_message?: unknown;
-          last_message?: unknown;
-        }>
-      >('list_sessions', {});
+      const all = (await this.call('list_sessions')) as Awaited<ReturnType<RPCClient['listSessions']>>;
       const start = opts.offset ?? 0;
       return all.slice(start, start + opts.limit);
     }
@@ -506,7 +506,7 @@ export class RPCClient {
     result?: Record<string, unknown>,
     error?: Record<string, unknown>
   ): Promise<void> {
-    const params: Record<string, unknown> = { request_id: requestId, ok };
+    const params: RpcMethodMap['client_response']['params'] = { request_id: requestId, ok };
     if (result) {
       params.result = result;
     }
@@ -529,14 +529,14 @@ export class RPCClient {
     alwaysApprove: boolean = false,
     rejectionMessage?: string
   ): Promise<boolean> {
-    const params: Record<string, unknown> = { call_id: callId, decision };
+    const params: RpcMethodMap['tool_approval_response']['params'] = { call_id: callId, decision };
     if (alwaysApprove) {
       params.always_approve = true;
     }
     if (rejectionMessage) {
       params.rejection_message = rejectionMessage;
     }
-    return this.call<boolean>('tool_approval_response', params);
+    return this.call('tool_approval_response', params);
   }
 
   /**
@@ -550,11 +550,11 @@ export class RPCClient {
     decision: 'approve' | 'reject',
     rejectionMessage?: string
   ): Promise<boolean> {
-    const params: Record<string, unknown> = { request_id: requestId, decision };
+    const params: RpcMethodMap['mcp_approval_response']['params'] = { request_id: requestId, decision };
     if (rejectionMessage) {
       params.rejection_message = rejectionMessage;
     }
-    return this.call<boolean>('mcp_approval_response', params);
+    return this.call('mcp_approval_response', params);
   }
 
   async listServerFunctions(): Promise<
@@ -565,11 +565,18 @@ export class RPCClient {
       result_schema?: Record<string, unknown>;
     }>
   > {
-    return this.call('list_server_functions', {});
+    return this.call('list_server_functions') as Promise<
+      Array<{
+        name: string;
+        description?: string;
+        params_schema?: Record<string, unknown>;
+        result_schema?: Record<string, unknown>;
+      }>
+    >;
   }
 
   async serverCall(func: string, args?: Record<string, unknown>, sessionId?: string): Promise<Record<string, unknown>> {
-    const params: Record<string, unknown> = { function: func };
+    const params: RpcMethodMap['server_call']['params'] = { function: func };
     if (args) {
       params.args = args;
     }
@@ -640,7 +647,7 @@ export class RPCClient {
     page_title_suffix?: string;
     theme_color?: string;
   }> {
-    return this.call('get_agent_info', {});
+    return this.call('get_agent_info');
   }
 
   // ---------------------------------------------------------------------
@@ -664,7 +671,7 @@ export class RPCClient {
       source?: string;
     }
   ): Promise<{ ok: boolean; id?: string; depth?: number; reason?: string; session_id?: string; enqueued_at?: number }> {
-    const params: Record<string, unknown> = { session_id: sessionId, content };
+    const params: RpcMethodMap['enqueue_message']['params'] = { session_id: sessionId, content };
     if (opts?.role) {
       params.role = opts.role;
     }
@@ -677,7 +684,7 @@ export class RPCClient {
         params.variables = variables;
       }
       if (safe_tool_overrides && !opts.safeToolOverrides) {
-        params.safe_tool_overrides = safe_tool_overrides;
+        params.safe_tool_overrides = safe_tool_overrides as Record<string, unknown>;
       }
     }
     if (opts?.safeToolOverrides) {
@@ -686,12 +693,16 @@ export class RPCClient {
     if (opts?.source) {
       params.source = opts.source;
     }
-    return this.call('enqueue_message', params);
+    return this.call('enqueue_message', params) as ReturnType<RPCClient['enqueueMessage']>;
   }
 
   /** Snapshot of the queue. Used to seed local state on session-switch / reconnect. */
   async listQueue(sessionId: string): Promise<{ session_id: string; depth: number; items: QueuedMessage[] }> {
-    return this.call('list_queue', { session_id: sessionId });
+    return this.call('list_queue', { session_id: sessionId }) as Promise<{
+      session_id: string;
+      depth: number;
+      items: QueuedMessage[];
+    }>;
   }
 
   /** Remove an item by id. Returns ``not_found`` if it has already been popped. */
@@ -699,7 +710,12 @@ export class RPCClient {
     sessionId: string,
     itemId: string
   ): Promise<{ ok: boolean; id?: string; depth?: number; reason?: string }> {
-    return this.call('cancel_queued_message', { session_id: sessionId, item_id: itemId });
+    return this.call('cancel_queued_message', { session_id: sessionId, item_id: itemId }) as Promise<{
+      ok: boolean;
+      id?: string;
+      depth?: number;
+      reason?: string;
+    }>;
   }
 }
 
