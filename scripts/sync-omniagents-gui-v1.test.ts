@@ -39,8 +39,8 @@ const sha256 = async (...values: Buffer[]) => {
   return createHash('sha256').update(Buffer.concat(values)).digest('hex');
 };
 
-const sourceFixture = async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'omni-source-'));
+const sourceFixture = async (prefix = 'omni-source-') => {
+  const directory = await mkdtemp(join(tmpdir(), prefix));
   const output = join(directory, 'desktop');
   const sourceArtifactPath = 'omniagents/backends/web/ui/src/protocol/generated/gui-v1.ts';
   const sourceManifestPath = 'protocol/openrpc/manifest.json';
@@ -161,6 +161,79 @@ describe('OmniAgents GUI protocol sync', () => {
     const result = run('--verify-source-root', fixture.directory, '--output-dir', fixture.output);
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toContain(fixture.commit);
+  });
+
+  it('verifies a source repository path containing spaces', async () => {
+    const fixture = await sourceFixture('omni source ');
+    const result = run('--verify-source-root', fixture.directory, '--output-dir', fixture.output);
+    expect(result.status, result.stderr).toBe(0);
+  });
+
+  it('fails when the pinned commit is missing', async () => {
+    const fixture = await sourceFixture();
+    const provenancePath = join(fixture.output, 'provenance.json');
+    const parsed = JSON.parse(await readFile(provenancePath, 'utf8'));
+    parsed.source_commit = '0000000000000000000000000000000000000000';
+    await writeFile(provenancePath, `${JSON.stringify(parsed, null, 2)}\n`);
+    const result = run('--verify-source-root', fixture.directory, '--output-dir', fixture.output);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('Git cat-file failed');
+  });
+
+  it('fails when the pinned upstream generated artifact differs', async () => {
+    const fixture = await sourceFixture();
+    await writeFile(
+      join(fixture.directory, 'omniagents/backends/web/ui/src/protocol/generated/gui-v1.ts'),
+      'export const tampered = true;\n'
+    );
+    git(fixture.directory, 'add', '.');
+    git(fixture.directory, 'commit', '-m', 'tamper artifact');
+    const provenancePath = join(fixture.output, 'provenance.json');
+    const parsed = JSON.parse(await readFile(provenancePath, 'utf8'));
+    parsed.source_commit = git(fixture.directory, 'rev-parse', 'HEAD');
+    await writeFile(provenancePath, `${JSON.stringify(parsed, null, 2)}\n`);
+    const result = run('--verify-source-root', fixture.directory, '--output-dir', fixture.output);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('does not match the pinned OmniAgents commit');
+  });
+
+  it('fails when the pinned upstream manifest differs', async () => {
+    const fixture = await sourceFixture();
+    const sourceManifestPath = join(fixture.directory, 'protocol/openrpc/manifest.json');
+    const manifest = JSON.parse(await readFile(sourceManifestPath, 'utf8'));
+    manifest.generator_version = 'tampered';
+    await writeFile(sourceManifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+    git(fixture.directory, 'add', '.');
+    git(fixture.directory, 'commit', '-m', 'tamper manifest');
+    const provenancePath = join(fixture.output, 'provenance.json');
+    const parsed = JSON.parse(await readFile(provenancePath, 'utf8'));
+    parsed.source_commit = git(fixture.directory, 'rev-parse', 'HEAD');
+    await writeFile(provenancePath, `${JSON.stringify(parsed, null, 2)}\n`);
+    const result = run('--verify-source-root', fixture.directory, '--output-dir', fixture.output);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('generator_version');
+  });
+
+  it('fails when the provenance source path is tampered', async () => {
+    const fixture = await sourceFixture();
+    const provenancePath = join(fixture.output, 'provenance.json');
+    const parsed = JSON.parse(await readFile(provenancePath, 'utf8'));
+    parsed.source_artifact = 'missing/gui-v1.ts';
+    await writeFile(provenancePath, `${JSON.stringify(parsed, null, 2)}\n`);
+    const result = run('--verify-source-root', fixture.directory, '--output-dir', fixture.output);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('Git show failed');
+  });
+
+  it('fails when the provenance repository is tampered', async () => {
+    const fixture = await sourceFixture();
+    const provenancePath = join(fixture.output, 'provenance.json');
+    const parsed = JSON.parse(await readFile(provenancePath, 'utf8'));
+    parsed.source_repository = 'https://github.com/example/wrong.git';
+    await writeFile(provenancePath, `${JSON.stringify(parsed, null, 2)}\n`);
+    const result = run('--verify-source-root', fixture.directory, '--output-dir', fixture.output);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('Unexpected provenance source repository');
   });
 
   it('fails when the source repository identity is wrong', async () => {

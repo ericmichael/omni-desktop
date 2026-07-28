@@ -37,5 +37,16 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Check out pinned OmniAgents protocol source
+        shell: bash
+        run: |
+          source_commit=$(node -p "require('./src/generated/omniagents-gui-v1/provenance.json').source_commit")
+          git clone --filter=blob:none --no-checkout https://github.com/utrgv-software-engineering/omniagents.git ../omniagents-protocol-source
+          git -C ../omniagents-protocol-source fetch --depth=1 origin "$source_commit"
+          git -C ../omniagents-protocol-source checkout --detach "$source_commit"
+
+      - name: Verify pinned OmniAgents protocol source
+        run: npm run protocol:verify-source -- ../omniagents-protocol-source
+
       - name: Run code quality checks
         run: npm run lint
