@@ -329,6 +329,41 @@ describe('ProcessManager', () => {
       expect(hoisted.agentProcessInstances[0]!.exit).toHaveBeenCalled();
     });
 
+    it('start adopts a live process instead of restarting it', async () => {
+      const { pm, sendCalls } = makePm();
+      await pm.start('proc-1', { workspaceDir: '/tmp/ws', sessionId: 's1' });
+
+      const proc = hoisted.agentProcessInstances[0]!;
+      const running: WithTimestamp<AgentProcessStatus> = {
+        type: 'running',
+        data: { wsUrl: 'ws://localhost:9000/ws', uiUrl: 'http://localhost:9000' },
+        timestamp: Date.now(),
+      };
+      proc.getStatus.mockReturnValue(running);
+
+      // A reconnected renderer re-issues start for the same launch.
+      await pm.start('proc-1', { workspaceDir: '/tmp/ws', sessionId: 's1' });
+
+      expect(proc.start).toHaveBeenCalledTimes(1);
+      expect(sendCalls.filter((c) => c.channel === 'agent-process:status')).toHaveLength(1);
+    });
+
+    it('start restarts a live process when the launch identity differs', async () => {
+      const { pm } = makePm();
+      await pm.start('proc-1', { workspaceDir: '/tmp/ws', sessionId: 's1' });
+
+      const proc = hoisted.agentProcessInstances[0]!;
+      proc.getStatus.mockReturnValue({
+        type: 'running',
+        data: { wsUrl: 'ws://localhost:9000/ws', uiUrl: 'http://localhost:9000' },
+        timestamp: Date.now(),
+      } satisfies WithTimestamp<AgentProcessStatus>);
+
+      await pm.start('proc-1', { workspaceDir: '/tmp/ws', sessionId: 's2' });
+
+      expect(proc.start).toHaveBeenCalledTimes(2);
+    });
+
     it('stop removes process from map', async () => {
       const { pm } = makePm();
       await pm.start('proc-1', { workspaceDir: '/tmp' });

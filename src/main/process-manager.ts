@@ -641,7 +641,44 @@ export class ProcessManager {
     return profilePath;
   }
 
+  /**
+   * The fields that decide whether two `start` calls mean "the same sandbox".
+   * `containerId` is a warm-reattach hint rather than identity (the renderer
+   * persists whatever id the last readiness payload reported, so it drifts
+   * across launches), and `extraSources` follows the project scope already
+   * captured by `projectId`/`projectIds`.
+   */
+  private static launchIdentity(opts: AgentProcessStartOptions): string {
+    return JSON.stringify([
+      opts.workspaceDir,
+      opts.projectId ?? null,
+      opts.projectIds ?? null,
+      opts.sessionId ?? null,
+      opts.profileNameOverride ?? null,
+    ]);
+  }
+
   start = async (processId: string, opts: AgentProcessStartOptions): Promise<void> => {
+    // Adopt an already-live process rather than restarting it. A renderer that
+    // just (re)connected has an empty status map — its auto-launch guard reads
+    // that map *before* `watchProcessStatus` seeds it — so a browser reload or
+    // WS reconnect re-issues `start` for a processId that is already serving.
+    // Without this check `AgentProcess.start` SIGTERMs the live `omni serve`
+    // and the conversation dies mid-flight. Deliberate restarts go through
+    // `stop()` (drops the process) or `rebuild()`, so they never land here.
+    const live = this.processes.get(processId);
+    if (live) {
+      const type = live.getStatus().type;
+      const previous = this.lastStartArgs.get(processId);
+      const sameLaunch =
+        previous !== undefined && ProcessManager.launchIdentity(previous) === ProcessManager.launchIdentity(opts);
+      if (sameLaunch && (type === 'starting' || type === 'connecting' || type === 'running')) {
+        // Re-broadcast so the reconnected renderer, which cleared its local
+        // status before calling start, leaves `starting` on its own.
+        this.sendToWindow('agent-process:status', processId, this.getStatus(processId));
+        return;
+      }
+    }
     this.lastStartArgs.set(processId, opts);
     const startArg = await this.buildStartArg(opts);
     const profilePath = await this.prepareHostBridge(processId, startArg.profileName, opts.workspaceDir);
