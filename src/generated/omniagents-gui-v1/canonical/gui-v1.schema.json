@@ -1,0 +1,1053 @@
+{
+  "$defs": {
+    "archive_session": {
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "cancel_queued_message": {
+      "additionalProperties": false,
+      "properties": {
+        "item_id": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "item_id"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "client_functions": {
+      "additionalProperties": false,
+      "properties": {
+        "functions": {
+          "items": {},
+          "type": "array"
+        },
+        "version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "functions"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "client_request": {
+      "additionalProperties": false,
+      "properties": {
+        "args": {
+          "type": "object"
+        },
+        "function": {
+          "type": "string"
+        },
+        "idempotency_key": {
+          "type": "string"
+        },
+        "request_id": {
+          "type": "string"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "function",
+        "args"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "client_request_resolved": {
+      "additionalProperties": false,
+      "properties": {
+        "request_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "client_response": {
+      "additionalProperties": false,
+      "properties": {
+        "error": {
+          "type": "object"
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "request_id": {
+          "type": "string"
+        },
+        "result": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "request_id",
+        "ok"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "delete_session": {
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "disable_mcp_server": {
+      "additionalProperties": false,
+      "properties": {
+        "server_name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "server_name"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "disable_tool": {
+      "additionalProperties": false,
+      "properties": {
+        "tool_name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "tool_name"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "enqueue_message": {
+      "additionalProperties": false,
+      "properties": {
+        "content": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string"
+        },
+        "safe_tool_overrides": {
+          "type": "object"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "trigger_run": {
+          "type": "boolean"
+        },
+        "variables": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "session_id",
+        "content"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "enqueue_notification": {
+      "additionalProperties": false,
+      "properties": {
+        "content": {
+          "type": "string"
+        },
+        "safe_tool_overrides": {
+          "type": "object"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "content"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "export_session": {
+      "additionalProperties": false,
+      "properties": {
+        "redact": {
+          "type": "boolean"
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "fork_session": {
+      "additionalProperties": false,
+      "properties": {
+        "new_session_id": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "get_agent_info": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "get_session_history": {
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "get_user_history": {
+      "additionalProperties": false,
+      "properties": {
+        "include_archived": {
+          "type": "boolean"
+        },
+        "limit": {
+          "type": "integer"
+        }
+      },
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "jsonRpcError": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "integer"
+        },
+        "data": {},
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "type": "object"
+    },
+    "list_queue": {
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "list_server_functions": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "list_sessions": {
+      "additionalProperties": false,
+      "properties": {
+        "limit": {
+          "type": "integer"
+        },
+        "offset": {
+          "type": "integer"
+        }
+      },
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "mcp_approval_requested": {
+      "additionalProperties": false,
+      "properties": {
+        "arguments": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "request_id": {
+          "type": "string"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "server_label": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "tool_name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "request_id",
+        "server_label",
+        "tool_name",
+        "arguments"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "mcp_approval_resolved": {
+      "additionalProperties": false,
+      "properties": {
+        "request_id": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "mcp_approval_response": {
+      "additionalProperties": false,
+      "properties": {
+        "decision": {
+          "type": "string"
+        },
+        "rejection_message": {
+          "type": "string"
+        },
+        "request_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "decision"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "message_output": {
+      "additionalProperties": false,
+      "properties": {
+        "content": {
+          "type": "string"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id",
+        "session_id",
+        "content"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "queue_changed": {
+      "additionalProperties": false,
+      "properties": {
+        "depth": {
+          "type": "integer"
+        },
+        "items": {
+          "items": {},
+          "type": "array"
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "depth",
+        "items"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "queue_status": {
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "report_incident": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "disable_mcp_servers": {
+          "items": {},
+          "type": "array"
+        },
+        "disable_tools": {
+          "items": {},
+          "type": "array"
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "description"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "result": {},
+    "run_end": {
+      "additionalProperties": false,
+      "properties": {
+        "end_reason": {
+          "type": "string"
+        },
+        "error": {
+          "type": "object"
+        },
+        "max_input_tokens": {
+          "type": "integer"
+        },
+        "max_output_tokens": {
+          "type": "integer"
+        },
+        "model": {
+          "type": "string"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "truncation": {
+          "type": "string"
+        },
+        "usage": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "run_id",
+        "session_id",
+        "end_reason"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "run_started": {
+      "additionalProperties": false,
+      "properties": {
+        "prompt": {
+          "type": "string"
+        },
+        "prompt_role": {
+          "type": "string"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id",
+        "session_id"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "run_status": {
+      "additionalProperties": false,
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "message": {
+          "type": "string"
+        },
+        "next_delay": {
+          "type": "integer"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "total": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "run_id",
+        "session_id",
+        "status",
+        "message"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "send_user_message": {
+      "additionalProperties": false,
+      "properties": {
+        "content": {
+          "type": "string"
+        },
+        "run_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id",
+        "content"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "server_call": {
+      "additionalProperties": false,
+      "properties": {
+        "args": {
+          "type": "object"
+        },
+        "function": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "function"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "session_forked": {
+      "additionalProperties": false,
+      "properties": {
+        "new_session_id": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "new_session_id"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "session_variables_changed": {
+      "additionalProperties": false,
+      "properties": {
+        "changed": {
+          "type": "object"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "variables": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "session_id",
+        "changed",
+        "variables"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "set_client_status": {
+      "additionalProperties": false,
+      "properties": {
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "set_session_hold": {
+      "additionalProperties": false,
+      "properties": {
+        "hold": {
+          "type": "boolean"
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "hold"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "start_run": {
+      "additionalProperties": false,
+      "properties": {
+        "content": {
+          "type": "string"
+        },
+        "context": {
+          "type": "object"
+        },
+        "group_id": {
+          "type": "string"
+        },
+        "prompt": {
+          "type": "string"
+        },
+        "prompt_role": {
+          "type": "string"
+        },
+        "safe_tool_overrides": {
+          "type": "object"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "variables": {
+          "type": "object"
+        },
+        "workflow_name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "prompt"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "stop_run": {
+      "additionalProperties": false,
+      "properties": {
+        "run_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "token": {
+      "additionalProperties": false,
+      "properties": {
+        "delta": {
+          "type": "object"
+        },
+        "max_input_tokens": {
+          "type": "integer"
+        },
+        "max_output_tokens": {
+          "type": "integer"
+        },
+        "model": {
+          "type": "string"
+        },
+        "response_id": {
+          "type": "string"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "totals": {
+          "type": "object"
+        },
+        "truncation": {
+          "type": "string"
+        },
+        "turn": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "run_id",
+        "session_id",
+        "delta",
+        "totals"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "tool_approval_requested": {
+      "additionalProperties": false,
+      "properties": {
+        "arguments": {
+          "type": "string"
+        },
+        "call_id": {
+          "type": "string"
+        },
+        "metadata": {
+          "type": "object"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "tool_name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "call_id",
+        "tool_name",
+        "arguments"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "tool_approval_resolved": {
+      "additionalProperties": false,
+      "properties": {
+        "call_id": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "call_id"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "tool_approval_response": {
+      "additionalProperties": false,
+      "properties": {
+        "always_approve": {
+          "type": "boolean"
+        },
+        "call_id": {
+          "type": "string"
+        },
+        "decision": {
+          "type": "string"
+        },
+        "rejection_message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "call_id",
+        "decision"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "tool_called": {
+      "additionalProperties": false,
+      "properties": {
+        "call_id": {
+          "type": "string"
+        },
+        "input": {
+          "type": "string"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "tool": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id",
+        "session_id",
+        "tool",
+        "input",
+        "call_id"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "tool_result": {
+      "additionalProperties": false,
+      "properties": {
+        "call_id": {
+          "type": "string"
+        },
+        "metadata": {
+          "type": "object"
+        },
+        "output": {
+          "type": "string"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "tool": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id",
+        "session_id",
+        "tool",
+        "output",
+        "call_id"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "update_session_variables": {
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "type": "string"
+        },
+        "updates": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "session_id",
+        "updates"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    }
+  },
+  "$id": "https://omniagents.dev/protocol/gui/v1/schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/start_run"
+    },
+    {
+      "$ref": "#/$defs/stop_run"
+    },
+    {
+      "$ref": "#/$defs/send_user_message"
+    },
+    {
+      "$ref": "#/$defs/get_session_history"
+    },
+    {
+      "$ref": "#/$defs/list_sessions"
+    },
+    {
+      "$ref": "#/$defs/archive_session"
+    },
+    {
+      "$ref": "#/$defs/delete_session"
+    },
+    {
+      "$ref": "#/$defs/get_user_history"
+    },
+    {
+      "$ref": "#/$defs/get_agent_info"
+    },
+    {
+      "$ref": "#/$defs/tool_approval_response"
+    },
+    {
+      "$ref": "#/$defs/mcp_approval_response"
+    },
+    {
+      "$ref": "#/$defs/client_functions"
+    },
+    {
+      "$ref": "#/$defs/client_response"
+    },
+    {
+      "$ref": "#/$defs/list_server_functions"
+    },
+    {
+      "$ref": "#/$defs/server_call"
+    },
+    {
+      "$ref": "#/$defs/enqueue_message"
+    },
+    {
+      "$ref": "#/$defs/list_queue"
+    },
+    {
+      "$ref": "#/$defs/cancel_queued_message"
+    },
+    {
+      "$ref": "#/$defs/fork_session"
+    },
+    {
+      "$ref": "#/$defs/set_session_hold"
+    },
+    {
+      "$ref": "#/$defs/queue_status"
+    },
+    {
+      "$ref": "#/$defs/enqueue_notification"
+    },
+    {
+      "$ref": "#/$defs/update_session_variables"
+    },
+    {
+      "$ref": "#/$defs/set_client_status"
+    },
+    {
+      "$ref": "#/$defs/disable_tool"
+    },
+    {
+      "$ref": "#/$defs/disable_mcp_server"
+    },
+    {
+      "$ref": "#/$defs/report_incident"
+    },
+    {
+      "$ref": "#/$defs/export_session"
+    },
+    {
+      "$ref": "#/$defs/run_started"
+    },
+    {
+      "$ref": "#/$defs/run_status"
+    },
+    {
+      "$ref": "#/$defs/tool_called"
+    },
+    {
+      "$ref": "#/$defs/tool_result"
+    },
+    {
+      "$ref": "#/$defs/message_output"
+    },
+    {
+      "$ref": "#/$defs/token"
+    },
+    {
+      "$ref": "#/$defs/run_end"
+    },
+    {
+      "$ref": "#/$defs/tool_approval_requested"
+    },
+    {
+      "$ref": "#/$defs/tool_approval_resolved"
+    },
+    {
+      "$ref": "#/$defs/mcp_approval_requested"
+    },
+    {
+      "$ref": "#/$defs/mcp_approval_resolved"
+    },
+    {
+      "$ref": "#/$defs/client_request"
+    },
+    {
+      "$ref": "#/$defs/client_request_resolved"
+    },
+    {
+      "$ref": "#/$defs/queue_changed"
+    },
+    {
+      "$ref": "#/$defs/session_forked"
+    },
+    {
+      "$ref": "#/$defs/session_variables_changed"
+    }
+  ]
+}

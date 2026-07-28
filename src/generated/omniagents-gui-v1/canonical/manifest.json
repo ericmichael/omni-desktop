@@ -1,0 +1,31 @@
+{
+  "artifacts": [
+    "omniagents/rpc/generated/gui_v1/models.py",
+    "omniagents/rpc/generated/gui_v1/schema_models.py",
+    "omniagents/backends/web/ui/src/protocol/generated/gui-v1.ts",
+    "omniagents/backends/ink/tui/src/protocol/generated/gui-v1.ts",
+    "omniagents/backends/web/ui/src/protocol/generated/schema-types.ts"
+  ],
+  "canonical_sha256": "492ef6ca531dc67aec3dd477d8b0fc739eb1d380510066898837953e0b5a81ba",
+  "generator": "scripts.protocol.generate_gui_protocol",
+  "generator_version": "1",
+  "protocol_version": "1.0.0",
+  "toolchain": {
+    "openrpc_meta_schema": "@open-rpc/meta-schema@1.14.9",
+    "python": {
+      "name": "datamodel-code-generator",
+      "options": [
+        "--output-model-type=pydantic_v2.BaseModel",
+        "--disable-timestamp"
+      ],
+      "version": "0.71.0"
+    },
+    "typescript": {
+      "name": "json-schema-to-typescript",
+      "options": [
+        "--bannerComment="
+      ],
+      "version": "15.0.4"
+    }
+  }
+}

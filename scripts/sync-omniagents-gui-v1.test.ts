@@ -68,23 +68,22 @@ const sourceFixture = async (prefix = 'omni-source-') => {
   git(directory, 'add', '.');
   git(directory, 'commit', '-m', 'fixture');
   const commit = git(directory, 'rev-parse', 'HEAD');
-  await mkdir(output, { recursive: true });
-  await writeFile(join(output, 'gui-v1.ts'), sourceArtifact);
-  await writeFile(
-    join(output, 'provenance.json'),
-    `${JSON.stringify(
-      {
-        ...manifest,
-        generated_typescript_sha256: await sha256(sourceArtifact),
-        source_repository: 'https://github.com/utrgv-software-engineering/omniagents.git',
-        source_commit: commit,
-        source_artifact: sourceArtifactPath,
-        source_manifest: sourceManifestPath,
-      },
-      null,
-      2
-    )}\n`
+  const syncResult = run(
+    '--sync',
+    '--source-ts',
+    join(directory, sourceArtifactPath),
+    '--source-manifest',
+    join(directory, sourceManifestPath),
+    '--source-openrpc',
+    join(directory, 'protocol/openrpc/omniagents-gui-v1.json'),
+    '--source-schema',
+    join(directory, 'protocol/openrpc/schemas/gui-v1.schema.json'),
+    '--source-commit',
+    commit,
+    '--output-dir',
+    output
   );
+  expect(syncResult.status, syncResult.stderr).toBe(0);
   return { directory, output, commit };
 };
 
@@ -124,12 +123,18 @@ describe('OmniAgents GUI protocol sync', () => {
     const directory = await mkdtemp(join(tmpdir(), 'omni-protocol-'));
     const sourceArtifact = join(directory, 'gui-v1.ts');
     const sourceManifest = join(directory, 'manifest.json');
+    const sourceOpenRpc = join(directory, 'omniagents-gui-v1.json');
+    const sourceSchema = join(directory, 'gui-v1.schema.json');
+    const openRpc = { info: { version: '1.0.0' }, methods: [] };
+    const schema = { $schema: 'https://json-schema.org/draft/2020-12/schema', $defs: {} };
     await writeFile(sourceArtifact, await readFile(artifact));
+    await writeFile(sourceOpenRpc, canonicalBytes(openRpc));
+    await writeFile(sourceSchema, canonicalBytes(schema));
     await writeFile(
       sourceManifest,
       JSON.stringify({
         protocol_version: '1.0.0',
-        canonical_sha256: 'canonical',
+        canonical_sha256: await sha256(canonicalBytes(openRpc), canonicalBytes(schema)),
         generator: 'generator',
         generator_version: '1',
         toolchain: {},
@@ -141,8 +146,12 @@ describe('OmniAgents GUI protocol sync', () => {
       sourceArtifact,
       '--source-manifest',
       sourceManifest,
+      '--source-openrpc',
+      sourceOpenRpc,
+      '--source-schema',
+      sourceSchema,
       '--source-commit',
-      'commit',
+      '0000000000000000000000000000000000000001',
       '--output-dir',
       join(directory, 'output'),
     ];
@@ -154,6 +163,24 @@ describe('OmniAgents GUI protocol sync', () => {
     expect(run(...args).status).toBe(0);
     expect(await readFile(outputArtifact)).toEqual(firstArtifact);
     expect(await readFile(outputProvenance)).toEqual(firstProvenance);
+  });
+
+  it('fails when the transported manifest is tampered', async () => {
+    const fixture = await sourceFixture();
+    const manifestPath = join(fixture.output, 'canonical/manifest.json');
+    await writeFile(manifestPath, Buffer.concat([await readFile(manifestPath), Buffer.from('\n')]));
+    const result = run('--check', '--output-dir', fixture.output);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('Transported manifest digest mismatch');
+  });
+
+  it('fails when a transported canonical document is tampered', async () => {
+    const fixture = await sourceFixture();
+    const openRpcPath = join(fixture.output, 'canonical/omniagents-gui-v1.json');
+    await writeFile(openRpcPath, `${JSON.stringify({ info: { version: '2.0.0' } }, null, 2)}\n`);
+    const result = run('--check', '--output-dir', fixture.output);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('Transported OpenRPC document digest mismatch');
   });
 
   it('verifies artifact, metadata, and canonical bytes at the exact pinned commit', async () => {
@@ -211,7 +238,7 @@ describe('OmniAgents GUI protocol sync', () => {
     await writeFile(provenancePath, `${JSON.stringify(parsed, null, 2)}\n`);
     const result = run('--verify-source-root', fixture.directory, '--output-dir', fixture.output);
     expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain('generator_version');
+    expect(result.stderr).toContain('Transported manifest does not match');
   });
 
   it('fails when the provenance source path is tampered', async () => {
@@ -222,7 +249,7 @@ describe('OmniAgents GUI protocol sync', () => {
     await writeFile(provenancePath, `${JSON.stringify(parsed, null, 2)}\n`);
     const result = run('--verify-source-root', fixture.directory, '--output-dir', fixture.output);
     expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain('Git show failed');
+    expect(result.stderr).toContain('Protocol provenance source_artifact must equal');
   });
 
   it('fails when the provenance repository is tampered', async () => {
@@ -233,7 +260,7 @@ describe('OmniAgents GUI protocol sync', () => {
     await writeFile(provenancePath, `${JSON.stringify(parsed, null, 2)}\n`);
     const result = run('--verify-source-root', fixture.directory, '--output-dir', fixture.output);
     expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain('Unexpected provenance source repository');
+    expect(result.stderr).toContain('Protocol provenance source_repository must equal');
   });
 
   it('fails when the source repository identity is wrong', async () => {
@@ -270,6 +297,6 @@ describe('OmniAgents GUI protocol sync', () => {
     await writeFile(provenancePath, `${JSON.stringify(parsed, null, 2)}\n`);
     const result = run('--verify-source-root', fixture.directory, '--output-dir', fixture.output);
     expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain('canonical digest');
+    expect(result.stderr).toContain('Transported OpenRPC document does not match');
   });
 });
