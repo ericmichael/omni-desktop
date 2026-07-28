@@ -373,7 +373,7 @@ export class RPCClient {
 
   private async call<Method extends keyof RpcMethodMap>(
     method: Method,
-    ...args: keyof RpcMethodMap[Method]['params'] extends never
+    ...args: Record<never, never> extends RpcMethodMap[Method]['params']
       ? [params?: RpcMethodMap[Method]['params']]
       : [params: RpcMethodMap[Method]['params']]
   ): Promise<RpcMethodMap[Method]['result']> {

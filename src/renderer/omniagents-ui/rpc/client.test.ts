@@ -85,6 +85,17 @@ describe('RPCClient generated protocol integration', () => {
     client.dispose();
   });
 
+  it('omits params for methods whose canonical params are all optional', async () => {
+    const { client, socket } = await connectedClient();
+    const response = client.listSessions();
+    const request = JSON.parse(socket.sent[0]!) as { id: number; params?: unknown };
+
+    expect(request).not.toHaveProperty('params');
+    socket.receive({ jsonrpc: '2.0', id: request.id, result: [] });
+    await expect(response).resolves.toEqual([]);
+    client.dispose();
+  });
+
   it('preserves structured JSON-RPC error code and data', async () => {
     const { client, socket } = await connectedClient();
     const response = client.deleteSession('session-1');
