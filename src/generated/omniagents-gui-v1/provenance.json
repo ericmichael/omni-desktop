@@ -3,7 +3,7 @@
   "canonical_sha256": "492ef6ca531dc67aec3dd477d8b0fc739eb1d380510066898837953e0b5a81ba",
   "generated_typescript_sha256": "306f4d7b4fcbc5b6be7afa739a48dcbe8a5b13ba4ca5beb8d546ed543abd7dc1",
   "source_repository": "https://github.com/utrgv-software-engineering/omniagents.git",
-  "source_commit": "af6c4900391afb9afd10776d1130dce5430ee3ea",
+  "source_commit": "02be682c98480d2db540aa7cfdab7ddc3a69dcfb",
   "source_artifact": "omniagents/backends/web/ui/src/protocol/generated/gui-v1.ts",
   "source_manifest": "protocol/openrpc/manifest.json",
   "generator": "scripts.protocol.generate_gui_protocol",
@@ -12,12 +12,17 @@
     "openrpc_meta_schema": "@open-rpc/meta-schema@1.14.9",
     "python": {
       "name": "datamodel-code-generator",
-      "options": ["--output-model-type=pydantic_v2.BaseModel", "--disable-timestamp"],
+      "options": [
+        "--output-model-type=pydantic_v2.BaseModel",
+        "--disable-timestamp"
+      ],
       "version": "0.71.0"
     },
     "typescript": {
       "name": "json-schema-to-typescript",
-      "options": ["--bannerComment="],
+      "options": [
+        "--bannerComment="
+      ],
       "version": "15.0.4"
     }
   }

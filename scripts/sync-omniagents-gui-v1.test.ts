@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -11,6 +11,82 @@ const artifact = resolve(root, 'src/generated/omniagents-gui-v1/gui-v1.ts');
 const provenance = resolve(root, 'src/generated/omniagents-gui-v1/provenance.json');
 
 const run = (...args: string[]) => spawnSync(process.execPath, [script, ...args], { encoding: 'utf8' });
+const git = (directory: string, ...args: string[]) => {
+  const result = spawnSync('git', ['-C', directory, ...args], { encoding: 'utf8' });
+  expect(result.status, result.stderr).toBe(0);
+  return result.stdout.trim();
+};
+
+const canonicalBytes = (value: unknown): Buffer => {
+  const sort = (input: unknown): unknown => {
+    if (Array.isArray(input)) {
+      return input.map(sort);
+    }
+    if (input && typeof input === 'object') {
+      return Object.fromEntries(
+        Object.keys(input)
+          .sort()
+          .map((key) => [key, sort((input as Record<string, unknown>)[key])])
+      );
+    }
+    return input;
+  };
+  return Buffer.from(`${JSON.stringify(sort(value), null, 2)}\n`);
+};
+
+const sha256 = async (...values: Buffer[]) => {
+  const { createHash } = await import('node:crypto');
+  return createHash('sha256').update(Buffer.concat(values)).digest('hex');
+};
+
+const sourceFixture = async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'omni-source-'));
+  const output = join(directory, 'desktop');
+  const sourceArtifactPath = 'omniagents/backends/web/ui/src/protocol/generated/gui-v1.ts';
+  const sourceManifestPath = 'protocol/openrpc/manifest.json';
+  const openRpc = { info: { version: '1.0.0' }, methods: [] };
+  const schema = { $schema: 'https://json-schema.org/draft/2020-12/schema', $defs: {} };
+  const sourceArtifact = await readFile(artifact);
+  const canonical = await sha256(canonicalBytes(openRpc), canonicalBytes(schema));
+  const manifest = {
+    protocol_version: '1.0.0',
+    canonical_sha256: canonical,
+    generator: 'scripts.protocol.generate_gui_protocol',
+    generator_version: '1',
+    toolchain: { fixture: '1' },
+  };
+  await mkdir(join(directory, 'omniagents/backends/web/ui/src/protocol/generated'), { recursive: true });
+  await mkdir(join(directory, 'protocol/openrpc/schemas'), { recursive: true });
+  await writeFile(join(directory, sourceArtifactPath), sourceArtifact);
+  await writeFile(join(directory, sourceManifestPath), `${JSON.stringify(manifest, null, 2)}\n`);
+  await writeFile(join(directory, 'protocol/openrpc/omniagents-gui-v1.json'), canonicalBytes(openRpc));
+  await writeFile(join(directory, 'protocol/openrpc/schemas/gui-v1.schema.json'), canonicalBytes(schema));
+  git(directory, 'init');
+  git(directory, 'config', 'user.email', 'fixture@example.com');
+  git(directory, 'config', 'user.name', 'Fixture');
+  git(directory, 'remote', 'add', 'origin', 'https://github.com/utrgv-software-engineering/omniagents.git');
+  git(directory, 'add', '.');
+  git(directory, 'commit', '-m', 'fixture');
+  const commit = git(directory, 'rev-parse', 'HEAD');
+  await mkdir(output, { recursive: true });
+  await writeFile(join(output, 'gui-v1.ts'), sourceArtifact);
+  await writeFile(
+    join(output, 'provenance.json'),
+    `${JSON.stringify(
+      {
+        ...manifest,
+        generated_typescript_sha256: await sha256(sourceArtifact),
+        source_repository: 'https://github.com/utrgv-software-engineering/omniagents.git',
+        source_commit: commit,
+        source_artifact: sourceArtifactPath,
+        source_manifest: sourceManifestPath,
+      },
+      null,
+      2
+    )}\n`
+  );
+  return { directory, output, commit };
+};
 
 describe('OmniAgents GUI protocol sync', () => {
   it('verifies the checked-in artifact and provenance', () => {
@@ -78,5 +154,49 @@ describe('OmniAgents GUI protocol sync', () => {
     expect(run(...args).status).toBe(0);
     expect(await readFile(outputArtifact)).toEqual(firstArtifact);
     expect(await readFile(outputProvenance)).toEqual(firstProvenance);
+  });
+
+  it('verifies artifact, metadata, and canonical bytes at the exact pinned commit', async () => {
+    const fixture = await sourceFixture();
+    const result = run('--verify-source-root', fixture.directory, '--output-dir', fixture.output);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain(fixture.commit);
+  });
+
+  it('fails when the source repository identity is wrong', async () => {
+    const fixture = await sourceFixture();
+    git(fixture.directory, 'remote', 'set-url', 'origin', 'https://github.com/example/wrong.git');
+    const result = run('--verify-source-root', fixture.directory, '--output-dir', fixture.output);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('Source root origin does not match');
+  });
+
+  it('fails when provenance metadata is tampered', async () => {
+    const fixture = await sourceFixture();
+    const provenancePath = join(fixture.output, 'provenance.json');
+    const parsed = JSON.parse(await readFile(provenancePath, 'utf8'));
+    parsed.generator_version = 'tampered';
+    await writeFile(provenancePath, `${JSON.stringify(parsed, null, 2)}\n`);
+    const result = run('--verify-source-root', fixture.directory, '--output-dir', fixture.output);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('generator_version');
+  });
+
+  it('fails when the pinned canonical documents do not match their manifest', async () => {
+    const fixture = await sourceFixture();
+    await writeFile(
+      join(fixture.directory, 'protocol/openrpc/omniagents-gui-v1.json'),
+      `${JSON.stringify({ info: { version: '2.0.0' }, methods: [] }, null, 2)}\n`
+    );
+    git(fixture.directory, 'add', '.');
+    git(fixture.directory, 'commit', '-m', 'tamper canonical');
+    const tamperedCommit = git(fixture.directory, 'rev-parse', 'HEAD');
+    const provenancePath = join(fixture.output, 'provenance.json');
+    const parsed = JSON.parse(await readFile(provenancePath, 'utf8'));
+    parsed.source_commit = tamperedCommit;
+    await writeFile(provenancePath, `${JSON.stringify(parsed, null, 2)}\n`);
+    const result = run('--verify-source-root', fixture.directory, '--output-dir', fixture.output);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('canonical digest');
   });
 });
