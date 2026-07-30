@@ -5,6 +5,7 @@ import { Terminal } from '@xterm/xterm';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createActor } from 'xstate';
 
+import { withConnectTicket } from '@/renderer/omniagents-ui/rpc/ws-ticket';
 import { useRPCClient, useRPCConnected } from '@/renderer/omniagents-ui/rpc-context';
 import { useUiConfig } from '@/renderer/omniagents-ui/ui-config';
 import { createMachineLogger } from '@/shared/machines/machine-logger';
@@ -296,20 +297,23 @@ export function TerminalPanel({
           sessionId: created?.session_id ? String(created.session_id) : undefined,
         });
 
-        // Step 3: Connect WebSocket
-        const url = new URL(wsOrigin + resolvePath(path));
-        url.searchParams.set('session_id', created?.session_id || sid);
-        url.searchParams.set('terminal_id', terminalId);
-        url.searchParams.set('terminal_token', terminalToken);
-        if (authToken) {
-          url.searchParams.set('token', authToken);
-        }
+        // Step 3: Connect WebSocket. Connection auth: bearer token →
+        // one-time /auth/ws-ticket ticket (never a token in the URL).
+        // Attach credentials go in the FIRST message, not query params.
+        const attachSessionId = String(created?.session_id || sid);
+        const wsUrl = await withConnectTicket(wsOrigin + resolvePath(path), authToken);
 
-        const ws = new WebSocket(url.toString());
+        const ws = new WebSocket(wsUrl);
         rt.socket = ws;
 
         ws.onopen = () => {
           rt.actor.send({ type: 'WS_OPEN' });
+          sendFrame(tabId, {
+            type: 'attach',
+            session_id: attachSessionId,
+            terminal_id: terminalId,
+            terminal_token: terminalToken,
+          });
           sendFrame(tabId, {
             type: 'resize',
             cols: rt.terminal.cols,

@@ -1,3 +1,5 @@
+import { withConnectTicket } from '@/renderer/omniagents-ui/rpc/ws-ticket';
+
 type JSONRPCId = number | string;
 
 type JSONRPCRequest = {
@@ -48,9 +50,12 @@ export class RealtimeRPCClient {
   }
 
   private async connectInternal(): Promise<void> {
-    const wsUrl = this.token ? `${this.url}?token=${encodeURIComponent(this.token)}` : this.url;
+    // Bearer token → one-time /auth/ws-ticket ticket; only the single-use
+    // ticket may appear in a dial URL, never the token. Log the base URL
+    // only so no credential (even the ticket) lands in the console.
+    const wsUrl = await withConnectTicket(this.url, this.token);
     if (this.debug) {
-      console.log('[rpc] connect', wsUrl);
+      console.log('[rpc] connect', this.url);
     }
     this.ws = new WebSocket(wsUrl);
     await new Promise<void>((resolve, reject) => {

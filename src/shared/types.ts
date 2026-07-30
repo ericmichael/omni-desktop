@@ -1559,6 +1559,15 @@ export type AgentProcessData = {
   uiUrl: string;
   /** Direct WS URL for JSON-RPC; renderer derives from uiUrl if unset. */
   wsUrl?: string;
+  /**
+   * Bearer token for authenticating WS/HTTP calls against this agent's
+   * server. Main-process dials send it as an `Authorization: Bearer`
+   * upgrade header; browser contexts exchange it for a one-time
+   * `/auth/ws-ticket` dial ticket. Never appended to a URL — the omniagents
+   * server rejects query-string tokens (rpc/protocol.md, Authentication).
+   * Unset when the server runs unauthenticated (local `omni serve`).
+   */
+  authToken?: string;
   /** Same shape as uiUrl today — kept for status/debug surfaces. */
   sandboxUrl?: string;
   /**
