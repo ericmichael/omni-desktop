@@ -21,6 +21,7 @@ import { StatusAnnouncer } from '@/renderer/app/StatusAnnouncer';
 import { syncTheme } from '@/renderer/constants';
 import { SystemInfoLoadingGate, SystemInfoProvider } from '@/renderer/contexts/SystemInfoContext';
 import { AuthGate } from '@/renderer/features/Auth/AuthGate';
+import { ConnectionStatusBanner } from '@/renderer/features/Banner/ConnectionStatusBanner';
 import { CommandPalette } from '@/renderer/features/CommandPalette/CommandPalette';
 import { QuickCapture } from '@/renderer/features/Inbox/QuickCapture';
 import { MigrationNotice } from '@/renderer/features/MigrationNotice/MigrationNotice';
@@ -129,6 +130,7 @@ export const App = () => {
             <ErrorBoundary FallbackComponent={ErrorBoundaryFallback}>
               <SystemInfoLoadingGate>
                 <AuthGate>
+                  <ConnectionStatusBanner />
                   <MigrationNotice />
                   <div className={styles.layout}>
                     <MainContent />

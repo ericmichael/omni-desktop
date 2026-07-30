@@ -1,6 +1,7 @@
 import { WebSocket } from 'ws';
 
 import type { ProcessManager } from '@/main/process-manager';
+import { classifyCloseCode, DEFAULT_LIFECYCLE_POLICY } from '@/shared/lifecycle';
 import type { IpcRendererEvents } from '@/shared/types';
 
 /**
@@ -30,11 +31,22 @@ export type ConsoleErrorKind =
 
 export class ConsoleError extends Error {
   readonly kind: ConsoleErrorKind;
+  /**
+   * True when the failure is terminal per the shared lifecycle policy
+   * (`@/shared/lifecycle`): the peer closed with a deterministic rejection
+   * (44xx auth/feature codes, 1002/1003/1008) and redialing the same way
+   * will fail identically.
+   */
+  readonly permanent: boolean;
+  /** WebSocket close code when the failure came from a socket close. */
+  readonly closeCode?: number;
 
-  constructor(kind: ConsoleErrorKind, message: string) {
+  constructor(kind: ConsoleErrorKind, message: string, opts: { permanent?: boolean; closeCode?: number } = {}) {
     super(message);
     this.name = 'ConsoleError';
     this.kind = kind;
+    this.permanent = opts.permanent ?? false;
+    this.closeCode = opts.closeCode;
   }
 }
 
@@ -65,7 +77,8 @@ type TabRpc = {
   sessionReady: Promise<string> | null;
 };
 
-const RPC_TIMEOUT_MS = 15_000;
+/** Per-call deadline from the standard lifecycle policy (protocol.md §"Connection Lifecycle"). */
+const RPC_TIMEOUT_MS = DEFAULT_LIFECYCLE_POLICY.rpcTimeoutMs;
 
 export class TerminalProxy {
   private terminals = new Map<string, ProxiedTerminal>();
@@ -127,8 +140,12 @@ export class TerminalProxy {
     this.terminals.set(serveTerminalId, entry);
 
     ioSocket.on('message', (raw) => this.handleIoMessage(entry, raw));
-    ioSocket.on('close', () => {
-      const exitCode = 0;
+    ioSocket.on('close', (code) => {
+      // A clean shell exit arrives as an `exit` io message first (which sets
+      // `disposing`), so a close reaching here is transport-level. Permanent
+      // close codes (44xx auth/feature rejections, 1002/1003/1008) surface as
+      // a non-zero exit so the renderer doesn't render a clean exit.
+      const exitCode = classifyCloseCode(code) === 'permanent' ? 1 : 0;
       this.terminals.delete(entry.id);
       if (!entry.disposing) {
         this.deps.sendToWindow('terminal:exited', entry.tabId, entry.id, exitCode);
@@ -287,8 +304,20 @@ export class TerminalProxy {
     };
 
     socket.on('message', (raw) => this.handleRpcMessage(rpc, raw));
-    socket.on('close', () => {
-      this.failPendingRpc(rpc, new ConsoleError('rpc_failed', '/ws connection closed'));
+    socket.on('close', (code, reason) => {
+      // Classify per the shared lifecycle table: 44xx / 1002 / 1003 / 1008
+      // are deterministic rejections (e.g. omni serve refusing the token) —
+      // mark the rejection permanent so callers don't treat it as a blip.
+      // No pending call may remain unresolved after the socket closes.
+      const permanent = classifyCloseCode(code) === 'permanent';
+      const detail = reason.toString('utf-8');
+      this.failPendingRpc(
+        rpc,
+        new ConsoleError('rpc_failed', `/ws connection closed (code ${code}${detail ? `: ${detail}` : ''})`, {
+          permanent,
+          closeCode: code,
+        })
+      );
       if (this.tabRpc.get(tabId) === rpc) {
         this.tabRpc.delete(tabId);
       }
