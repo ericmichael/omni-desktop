@@ -553,7 +553,8 @@ export function VoiceModal({
 
     const client = new RealtimeRPCClient(wsRealtimeUrl, token, debugEnabled);
     if (debugEnabled) {
-      console.log('[ui] VoiceModal init', { base: wsRealtimeUrl, token, debug: debugEnabled });
+      // Never log the token itself — only whether one is configured.
+      console.log('[ui] VoiceModal init', { base: wsRealtimeUrl, hasToken: Boolean(token), debug: debugEnabled });
     }
     clientRef.current = client;
     let active = true;

@@ -1,6 +1,7 @@
 import { createActor } from 'xstate';
 
 import type { JsonRpcError, JsonRpcId, RpcMethodMap, RpcNotificationMap } from '@/generated/omniagents-gui-v1/gui-v1';
+import { withConnectTicket } from '@/renderer/omniagents-ui/rpc/ws-ticket';
 import { createMachineLogger } from '@/shared/machines/machine-logger';
 import {
   MAX_PENDING_CALLS,
@@ -189,7 +190,21 @@ export class RPCClient {
       this.ws = null;
     }
 
-    const wsUrl = this.token ? `${this.url}?token=${encodeURIComponent(this.token)}` : this.url;
+    // Browsers cannot set WebSocket upgrade headers, so the bearer token is
+    // exchanged for a short-lived single-use ticket over HTTP and only the
+    // ticket ever appears in the dial URL — never the token itself.
+    // Tokenless (unauthenticated server) dials stay fully synchronous.
+    let wsUrl = this.url;
+    if (this.token) {
+      try {
+        wsUrl = await withConnectTicket(this.url, this.token);
+      } catch (err) {
+        // A failed exchange must still drive the machine out of `connecting` —
+        // otherwise the reconnect loop wedges on a state with no pending dial.
+        this.send({ type: 'WS_ERROR', error: (err as Error).message || 'ticket exchange failed' });
+        throw err;
+      }
+    }
     const ws = new WebSocket(wsUrl);
     this.ws = ws;
 
