@@ -442,6 +442,20 @@ export function useChatSession(client: RPCClient) {
     [actor, client]
   );
 
+  // Resync fallback (durable event replay, error -32030 / stream epoch
+  // change): when the client cannot recover the sequenced stream by
+  // cursor-based replay, refetch authoritative state for the affected
+  // session through the existing loadSession path (SELECT_SESSION →
+  // get_session_history → HISTORY_LOADED). Sessions other than the bound
+  // one need nothing — their history is refetched on selection anyway.
+  useEffect(() => {
+    return client.onResyncRequired((resyncSessionId) => {
+      if (resyncSessionId && resyncSessionId === actor.getSnapshot().context.sessionId) {
+        void loadSession(resyncSessionId);
+      }
+    });
+  }, [client, actor, loadSession]);
+
   return {
     // Actor (for advanced usage / subscriptions)
     actor,

@@ -1,5 +1,15 @@
 export type JsonRpcId = string | number;
 export type JsonRpcError = { code: number; message: string; data?: unknown };
+export interface Identity { name: string; version: string }
+export interface Platform { os: string; arch: string }
+export interface Capabilities { realtime: boolean; mcp_apps: boolean; client_functions: boolean; approvals: boolean; artifacts: boolean; replay: boolean; terminal: boolean; experimental_operations: string[]; disabled_notifications: string[] }
+export interface InitializeParams {
+  protocol_version: string;
+  identity: Identity;
+  platform: Platform;
+  capabilities: Capabilities;
+}
+export interface InitializeResult { protocol_version: string; identity: Identity; platform: Platform; capabilities: Capabilities }
 export interface StartRunParams {
   prompt: string;
   session_id?: string;
@@ -82,6 +92,16 @@ export interface CancelQueuedMessageParams {
   session_id: string;
   item_id: string;
 }
+export interface ResumeSessionParams {
+  session_id: string;
+  stream_id?: string;
+  after_seq?: number;
+}
+export interface AckEventsParams {
+  session_id: string;
+  stream_id: string;
+  seq: number;
+}
 export interface ForkSessionParams {
   session_id: string;
   new_session_id?: string;
@@ -122,11 +142,15 @@ export interface ExportSessionParams {
   session_id: string;
   redact?: boolean;
 }
+export interface InitializedParams {
+}
 export interface RunStartedParams {
   run_id: string;
   session_id: string;
   prompt?: string;
   prompt_role?: string;
+  seq?: number;
+  stream_id?: string;
 }
 export interface RunStatusParams {
   run_id: string;
@@ -136,6 +160,8 @@ export interface RunStatusParams {
   attempt?: number;
   total?: number;
   next_delay?: number;
+  seq?: number;
+  stream_id?: string;
 }
 export interface ToolCalledParams {
   run_id: string;
@@ -143,6 +169,8 @@ export interface ToolCalledParams {
   tool: string;
   input: string;
   call_id: string;
+  seq?: number;
+  stream_id?: string;
 }
 export interface ToolResultParams {
   run_id: string;
@@ -151,11 +179,15 @@ export interface ToolResultParams {
   output: string;
   call_id: string;
   metadata?: Record<string, unknown>;
+  seq?: number;
+  stream_id?: string;
 }
 export interface MessageOutputParams {
   run_id: string;
   session_id: string;
   content: string;
+  seq?: number;
+  stream_id?: string;
 }
 export interface TokenParams {
   run_id: string;
@@ -168,6 +200,8 @@ export interface TokenParams {
   max_input_tokens?: number;
   max_output_tokens?: number;
   truncation?: string;
+  seq?: number;
+  stream_id?: string;
 }
 export interface RunEndParams {
   run_id: string;
@@ -179,6 +213,8 @@ export interface RunEndParams {
   max_output_tokens?: number;
   truncation?: string;
   error?: Record<string, unknown>;
+  seq?: number;
+  stream_id?: string;
 }
 export interface ToolApprovalRequestedParams {
   call_id: string;
@@ -187,10 +223,15 @@ export interface ToolApprovalRequestedParams {
   metadata?: Record<string, unknown>;
   session_id?: string;
   run_id?: string;
+  seq?: number;
+  stream_id?: string;
 }
 export interface ToolApprovalResolvedParams {
   call_id: string;
   session_id?: string;
+  reason?: string;
+  seq?: number;
+  stream_id?: string;
 }
 export interface McpApprovalRequestedParams {
   kind: string;
@@ -200,10 +241,15 @@ export interface McpApprovalRequestedParams {
   arguments: string;
   session_id?: string;
   run_id?: string;
+  seq?: number;
+  stream_id?: string;
 }
 export interface McpApprovalResolvedParams {
   request_id: string;
   session_id?: string;
+  reason?: string;
+  seq?: number;
+  stream_id?: string;
 }
 export interface ClientRequestParams {
   request_id: string;
@@ -212,25 +258,38 @@ export interface ClientRequestParams {
   session_id?: string;
   idempotency_key?: string;
   run_id?: string;
+  seq?: number;
+  stream_id?: string;
 }
 export interface ClientRequestResolvedParams {
   request_id: string;
+  session_id?: string;
+  reason?: string;
+  seq?: number;
+  stream_id?: string;
 }
 export interface QueueChangedParams {
   session_id: string;
   depth: number;
   items: unknown[];
+  seq?: number;
+  stream_id?: string;
 }
 export interface SessionForkedParams {
   session_id: string;
   new_session_id: string;
+  seq?: number;
+  stream_id?: string;
 }
 export interface SessionVariablesChangedParams {
   session_id: string;
   changed: Record<string, unknown>;
   variables: Record<string, unknown>;
+  seq?: number;
+  stream_id?: string;
 }
 export interface RpcMethodMap {
+  "initialize": { params: InitializeParams; result: InitializeResult };
   "start_run": { params: StartRunParams; result: StartRunResult };
   "stop_run": { params: StopRunParams; result: boolean };
   "send_user_message": { params: SendUserMessageParams; result: null };
@@ -249,6 +308,8 @@ export interface RpcMethodMap {
   "enqueue_message": { params: EnqueueMessageParams; result: Record<string, unknown> };
   "list_queue": { params: ListQueueParams; result: Record<string, unknown> };
   "cancel_queued_message": { params: CancelQueuedMessageParams; result: Record<string, unknown> };
+  "resume_session": { params: ResumeSessionParams; result: Record<string, unknown> };
+  "ack_events": { params: AckEventsParams; result: Record<string, unknown> };
   "fork_session": { params: ForkSessionParams; result: Record<string, unknown> };
   "set_session_hold": { params: SetSessionHoldParams; result: Record<string, unknown> };
   "queue_status": { params: QueueStatusParams; result: Record<string, unknown> };
@@ -278,9 +339,15 @@ export interface RpcNotificationMap {
   "session_forked": SessionForkedParams;
   "session_variables_changed": SessionVariablesChangedParams;
 }
+export interface RpcClientNotificationMap {
+  "initialized": InitializedParams;
+}
 export type RpcRequest<M extends keyof RpcMethodMap = keyof RpcMethodMap> = {
   [K in M]: { jsonrpc: '2.0'; id: JsonRpcId; method: K; params: RpcMethodMap[K]['params'] }
 }[M];
 export type RpcNotification<E extends keyof RpcNotificationMap = keyof RpcNotificationMap> = {
   [K in E]: { jsonrpc: '2.0'; method: K; params: RpcNotificationMap[K] }
+}[E];
+export type RpcClientNotification<E extends keyof RpcClientNotificationMap = keyof RpcClientNotificationMap> = {
+  [K in E]: { jsonrpc: '2.0'; method: K; params: RpcClientNotificationMap[K] }
 }[E];

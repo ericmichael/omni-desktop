@@ -10,6 +10,8 @@ import {
 } from '@/shared/machines/rpc-client.machine';
 import { OmniagentsRpcError } from '@/shared/omniagents-rpc';
 
+import { type ResumeResult, SessionReplayCoordinator } from './replay';
+
 type JSONRPCResponse = {
   jsonrpc: '2.0';
   id: JsonRpcId;
@@ -38,6 +40,13 @@ type PendingEntry = {
   reqBytes: number;
 };
 
+/**
+ * Debounce window for ``ack_events``. Matches the reference OmniAgents
+ * web-UI client: acks exist purely so the server can compact its durable
+ * event journal, so batching them per session is always safe.
+ */
+export const ACK_DEBOUNCE_MS = 500;
+
 function profileEnabled(): boolean {
   try {
     return typeof localStorage !== 'undefined' && localStorage.getItem('debug:profile') === '1';
@@ -62,11 +71,27 @@ export class RPCClient {
   private disposed = false;
   private reconnectSub: { unsubscribe(): void } | null = null;
   private connectInFlight: Promise<void> | null = null;
+  private replay: SessionReplayCoordinator;
+  private ackTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private resyncListeners = new Set<(sessionId: string) => void>();
   readonly actor: RPCClientActor;
 
   constructor(url: string, token?: string) {
     this.url = url;
     this.token = token;
+    // Sequence-aware dedup / gap recovery for the durable event stream
+    // (protocol.md § "Durable Sequenced Event Replay"). Replay cursors
+    // live on the client (not the socket), so dedup and gap backfill
+    // survive reconnects. Duplicates are dropped BEFORE dispatch — a
+    // replayed `client_request` can never re-execute a client function.
+    this.replay = new SessionReplayCoordinator(
+      (sessionId, streamId, afterSeq) => this.resumeSession(sessionId, streamId ?? undefined, afterSeq),
+      (method, params) => {
+        this.emitEvent(method, params);
+        this.scheduleAck(params);
+      },
+      (sessionId) => this.emitResyncRequired(sessionId)
+    );
     this.actor = createActor(rpcClientMachine, {
       input: { url, token },
       inspect: createMachineLogger('rpc', { tags: { url } }),
@@ -255,7 +280,15 @@ export class RPCClient {
           }
         } else {
           const evt = msg as JSONRPCNotification;
+          // Single notification dispatch point. The replay coordinator
+          // drops duplicate deliveries (so replays never create duplicate
+          // UI items), backfills gaps via resume_session, and reports
+          // unrecoverable streams through onResyncRequired.
+          if (this.replay.handle(evt.method, evt.params)) {
+            return;
+          }
           this.emitEvent(evt.method, evt.params);
+          this.scheduleAck(evt.params);
           if (profile) {
             profileLog(
               `rpc.event method=${evt.method} resp_bytes=${respBytes} ` +
@@ -282,6 +315,13 @@ export class RPCClient {
     this.ws.onerror = () => {
       // onclose will fire after onerror
     };
+
+    // Reconnect hook: proactively backfill every session we hold a replay
+    // cursor for, before any re-render depends on live events. The
+    // resume_session call replays events missed while disconnected AND
+    // re-registers this channel for live notifications. On the first
+    // connect no cursors exist yet, so this is a no-op.
+    this.replay.resumeAll();
   }
 
   disconnect(): void {
@@ -341,8 +381,59 @@ export class RPCClient {
     this.reconnectSub?.unsubscribe();
     this.reconnectSub = null;
     this.connectInFlight = null;
+    for (const timer of this.ackTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.ackTimers.clear();
+    this.resyncListeners.clear();
     this.disconnect();
     this.actor.stop();
+  }
+
+  /**
+   * Subscribe to resync-required signals: the sequenced event stream for
+   * ``sessionId`` cannot be recovered by replay (stream epoch changed,
+   * cursor fell below the compaction floor, or ``resume_session`` failed
+   * with ``-32030``). The host must refetch authoritative state through
+   * the existing ``get_session_history`` path. Returns an unsubscribe fn.
+   */
+  onResyncRequired(handler: (sessionId: string) => void): () => void {
+    this.resyncListeners.add(handler);
+    return () => this.resyncListeners.delete(handler);
+  }
+
+  private emitResyncRequired(sessionId: string): void {
+    for (const fn of this.resyncListeners) {
+      try {
+        fn(sessionId);
+      } catch {}
+    }
+  }
+
+  /**
+   * Debounced ack of the latest applied sequence id per session, so the
+   * server can compact its journal. Only fires for sessions we actually
+   * hold a cursor for (i.e. sessions that delivered sequenced events).
+   */
+  private scheduleAck(params?: Record<string, unknown>): void {
+    const sessionId = params?.session_id;
+    if (typeof sessionId !== 'string' || typeof params?.seq !== 'number') {
+      return;
+    }
+    if (this.ackTimers.has(sessionId)) {
+      return;
+    }
+    this.ackTimers.set(
+      sessionId,
+      setTimeout(() => {
+        this.ackTimers.delete(sessionId);
+        const tracker = this.replay.tracker(sessionId);
+        if (!tracker.streamId || tracker.lastSeq <= 0) {
+          return;
+        }
+        this.ackEvents(sessionId, tracker.streamId, tracker.lastSeq).catch(() => {});
+      }, ACK_DEBOUNCE_MS)
+    );
   }
 
   on<Event extends keyof RpcNotificationMap>(
@@ -462,6 +553,27 @@ export class RPCClient {
 
   async stopRun(runId: string): Promise<void> {
     await this.call('stop_run', { run_id: runId });
+  }
+
+  /**
+   * Replay retained sequenced events after ``afterSeq`` from the server's
+   * durable journal. Rejects with ``OmniagentsRpcError`` code ``-32030``
+   * when the cursor cannot be served (resync required).
+   */
+  async resumeSession(sessionId: string, streamId?: string, afterSeq?: number): Promise<ResumeResult> {
+    const params: RpcMethodMap['resume_session']['params'] = { session_id: sessionId };
+    if (streamId) {
+      params.stream_id = streamId;
+    }
+    if (afterSeq != null) {
+      params.after_seq = afterSeq;
+    }
+    return this.call('resume_session', params) as Promise<ResumeResult>;
+  }
+
+  /** Acknowledge applied events so the server can compact its journal. */
+  async ackEvents(sessionId: string, streamId: string, seq: number): Promise<Record<string, unknown>> {
+    return this.call('ack_events', { session_id: sessionId, stream_id: streamId, seq });
   }
 
   async getSessionHistory(sessionId: string): Promise<Array<{ role: string; content: unknown; timestamp: string }>> {
