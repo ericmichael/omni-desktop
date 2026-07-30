@@ -1,6 +1,120 @@
 {
   "components": {
     "errors": {
+      "AlreadyInitialized": {
+        "code": -32011,
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "invalid_initialization_state"
+            },
+            "state": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "state"
+          ],
+          "type": "object"
+        },
+        "message": "Already initialized"
+      },
+      "CapabilityMismatch": {
+        "code": -32013,
+        "data": {
+          "oneOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "disabled": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "kind": {
+                  "const": "mandatory_capability_disabled"
+                }
+              },
+              "required": [
+                "kind",
+                "disabled"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "const": "capability_not_negotiated"
+                },
+                "unsupported_capabilities": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
+              },
+              "required": [
+                "kind",
+                "unsupported_capabilities"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "capability": {
+                  "type": "string"
+                },
+                "kind": {
+                  "const": "capability_not_negotiated"
+                }
+              },
+              "required": [
+                "kind",
+                "capability"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "const": "invalid_capabilities"
+                }
+              },
+              "required": [
+                "kind"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "message": "Capability mismatch"
+      },
+      "InitializationRequired": {
+        "code": -32010,
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "initialization_required"
+            },
+            "state": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "state"
+          ],
+          "type": "object"
+        },
+        "message": "Initialization required"
+      },
       "InternalError": {
         "code": -32603,
         "message": "Internal error"
@@ -16,6 +130,105 @@
       "MethodNotFound": {
         "code": -32601,
         "message": "Method not found"
+      },
+      "ProtocolVersionMismatch": {
+        "code": -32012,
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "client_version": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "protocol_version_mismatch"
+            },
+            "server_version": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "client_version",
+            "server_version"
+          ],
+          "type": "object"
+        },
+        "message": "Protocol version mismatch"
+      },
+      "ResyncRequired": {
+        "code": -32030,
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "resync_required"
+            },
+            "retained_first_seq": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "retained_last_seq": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "session_id": {
+              "type": "string"
+            },
+            "stream_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "session_id",
+            "stream_id",
+            "retained_first_seq",
+            "retained_last_seq"
+          ],
+          "type": "object"
+        },
+        "message": "Resync required"
+      },
+      "TransportOverloaded": {
+        "code": -32020,
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "limit": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "resource": {
+              "type": "string"
+            },
+            "retry_after_ms": {
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "retryable": {
+              "type": "boolean"
+            },
+            "unit": {
+              "enum": [
+                "messages",
+                "bytes"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "resource",
+            "unit",
+            "limit",
+            "retryable",
+            "retry_after_ms"
+          ],
+          "type": "object"
+        },
+        "message": "Transport overloaded"
       }
     }
   },
@@ -39,6 +252,85 @@
         },
         {
           "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/AlreadyInitialized"
+        },
+        {
+          "$ref": "#/components/errors/ProtocolVersionMismatch"
+        },
+        {
+          "$ref": "#/components/errors/CapabilityMismatch"
+        }
+      ],
+      "name": "initialize",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "protocol_version",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/initialize/properties/protocol_version"
+          }
+        },
+        {
+          "name": "identity",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/initialize/properties/identity"
+          }
+        },
+        {
+          "name": "platform",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/initialize/properties/platform"
+          }
+        },
+        {
+          "name": "capabilities",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/initialize/properties/capabilities"
+          }
+        }
+      ],
+      "result": {
+        "name": "initialize_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/initializeResult"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation initialize",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/initialize"
+      },
+      "x-omni-stability": "stable"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
         }
       ],
       "name": "start_run",
@@ -135,6 +427,12 @@
         },
         {
           "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
         }
       ],
       "name": "stop_run",
@@ -175,6 +473,12 @@
         },
         {
           "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
         }
       ],
       "name": "send_user_message",
@@ -222,6 +526,12 @@
         },
         {
           "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
         }
       ],
       "name": "get_session_history",
@@ -262,6 +572,12 @@
         },
         {
           "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
         }
       ],
       "name": "list_sessions",
@@ -309,6 +625,12 @@
         },
         {
           "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
         }
       ],
       "name": "archive_session",
@@ -349,6 +671,12 @@
         },
         {
           "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
         }
       ],
       "name": "delete_session",
@@ -389,6 +717,12 @@
         },
         {
           "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
         }
       ],
       "name": "get_user_history",
@@ -436,6 +770,12 @@
         },
         {
           "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
         }
       ],
       "name": "get_agent_info",
@@ -468,6 +808,12 @@
         },
         {
           "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
         }
       ],
       "name": "tool_approval_response",
@@ -529,6 +875,12 @@
         },
         {
           "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
         }
       ],
       "name": "mcp_approval_response",
@@ -583,6 +935,12 @@
         },
         {
           "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
         }
       ],
       "name": "client_functions",
@@ -630,6 +988,12 @@
         },
         {
           "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
         }
       ],
       "name": "client_response",
@@ -691,6 +1055,12 @@
         },
         {
           "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
         }
       ],
       "name": "list_server_functions",
@@ -723,6 +1093,12 @@
         },
         {
           "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
         }
       ],
       "name": "server_call",
@@ -777,6 +1153,12 @@
         },
         {
           "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
         }
       ],
       "name": "enqueue_message",
@@ -859,6 +1241,12 @@
         },
         {
           "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
         }
       ],
       "name": "list_queue",
@@ -899,6 +1287,12 @@
         },
         {
           "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
         }
       ],
       "name": "cancel_queued_message",
@@ -946,6 +1340,138 @@
         },
         {
           "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        },
+        {
+          "$ref": "#/components/errors/ResyncRequired"
+        }
+      ],
+      "name": "resume_session",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "session_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/resume_session/properties/session_id"
+          }
+        },
+        {
+          "name": "stream_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/resume_session/properties/stream_id"
+          }
+        },
+        {
+          "name": "after_seq",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/resume_session/properties/after_seq"
+          }
+        }
+      ],
+      "result": {
+        "name": "resume_session_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation resume_session",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/resume_session"
+      },
+      "x-omni-stability": "stable"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        },
+        {
+          "$ref": "#/components/errors/ResyncRequired"
+        }
+      ],
+      "name": "ack_events",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "session_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/ack_events/properties/session_id"
+          }
+        },
+        {
+          "name": "stream_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/ack_events/properties/stream_id"
+          }
+        },
+        {
+          "name": "seq",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/ack_events/properties/seq"
+          }
+        }
+      ],
+      "result": {
+        "name": "ack_events_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation ack_events",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/ack_events"
+      },
+      "x-omni-stability": "stable"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
         }
       ],
       "name": "fork_session",
@@ -993,6 +1519,12 @@
         },
         {
           "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
         }
       ],
       "name": "set_session_hold",
@@ -1040,6 +1572,12 @@
         },
         {
           "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
         }
       ],
       "name": "queue_status",
@@ -1080,6 +1618,12 @@
         },
         {
           "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
         }
       ],
       "name": "enqueue_notification",
@@ -1141,6 +1685,12 @@
         },
         {
           "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
         }
       ],
       "name": "update_session_variables",
@@ -1188,6 +1738,12 @@
         },
         {
           "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
         }
       ],
       "name": "set_client_status",
@@ -1228,6 +1784,12 @@
         },
         {
           "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
         }
       ],
       "name": "disable_tool",
@@ -1268,6 +1830,12 @@
         },
         {
           "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
         }
       ],
       "name": "disable_mcp_server",
@@ -1308,6 +1876,12 @@
         },
         {
           "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
         }
       ],
       "name": "report_incident",
@@ -1369,6 +1943,12 @@
         },
         {
           "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
         }
       ],
       "name": "export_session",
@@ -1404,6 +1984,24 @@
       "x-omni-stability": "experimental"
     },
     {
+      "name": "initialized",
+      "paramStructure": "by-name",
+      "params": [],
+      "result": {
+        "name": "initialized_result",
+        "schema": {
+          "type": "null"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation initialized",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "notification",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/initialized"
+      },
+      "x-omni-stability": "stable"
+    },
+    {
       "name": "run_started",
       "paramStructure": "by-name",
       "params": [
@@ -1433,6 +2031,20 @@
           "required": false,
           "schema": {
             "$ref": "./schemas/gui-v1.schema.json#/$defs/run_started/properties/prompt_role"
+          }
+        },
+        {
+          "name": "seq",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/run_started/properties/seq"
+          }
+        },
+        {
+          "name": "stream_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/run_started/properties/stream_id"
           }
         }
       ],
@@ -1502,6 +2114,20 @@
           "schema": {
             "$ref": "./schemas/gui-v1.schema.json#/$defs/run_status/properties/next_delay"
           }
+        },
+        {
+          "name": "seq",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/run_status/properties/seq"
+          }
+        },
+        {
+          "name": "stream_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/run_status/properties/stream_id"
+          }
         }
       ],
       "result": {
@@ -1555,6 +2181,20 @@
           "required": true,
           "schema": {
             "$ref": "./schemas/gui-v1.schema.json#/$defs/tool_called/properties/call_id"
+          }
+        },
+        {
+          "name": "seq",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/tool_called/properties/seq"
+          }
+        },
+        {
+          "name": "stream_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/tool_called/properties/stream_id"
           }
         }
       ],
@@ -1617,6 +2257,20 @@
           "schema": {
             "$ref": "./schemas/gui-v1.schema.json#/$defs/tool_result/properties/metadata"
           }
+        },
+        {
+          "name": "seq",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/tool_result/properties/seq"
+          }
+        },
+        {
+          "name": "stream_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/tool_result/properties/stream_id"
+          }
         }
       ],
       "result": {
@@ -1656,6 +2310,20 @@
           "required": true,
           "schema": {
             "$ref": "./schemas/gui-v1.schema.json#/$defs/message_output/properties/content"
+          }
+        },
+        {
+          "name": "seq",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/message_output/properties/seq"
+          }
+        },
+        {
+          "name": "stream_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/message_output/properties/stream_id"
           }
         }
       ],
@@ -1746,6 +2414,20 @@
           "schema": {
             "$ref": "./schemas/gui-v1.schema.json#/$defs/token/properties/truncation"
           }
+        },
+        {
+          "name": "seq",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/token/properties/seq"
+          }
+        },
+        {
+          "name": "stream_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/token/properties/stream_id"
+          }
         }
       ],
       "result": {
@@ -1828,6 +2510,20 @@
           "schema": {
             "$ref": "./schemas/gui-v1.schema.json#/$defs/run_end/properties/error"
           }
+        },
+        {
+          "name": "seq",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/run_end/properties/seq"
+          }
+        },
+        {
+          "name": "stream_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/run_end/properties/stream_id"
+          }
         }
       ],
       "result": {
@@ -1889,6 +2585,20 @@
           "schema": {
             "$ref": "./schemas/gui-v1.schema.json#/$defs/tool_approval_requested/properties/run_id"
           }
+        },
+        {
+          "name": "seq",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/tool_approval_requested/properties/seq"
+          }
+        },
+        {
+          "name": "stream_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/tool_approval_requested/properties/stream_id"
+          }
         }
       ],
       "result": {
@@ -1921,6 +2631,27 @@
           "required": false,
           "schema": {
             "$ref": "./schemas/gui-v1.schema.json#/$defs/tool_approval_resolved/properties/session_id"
+          }
+        },
+        {
+          "name": "reason",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/tool_approval_resolved/properties/reason"
+          }
+        },
+        {
+          "name": "seq",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/tool_approval_resolved/properties/seq"
+          }
+        },
+        {
+          "name": "stream_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/tool_approval_resolved/properties/stream_id"
           }
         }
       ],
@@ -1990,6 +2721,20 @@
           "schema": {
             "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_approval_requested/properties/run_id"
           }
+        },
+        {
+          "name": "seq",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_approval_requested/properties/seq"
+          }
+        },
+        {
+          "name": "stream_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_approval_requested/properties/stream_id"
+          }
         }
       ],
       "result": {
@@ -2022,6 +2767,27 @@
           "required": false,
           "schema": {
             "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_approval_resolved/properties/session_id"
+          }
+        },
+        {
+          "name": "reason",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_approval_resolved/properties/reason"
+          }
+        },
+        {
+          "name": "seq",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_approval_resolved/properties/seq"
+          }
+        },
+        {
+          "name": "stream_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_approval_resolved/properties/stream_id"
           }
         }
       ],
@@ -2084,6 +2850,20 @@
           "schema": {
             "$ref": "./schemas/gui-v1.schema.json#/$defs/client_request/properties/run_id"
           }
+        },
+        {
+          "name": "seq",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/client_request/properties/seq"
+          }
+        },
+        {
+          "name": "stream_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/client_request/properties/stream_id"
+          }
         }
       ],
       "result": {
@@ -2113,6 +2893,34 @@
           "required": true,
           "schema": {
             "$ref": "./schemas/gui-v1.schema.json#/$defs/client_request_resolved/properties/request_id"
+          }
+        },
+        {
+          "name": "session_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/client_request_resolved/properties/session_id"
+          }
+        },
+        {
+          "name": "reason",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/client_request_resolved/properties/reason"
+          }
+        },
+        {
+          "name": "seq",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/client_request_resolved/properties/seq"
+          }
+        },
+        {
+          "name": "stream_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/client_request_resolved/properties/stream_id"
           }
         }
       ],
@@ -2154,6 +2962,20 @@
           "schema": {
             "$ref": "./schemas/gui-v1.schema.json#/$defs/queue_changed/properties/items"
           }
+        },
+        {
+          "name": "seq",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/queue_changed/properties/seq"
+          }
+        },
+        {
+          "name": "stream_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/queue_changed/properties/stream_id"
+          }
         }
       ],
       "result": {
@@ -2186,6 +3008,20 @@
           "required": true,
           "schema": {
             "$ref": "./schemas/gui-v1.schema.json#/$defs/session_forked/properties/new_session_id"
+          }
+        },
+        {
+          "name": "seq",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/session_forked/properties/seq"
+          }
+        },
+        {
+          "name": "stream_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/session_forked/properties/stream_id"
           }
         }
       ],
@@ -2226,6 +3062,20 @@
           "required": true,
           "schema": {
             "$ref": "./schemas/gui-v1.schema.json#/$defs/session_variables_changed/properties/variables"
+          }
+        },
+        {
+          "name": "seq",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/session_variables_changed/properties/seq"
+          }
+        },
+        {
+          "name": "stream_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/session_variables_changed/properties/stream_id"
           }
         }
       ],
