@@ -178,9 +178,7 @@ describe('ProcessManager', () => {
 
     it('mounts the union of scoped projects with collision-suffixed mount names', async () => {
       const projects = [
-        project('p1', [
-          { id: 's1', mountName: 'api', kind: 'git-remote', repoUrl: 'https://github.com/acme/api.git' },
-        ]),
+        project('p1', [{ id: 's1', mountName: 'api', kind: 'git-remote', repoUrl: 'https://github.com/acme/api.git' }]),
         project('p2', [
           { id: 's2', mountName: 'api', kind: 'git-remote', repoUrl: 'https://github.com/acme/api2.git' },
           { id: 's3', mountName: 'web', kind: 'git-remote', repoUrl: 'https://github.com/acme/web.git' },
@@ -207,9 +205,7 @@ describe('ProcessManager', () => {
 
     it('excludes projectIds processes from getProjectContainerId', async () => {
       const projects = [
-        project('p1', [
-          { id: 's1', mountName: 'api', kind: 'git-remote', repoUrl: 'https://github.com/acme/api.git' },
-        ]),
+        project('p1', [{ id: 's1', mountName: 'api', kind: 'git-remote', repoUrl: 'https://github.com/acme/api.git' }]),
       ];
       const { pm } = makePm({ storeData: { defaultProfileName: 'devbox', projects } });
       await pm.start('agent:bob', { workspaceDir: '/tmp/agents/bob', projectIds: ['p1'] });

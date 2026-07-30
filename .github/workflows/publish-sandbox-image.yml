@@ -13,8 +13,8 @@ on:
   push:
     branches: [main]
     paths:
-      - "sandbox-image/**"
-      - ".github/workflows/publish-sandbox-image.yml"
+      - 'sandbox-image/**'
+      - '.github/workflows/publish-sandbox-image.yml'
   workflow_dispatch:
 
 env:
