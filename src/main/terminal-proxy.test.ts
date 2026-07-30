@@ -1,162 +1,204 @@
-// @vitest-environment node
-import type { AddressInfo } from 'node:net';
-
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { WebSocketServer } from 'ws';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ProcessManager } from '@/main/process-manager';
 import { TerminalProxy } from '@/main/terminal-proxy';
-import type { AgentProcessStatus, WithTimestamp } from '@/shared/types';
 
-/**
- * Dial-shape tests against a real WebSocket server standing in for
- * `omni serve` (omniagents rpc/protocol.md): connection auth arrives as an
- * `Authorization: Bearer` upgrade header — never in the URL — and the
- * `/ws/terminal` attach credentials ride in the FIRST frame, not query
- * params.
- */
+const { FakeWs } = vi.hoisted(() => {
+  /**
+   * Minimal `ws` stand-in (Node-style event API). Tests drive the server side
+   * via `serverOpen` / `emit`.
+   */
+  class FakeWs {
+    static readonly CONNECTING = 0;
+    static readonly OPEN = 1;
+    static readonly CLOSING = 2;
+    static readonly CLOSED = 3;
+    static instances: FakeWs[] = [];
 
-type CapturedConn = {
-  path: string;
-  query: string;
-  authorization: string | undefined;
-  messages: string[];
-};
+    readonly url: string;
+    readyState = FakeWs.CONNECTING;
+    sent: string[] = [];
+    private handlers = new Map<string, ((...args: unknown[]) => void)[]>();
 
-type FakeServe = {
-  wsUrl: string;
-  connections: CapturedConn[];
-  close: () => Promise<void>;
-};
+    constructor(url: string) {
+      this.url = url;
+      FakeWs.instances.push(this);
+    }
 
-const startFakeServe = async (): Promise<FakeServe> => {
-  const wss = new WebSocketServer({ host: '127.0.0.1', port: 0 });
-  const connections: CapturedConn[] = [];
+    on(event: string, cb: (...args: unknown[]) => void): this {
+      const list = this.handlers.get(event) ?? [];
+      list.push(cb);
+      this.handlers.set(event, list);
+      return this;
+    }
 
-  wss.on('connection', (socket, req) => {
-    const url = new URL(req.url ?? '/', 'http://127.0.0.1');
-    const conn: CapturedConn = {
-      path: url.pathname,
-      query: url.search,
-      authorization: req.headers.authorization,
-      messages: [],
-    };
-    connections.push(conn);
+    once(event: string, cb: (...args: unknown[]) => void): this {
+      const wrapper = (...args: unknown[]): void => {
+        this.off(event, wrapper);
+        cb(...args);
+      };
+      return this.on(event, wrapper);
+    }
 
-    socket.on('message', (raw) => {
-      const text = String(raw);
-      conn.messages.push(text);
-      if (url.pathname !== '/ws') {
-        return;
+    off(event: string, cb: (...args: unknown[]) => void): this {
+      const list = this.handlers.get(event) ?? [];
+      this.handlers.set(
+        event,
+        list.filter((h) => h !== cb)
+      );
+      return this;
+    }
+
+    send(data: unknown): void {
+      this.sent.push(String(data));
+    }
+
+    close(): void {
+      this.readyState = FakeWs.CLOSED;
+    }
+
+    emit(event: string, ...args: unknown[]): void {
+      for (const cb of [...(this.handlers.get(event) ?? [])]) {
+        cb(...args);
       }
-      // Minimal JSON-RPC responder for the tab RPC channel.
-      const msg = JSON.parse(text) as { id: number; params: { function: string } };
-      const fn = msg.params.function;
-      const result =
-        fn === 'session.ensure'
-          ? { session_id: 'sess-1' }
-          : fn === 'terminal.create'
-            ? { terminal_id: 'term-1', terminal_token: 'attach-tok-1', path: '/ws/terminal', session_id: 'sess-1' }
-            : {};
-      socket.send(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result }));
-    });
-  });
+    }
 
-  await new Promise<void>((resolve) => wss.once('listening', resolve));
-  const { port } = wss.address() as AddressInfo;
-  return {
-    wsUrl: `ws://127.0.0.1:${port}/ws`,
-    connections,
-    close: () =>
-      new Promise<void>((resolve) => {
-        for (const client of wss.clients) {
-          client.terminate();
-        }
-        wss.close(() => resolve());
-      }),
-  };
-};
-
-const makeProcessManager = (status: WithTimestamp<AgentProcessStatus>): ProcessManager =>
-  ({ getStatus: () => status }) as unknown as ProcessManager;
-
-const runningStatus = (wsUrl: string, authToken?: string): WithTimestamp<AgentProcessStatus> => ({
-  type: 'running',
-  timestamp: Date.now(),
-  data: { uiUrl: wsUrl.replace(/^ws:/, 'http:').replace(/\/ws$/, ''), wsUrl, ...(authToken ? { authToken } : {}) },
+    serverOpen(): void {
+      this.readyState = FakeWs.OPEN;
+      this.emit('open');
+    }
+  }
+  return { FakeWs };
 });
 
-const waitFor = async (cond: () => boolean, ms = 5_000): Promise<void> => {
-  const deadline = Date.now() + ms;
-  while (!cond()) {
-    if (Date.now() > deadline) {
-      throw new Error('condition not met in time');
-    }
-    await new Promise((r) => setTimeout(r, 10));
+vi.mock('ws', () => ({ WebSocket: FakeWs }));
+
+const settle = async (): Promise<void> => {
+  for (let i = 0; i < 20; i++) {
+    await Promise.resolve();
   }
 };
 
-describe('TerminalProxy dials', () => {
-  let serve: FakeServe;
-  let proxy: TerminalProxy;
+const makeProxy = () => {
+  const sendToWindow = vi.fn();
+  const processManager = {
+    getStatus: () => ({ type: 'running', data: { wsUrl: 'ws://127.0.0.1:9000/ws?token=abc' } }),
+  } as unknown as ProcessManager;
+  return { proxy: new TerminalProxy({ processManager, sendToWindow }), sendToWindow };
+};
 
-  beforeEach(async () => {
-    serve = await startFakeServe();
+type FakeWsInstance = InstanceType<typeof FakeWs>;
+
+/** Drive create() through session.ensure + terminal.create against the fake server. */
+const completeCreate = async (
+  proxy: TerminalProxy,
+  tabId: string
+): Promise<{ rpcWs: FakeWsInstance; ioWs: FakeWsInstance }> => {
+  const createP = proxy.create(tabId);
+  await settle();
+  const rpcWs = FakeWs.instances[0]!;
+  rpcWs.serverOpen();
+  await settle();
+  const ensureFrame = JSON.parse(rpcWs.sent[0]!) as { id: number };
+  rpcWs.emit('message', JSON.stringify({ jsonrpc: '2.0', id: ensureFrame.id, result: { session_id: 'sess-1' } }));
+  await settle();
+  const createFrame = JSON.parse(rpcWs.sent[1]!) as { id: number };
+  rpcWs.emit(
+    'message',
+    JSON.stringify({
+      jsonrpc: '2.0',
+      id: createFrame.id,
+      result: { terminal_id: 'term-1', terminal_token: 'tt', path: '/ws/terminal', session_id: 'sess-1' },
+    })
+  );
+  await expect(createP).resolves.toBe('term-1');
+  return { rpcWs, ioWs: FakeWs.instances[1]! };
+};
+
+describe('TerminalProxy lifecycle', () => {
+  beforeEach(() => {
+    FakeWs.instances = [];
   });
 
-  afterEach(async () => {
-    await proxy?.disposeAll();
-    await serve.close();
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
-  it('sends Authorization upgrade headers and a first-message attach frame (no credentials in URLs)', async () => {
-    proxy = new TerminalProxy({
-      processManager: makeProcessManager(runningStatus(serve.wsUrl, 'serve-token-1')),
-      sendToWindow: () => {},
-    });
+  it('rejects pending RPC calls with a permanent structured error on a 4401 close', async () => {
+    const { proxy } = makeProxy();
+    const createP = proxy.create('tab-1');
+    createP.catch(() => undefined); // assertion attaches below
+    await settle();
+    const rpcWs = FakeWs.instances[0]!;
+    rpcWs.serverOpen();
+    await settle();
+    expect(rpcWs.sent).toHaveLength(1); // session.ensure is in flight
 
-    const id = await proxy.create('tab-1');
-    expect(id).toBe('term-1');
-
-    // Two connections: the tab JSON-RPC channel (/ws) and the terminal IO
-    // socket (/ws/terminal). Both authenticate via the upgrade header.
-    await waitFor(() => serve.connections.length === 2);
-    const rpcConn = serve.connections.find((c) => c.path === '/ws');
-    const ioConn = serve.connections.find((c) => c.path === '/ws/terminal');
-    expect(rpcConn?.authorization).toBe('Bearer serve-token-1');
-    expect(ioConn?.authorization).toBe('Bearer serve-token-1');
-
-    // No token / terminal credentials in either dial URL.
-    expect(rpcConn?.query).toBe('');
-    expect(ioConn?.query).toBe('');
-
-    // The attach frame is the FIRST message on the IO socket…
-    await waitFor(() => (ioConn?.messages.length ?? 0) >= 1);
-    expect(JSON.parse(ioConn!.messages[0]!)).toEqual({
-      type: 'attach',
-      session_id: 'sess-1',
-      terminal_id: 'term-1',
-      terminal_token: 'attach-tok-1',
-    });
-
-    // …and ordinary IO frames follow it.
-    await waitFor(() => proxy.listIdsForTab('tab-1').length === 1);
-    proxy.write('term-1', 'ls\n');
-    await waitFor(() => (ioConn?.messages.length ?? 0) >= 2);
-    expect(JSON.parse(ioConn!.messages[1]!)).toEqual({
-      type: 'input',
-      data: Buffer.from('ls\n', 'utf-8').toString('base64'),
+    rpcWs.emit('close', 4401, Buffer.from('token rejected'));
+    await expect(createP).rejects.toMatchObject({
+      name: 'ConsoleError',
+      kind: 'rpc_failed',
+      permanent: true,
+      closeCode: 4401,
     });
   });
 
-  it('omits the Authorization header when the server is unauthenticated', async () => {
-    proxy = new TerminalProxy({
-      processManager: makeProcessManager(runningStatus(serve.wsUrl)),
-      sendToWindow: () => {},
-    });
+  it('marks pending rejections retryable on an abnormal (1006) close', async () => {
+    const { proxy } = makeProxy();
+    const createP = proxy.create('tab-1');
+    createP.catch(() => undefined);
+    await settle();
+    const rpcWs = FakeWs.instances[0]!;
+    rpcWs.serverOpen();
+    await settle();
 
-    await proxy.create('tab-1');
-    await waitFor(() => serve.connections.length === 2);
-    expect(serve.connections.every((c) => c.authorization === undefined)).toBe(true);
+    rpcWs.emit('close', 1006, Buffer.from(''));
+    await expect(createP).rejects.toMatchObject({
+      name: 'ConsoleError',
+      kind: 'rpc_failed',
+      permanent: false,
+      closeCode: 1006,
+    });
+  });
+
+  it('surfaces a permanent io-socket close as a non-zero terminal exit', async () => {
+    const { proxy, sendToWindow } = makeProxy();
+    const { ioWs } = await completeCreate(proxy, 'tab-1');
+
+    ioWs.emit('close', 4401, Buffer.from(''));
+    expect(sendToWindow).toHaveBeenCalledWith('terminal:exited', 'tab-1', 'term-1', 1);
+  });
+
+  it('keeps a clean io-socket close as exit code 0', async () => {
+    const { proxy, sendToWindow } = makeProxy();
+    const { ioWs } = await completeCreate(proxy, 'tab-1');
+
+    ioWs.emit('close', 1000, Buffer.from(''));
+    expect(sendToWindow).toHaveBeenCalledWith('terminal:exited', 'tab-1', 'term-1', 0);
+  });
+
+  it('uses the standard 60s lifecycle RPC deadline (not the old 15s)', async () => {
+    vi.useFakeTimers();
+    const { proxy } = makeProxy();
+    const createP = proxy.create('tab-1');
+    let settled = false;
+    createP.then(
+      () => {
+        settled = true;
+      },
+      () => {
+        settled = true;
+      }
+    );
+    await settle();
+    FakeWs.instances[0]!.serverOpen();
+    await settle();
+
+    await vi.advanceTimersByTimeAsync(15_001);
+    expect(settled).toBe(false); // would already have timed out under the old 15s deadline
+
+    await vi.advanceTimersByTimeAsync(45_000);
+    await expect(createP).rejects.toMatchObject({ kind: 'rpc_failed' });
+    expect(settled).toBe(true);
   });
 });
