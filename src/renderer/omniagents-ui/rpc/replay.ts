@@ -6,10 +6,18 @@
  * Ported from the reference implementation in
  * omniagents/backends/web/ui/src/rpc/replay.ts (identical to the Ink TUI
  * copy) at the same commit the generated protocol contract is pinned to —
- * see src/generated/omniagents-gui-v1/provenance.json. The one addition
- * is `SessionReplayCoordinator.resumeAll()`, the reconnect hook Omni
- * Desktop uses to proactively backfill cursors after the RPC client
- * re-establishes its connection.
+ * see src/generated/omniagents-gui-v1/provenance.json. Two additions over
+ * the reference:
+ *
+ * - `SessionReplayCoordinator.resumeAll()` — the reconnect hook Omni
+ *   Desktop uses to proactively backfill cursors after the RPC client
+ *   re-establishes its connection.
+ * - Tracker pruning on a `-32030` resync-required resume failure — a
+ *   cursor the server can never serve again (stream epoch changed, or the
+ *   session was deleted) is dropped so subsequent `resumeAll()` passes
+ *   stop re-resuming it. Without this, resuming a deleted session would
+ *   re-materialize it server-side (`resume_session` → `get_or_create`)
+ *   on every reconnect, forever.
  *
  * Every replayable server notification carries a replay envelope:
  * `session_id`, `stream_id` (event-stream epoch) and `seq` (per-session
@@ -27,6 +35,13 @@
  * Events without an integer `seq` (e.g. `token` deltas) are transient and
  * always deliver without moving the cursor.
  */
+
+/**
+ * JSON-RPC error code for "resync required" (protocol.md § Durable
+ * Sequenced Event Replay): the cursor cannot be served — stream epoch
+ * changed, cursor below the compaction floor, or ahead of the stream.
+ */
+export const RESYNC_REQUIRED_CODE = -32030;
 
 export type ReplayObservation = 'deliver' | 'duplicate' | 'gap' | 'stream_changed';
 
@@ -205,10 +220,17 @@ export class SessionReplayCoordinator {
       for (const event of tracker.applyResume(result)) {
         this.deliver(event.method, event.params);
       }
-    } catch {
+    } catch (err) {
       // Resync required (or transport failure): surface to the host app,
       // which refetches authoritative state.
       failed = true;
+      if ((err as { code?: unknown } | null)?.code === RESYNC_REQUIRED_CODE) {
+        // The server can never serve this cursor again (stream epoch
+        // changed, or the session was deleted — resume_session would only
+        // re-materialize it). Drop the tracker so later resumeAll passes
+        // skip the session; a future live event re-adopts its stream.
+        this.trackers.delete(sessionId);
+      }
       this.onResyncRequired(sessionId);
     } finally {
       const held = this.buffered.get(sessionId) ?? [];

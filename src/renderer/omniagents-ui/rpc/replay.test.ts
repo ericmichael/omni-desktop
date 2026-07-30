@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { ReplayTracker, type ResumeResult, SessionReplayCoordinator } from './replay';
+import { ReplayTracker, type ResumeResult, RESYNC_REQUIRED_CODE, SessionReplayCoordinator } from './replay';
 
 const payload = (seq: number, streamId = 'stream-1') => ({
   session_id: 's',
@@ -189,6 +189,53 @@ describe('SessionReplayCoordinator', () => {
       ['tool_result', 2],
       ['message_output', 3],
     ]);
+    expect(coordinator.tracker('s').lastSeq).toBe(3);
+  });
+
+  it('prunes the cursor on a -32030 resume failure so resumeAll stops re-resuming the session', async () => {
+    const resumed: string[] = [];
+    const resyncs: string[] = [];
+    const coordinator = new SessionReplayCoordinator(
+      async (sessionId): Promise<ResumeResult> => {
+        resumed.push(sessionId);
+        throw Object.assign(new Error('Resync required'), { code: RESYNC_REQUIRED_CODE });
+      },
+      () => {},
+      (sessionId) => resyncs.push(sessionId)
+    );
+
+    coordinator.handle('run_started', payload(3));
+    coordinator.resumeAll();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(resumed).toEqual(['s']);
+    expect(resyncs).toEqual(['s']);
+
+    // The unservable cursor is gone: the next reconnect must not resume —
+    // and therefore not re-materialize — the session server-side.
+    coordinator.resumeAll();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(resumed).toEqual(['s']);
+    expect(resyncs).toEqual(['s']);
+  });
+
+  it('keeps the cursor on a transport resume failure and retries on the next reconnect', async () => {
+    const resumed: string[] = [];
+    const coordinator = new SessionReplayCoordinator(
+      async (sessionId): Promise<ResumeResult> => {
+        resumed.push(sessionId);
+        throw new Error('WebSocket not connected');
+      },
+      () => {},
+      () => {}
+    );
+
+    coordinator.handle('run_started', payload(3));
+    coordinator.resumeAll();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    coordinator.resumeAll();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(resumed).toEqual(['s', 's']);
     expect(coordinator.tracker('s').lastSeq).toBe(3);
   });
 });
