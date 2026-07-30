@@ -1,5 +1,6 @@
 import { WebSocket } from 'ws';
 
+import { wsAuthOptions } from '@/lib/ws-auth';
 import type { ProcessManager } from '@/main/process-manager';
 import type { IpcRendererEvents } from '@/shared/types';
 
@@ -11,8 +12,11 @@ import type { IpcRendererEvents } from '@/shared/types';
  * Two WebSockets per terminal:
  *   - One JSON-RPC connection (`/ws`) shared across all terminals on a
  *     given tab, used to call `session.ensure` and `terminal.create`.
- *   - One I/O socket (`/ws/terminal`) per terminal, opened with the
- *     `terminal_id`/`terminal_token` returned by `terminal.create`.
+ *   - One I/O socket (`/ws/terminal`) per terminal. Connection auth is the
+ *     `Authorization: Bearer` upgrade header (when the server is
+ *     authenticated); the `terminal_id`/`terminal_token` returned by
+ *     `terminal.create` ride in the FIRST message — an `attach` frame —
+ *     never in the dial URL (omniagents rpc/protocol.md, Terminal WebSocket).
  *
  * Closing the I/O socket triggers `close_terminal` on the omni serve side
  * automatically (see `omniagents/backends/server/app.py` finally block) —
@@ -84,8 +88,9 @@ export class TerminalProxy {
       throw new ConsoleError('process_not_ready', 'Open a code session before launching a terminal.');
     }
     const wsUrl = status.data.wsUrl;
+    const authToken = status.data.authToken;
 
-    const rpc = await this.ensureTabRpc(tabId, wsUrl);
+    const rpc = await this.ensureTabRpc(tabId, wsUrl, authToken);
     const sessionId = await this.ensureSession(rpc);
 
     // We deliberately do not send `cwd` here. The terminal cwd is the
@@ -109,12 +114,8 @@ export class TerminalProxy {
       throw new ConsoleError('terminal_unavailable', 'omni serve did not return a usable terminal');
     }
 
-    const ioUrl = this.buildTerminalUrl(wsUrl, path, {
-      session_id: serveSessionId,
-      terminal_id: serveTerminalId,
-      terminal_token: token,
-    });
-    const ioSocket = new WebSocket(ioUrl);
+    const ioUrl = this.buildTerminalUrl(wsUrl, path);
+    const ioSocket = new WebSocket(ioUrl, wsAuthOptions(authToken));
     const entry: ProxiedTerminal = {
       id: serveTerminalId,
       tabId,
@@ -126,6 +127,20 @@ export class TerminalProxy {
     };
     this.terminals.set(serveTerminalId, entry);
 
+    // Attach credentials go in the FIRST frame on the socket, before any
+    // input/resize. `open` fires before user frames can be written (write/
+    // resize drop frames until readyState is OPEN), so this send is ordered
+    // first on the wire.
+    ioSocket.on('open', () => {
+      ioSocket.send(
+        JSON.stringify({
+          type: 'attach',
+          session_id: serveSessionId,
+          terminal_id: serveTerminalId,
+          terminal_token: token,
+        })
+      );
+    });
     ioSocket.on('message', (raw) => this.handleIoMessage(entry, raw));
     ioSocket.on('close', () => {
       const exitCode = 0;
@@ -263,7 +278,7 @@ export class TerminalProxy {
     }
   }
 
-  private async ensureTabRpc(tabId: string, wsUrl: string): Promise<TabRpc> {
+  private async ensureTabRpc(tabId: string, wsUrl: string, authToken?: string): Promise<TabRpc> {
     const existing = this.tabRpc.get(tabId);
     if (existing) {
       await existing.ready;
@@ -273,7 +288,7 @@ export class TerminalProxy {
       this.tabRpc.delete(tabId);
     }
 
-    const socket = new WebSocket(wsUrl);
+    const socket = new WebSocket(wsUrl, wsAuthOptions(authToken));
     const rpc: TabRpc = {
       socket,
       pending: new Map(),
@@ -388,20 +403,13 @@ export class TerminalProxy {
     rpc.pending.clear();
   }
 
-  private buildTerminalUrl(rpcWsUrl: string, path: string, params: Record<string, string>): string {
-    // rpcWsUrl is like `ws://host:port/ws?token=...`; we keep host, port,
-    // and the token query param (the /ws/terminal route validates the
-    // same token).
+  private buildTerminalUrl(rpcWsUrl: string, path: string): string {
+    // rpcWsUrl is like `ws://host:port/ws`; keep host + port, swap the path.
+    // No credentials in the URL: connection auth is the Authorization
+    // upgrade header, attach credentials are the first message.
     const u = new URL(rpcWsUrl);
-    const tokenParam = u.searchParams.get('token');
     u.pathname = path;
     u.search = '';
-    for (const [k, v] of Object.entries(params)) {
-      u.searchParams.set(k, v);
-    }
-    if (tokenParam) {
-      u.searchParams.set('token', tokenParam);
-    }
     return u.toString();
   }
 }

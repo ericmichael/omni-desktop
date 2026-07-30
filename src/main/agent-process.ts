@@ -10,6 +10,7 @@ import { WebSocket as WsWebSocket } from 'ws';
 import { getProductSlug } from '@/lib/product';
 import { DEFAULT_ENV } from '@/lib/pty-utils';
 import { SimpleLogger } from '@/lib/simple-logger';
+import { wsAuthOptions } from '@/lib/ws-auth';
 import type { IComputeClient } from '@/main/platform-client';
 import { assertServeProtocolSupported } from '@/main/product-runtime';
 import { type ResolvedProfile, resolveProfile } from '@/main/profile-resolver';
@@ -188,6 +189,12 @@ type ServeReadyPayload = {
   sandbox_url: string;
   ws_url: string;
   ui_url: string;
+  /**
+   * Bearer token WS clients must present as an ``Authorization: Bearer``
+   * upgrade header (or exchange at ``POST /auth/ws-ticket``). ``ws_url``
+   * is token-free — never parse credentials out of it.
+   */
+  auth_token?: string | null;
   services: Record<string, string>;
   ports: { ui: number };
   container_id?: string | null;
@@ -203,6 +210,7 @@ const servePayloadToData = (payload: ServeReadyPayload): AgentProcessData => {
   return {
     uiUrl: payload.ui_url,
     wsUrl: payload.ws_url,
+    ...(payload.auth_token ? { authToken: payload.auth_token } : {}),
     sandboxUrl: payload.sandbox_url,
     services: payload.services ?? {},
     containerId: payload.container_id ?? undefined,
@@ -211,6 +219,14 @@ const servePayloadToData = (payload: ServeReadyPayload): AgentProcessData => {
     ...(payload.resume ? { resume: payload.resume } : {}),
   };
 };
+
+/**
+ * Redact bearer credentials from a raw output chunk before it reaches any
+ * log surface (renderer log viewer, launcher stdout). The readiness line
+ * `omni serve` prints carries the dedicated ``auth_token`` field — the
+ * launcher must consume it, never display it.
+ */
+const redactAuthTokens = (chunk: string): string => chunk.replace(/("auth_token"\s*:\s*")[^"]*(")/g, '$1[redacted]$2');
 
 const SERVER_CALL_TIMEOUT_MS = 8_000;
 
@@ -227,14 +243,15 @@ const SANDBOX_SWITCH_TIMEOUT_MS = 5 * 60_000;
  * Open a one-shot JSON-RPC WebSocket to omni serve, send one
  * ``server_call`` for *fn*, await the result, then close. Used by
  * lifecycle calls (pause/unpause) that don't need a long-lived control
- * channel. Auth tokens travel in the wsUrl query string so we don't have
- * to re-derive them here.
+ * channel. When the server is authenticated, *authToken* rides as an
+ * ``Authorization: Bearer`` upgrade header — never in the URL.
  */
 async function oneShotServerCall(
   wsUrl: string,
   fn: string,
   args: Record<string, unknown> = {},
-  timeoutMs: number = SERVER_CALL_TIMEOUT_MS
+  timeoutMs: number = SERVER_CALL_TIMEOUT_MS,
+  authToken?: string
 ): Promise<SandboxPauseResult> {
   return new Promise<SandboxPauseResult>((resolve) => {
     let settled = false;
@@ -251,7 +268,7 @@ async function oneShotServerCall(
       resolve(result);
     };
 
-    const socket = new WsWebSocket(wsUrl);
+    const socket = new WsWebSocket(wsUrl, wsAuthOptions(authToken));
     const timer = setTimeout(() => finish({ ok: false, supported: false, reason: `${fn} timed out` }), timeoutMs);
 
     socket.once('open', () => {
@@ -448,16 +465,17 @@ export class AgentProcess {
     if (!this.childProcess) {
       return;
     }
-    // Capture the WS URL before flipping status — `stopping` carries no data.
-    const wsUrl =
-      this.status.type === 'running' || this.status.type === 'connecting' ? this.status.data.wsUrl : undefined;
+    // Capture the WS URL + auth before flipping status — `stopping` carries no data.
+    const data = this.status.type === 'running' || this.status.type === 'connecting' ? this.status.data : undefined;
+    const wsUrl = data?.wsUrl;
+    const authToken = data?.authToken;
     this.updateStatus({ type: 'stopping' });
     if (opts?.discardSnapshot && wsUrl) {
       // Terminal close: the caller deletes the snapshot tar right after this
       // stop, so tell serve to skip the persist (fingerprint + full workspace
       // tar export + scrub) in its SIGTERM teardown. Best-effort — on timeout
       // or an older serve without the function, teardown persists as before.
-      await oneShotServerCall(wsUrl, 'sandbox.discard_snapshot');
+      await oneShotServerCall(wsUrl, 'sandbox.discard_snapshot', {}, SERVER_CALL_TIMEOUT_MS, authToken);
     }
     await this.killProcess();
     this.updateStatus({ type: 'exited' });
@@ -535,7 +553,8 @@ export class AgentProcess {
         wsUrl,
         'sandbox.switch',
         { profile: resolved.path },
-        SANDBOX_SWITCH_TIMEOUT_MS
+        SANDBOX_SWITCH_TIMEOUT_MS,
+        data.authToken
       );
       const raw = res.data ?? {};
       if (!res.ok) {
@@ -579,10 +598,12 @@ export class AgentProcess {
     if (!data.wsUrl) {
       return;
     }
-    void oneShotServerCall(data.wsUrl, 'sandbox.notify_activity').catch(() => {
-      // Best-effort. A dropped ping costs us ~60s of headroom (the
-      // renderer's throttle window) before the next one tries.
-    });
+    void oneShotServerCall(data.wsUrl, 'sandbox.notify_activity', {}, SERVER_CALL_TIMEOUT_MS, data.authToken).catch(
+      () => {
+        // Best-effort. A dropped ping costs us ~60s of headroom (the
+        // renderer's throttle window) before the next one tries.
+      }
+    );
   };
 
   private callSandboxLifecycle = async (
@@ -601,7 +622,7 @@ export class AgentProcess {
       return { ok: false, supported: false, reason: 'no ws_url available' };
     }
     try {
-      const result = await oneShotServerCall(wsUrl, fn);
+      const result = await oneShotServerCall(wsUrl, fn, {}, SERVER_CALL_TIMEOUT_MS, data.authToken);
       // Trust the server function's reported paused state when supported.
       if (result.ok && result.supported) {
         this.updateAgentProcessData({
@@ -921,12 +942,16 @@ export class AgentProcess {
       // against a plain-HTTP server).
       let uiUrl = wsUrl.replace(/^wss:/i, 'https:').replace(/^ws:/i, 'http:').replace(/\/ws$/, '');
       if (ready.authToken) {
+        // Webview handoff only: the bundled web UI reads `?token=` off its own
+        // location and exchanges it for a one-time /auth/ws-ticket ticket —
+        // the token itself never rides a WS dial URL.
         const sep = uiUrl.includes('?') ? '&' : '?';
         uiUrl = `${uiUrl}${sep}token=${encodeURIComponent(ready.authToken)}`;
       }
       const data: AgentProcessData = {
         uiUrl,
         wsUrl,
+        ...(ready.authToken ? { authToken: ready.authToken } : {}),
         containerId: ready.containerId,
       };
 
@@ -1018,8 +1043,9 @@ export class AgentProcess {
 
   private handleStdout = (data: Buffer): void => {
     const str = data.toString();
-    this.ipcRawOutput(str);
-    process.stdout.write(str);
+    const echoed = redactAuthTokens(str);
+    this.ipcRawOutput(echoed);
+    process.stdout.write(echoed);
     if (this.jsonEmitted) {
       return;
     }
@@ -1080,7 +1106,7 @@ export class AgentProcess {
       try {
         return await new Promise<boolean>((resolve) => {
           let settled = false;
-          const socket = new WsWebSocket(url);
+          const socket = new WsWebSocket(url, wsAuthOptions(data.authToken));
           const finish = (result: boolean): void => {
             if (settled) {
               return;
@@ -1104,29 +1130,12 @@ export class AgentProcess {
       }
     };
 
-    // Compute mode (PlatformClient) requires the auth token on WS connections;
-    // carry it through from the uiUrl query.
-    let wsCheckUrl = data.wsUrl;
-    if (wsCheckUrl && this.mode === 'compute') {
-      try {
-        const uiParsed = new URL(data.uiUrl);
-        const token = uiParsed.searchParams.get('token');
-        if (token) {
-          const wsUrlObj = new URL(wsCheckUrl);
-          wsUrlObj.searchParams.set('token', token);
-          wsCheckUrl = wsUrlObj.toString();
-        }
-      } catch {
-        /* ignore parse errors */
-      }
-    }
-
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       if (this.isStopping()) {
         return;
       }
       const httpOk = await checkHttp(data.uiUrl);
-      const wsOk = wsCheckUrl ? await checkWs(wsCheckUrl) : true;
+      const wsOk = data.wsUrl ? await checkWs(data.wsUrl) : true;
       if (httpOk && wsOk) {
         if (this.isStopping()) {
           return;
