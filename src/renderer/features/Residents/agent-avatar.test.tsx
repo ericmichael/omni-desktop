@@ -9,15 +9,26 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { persistedStoreApi } from '@/renderer/services/store';
 import type { ResidentAgent, ResidentAgentRuntime, StoreData } from '@/shared/types';
 
 import type { AgentPresence } from './agent-avatar';
 import { AgentAvatar, AgentAvatarGroup, participantPresence, presenceStatus } from './agent-avatar';
+import { DmsSection } from './sidebar-sections';
+import { $residentStatus, $residentsView } from './state';
 
 // `./state` and `services/store` dial IPC at import time; the sidebar section
 // below is mounted for real, so the transport is the only thing stubbed. The
 // `store:changed` handler is captured so the store can be seeded through the
 // SAME path main uses, rather than by poking the private atom.
+//
+// `DmsSection` and friends are imported STATICALLY on purpose. `vi.mock` is
+// hoisted above these imports, so the stub is in place before they evaluate —
+// and pulling `sidebar-sections` (which reaches the whole `@/renderer/ds`
+// barrel) costs ~3.4s of one-time Vite transform. As a dynamic `await import()`
+// inside a test that lands in the 5s per-test budget and times out on CI; as a
+// static import it is paid once during collection, which has no such limit.
+// Tests here run in ~170ms total. Do not convert these back to dynamic imports.
 const mocks = vi.hoisted(() => ({ ipcHandlers: new Map<string, (data: unknown) => void>() }));
 
 vi.mock('@/renderer/services/ipc', () => ({
@@ -454,9 +465,7 @@ const resident = (id: string, name: string, role: string): ResidentAgent => ({
   createdAt: 0,
 });
 
-const seed = async (statuses: Record<string, ResidentAgentRuntime>): Promise<void> => {
-  const { persistedStoreApi } = await import('@/renderer/services/store');
-  const { $residentStatus, $residentsView } = await import('./state');
+const seed = (statuses: Record<string, ResidentAgentRuntime>): void => {
   const next: StoreData = {
     ...persistedStoreApi.$atom.get(),
     layoutMode: 'agents',
@@ -471,8 +480,7 @@ const seed = async (statuses: Record<string, ResidentAgentRuntime>): Promise<voi
   $residentStatus.set(statuses);
 };
 
-const setStatus = async (statuses: Record<string, ResidentAgentRuntime>): Promise<void> => {
-  const { $residentStatus } = await import('./state');
+const setStatus = (statuses: Record<string, ResidentAgentRuntime>): void => {
   act(() => $residentStatus.set(statuses));
 };
 
@@ -487,9 +495,8 @@ const rowsByAgent = (): Record<string, HTMLElement[]> => {
 };
 
 describe('sidebar DM rows (real DmsSection + real $residentStatus)', () => {
-  it('announces the agent once and its status once', async () => {
-    await seed({ a1: runtime('thinking'), a2: runtime('idle') });
-    const { DmsSection } = await import('./sidebar-sections');
+  it('announces the agent once and its status once', () => {
+    seed({ a1: runtime('thinking'), a2: runtime('idle') });
     render(<DmsSection />);
 
     const ada = rowsByAgent()['Ada Lovelace']?.[0];
@@ -514,9 +521,8 @@ describe('sidebar DM rows (real DmsSection + real $residentStatus)', () => {
     expect(accessibleName(host.querySelector('button') as Element)).toBe('Ada Lovelace busy Ada Lovelace');
   });
 
-  it('repaints every mounted instance when $residentStatus changes, with no re-render', async () => {
-    await seed({ a1: runtime('parked'), a2: runtime('parked') });
-    const { DmsSection } = await import('./sidebar-sections');
+  it('repaints every mounted instance when $residentStatus changes, with no re-render', () => {
+    seed({ a1: runtime('parked'), a2: runtime('parked') });
     // Two independently mounted copies of the real section — the same agent
     // rendered on two surfaces at once.
     render(
@@ -534,7 +540,7 @@ describe('sidebar DM rows (real DmsSection + real $residentStatus)', () => {
     }
 
     // No render() call here — only the store moves.
-    await setStatus({ a1: runtime('thinking'), a2: runtime('parked') });
+    setStatus({ a1: runtime('thinking'), a2: runtime('parked') });
 
     const after = rowsByAgent();
     expect(after['Ada Lovelace']).toHaveLength(2);
@@ -550,7 +556,7 @@ describe('sidebar DM rows (real DmsSection + real $residentStatus)', () => {
     // Same DOM nodes — the rows updated in place rather than remounting.
     expect(after['Ada Lovelace']?.[0]).toBe(before['Ada Lovelace']?.[0]);
 
-    await setStatus({ a1: runtime('idle'), a2: runtime('idle') });
+    setStatus({ a1: runtime('idle'), a2: runtime('idle') });
     for (const row of Object.values(rowsByAgent()).flat()) {
       expect(badgeLabels(row)).toEqual(['available']);
     }
