@@ -119,12 +119,17 @@ async function launchServerLocal(
 }
 
 async function launchElectronLocal(state: E2eState, testInfo: TestInfo, launchIndex: number): Promise<LaunchedApp> {
+  // When the suite is launched from another Electron host (for example Codex
+  // Desktop), do not inherit that host's renderer URL. electron-vite uses this
+  // variable to select a dev renderer, which would make the child Electron
+  // window display the host application instead of this built test app.
+  const { ELECTRON_RENDERER_URL: _hostRendererUrl, ...electronEnv } = process.env;
   const electronApp: ElectronApplication = await electron.launch({
     executablePath: electronExecutablePath,
     args: ['.'],
     cwd: process.cwd(),
     env: {
-      ...process.env,
+      ...electronEnv,
       XDG_CONFIG_HOME: state.xdgConfigHome,
       OPENAI_BASE_URL: process.env.OPENAI_BASE_URL ?? process.env.SANDBOX_OPENAI_BASE_URL ?? 'http://127.0.0.1:9/v1',
       OPENAI_API_KEY: process.env.OPENAI_API_KEY ?? process.env.SANDBOX_OPENAI_API_KEY ?? 'test-key',
@@ -134,6 +139,11 @@ async function launchElectronLocal(state: E2eState, testInfo: TestInfo, launchIn
     slowMo: visualProofEnabled ? proofSlowMo : undefined,
   });
   const page = await electronApp.firstWindow({ timeout: 120_000 });
+  // The first BrowserWindow begins on the lightweight splash document and
+  // then navigates to the renderer. Wait for stable product UI before taking
+  // a BrowserWindow handle; otherwise the navigation can destroy its JS
+  // execution context while proof-mode sizing is in flight.
+  await page.getByText('New chat', { exact: true }).first().waitFor({ state: 'visible', timeout: 120_000 });
   if (visualProofEnabled) {
     const browserWindow = await electronApp.browserWindow(page);
     await browserWindow.evaluate((window, size) => window.setSize(size.width, size.height), proofViewport);

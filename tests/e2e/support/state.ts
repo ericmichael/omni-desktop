@@ -9,7 +9,13 @@ export type E2eState = {
   cleanup: () => void;
 };
 
-export type SeedState = 'blank' | 'planning';
+export type SeedState =
+  | 'blank'
+  | 'planning'
+  | 'no-workspace'
+  | 'lazy-ready'
+  | 'lazy-error-pending'
+  | 'lazy-error-empty';
 
 const modelsConfig = {
   version: 3,
@@ -74,11 +80,31 @@ const planningSeed = {
 };
 
 function launcherConfig(seedState: SeedState) {
+  const errorProfile = 'missing-e2e-profile';
+  const lazyState = ['no-workspace', 'lazy-ready', 'lazy-error-pending', 'lazy-error-empty'].includes(seedState);
+  const errorWithoutPending = seedState === 'lazy-error-empty';
   return {
+    schemaVersion: 28,
     onboardingComplete: true,
-    defaultProfileName: 'host',
+    defaultProfileName: seedState.startsWith('lazy-error') ? errorProfile : 'host',
     modelsConfig,
     envVars: '',
+    ...(seedState !== 'no-workspace' ? { workspaceDir: '/tmp' } : {}),
+    ...(lazyState
+      ? {
+          codeTabs: [
+            {
+              id: 'chat-e2e-lazy',
+              projectId: null,
+              profileName: seedState.startsWith('lazy-error') ? errorProfile : 'host',
+              profileNameExplicit: seedState.startsWith('lazy-error'),
+              createdAt: seededAt,
+              ...(errorWithoutPending ? { sessionId: 'session-e2e-lazy-error', activatedAt: seededAt } : {}),
+            },
+          ],
+          activeCodeTabId: 'chat-e2e-lazy',
+        }
+      : {}),
     ...(seedState === 'planning' ? planningSeed : {}),
   };
 }

@@ -11,9 +11,9 @@ import { Button, Spinner } from '@/renderer/ds';
 import { SessionStatusBanner } from '@/renderer/features/Banner/SessionStatusBanner';
 import { getAvailableProfileNames, getProfileMenuLabel } from '@/renderer/features/SandboxProfile/profile-list';
 import { SandboxPicker } from '@/renderer/features/SandboxProfile/SandboxPicker';
+import { openSettingsTab } from '@/renderer/features/SettingsModal/settings-nav';
 import { buildClientToolHandler } from '@/renderer/features/Tickets/client-tool-handler';
 import { $pendingPlan, resolvePlanApproval } from '@/renderer/features/Tickets/plan-approval-bridge';
-import { toast } from '@/renderer/features/Toast/state';
 import { useSandboxActivityPing } from '@/renderer/hooks/use-sandbox-activity-ping';
 import { useSessionWorkspaceDir } from '@/renderer/hooks/use-session-workspace-dir';
 import type { ClientToolCallHandler } from '@/renderer/omniagents-ui/App';
@@ -415,10 +415,7 @@ export const CodeTabContent = memo(
     const handlePrelaunchSubmit = useCallback(
       (msg: PendingMessage) => {
         if (!store.workspaceDir) {
-          toast.error(
-            'Set a workspace folder in Settings first',
-            'Chat needs a base folder for its scratch workspaces.'
-          );
+          openSettingsTab('Workspace');
           return;
         }
         setPendingMessages((prev) => [...prev, msg]);
@@ -609,6 +606,10 @@ export const CodeTabContent = memo(
             onRetry={phase === 'error' ? retry : undefined}
             onSubmit={handlePrelaunchSubmit}
             pendingMessages={pendingMessages}
+            suggestions={!tab.activatedAt ? CHAT_SUGGESTIONS : undefined}
+            sandboxLabel={sandboxLabel}
+            workspaceReady={Boolean(store.workspaceDir)}
+            onOpenWorkspaceSettings={() => openSettingsTab('Workspace')}
             prelaunchExtras={
               !tab.activatedAt ? (
                 <>

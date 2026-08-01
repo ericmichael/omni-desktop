@@ -9,6 +9,7 @@ import { OmniAgentsHeaderActionsProvider } from './header-actions';
 type ChatShellPhase = 'loading' | 'idle' | 'error';
 
 export type PendingMessage = { text: string; files?: File[] };
+export type ChatShellSuggestion = { label: string; prompt: string };
 
 type ChatShellProps = {
   greeting?: string;
@@ -17,14 +18,13 @@ type ChatShellProps = {
   onRetry?: () => void;
   onLaunch?: () => void;
   launchDisabled?: boolean;
-  /**
-   * Optional slot rendered alongside the Launch button while idle. Used
-   * by Chat.tsx to mount the pre-launch SandboxPicker so the user can
-   * pick which sandbox profile this session boots against.
-   */
   prelaunchExtras?: ReactNode;
-  onSubmit?: (msg: PendingMessage) => void;
+  onSubmit: (msg: PendingMessage) => void;
   pendingMessages?: PendingMessage[];
+  suggestions?: ReadonlyArray<ChatShellSuggestion>;
+  sandboxLabel?: string;
+  workspaceReady?: boolean;
+  onOpenWorkspaceSettings?: () => void;
 };
 
 const headerActions = {
@@ -43,10 +43,14 @@ export const ChatShell = memo(
     prelaunchExtras,
     onSubmit,
     pendingMessages,
+    suggestions,
+    sandboxLabel = 'sandbox',
+    workspaceReady = true,
+    onOpenWorkspaceSettings,
   }: ChatShellProps) => {
     const handleSubmit = useCallback(
       (text: string, files?: File[]) => {
-        onSubmit?.({ text, files });
+        onSubmit({ text, files });
       },
       [onSubmit]
     );
@@ -54,7 +58,46 @@ export const ChatShell = memo(
     const [fallbackGreeting] = useState(getGreeting);
     const greeting = greetingProp ?? fallbackGreeting;
     const isConnecting = phase === 'loading';
-    const hasPending = pendingMessages && pendingMessages.length > 0;
+    const hasPending = !!pendingMessages?.length;
+
+    const launchStatus =
+      phase === 'error' ? (
+        <div role="alert" className="rounded-xl border border-errorRed/30 bg-errorRed/5 px-4 py-3 text-left">
+          <div className="text-sm font-medium text-textHeading">Couldn’t start {sandboxLabel}</div>
+          {error && <div className="mt-1 text-sm text-errorRed">{error}</div>}
+          {onRetry && (
+            <button
+              type="button"
+              onClick={onRetry}
+              className="mt-3 h-9 rounded-full bg-primary px-4 text-sm font-medium text-primary-foreground hover:brightness-110 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+            >
+              Retry
+            </button>
+          )}
+        </div>
+      ) : isConnecting ? (
+        <div
+          role="status"
+          aria-live="polite"
+          className="inline-flex items-center gap-2 rounded-full bg-bgCardAlt px-3 py-1.5 text-xs text-textSubtle"
+        >
+          <svg
+            className="h-3 w-3 animate-spin"
+            xmlns="http://www.w3.org/2000/svg"
+            fill="none"
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+          >
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path
+              className="opacity-75"
+              fill="currentColor"
+              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+            />
+          </svg>
+          Starting {sandboxLabel}…
+        </div>
+      ) : null;
 
     return (
       <OmniAgentsHeaderActionsProvider {...headerActions}>
@@ -66,7 +109,7 @@ export const ChatShell = memo(
               <div className="flex-1 flex flex-col min-h-0 min-w-0">
                 <div className="flex-1 min-h-0 relative flex flex-col">
                   {hasPending ? (
-                    <div className="flex-1 px-3 py-3">
+                    <div className="flex-1 overflow-y-auto px-3 py-3">
                       {pendingMessages.map((m, i) => (
                         <motion.div
                           key={i}
@@ -85,6 +128,7 @@ export const ChatShell = memo(
                           </div>
                         </motion.div>
                       ))}
+                      {launchStatus && <div className="ml-auto max-w-[80%] text-right">{launchStatus}</div>}
                     </div>
                   ) : (
                     <div className="flex-1 relative">
@@ -94,102 +138,87 @@ export const ChatShell = memo(
                             {greeting}
                           </div>
                           <AnimatePresence>
-                            {phase === 'error' && error && (
+                            {phase === 'idle' && (
                               <motion.div
-                                className="mt-4 text-sm text-errorRed"
+                                className="mt-5"
                                 initial={{ opacity: 0 }}
                                 animate={{ opacity: 1 }}
                                 exit={{ opacity: 0 }}
                                 transition={{ duration: 0.3 }}
                               >
-                                {error}
-                              </motion.div>
-                            )}
-                          </AnimatePresence>
-                          <AnimatePresence>
-                            {phase === 'error' && onRetry && (
-                              <motion.div
-                                className="mt-4"
-                                initial={{ opacity: 0 }}
-                                animate={{ opacity: 1 }}
-                                exit={{ opacity: 0 }}
-                                transition={{ duration: 0.3, delay: 0.1 }}
-                              >
-                                <button
-                                  type="button"
-                                  onClick={onRetry}
-                                  className="h-8 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:brightness-110"
-                                >
-                                  Retry
-                                </button>
-                              </motion.div>
-                            )}
-                          </AnimatePresence>
-                          <AnimatePresence>
-                            {phase === 'idle' && (onLaunch || prelaunchExtras) && (
-                              <motion.div
-                                className="mt-5 flex items-center justify-center gap-2"
-                                initial={{ opacity: 0 }}
-                                animate={{ opacity: 1 }}
-                                exit={{ opacity: 0 }}
-                                transition={{ duration: 0.3 }}
-                              >
-                                {onLaunch && (
-                                  <button
-                                    type="button"
-                                    onClick={onLaunch}
-                                    disabled={launchDisabled}
-                                    className="h-9 rounded-full bg-primary px-5 text-sm font-medium text-primary-foreground hover:brightness-110 disabled:opacity-50"
+                                {workspaceReady ? (
+                                  <>
+                                    {!onLaunch && (
+                                      <p className="text-sm text-textSubtle">
+                                        Your first message starts a session in {sandboxLabel}.
+                                      </p>
+                                    )}
+                                    {onLaunch && (
+                                      <button
+                                        type="button"
+                                        onClick={onLaunch}
+                                        disabled={launchDisabled}
+                                        className="min-h-9 rounded-full bg-primary px-5 py-2 text-sm font-medium text-primary-foreground hover:brightness-110 disabled:opacity-50"
+                                      >
+                                        Launch workspace
+                                      </button>
+                                    )}
+                                    {!!suggestions?.length && (
+                                      <div className="mt-4 grid grid-cols-1 gap-2 sm:flex sm:flex-wrap sm:justify-center">
+                                        {suggestions.map((suggestion) => (
+                                          <button
+                                            key={suggestion.label}
+                                            type="button"
+                                            onClick={() => onSubmit({ text: suggestion.prompt })}
+                                            className="min-h-9 rounded-full border border-border bg-bgCard px-4 py-2 text-sm font-medium text-textHeading hover:bg-bgCardAlt focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                                          >
+                                            {suggestion.label}
+                                          </button>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </>
+                                ) : (
+                                  <section
+                                    aria-labelledby="workspace-setup-heading"
+                                    className="rounded-2xl border border-border bg-bgCard px-5 py-4"
                                   >
-                                    Launch workspace
-                                  </button>
+                                    <h2
+                                      id="workspace-setup-heading"
+                                      className="text-base font-semibold text-textHeading"
+                                    >
+                                      Choose a workspace folder to start chatting
+                                    </h2>
+                                    <p className="mt-1 text-sm text-textSubtle">
+                                      Omni uses it to create an isolated workspace for each session.
+                                    </p>
+                                    <button
+                                      type="button"
+                                      onClick={onOpenWorkspaceSettings}
+                                      disabled={!onOpenWorkspaceSettings}
+                                      className="mt-4 min-h-9 rounded-full bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:brightness-110 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                                    >
+                                      Open workspace settings
+                                    </button>
+                                  </section>
                                 )}
-                                {prelaunchExtras}
+                                {prelaunchExtras && (
+                                  <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+                                    {prelaunchExtras}
+                                  </div>
+                                )}
                               </motion.div>
                             )}
                           </AnimatePresence>
+                          {phase !== 'idle' && launchStatus && (
+                            <div className="mt-5 flex justify-center">{launchStatus}</div>
+                          )}
                         </div>
                       </div>
-
-                      <AnimatePresence>
-                        {isConnecting && (
-                          <motion.div
-                            className="absolute bottom-2 left-0 right-0 flex justify-center pointer-events-none z-10"
-                            initial={{ opacity: 0 }}
-                            animate={{ opacity: 1 }}
-                            exit={{ opacity: 0 }}
-                            transition={{ duration: 0.3, ease: 'easeOut' }}
-                          >
-                            <div className="inline-flex items-center gap-1.5 rounded-full bg-bgCardAlt px-3 py-1">
-                              <svg
-                                className="animate-spin h-3 w-3 text-textSubtle"
-                                xmlns="http://www.w3.org/2000/svg"
-                                fill="none"
-                                viewBox="0 0 24 24"
-                              >
-                                <circle
-                                  className="opacity-25"
-                                  cx="12"
-                                  cy="12"
-                                  r="10"
-                                  stroke="currentColor"
-                                  strokeWidth="4"
-                                />
-                                <path
-                                  className="opacity-75"
-                                  fill="currentColor"
-                                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                                />
-                              </svg>
-                              <span className="text-xs text-textSubtle">Connecting…</span>
-                            </div>
-                          </motion.div>
-                        )}
-                      </AnimatePresence>
                     </div>
                   )}
                 </div>
-                <Input onSubmit={handleSubmit} />
+                <Input onSubmit={handleSubmit} disabled={!workspaceReady} />
               </div>
             </div>
           </div>
