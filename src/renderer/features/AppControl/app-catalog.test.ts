@@ -49,6 +49,12 @@ describe('buildAppCatalog', () => {
     expect(files).toMatchObject({ available: true, controllable: false, kind: 'builtin-files', running: false });
   });
 
+  it('lists the native Git surface without claiming separate app-control support', () => {
+    const cat = buildAppCatalog(base({ filter: { tabId: 't1', allowGlobal: true } }));
+    const git = cat.find((app) => app.id === 'git' && app.tabId === 't1');
+    expect(git).toMatchObject({ available: true, controllable: false, kind: 'builtin-git', running: false });
+  });
+
   it('excludes the agent chat surface from the catalog', () => {
     const cat = buildAppCatalog(base({ filter: { tabId: 't1', allowGlobal: true } }));
     expect(cat.some((a) => a.id === 'chat')).toBe(false);

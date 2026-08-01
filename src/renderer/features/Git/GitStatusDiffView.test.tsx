@@ -8,6 +8,7 @@ import { GitStatusDiffView } from './GitStatusDiffView';
 
 vi.mock('@fluentui/react-components', () => ({
   makeStyles: () => () => new Proxy({}, { get: (_target, key) => String(key) }),
+  mergeClasses: (...classes: Array<string | false | null | undefined>) => classes.filter(Boolean).join(' '),
   tokens: new Proxy({}, { get: (_target, key) => String(key) }),
 }));
 

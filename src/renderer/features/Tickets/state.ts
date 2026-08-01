@@ -14,7 +14,6 @@ import type {
   ArtifactFileContent,
   ArtifactFileEntry,
   ColumnId,
-  DiffResponse,
   MilestoneId,
   PageId,
   Pipeline,
@@ -422,17 +421,6 @@ export const ticketApi = {
     void ticketApi.fetchTasks();
     return ok;
   },
-  mergeTicket: async (ticketId: TicketId, sourceId: string): Promise<import('@/shared/types').PrMergeResult> => {
-    const result = await emitter.invoke('project:merge-ticket', ticketId, sourceId);
-    void ticketApi.fetchTasks();
-    return result;
-  },
-  detectPullRequest: (
-    ticketId: TicketId,
-    sourceId: string
-  ): Promise<import('@/shared/types').ContainerPullRequest | null> => {
-    return emitter.invoke('project:detect-pull-request', ticketId, sourceId);
-  },
   sendSupervisorMessage: (ticketId: TicketId, message: string): Promise<void> => {
     // Optimistically add the user's message to the chat so it appears immediately
     const userMsg: SessionMessage = {
@@ -462,21 +450,6 @@ export const ticketApi = {
   },
   openArtifactExternal: (ticketId: TicketId, relativePath: string): Promise<void> => {
     return emitter.invoke('project:open-artifact-external', ticketId, relativePath);
-  },
-  getFilesChanged: (ticketId: TicketId, sourceId: string): Promise<DiffResponse> => {
-    return emitter.invoke('project:get-files-changed', ticketId, sourceId);
-  },
-  getCodeTabFilesChanged: (tabId: string, sourceId: string): Promise<DiffResponse> => {
-    return emitter.invoke('project:get-code-tab-files-changed', tabId, sourceId);
-  },
-  applyCodeTabSourceChanges: (tabId: string, sourceId: string): Promise<import('@/shared/types').PrMergeResult> => {
-    return emitter.invoke('project:apply-code-tab-source-changes', tabId, sourceId);
-  },
-  detectCodeTabPullRequest: (
-    tabId: string,
-    sourceId: string
-  ): Promise<import('@/shared/types').ContainerPullRequest | null> => {
-    return emitter.invoke('project:detect-code-tab-pull-request', tabId, sourceId);
   },
 
   // Context files (replaces project.brief)

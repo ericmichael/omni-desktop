@@ -151,6 +151,7 @@ const CodeRunningView = memo(
     agentWorkspaceDir,
     sidecarMode,
     filesHost,
+    gitHost,
     ticketId,
     routineId,
     switching,
@@ -182,6 +183,7 @@ const CodeRunningView = memo(
     agentWorkspaceDir?: string;
     sidecarMode?: boolean;
     filesHost: HTMLDivElement;
+    gitHost: HTMLDivElement;
     ticketId?: TicketId;
     routineId?: string;
     switching?: boolean;
@@ -244,6 +246,7 @@ const CodeRunningView = memo(
             agentWorkspaceDir={agentWorkspaceDir}
             sidecarMode={sidecarMode}
             filesHost={filesHost}
+            gitHost={gitHost}
             ticketId={ticketId}
             routineId={routineId}
             greeting={greeting}
@@ -282,6 +285,7 @@ type CodeTabContentProps = {
   isGlass?: boolean;
   sidecarMode?: boolean;
   filesHost: HTMLDivElement;
+  gitHost: HTMLDivElement;
 };
 
 export const CodeTabContent = memo(
@@ -299,6 +303,7 @@ export const CodeTabContent = memo(
     isGlass,
     sidecarMode,
     filesHost,
+    gitHost,
   }: CodeTabContentProps) => {
     const styles = useStyles();
     const store = useStore(persistedStoreApi.$atom);
@@ -592,6 +597,7 @@ export const CodeTabContent = memo(
               agentWorkspaceDir={agentWorkspaceDir}
               sidecarMode={sidecarMode}
               filesHost={filesHost}
+              gitHost={gitHost}
               ticketId={tab.ticketId as TicketId | undefined}
               routineId={tab.routineId}
               switching={sandboxStatus?.type === 'running' && !!sandboxStatus.data.switching}

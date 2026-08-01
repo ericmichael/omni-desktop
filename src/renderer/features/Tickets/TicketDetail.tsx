@@ -52,7 +52,6 @@ import { $pipeline, $tickets, ticketApi } from './state';
 import { RESOLUTION_LABELS } from './ticket-constants';
 import { TicketArtifactsTab } from './TicketArtifactsTab';
 import { TicketOverviewTab } from './TicketOverviewTab';
-import { TicketPRTab } from './TicketPRTab';
 
 const useStyles = makeStyles({
   root: {
@@ -206,8 +205,8 @@ const useStyles = makeStyles({
 });
 
 /* Discussion lives inline in the Overview (GitHub issue shape), not a tab. */
-type TicketTab = 'Overview' | 'PR' | 'Artifacts';
-const TABS: TicketTab[] = ['Overview', 'PR', 'Artifacts'];
+type TicketTab = 'Overview' | 'Artifacts';
+const TABS: TicketTab[] = ['Overview', 'Artifacts'];
 
 type DragHandleProps = {
   attributes: Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -633,11 +632,6 @@ export const TicketDetail = memo(
         {activeTab === 'Overview' && (
           <div className={styles.overviewScroll}>
             <TicketOverviewTab ticket={ticket} compact={compact} />
-          </div>
-        )}
-        {activeTab === 'PR' && (
-          <div className={styles.tabPane}>
-            <TicketPRTab ticketId={ticketId} />
           </div>
         )}
         {activeTab === 'Artifacts' && (

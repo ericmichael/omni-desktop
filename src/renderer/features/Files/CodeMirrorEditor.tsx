@@ -4,6 +4,13 @@ import { makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
 import { basicSetup } from 'codemirror';
 import { useEffect, useRef } from 'react';
 
+import type { OpenFileLocation } from './open-file-intent';
+
+export type CodeMirrorRevealRequest = Readonly<{
+  requestId: string;
+  location: OpenFileLocation;
+}>;
+
 export type CodeMirrorEditorProps = {
   value: string;
   onChange: (value: string) => void;
@@ -12,6 +19,7 @@ export type CodeMirrorEditorProps = {
   ariaLabel?: string;
   autoFocus?: boolean;
   isGlass?: boolean;
+  revealRequest?: CodeMirrorRevealRequest;
 };
 
 const useStyles = makeStyles({
@@ -68,6 +76,7 @@ export function CodeMirrorEditor({
   ariaLabel = 'Source editor',
   autoFocus = false,
   isGlass = false,
+  revealRequest,
 }: CodeMirrorEditorProps) {
   const styles = useStyles();
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -163,6 +172,25 @@ export function CodeMirrorEditor({
     });
     view.contentDOM.setAttribute('aria-readonly', String(readOnly));
   }, [readOnly]);
+
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view || !revealRequest) {
+      return;
+    }
+    const { location } = revealRequest;
+    const position = (lineNumber: number, column = 1) => {
+      const line = view.state.doc.line(Math.min(lineNumber, view.state.doc.lines));
+      return line.from + Math.min(column - 1, line.length);
+    };
+    const anchor = position(location.line, location.column);
+    const head = position(location.endLine ?? location.line, location.endColumn ?? location.column);
+    view.dispatch({
+      selection: { anchor, head },
+      effects: EditorView.scrollIntoView(anchor, { y: 'center' }),
+    });
+    view.focus();
+  }, [revealRequest]);
 
   return (
     <div ref={hostRef} className={mergeClasses(styles.root, isGlass && styles.rootGlass)} data-testid="source-editor" />

@@ -84,7 +84,7 @@ export class HostFsArtifactStore implements ArtifactStore {
 
 /**
  * Reads artifacts out of the per-project devbox container via `docker exec`,
- * the same transport `container-files-changed.ts` uses for diffs. The artifacts
+ * the same container transport used by source synchronization. The artifacts
  * dir lives inside the workspace (`<workspace>/.omni-artifacts/<ticketId>`), so
  * it rides the snapshot like the sources; reads require the container to be
  * running (offline reads from the persisted snapshot are a future enhancement).

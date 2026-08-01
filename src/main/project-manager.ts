@@ -9,10 +9,8 @@ import path from 'path';
 
 import { appendActivityEvent } from '@/lib/activity-log';
 import { getArtifactsDir, getContainerArtifactsDir } from '@/lib/artifacts';
-import { getContainerFilesChanged } from '@/lib/container-files-changed';
-import { detectContainerPullRequest, detectContainerPullRequests } from '@/lib/container-pull-request';
+import { detectContainerPullRequests } from '@/lib/container-pull-request';
 import { mirrorContainerChangesToHost } from '@/lib/container-sync';
-import { getGitFilesChanged, resolveTicketDiffBase } from '@/lib/git-files-changed';
 import { INBOX_SWEEP_INTERVAL_MS } from '@/lib/inbox-expiry';
 import {
   doneColumnIds,
@@ -68,7 +66,6 @@ import type {
   CodeTabId,
   ColumnId,
   ContainerPullRequest,
-  DiffResponse,
   InboxItem,
   IpcRendererEvents,
   Milestone,
@@ -1287,108 +1284,7 @@ export class ProjectManager {
 
   // #endregion
 
-  // #region Files changed (git diff)
-
-  getFilesChanged = async (ticketId: TicketId, sourceId: string): Promise<DiffResponse> => {
-    const empty: DiffResponse = { totalFiles: 0, totalAdditions: 0, totalDeletions: 0, hasChanges: false, files: [] };
-
-    const ticket = this.getTicketById(ticketId);
-    if (!ticket) {
-      return empty;
-    }
-
-    const project = this.getProjects().find((p) => p.id === ticket.projectId);
-    if (!project) {
-      return empty;
-    }
-
-    // Find the named source by id on the project.
-    const source = project.sources.find((s) => s.id === sourceId);
-
-    // Container-backed model: for local sources with a running session,
-    // the agent's work lives in /workspace/<mountName>. Diff against
-    // the ``omni/seed`` tag set up by devbox.yml's init step.
-    if (source?.kind === 'local') {
-      const containerId = this.processManager?.getProjectContainerId(project.id) ?? null;
-      if (containerId) {
-        return getContainerFilesChanged({ containerId, mountName: source.mountName });
-      }
-    }
-
-    // Host-side fallback (legacy worktree flow, currently unused by
-    // entry-based seeding but kept until the supervisor's per-ticket
-    // worktree machinery is rebuilt in container-land).
-    let task: Task | undefined;
-    if (ticket.supervisorTaskId) {
-      task = this.supervisors.tasks.get(ticket.supervisorTaskId)?.task;
-    }
-    if (!task) {
-      for (const [, entry] of this.supervisors.tasks) {
-        if (entry.task.ticketId === ticketId) {
-          task = entry.task;
-          break;
-        }
-      }
-    }
-    if (!task) {
-      const storedTasks = this.repo ? this.cache.tasks : (this.store.get('tasks') ?? []);
-      task = storedTasks.find((t: Task) => t.ticketId === ticketId);
-    }
-
-    const worktreePath = ticket.worktreePath ?? task?.worktreePath;
-    let gitDir: string;
-    if (worktreePath) {
-      gitDir = worktreePath;
-    } else {
-      if (source?.kind !== 'local') {
-        return empty; // git-remote diffs happen inside the container, not locally
-      }
-      gitDir = source.workspaceDir;
-    }
-
-    const milestoneBranch = ticket.milestoneId ? this.milestones.getById(ticket.milestoneId)?.branch : undefined;
-    let preferredBase: string | undefined;
-    if (worktreePath) {
-      preferredBase = this.milestones.resolveTicketBranch(ticket) ?? task?.branch;
-    } else if (ticket.branch && milestoneBranch && ticket.branch !== milestoneBranch) {
-      preferredBase = milestoneBranch;
-    }
-
-    const mergeBase = await resolveTicketDiffBase(gitDir, preferredBase);
-    return getGitFilesChanged({ gitDir, mergeBase });
-  };
-
-  getCodeTabFilesChanged = async (tabId: CodeTabId, sourceId: string): Promise<DiffResponse> => {
-    const empty: DiffResponse = { totalFiles: 0, totalAdditions: 0, totalDeletions: 0, hasChanges: false, files: [] };
-    const tab = (
-      (this.store.get('codeTabs') ?? []) as Array<{
-        id: string;
-        projectId: ProjectId | null;
-        workspaceDir?: string;
-      }>
-    ).find((t) => t.id === tabId);
-    if (!tab) {
-      return empty;
-    }
-
-    const project = tab.projectId ? this.getProjects().find((p) => p.id === tab.projectId) : undefined;
-    const source = project?.sources.find((s) => s.id === sourceId);
-    if (source) {
-      const containerId = this.processManager?.getProcessContainerId(tabId) ?? null;
-      if (containerId) {
-        return getContainerFilesChanged({ containerId, mountName: source.mountName });
-      }
-      if (source.kind === 'local') {
-        return getGitFilesChanged({ gitDir: source.workspaceDir, mergeBase: 'HEAD' }).catch(() => empty);
-      }
-    }
-
-    if (!project && tab.workspaceDir && sourceId === tab.workspaceDir) {
-      return getGitFilesChanged({ gitDir: tab.workspaceDir, mergeBase: 'HEAD' }).catch(() => empty);
-    }
-
-    return empty;
-  };
+  // #region Session source sync and pull-request discovery
 
   applyCodeTabSourceChanges = async (tabId: CodeTabId, sourceId: string): Promise<PrMergeResult> => {
     const tab = (
@@ -1601,33 +1497,6 @@ export class ProjectManager {
   };
 
   /**
-   * Detect an open GitHub/Azure PR for one source's branch in a code tab's
-   * container. Mirror of {@link detectPullRequest} for the code-tab surface
-   * (per-source — used by the Files Changed view). Best-effort → null.
-   */
-  detectCodeTabPullRequest = async (tabId: CodeTabId, sourceId: string): Promise<ContainerPullRequest | null> => {
-    const ctx = this.codeTabPrContext(tabId);
-    const source = ctx?.project.sources.find((s) => s.id === sourceId);
-    if (!ctx || !source) {
-      return null;
-    }
-    const pr = await detectContainerPullRequest(ctx.containerId, source.mountName);
-    if (!pr) {
-      return null;
-    }
-    const enriched = this.attachPrContext(pr, ctx.project, source, {
-      ticketId: ctx.tab.ticketId,
-      codeTabId: tabId,
-      sessionId: ctx.tab.sessionId,
-      workspaceDir: ctx.tab.workspaceDir,
-    });
-    const gated = ctx.tab.ticketId
-      ? this.gateAndPersistPullRequests(ctx.tab.ticketId, [enriched])
-      : this.gateAndPersistScopedPullRequests(ctx.tab.sessionId ?? tabId, [enriched]);
-    return gated[0] ?? null;
-  };
-
-  /**
    * Detect open PRs across *all* of a code tab's sources (one per source that
    * has one). Used by the deck banner — a multi-source project can have a PR per
    * repo. Best-effort → empty array.
@@ -1689,82 +1558,6 @@ export class ProjectManager {
       workspaceDir,
     }));
     return this.gateAndPersistScopedPullRequests(tab.sessionId ?? tabId, enriched);
-  };
-
-  // #endregion
-
-  // #region Sync to host
-
-  /**
-   * Mirror one source's changed-vs-seed container files onto its host workspace
-   * ("sync to host"). Idempotent and repeatable — the container is
-   * authoritative, so re-running re-copies the current files. Stamps
-   * ``prMergedAt[sourceId]`` with the last-sync time. Requires a running
-   * container.
-   */
-  mergePrTicket = async (ticketId: TicketId, sourceId: string): Promise<PrMergeResult> => {
-    const ticket = this.getTicketById(ticketId);
-    if (!ticket) {
-      return { ok: false, error: 'Ticket not found' };
-    }
-    const project = this.getProjects().find((p) => p.id === ticket.projectId);
-    if (!project) {
-      return { ok: false, error: 'Project not found' };
-    }
-    const source = project.sources.find((s) => s.id === sourceId);
-    if (!source) {
-      return { ok: false, error: `Source not found: ${sourceId}` };
-    }
-    if (source.kind !== 'local') {
-      return { ok: false, error: 'Sync to host is only supported for local sources' };
-    }
-
-    const containerId = this.processManager?.getProjectContainerId(project.id) ?? null;
-    if (!containerId) {
-      return { ok: false, error: 'No running session for this project' };
-    }
-    const result = await mirrorContainerChangesToHost(containerId, source.mountName, source.workspaceDir);
-    if (!result.ok) {
-      return { ok: false, error: result.error ?? 'Sync failed' };
-    }
-    if (result.copied === 0 && result.removed === 0) {
-      return { ok: false, error: 'No changes to sync' };
-    }
-    this.updateTicket(ticketId, {
-      prMergedAt: { ...(ticket.prMergedAt ?? {}), [sourceId]: Date.now() },
-    });
-    return { ok: true, mergeCommitSha: 'sync' };
-  };
-
-  /**
-   * Detect an open GitHub PR for one source's branch by running ``gh pr view``
-   * inside the project's running container. Returns ``null`` when there's no
-   * running container, no PR, or the source can't have one (plain directory /
-   * no remote). Best-effort — never throws.
-   */
-  detectPullRequest = async (ticketId: TicketId, sourceId: string): Promise<ContainerPullRequest | null> => {
-    const ticket = this.getTicketById(ticketId);
-    if (!ticket) {
-      return null;
-    }
-    const project = this.getProjects().find((p) => p.id === ticket.projectId);
-    if (!project) {
-      return null;
-    }
-    const source = project.sources.find((s) => s.id === sourceId);
-    if (!source) {
-      return null;
-    }
-    const containerId = this.processManager?.getProjectContainerId(project.id) ?? null;
-    if (!containerId) {
-      return null;
-    }
-    const pr = await detectContainerPullRequest(containerId, source.mountName);
-    if (!pr) {
-      return null;
-    }
-    const enriched = this.attachPrContext(pr, project, source, { ticketId });
-    return this.gateAndPersistPullRequests(ticketId, [enriched])[0] ?? null;
   };
 
   // #endregion

@@ -1,4 +1,5 @@
 import {
+  Branch20Regular,
   Chat20Regular,
   Code20Regular,
   Desktop20Regular,
@@ -21,6 +22,7 @@ type FluentIcon = typeof Globe20Regular;
  * Map of Fluent icon name → component for builtin + user-picker icons.
  */
 export const ICON_MAP: Record<string, FluentIcon> = {
+  Branch20Regular,
   Chat20Regular,
   Code20Regular,
   Desktop20Regular,

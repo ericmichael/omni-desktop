@@ -30,13 +30,8 @@ const EXPECTED_CHANNELS = [
   'project:list-artifacts',
   'project:read-artifact',
   'project:open-artifact-external',
-  'project:get-files-changed',
-  'project:get-code-tab-files-changed',
   'project:apply-code-tab-source-changes',
-  'project:detect-code-tab-pull-request',
   'project:detect-code-tab-pull-requests',
-  'project:merge-ticket',
-  'project:detect-pull-request',
   'project:read-context',
   'project:write-context',
   'project:list-project-files',
@@ -60,24 +55,13 @@ const makeManager = () => ({
   listArtifacts: vi.fn(() => []),
   readArtifact: vi.fn(() => ({ relativePath: '', mimeType: '', textContent: null, size: 0 })),
   openArtifactExternal: vi.fn(),
-  getFilesChanged: vi.fn(() => ({ totalFiles: 0, totalAdditions: 0, totalDeletions: 0, hasChanges: false, files: [] })),
-  getCodeTabFilesChanged: vi.fn(() => ({
-    totalFiles: 0,
-    totalAdditions: 0,
-    totalDeletions: 0,
-    hasChanges: false,
-    files: [],
-  })),
   applyCodeTabSourceChanges: vi.fn(async () => ({ ok: true, mergeCommitSha: 'apply' })),
-  detectCodeTabPullRequest: vi.fn(async () => null),
   detectCodeTabPullRequests: vi.fn(async () => []),
   readContext: vi.fn(() => ''),
   writeContext: vi.fn(),
   listProjectFiles: vi.fn(() => []),
   getContextPreview: vi.fn(() => ''),
   openProjectFile: vi.fn(),
-  mergePrTicket: vi.fn(async () => ({ ok: true, mergeCommitSha: 'deadbeef' })),
-  detectPullRequest: vi.fn(async () => null),
 });
 
 describe('registerProjectHandlers', () => {
@@ -178,52 +162,12 @@ describe('registerProjectHandlers', () => {
     expect(mgr.listArtifacts).toHaveBeenCalledWith('t1', 'sub/dir');
   });
 
-  it('project:get-files-changed delegates with ticketId + sourceId', () => {
-    const ipc = new StubIpc();
-    const mgr = makeManager();
-    registerProjectHandlers(ipc, () => mgr as never);
-    ipc.invoke('project:get-files-changed', 't1', 'src1');
-    expect(mgr.getFilesChanged).toHaveBeenCalledWith('t1', 'src1');
-  });
-
-  it('project:get-code-tab-files-changed delegates with tabId + sourceId', () => {
-    const ipc = new StubIpc();
-    const mgr = makeManager();
-    registerProjectHandlers(ipc, () => mgr as never);
-    ipc.invoke('project:get-code-tab-files-changed', 'tab1', 'src1');
-    expect(mgr.getCodeTabFilesChanged).toHaveBeenCalledWith('tab1', 'src1');
-  });
-
   it('project:apply-code-tab-source-changes delegates with tabId + sourceId', () => {
     const ipc = new StubIpc();
     const mgr = makeManager();
     registerProjectHandlers(ipc, () => mgr as never);
     ipc.invoke('project:apply-code-tab-source-changes', 'tab1', 'src1');
     expect(mgr.applyCodeTabSourceChanges).toHaveBeenCalledWith('tab1', 'src1');
-  });
-
-  it('project:merge-ticket delegates with ticketId + sourceId', () => {
-    const ipc = new StubIpc();
-    const mgr = makeManager();
-    registerProjectHandlers(ipc, () => mgr as never);
-    ipc.invoke('project:merge-ticket', 't1', 'src1');
-    expect(mgr.mergePrTicket).toHaveBeenCalledWith('t1', 'src1');
-  });
-
-  it('project:detect-pull-request delegates with ticketId + sourceId', () => {
-    const ipc = new StubIpc();
-    const mgr = makeManager();
-    registerProjectHandlers(ipc, () => mgr as never);
-    ipc.invoke('project:detect-pull-request', 't1', 'src1');
-    expect(mgr.detectPullRequest).toHaveBeenCalledWith('t1', 'src1');
-  });
-
-  it('project:detect-code-tab-pull-request delegates with tabId + sourceId', () => {
-    const ipc = new StubIpc();
-    const mgr = makeManager();
-    registerProjectHandlers(ipc, () => mgr as never);
-    ipc.invoke('project:detect-code-tab-pull-request', 'tab1', 'src1');
-    expect(mgr.detectCodeTabPullRequest).toHaveBeenCalledWith('tab1', 'src1');
   });
 
   it('project:detect-code-tab-pull-requests delegates with tabId', () => {

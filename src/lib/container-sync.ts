@@ -28,7 +28,7 @@ const WORKSPACE_ROOT = '/workspace';
 const SEED_REF = 'refs/tags/omni/seed';
 const TIMEOUT_MS = 30_000;
 // Same uid that owns /workspace/* (devbox chown init step). Matches
-// EXEC_USER in container-files-changed.ts.
+// Matches the uid used for workspace-owned container files.
 const EXEC_USER = '1000:1000';
 
 const mountPath = (mountName: string): string => `${WORKSPACE_ROOT}/${mountName}`;

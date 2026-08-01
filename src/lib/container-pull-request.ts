@@ -7,7 +7,7 @@
  * not even have the branch, so detection has to run where the branch and the
  * authenticated CLIs live: inside the container, via ``docker exec``.
  *
- * Mirrors the ``docker exec`` posture of :module:`@/lib/container-files-changed`
+ * Uses the same ``docker exec`` posture as container source synchronization.
  * (same uid that owns ``/workspace/*``, same per-source mount layout), but runs
  * a PR CLI rather than ``git`` — so it sets the container working directory
  * with ``-w`` and lets each CLI auto-detect org/repo from the remote.
@@ -28,7 +28,7 @@ const execFileAsync = promisify(execFile);
 const WORKSPACE_ROOT = '/workspace';
 const TIMEOUT_MS = 15_000;
 // Same uid that owns /workspace/* (set by the devbox profile's chown init
-// step). Matches EXEC_USER in container-files-changed.ts.
+// step). Matches the uid used for workspace-owned container files.
 const EXEC_USER = '1000:1000';
 
 /** Resolve a per-source mount path inside the container. */

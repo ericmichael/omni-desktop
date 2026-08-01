@@ -6,6 +6,7 @@ export type AppKind =
   | 'builtin-desktop'
   | 'builtin-browser'
   | 'builtin-files'
+  | 'builtin-git'
   | 'builtin-terminal'
   | 'webview';
 
@@ -96,6 +97,16 @@ export const BUILTIN_APPS: AppDescriptor[] = [
     scope: 'always',
     builtin: true,
     order: 35,
+    columnScoped: true,
+  },
+  {
+    id: 'git',
+    label: 'Git',
+    icon: 'Branch20Regular',
+    kind: 'builtin-git',
+    scope: 'always',
+    builtin: true,
+    order: 37,
     columnScoped: true,
   },
   {

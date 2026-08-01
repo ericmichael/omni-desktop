@@ -1196,8 +1196,7 @@ const CodeSessionHeader = memo(
                   <MenuList>
                     {onOpenPanel && (
                       <>
-                        {ticketId && <MenuItem onClick={() => onOpenPanel('overview')}>Overview</MenuItem>}
-                        <MenuItem onClick={() => onOpenPanel('pr')}>Changes</MenuItem>
+                        <MenuItem onClick={() => onOpenPanel('overview')}>Overview</MenuItem>
                         {showArtifacts && <MenuItem onClick={() => onOpenPanel('artifacts')}>Artifacts</MenuItem>}
                         <MenuDivider />
                       </>
@@ -1360,7 +1359,7 @@ const DeckColumn = memo(
             onClose={() => onClose(tab.id)}
             ticketId={tab.ticketId as TicketId | undefined}
             projectId={tab.projectId}
-            onOpenPanel={tab.ticketId || tab.projectId ? setActivePanel : undefined}
+            onOpenPanel={tab.ticketId ? setActivePanel : undefined}
             dragSurfaceProps={listeners}
             dragHandle={
               <button
@@ -1377,13 +1376,8 @@ const DeckColumn = memo(
           <PullRequestBanner scope={{ kind: 'code-tab', tabId: tab.id }} />
           <div className={styles.flex1MinH0Relative}>
             {children}
-            {(tab.ticketId || tab.projectId) && (
-              <TicketPanelOverlay
-                panel={activePanel}
-                ticketId={tab.ticketId as TicketId | undefined}
-                tabId={tab.id}
-                onClose={handleClosePanel}
-              />
+            {tab.ticketId && (
+              <TicketPanelOverlay panel={activePanel} ticketId={tab.ticketId as TicketId} onClose={handleClosePanel} />
             )}
           </div>
         </motion.div>
@@ -1570,6 +1564,7 @@ type SidecarBodyProps = {
   app: AppDescriptor;
   originTabId: CodeTabId;
   filesHost: HTMLDivElement;
+  gitHost: HTMLDivElement;
   sandboxUrls: { services?: Record<string, string> } | undefined;
   previewUrl?: string;
   onPreviewUrlChange?: (url: string) => void;
@@ -1584,7 +1579,17 @@ type SidecarBodyProps = {
  * browser page, loaded code-server session, etc.
  */
 const SidecarBody = memo(
-  ({ app, originTabId, filesHost, sandboxUrls, previewUrl, onPreviewUrlChange, isGlass, hidden }: SidecarBodyProps) => {
+  ({
+    app,
+    originTabId,
+    filesHost,
+    gitHost,
+    sandboxUrls,
+    previewUrl,
+    onPreviewUrlChange,
+    isGlass,
+    hidden,
+  }: SidecarBodyProps) => {
     const styles = useStyles();
     const registryProps = useMemo(
       () => ({
@@ -1614,6 +1619,8 @@ const SidecarBody = memo(
       body = <ConsoleStarted tabId={originTabId} />;
     } else if (app.kind === 'builtin-files') {
       body = <TabContentSlot host={filesHost} />;
+    } else if (app.kind === 'builtin-git') {
+      body = <TabContentSlot host={gitHost} />;
     } else if (app.kind === 'builtin-code') {
       body = sandboxUrls?.services?.['code_server'] ? (
         <Webview src={sandboxUrls.services['code_server']} showUnavailable={false} registry={registryProps} />
@@ -1655,6 +1662,7 @@ const SidecarColumn = memo(
     originTab,
     app,
     filesHost,
+    gitHost,
     sandboxUrls,
     previewUrl,
     onPreviewUrlChange,
@@ -1666,6 +1674,7 @@ const SidecarColumn = memo(
     originTab: CodeTab;
     app: AppDescriptor;
     filesHost: HTMLDivElement;
+    gitHost: HTMLDivElement;
     sandboxUrls: { services?: Record<string, string> } | undefined;
     previewUrl?: string;
     onPreviewUrlChange?: (url: string) => void;
@@ -1729,6 +1738,7 @@ const SidecarColumn = memo(
                 app={mountedApp}
                 originTabId={originTab.id}
                 filesHost={filesHost}
+                gitHost={gitHost}
                 sandboxUrls={sandboxUrls}
                 previewUrl={previewUrl}
                 onPreviewUrlChange={onPreviewUrlChange}
@@ -2029,19 +2039,14 @@ const CodeSessionPane = memo(
           onClose={() => onClose(tab.id)}
           ticketId={tab.ticketId as TicketId | undefined}
           projectId={tab.projectId}
-          onOpenPanel={tab.ticketId || tab.projectId ? setActivePanel : undefined}
+          onOpenPanel={tab.ticketId ? setActivePanel : undefined}
           isGlass={isGlass}
         />
         <PullRequestBanner scope={{ kind: 'code-tab', tabId: tab.id }} />
         <div className={styles.flex1MinH0Relative}>
           {content}
-          {(tab.ticketId || tab.projectId) && (
-            <TicketPanelOverlay
-              panel={activePanel}
-              ticketId={tab.ticketId as TicketId | undefined}
-              tabId={tab.id}
-              onClose={handleClosePanel}
-            />
+          {tab.ticketId && (
+            <TicketPanelOverlay panel={activePanel} ticketId={tab.ticketId as TicketId} onClose={handleClosePanel} />
           )}
         </div>
       </motion.div>
@@ -2083,6 +2088,7 @@ export const CodeDeck = memo(() => {
   const sessionTabs = useMemo(() => tabs.filter((t) => !t.customAppId), [tabs]);
   const contentHostsRef = useRef<Map<CodeTabId, HTMLDivElement>>(new Map());
   const filesHostsRef = useRef<Map<CodeTabId, HTMLDivElement>>(new Map());
+  const gitHostsRef = useRef<Map<CodeTabId, HTMLDivElement>>(new Map());
   const getContentHost = useCallback((tabId: CodeTabId): HTMLDivElement => {
     let host = contentHostsRef.current.get(tabId);
     if (!host) {
@@ -2103,6 +2109,17 @@ export const CodeDeck = memo(() => {
     }
     return host;
   }, []);
+  const getGitHost = useCallback((tabId: CodeTabId): HTMLDivElement => {
+    let host = gitHostsRef.current.get(tabId);
+    if (!host) {
+      host = document.createElement('div');
+      host.style.width = '100%';
+      host.style.height = '100%';
+      host.style.minHeight = '0';
+      gitHostsRef.current.set(tabId, host);
+    }
+    return host;
+  }, []);
   useEffect(() => {
     const live = new Set<string>(sessionTabs.map((t) => t.id));
     for (const id of [...contentHostsRef.current.keys()]) {
@@ -2113,6 +2130,11 @@ export const CodeDeck = memo(() => {
     for (const id of [...filesHostsRef.current.keys()]) {
       if (!live.has(id)) {
         filesHostsRef.current.delete(id);
+      }
+    }
+    for (const id of [...gitHostsRef.current.keys()]) {
+      if (!live.has(id)) {
+        gitHostsRef.current.delete(id);
       }
     }
   }, [sessionTabs]);
@@ -2779,6 +2801,7 @@ export const CodeDeck = memo(() => {
                               originTab={tab}
                               app={mountedSidecarApp}
                               filesHost={getFilesHost(tab.id)}
+                              gitHost={getGitHost(tab.id)}
                               sandboxUrls={tabSandboxUrls}
                               previewUrl={previewUrls[tab.id]}
                               onPreviewUrlChange={(url) => handlePreviewUrlChange(tab.id, url)}
@@ -2912,6 +2935,7 @@ export const CodeDeck = memo(() => {
               isGlass={isGlass}
               sidecarMode={tile}
               filesHost={getFilesHost(tab.id)}
+              gitHost={getGitHost(tab.id)}
             />,
             getContentHost(tab.id),
             `tab-content-${tab.id}`

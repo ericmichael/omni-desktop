@@ -9,7 +9,8 @@ import type { WebviewRegistryProps } from '@/renderer/common/Webview';
 import { Webview } from '@/renderer/common/Webview';
 import { BrowserView } from '@/renderer/features/Browser/BrowserView';
 import { ConsoleStarted } from '@/renderer/features/Console/ConsoleRunning';
-import { WorkspaceFilesPortal } from '@/renderer/features/Files/FilesSurface';
+import { dispatchOpenFileIntent, WorkspaceFilesPortal } from '@/renderer/features/Files';
+import { WorkspaceGitPortal } from '@/renderer/features/Git';
 import { OmniAgentsApp } from '@/renderer/omniagents-ui';
 import type { ClientToolCallHandler } from '@/renderer/omniagents-ui/App';
 import type { PendingMessage } from '@/renderer/omniagents-ui/ChatShell';
@@ -84,6 +85,8 @@ type CodeWorkspaceLayoutProps = {
   sidecarMode?: boolean;
   /** Stable portal host for the Files surface owned by this session column. */
   filesHost: HTMLDivElement;
+  /** Stable portal host for the Git surface owned by this session column. */
+  gitHost: HTMLDivElement;
   /** Ticket bound to this column — enables the supervisor bridge actor. */
   ticketId?: TicketId;
   /** Routine bound to this column — enables the routine bridge actor. */
@@ -290,7 +293,7 @@ const useStyles = makeStyles({
 
 const transition = { type: 'spring' as const, duration: 0.28, bounce: 0.08 };
 
-const FilesHostSlot = memo(({ host }: { host: HTMLDivElement }) => {
+const SurfaceHostSlot = memo(({ host }: { host: HTMLDivElement }) => {
   const ref = useCallback(
     (element: HTMLDivElement | null) => {
       if (element) {
@@ -301,7 +304,7 @@ const FilesHostSlot = memo(({ host }: { host: HTMLDivElement }) => {
   );
   return <div ref={ref} style={{ width: '100%', height: '100%', minHeight: 0 }} />;
 });
-FilesHostSlot.displayName = 'FilesHostSlot';
+SurfaceHostSlot.displayName = 'SurfaceHostSlot';
 
 const BUILTIN_TITLES: Record<string, string> = {
   code: 'VS Code',
@@ -341,6 +344,7 @@ const AppSurfaceView = memo(
     isGlass,
     tabId,
     filesHost,
+    gitHost,
   }: {
     app: AppDescriptor;
     src?: string;
@@ -348,6 +352,7 @@ const AppSurfaceView = memo(
     isGlass?: boolean;
     tabId?: string;
     filesHost: HTMLDivElement;
+    gitHost: HTMLDivElement;
   }) => {
     const styles = useStyles();
     const registryProps = useMemo(() => makeRegistryProps(app, tabId), [app, tabId]);
@@ -414,7 +419,23 @@ const AppSurfaceView = memo(
           className={mergeClasses(styles.surfaceCard, isGlass && styles.surfaceCardGlass)}
         >
           <SurfaceFrame app={app} isGlass={isGlass}>
-            <FilesHostSlot host={filesHost} />
+            <SurfaceHostSlot host={filesHost} />
+          </SurfaceFrame>
+        </motion.div>
+      );
+    }
+
+    if (app.kind === 'builtin-git') {
+      return (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={transition}
+          className={mergeClasses(styles.surfaceCard, isGlass && styles.surfaceCardGlass)}
+        >
+          <SurfaceFrame app={app} isGlass={isGlass}>
+            <SurfaceHostSlot host={gitHost} />
           </SurfaceFrame>
         </motion.div>
       );
@@ -499,6 +520,7 @@ export const CodeWorkspaceLayout = memo(
     agentWorkspaceDir,
     sidecarMode,
     filesHost,
+    gitHost,
     ticketId,
     routineId,
   }: CodeWorkspaceLayoutProps) => {
@@ -566,11 +588,33 @@ export const CodeWorkspaceLayout = memo(
 
     const [dockTarget, setDockTarget] = useState<HTMLElement | null>(null);
     const [filesActivated, setFilesActivated] = useState(activeApp === 'files');
+    const [gitActivated, setGitActivated] = useState(activeApp === 'git');
     useEffect(() => {
       if (activeApp === 'files') {
         setFilesActivated(true);
       }
+      if (activeApp === 'git') {
+        setGitActivated(true);
+      }
     }, [activeApp]);
+    const handleGitOpenFile = useCallback(
+      (path: string, line?: number) => {
+        if (!sessionId) {
+          return;
+        }
+        onActiveAppChange?.('files');
+        void dispatchOpenFileIntent(
+          {
+            sessionId,
+            path,
+            location: line === undefined ? undefined : { line },
+            source: 'git-diff',
+          },
+          { waitForTargetMs: 1_500 }
+        );
+      },
+      [onActiveAppChange, sessionId]
+    );
     useLayoutEffect(() => {
       if (!dockTargetId) {
         setDockTarget(null);
@@ -625,13 +669,27 @@ export const CodeWorkspaceLayout = memo(
               routineId={routineId}
               workspaceDir={agentWorkspaceDir}
               providerChildren={
-                filesActivated ? (
-                  <WorkspaceFilesPortal
-                    host={filesHost}
-                    sessionId={sessionId}
-                    workspaceRoot={agentWorkspaceDir}
-                    isGlass={isGlass}
-                  />
+                filesActivated || gitActivated ? (
+                  <>
+                    {filesActivated && (
+                      <WorkspaceFilesPortal
+                        host={filesHost}
+                        sessionId={sessionId}
+                        workspaceRoot={agentWorkspaceDir}
+                        isGlass={isGlass}
+                      />
+                    )}
+                    {gitActivated && (
+                      <WorkspaceGitPortal
+                        host={gitHost}
+                        tabId={tabId}
+                        sessionId={sessionId}
+                        workspaceRoot={agentWorkspaceDir}
+                        isGlass={isGlass}
+                        onOpenFile={handleGitOpenFile}
+                      />
+                    )}
+                  </>
                 ) : undefined
               }
             />
@@ -646,6 +704,7 @@ export const CodeWorkspaceLayout = memo(
                   isGlass={isGlass}
                   tabId={tabId}
                   filesHost={filesHost}
+                  gitHost={gitHost}
                 />
               )}
             </AnimatePresence>

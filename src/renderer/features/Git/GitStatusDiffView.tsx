@@ -1,4 +1,4 @@
-import { makeStyles, tokens } from '@fluentui/react-components';
+import { makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
 import { memo } from 'react';
 
 import type {
@@ -18,6 +18,7 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground1,
     backgroundColor: tokens.colorNeutralBackground1,
   },
+  rootGlass: { backgroundColor: 'transparent' },
   status: {
     overflowY: 'auto',
     borderRight: `1px solid ${tokens.colorNeutralStroke2}`,
@@ -33,6 +34,7 @@ const useStyles = makeStyles({
     gap: tokens.spacingHorizontalS,
     padding: `${tokens.spacingVerticalXS} 0`,
   },
+  statusRowSelected: { backgroundColor: tokens.colorSubtleBackgroundSelected },
   path: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'monospace' },
   file: { marginBottom: tokens.spacingVerticalL },
   fileHeader: { display: 'flex', alignItems: 'baseline', gap: tokens.spacingHorizontalS },
@@ -43,6 +45,7 @@ const useStyles = makeStyles({
     background: tokens.colorNeutralBackground1,
     color: tokens.colorNeutralForeground1,
     cursor: 'pointer',
+    ':disabled': { cursor: 'default', opacity: 0.6 },
   },
   hunk: {
     marginTop: tokens.spacingVerticalS,
@@ -69,7 +72,12 @@ const useStyles = makeStyles({
 export type GitStatusDiffViewProps = {
   status: GitStatusResult;
   diff: GitDiffResult;
-  onOpenFile?: (path: string) => void;
+  diffHeading?: string;
+  onOpenFile?: (path: string, line?: number) => void;
+  onSelectFile?: (path: string) => void;
+  selectedPath?: string | null;
+  actionsDisabled?: boolean;
+  isGlass?: boolean;
   onStage?: (selection: {
     paths?: string[];
     hunks?: GitHunkRef[];
@@ -106,6 +114,20 @@ function linePrefix(origin: GitDiffHunk['lines'][number]['origin']): string {
   return ' ';
 }
 
+function firstChangedLine(file: GitDiffFile): number | undefined {
+  for (const hunk of file.hunks) {
+    for (const line of hunk.lines) {
+      if (line.origin === 'add' && line.new_lineno !== null) {
+        return line.new_lineno;
+      }
+      if (line.origin === 'delete' && line.old_lineno !== null) {
+        return line.old_lineno;
+      }
+    }
+  }
+  return undefined;
+}
+
 const HunkView = ({
   file,
   hunk,
@@ -114,6 +136,7 @@ const HunkView = ({
   onStage,
   onUnstage,
   onDiscard,
+  actionsDisabled,
 }: {
   file: GitDiffFile;
   hunk: GitDiffHunk;
@@ -122,6 +145,7 @@ const HunkView = ({
   onStage: GitStatusDiffViewProps['onStage'];
   onUnstage: GitStatusDiffViewProps['onUnstage'];
   onDiscard: GitStatusDiffViewProps['onDiscard'];
+  actionsDisabled: boolean;
 }) => {
   const styles = useStyles();
   const ref = { path: file.path, hunk_id: hunk.hunk_id };
@@ -131,29 +155,32 @@ const HunkView = ({
       <header className={styles.hunkHeader}>
         <span>{hunk.header}</span>
         {hunk.section_heading && <span>{hunk.section_heading}</span>}
-        {mode !== 'range' && (
+        {mode !== 'range' && (onStage || onUnstage || onDiscard) && (
           <span className={styles.actions}>
-            {mode === 'staged' ? (
+            {mode === 'staged' && onUnstage ? (
               <button
                 className={styles.button}
                 type="button"
+                disabled={actionsDisabled}
                 onClick={() => onUnstage?.({ hunks: [ref], contextLines })}
               >
                 Unstage hunk
               </button>
-            ) : (
+            ) : onStage ? (
               <button
                 className={styles.button}
                 type="button"
+                disabled={actionsDisabled}
                 onClick={() => onStage?.({ hunks: [ref], contextLines, mode: stageMode })}
               >
                 Stage hunk
               </button>
-            )}
-            {mode === 'worktree' && (
+            ) : null}
+            {mode === 'worktree' && onDiscard && (
               <button
                 className={styles.button}
                 type="button"
+                disabled={actionsDisabled}
                 onClick={() => onDiscard?.({ hunks: [ref], contextLines })}
               >
                 Discard hunk
@@ -185,7 +212,19 @@ const HunkView = ({
 };
 
 export const GitStatusDiffView = memo(
-  ({ status, diff, onOpenFile, onStage, onUnstage, onDiscard }: GitStatusDiffViewProps) => {
+  ({
+    status,
+    diff,
+    diffHeading,
+    onOpenFile,
+    onSelectFile,
+    selectedPath,
+    actionsDisabled = false,
+    isGlass,
+    onStage,
+    onUnstage,
+    onDiscard,
+  }: GitStatusDiffViewProps) => {
     const styles = useStyles();
     const changed = [...status.entries];
     const known = new Set(changed.map((entry) => entry.path));
@@ -208,7 +247,11 @@ export const GitStatusDiffView = memo(
     const branch = status.head.branch ?? (status.head.unborn ? 'New repository' : 'Detached HEAD');
 
     return (
-      <div className={styles.root} role="region" aria-label="Source control changes">
+      <div
+        className={mergeClasses(styles.root, isGlass && styles.rootGlass)}
+        role="region"
+        aria-label="Source control changes"
+      >
         <section className={styles.status} aria-labelledby="git-changes-heading">
           <h2 className={styles.heading} id="git-changes-heading">
             Changes
@@ -222,13 +265,17 @@ export const GitStatusDiffView = memo(
           ) : (
             <ul className={styles.list} aria-label="Changed files">
               {changed.map((entry) => (
-                <li className={styles.statusRow} key={`${entry.xy}:${entry.path}`}>
+                <li
+                  className={mergeClasses(styles.statusRow, selectedPath === entry.path && styles.statusRowSelected)}
+                  key={`${entry.xy}:${entry.path}`}
+                >
                   <span aria-label={`Status: ${statusLabel(entry)}`}>{entry.xy}</span>
-                  {onOpenFile ? (
+                  {onSelectFile || onOpenFile ? (
                     <button
                       className={`${styles.button} ${styles.path}`}
                       type="button"
-                      onClick={() => onOpenFile(entry.path)}
+                      aria-pressed={selectedPath === entry.path}
+                      onClick={() => (onSelectFile ?? onOpenFile)?.(entry.path)}
                     >
                       {entry.path}
                     </button>
@@ -243,11 +290,12 @@ export const GitStatusDiffView = memo(
 
         <section className={styles.diff} aria-labelledby="git-diff-heading">
           <h2 className={styles.heading} id="git-diff-heading">
-            {diff.mode === 'staged'
-              ? 'Staged diff'
-              : diff.mode === 'range'
-                ? 'Revision range diff'
-                : 'Working tree diff'}
+            {diffHeading ??
+              (diff.mode === 'staged'
+                ? 'Staged diff'
+                : diff.mode === 'range'
+                  ? 'Revision range diff'
+                  : 'Working tree diff')}
           </h2>
           {diff.context_lines_clamped && <p role="status">Diff context was limited to {diff.context_lines} lines.</p>}
           {diff.files.length === 0 ? (
@@ -258,20 +306,32 @@ export const GitStatusDiffView = memo(
                 <header className={styles.fileHeader}>
                   <h3 className={styles.path}>{file.path}</h3>
                   <span>{file.binary ? 'Binary' : `+${file.added_lines ?? 0} −${file.deleted_lines ?? 0}`}</span>
-                  {diff.mode !== 'range' && (
+                  {(onOpenFile || (diff.mode !== 'range' && (onStage || onUnstage || onDiscard))) && (
                     <span className={styles.actions}>
-                      {diff.mode === 'staged' ? (
+                      {onOpenFile && (
+                        <button
+                          aria-label={`Open ${file.path}`}
+                          className={styles.button}
+                          type="button"
+                          onClick={() => onOpenFile(file.path, firstChangedLine(file))}
+                        >
+                          Open
+                        </button>
+                      )}
+                      {diff.mode === 'staged' && onUnstage ? (
                         <button
                           className={styles.button}
                           type="button"
+                          disabled={actionsDisabled}
                           onClick={() => onUnstage?.({ paths: [file.path], contextLines: diff.context_lines })}
                         >
                           Unstage file
                         </button>
-                      ) : (
+                      ) : diff.mode !== 'range' && onStage ? (
                         <button
                           className={styles.button}
                           type="button"
+                          disabled={actionsDisabled}
                           onClick={() =>
                             onStage?.({
                               paths: [file.path],
@@ -282,11 +342,12 @@ export const GitStatusDiffView = memo(
                         >
                           Stage file
                         </button>
-                      )}
-                      {diff.mode === 'worktree' && (
+                      ) : null}
+                      {diff.mode === 'worktree' && onDiscard && (
                         <button
                           className={styles.button}
                           type="button"
+                          disabled={actionsDisabled}
                           onClick={() => onDiscard?.({ paths: [file.path], contextLines: diff.context_lines })}
                         >
                           Discard file
@@ -295,6 +356,7 @@ export const GitStatusDiffView = memo(
                     </span>
                   )}
                 </header>
+                {file.unmerged && <p role="alert">This file has unresolved merge conflicts.</p>}
                 {!file.hunk_selectable && file.hunks.length > 0 && (
                   <p role="note">This file can only be changed as a whole.</p>
                 )}
@@ -309,6 +371,7 @@ export const GitStatusDiffView = memo(
                       onStage={onStage}
                       onUnstage={onUnstage}
                       onDiscard={onDiscard}
+                      actionsDisabled={actionsDisabled}
                     />
                   ))}
               </article>

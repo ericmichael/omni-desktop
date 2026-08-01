@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -15,6 +16,7 @@ export type SeedState =
   | 'planning'
   | 'no-workspace'
   | 'workspace-files'
+  | 'workspace-git'
   | 'lazy-ready'
   | 'lazy-error-pending'
   | 'lazy-error-empty';
@@ -69,6 +71,40 @@ const workspaceFilesSeed = (workspaceDir: string) => ({
   codeLayoutMode: 'focus',
 });
 
+const workspaceGitSeed = (workspaceDir: string) => ({
+  projects: [
+    {
+      id: 'proj_e2e_workspace_git',
+      label: 'Workspace Git',
+      slug: 'workspace-git',
+      sources: [
+        {
+          id: 'src_e2e_workspace_git',
+          mountName: 'workspace-git',
+          kind: 'local',
+          workspaceDir,
+          gitDetected: true,
+        },
+      ],
+      createdAt: seededAt,
+    },
+  ],
+  codeTabs: [
+    {
+      id: 'code-e2e-workspace-git',
+      projectId: 'proj_e2e_workspace_git',
+      sessionId: 'session-e2e-workspace-git',
+      workspaceDir,
+      profileName: 'host',
+      profileNameExplicit: true,
+      createdAt: seededAt,
+      activatedAt: seededAt,
+    },
+  ],
+  activeCodeTabId: 'code-e2e-workspace-git',
+  codeLayoutMode: 'focus',
+});
+
 function seedWorkspaceFiles(workspaceDir: string): void {
   const sourceDir = path.join(workspaceDir, 'src');
   mkdirSync(sourceDir, { recursive: true });
@@ -79,6 +115,30 @@ function seedWorkspaceFiles(workspaceDir: string): void {
     'utf-8'
   );
   writeFileSync(path.join(sourceDir, 'utility.ts'), 'export const answer = 42;\n', 'utf-8');
+}
+
+function seedWorkspaceGit(workspaceDir: string): void {
+  const sourceDir = path.join(workspaceDir, 'src');
+  mkdirSync(sourceDir, { recursive: true });
+  writeFileSync(path.join(workspaceDir, 'README.md'), '# Workspace git fixture\n', 'utf-8');
+  writeFileSync(
+    path.join(sourceDir, 'index.ts'),
+    "export const greeting = 'hello';\nexport const target = 'before';\nconsole.log(greeting);\n",
+    'utf-8'
+  );
+  writeFileSync(path.join(sourceDir, 'utility.ts'), 'export const answer = 42;\n', 'utf-8');
+  execFileSync('git', ['init', '--initial-branch=main'], { cwd: workspaceDir, stdio: 'ignore' });
+  execFileSync('git', ['add', '.'], { cwd: workspaceDir, stdio: 'ignore' });
+  execFileSync(
+    'git',
+    ['-c', 'user.name=Omni E2E', '-c', 'user.email=omni-e2e@example.invalid', 'commit', '-m', 'fixture baseline'],
+    { cwd: workspaceDir, stdio: 'ignore' }
+  );
+  writeFileSync(
+    path.join(sourceDir, 'index.ts'),
+    "export const greeting = 'hello';\nexport const target = 'after';\nconsole.log(greeting);\n",
+    'utf-8'
+  );
 }
 
 const planningSeed = {
@@ -137,7 +197,9 @@ function launcherConfig(seedState: SeedState, workspaceDir: string) {
     defaultProfileName: seedState.startsWith('lazy-error') ? errorProfile : 'host',
     modelsConfig,
     envVars: '',
-    ...(seedState !== 'no-workspace' ? { workspaceDir: seedState === 'workspace-files' ? workspaceDir : '/tmp' } : {}),
+    ...(seedState !== 'no-workspace'
+      ? { workspaceDir: seedState === 'workspace-files' || seedState === 'workspace-git' ? workspaceDir : '/tmp' }
+      : {}),
     ...(lazyState
       ? {
           codeTabs: [
@@ -155,6 +217,7 @@ function launcherConfig(seedState: SeedState, workspaceDir: string) {
       : {}),
     ...(seedState === 'planning' ? planningSeed : {}),
     ...(seedState === 'workspace-files' ? workspaceFilesSeed(workspaceDir) : {}),
+    ...(seedState === 'workspace-git' ? workspaceGitSeed(workspaceDir) : {}),
   };
 }
 
@@ -180,6 +243,9 @@ export function seedServerState(state: E2eState, seedState: SeedState): void {
   if (seedState === 'workspace-files') {
     seedWorkspaceFiles(state.workspaceDir);
   }
+  if (seedState === 'workspace-git') {
+    seedWorkspaceGit(state.workspaceDir);
+  }
   const configDir = path.join(state.homeDir, '.config', 'Omni Code');
   mkdirSync(configDir, { recursive: true });
   writeFileSync(
@@ -192,6 +258,9 @@ export function seedServerState(state: E2eState, seedState: SeedState): void {
 export function seedElectronState(state: E2eState, seedState: SeedState): void {
   if (seedState === 'workspace-files') {
     seedWorkspaceFiles(state.workspaceDir);
+  }
+  if (seedState === 'workspace-git') {
+    seedWorkspaceGit(state.workspaceDir);
   }
   const configDir = path.join(state.xdgConfigHome, 'Omni Code');
   mkdirSync(configDir, { recursive: true });

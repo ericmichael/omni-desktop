@@ -72,4 +72,27 @@ describe('CodeMirrorEditor', () => {
     expect(onSave).toHaveBeenCalledOnce();
     expect(event.defaultPrevented).toBe(true);
   });
+
+  it('reveals and selects a requested one-based source range', () => {
+    const props = { onChange: () => {}, onSave: () => {}, value: 'first\nsecond\nthird' };
+    act(() => root.render(<CodeMirrorEditor {...props} ariaLabel="Editor for source/app.ts" />));
+    const content = container.querySelector<HTMLElement>('[aria-label="Editor for source/app.ts"]')!;
+    const view = EditorView.findFromDOM(content)!;
+
+    act(() =>
+      root.render(
+        <CodeMirrorEditor
+          {...props}
+          ariaLabel="Editor for source/app.ts"
+          revealRequest={{
+            requestId: 'open-file-1',
+            location: { line: 2, column: 2, endLine: 3, endColumn: 3 },
+          }}
+        />
+      )
+    );
+
+    expect(view.state.selection.main).toMatchObject({ from: 7, to: 15 });
+    expect(document.activeElement).toBe(content);
+  });
 });

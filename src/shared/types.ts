@@ -1957,9 +1957,9 @@ export type GithubDeviceCode = { userCode: string; verificationUri: string; expi
  * change across launcher + omni-code + omniagents" attaches three sources
  * to one project so the agent sees all three at once in /workspace.
  *
- * - `id`: stable identifier (nanoid). Reviews + merge state on tickets key
+ * - `id`: stable identifier (nanoid). Session sync and optional PR links key
  *   off this so renaming the user-facing ``mountName`` doesn't orphan
- *   per-source PR state.
+ *   per-source state.
  * - `mountName`: subdirectory under ``/workspace/`` inside the container
  *   (e.g. ``launcher``). Defaults to a slug derived from path or repo
  *   name; must be unique within a project.
@@ -2295,35 +2295,6 @@ export type ArtifactFileContent = {
   mimeType: string;
   textContent: string | null;
   size: number;
-};
-
-/**
- * Which source the change came from:
- *   - committed: between `base` and `HEAD` (what a PR would land)
- *   - staged: between `HEAD` and the index (git add)
- *   - unstaged: between the index and the working tree
- *   - untracked: new file not tracked by git
- * A single path can appear under multiple groups when its change spans several.
- */
-export type DiffGroup = 'committed' | 'staged' | 'unstaged' | 'untracked';
-
-export type FileDiff = {
-  path: string;
-  oldPath?: string;
-  status: 'added' | 'modified' | 'deleted' | 'renamed' | 'copied' | 'untracked';
-  group: DiffGroup;
-  additions: number;
-  deletions: number;
-  isBinary: boolean;
-  patch?: string;
-};
-
-export type DiffResponse = {
-  totalFiles: number;
-  totalAdditions: number;
-  totalDeletions: number;
-  hasChanges: boolean;
-  files: FileDiff[];
 };
 
 export type SessionMessage = {
@@ -3246,17 +3217,7 @@ type ProjectIpcEvents = Namespaced<
     'list-artifacts': (ticketId: TicketId, dirPath?: string) => ArtifactFileEntry[];
     'read-artifact': (ticketId: TicketId, relativePath: string) => ArtifactFileContent;
     'open-artifact-external': (ticketId: TicketId, relativePath: string) => void;
-    /**
-     * Diff one source's container subdir vs its ``omni/seed`` baseline.
-     * ``sourceId`` is required: cross-source diffs aren't a thing — each
-     * source has its own git repo inside the container. The renderer
-     * iterates ``project.sources`` and calls this per source.
-     */
-    'get-files-changed': (ticketId: TicketId, sourceId: string) => DiffResponse;
-    'get-code-tab-files-changed': (tabId: CodeTabId, sourceId: string) => DiffResponse;
     'apply-code-tab-source-changes': (tabId: CodeTabId, sourceId: string) => PrMergeResult;
-    /** Detect an open PR for one source's branch in a code tab's container. Null when none. */
-    'detect-code-tab-pull-request': (tabId: CodeTabId, sourceId: string) => ContainerPullRequest | null;
     /**
      * Detect open PRs across a code tab's sources (deck banner). For
      * projectless (chat) columns the tab's live process workspace dir is the
@@ -3278,13 +3239,6 @@ type ProjectIpcEvents = Namespaced<
      * still has uncommitted changes (cleanupPending stays set).
      */
     'finalize-ticket-cleanup': (ticketId: TicketId) => boolean;
-    /** Apply one source's container patch onto its host repo ("sync to host"). */
-    'merge-ticket': (ticketId: TicketId, sourceId: string) => PrMergeResult;
-    /**
-     * Detect an open GitHub PR for one source's branch by running
-     * ``gh pr view`` inside the running container. Null when there's no PR.
-     */
-    'detect-pull-request': (ticketId: TicketId, sourceId: string) => ContainerPullRequest | null;
     'set-auto-dispatch': (projectId: ProjectId, enabled: boolean) => void;
     // Context file operations (replaces project.brief)
     'read-context': (projectId: ProjectId) => string;

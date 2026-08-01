@@ -11,6 +11,12 @@ import { type FileEditorLease, FileEditorRegistry } from '@/shared/machines/file
 
 import { CodeMirrorEditor } from './CodeMirrorEditor';
 import { FsFileEditorIO } from './fs-file-editor-io';
+import {
+  type OpenFileLocation,
+  type OpenFileResult,
+  type OpenFileTargetRequest,
+  registerOpenFileTarget,
+} from './open-file-intent';
 import { WorkspaceFileTree } from './WorkspaceFileTree';
 
 type FilesSurfaceProps = {
@@ -27,6 +33,13 @@ type FileEditorPaneProps = {
   lease: FileEditorLease;
   writeSupported: boolean;
   isGlass?: boolean;
+  revealRequest?: { requestId: string; location: OpenFileLocation };
+};
+
+type FileSelection = {
+  identityKey: string;
+  path: string;
+  revealRequest?: { requestId: string; location: OpenFileLocation };
 };
 
 const FILES_READ_OPERATIONS = [
@@ -114,10 +127,21 @@ const useStyles = makeStyles({
     fontSize: tokens.fontSizeBase200,
   },
   bannerText: { flex: '1 1 18rem' },
+  visuallyHidden: {
+    position: 'absolute',
+    width: '1px',
+    height: '1px',
+    padding: 0,
+    margin: '-1px',
+    overflow: 'hidden',
+    clip: 'rect(0, 0, 0, 0)',
+    whiteSpace: 'nowrap',
+    border: 0,
+  },
 });
 
 const FileEditorPane = memo(
-  ({ path, sessionId, fsClient, connected, lease, writeSupported, isGlass }: FileEditorPaneProps) => {
+  ({ path, sessionId, fsClient, connected, lease, writeSupported, isGlass, revealRequest }: FileEditorPaneProps) => {
     const styles = useStyles();
     const snapshot = useSelector(lease.actor, (value) => value);
     const [writable, setWritable] = useState<boolean | null>(null);
@@ -255,6 +279,7 @@ const FileEditorPane = memo(
             readOnly={!connected || writable !== true || isConflict}
             value={snapshot.context.content}
             isGlass={isGlass}
+            revealRequest={revealRequest}
           />
         </div>
       </>
@@ -272,7 +297,8 @@ export const FilesSurface = memo(({ sessionId, workspaceRoot, isGlass }: FilesSu
   const identityKey = sessionId && workspaceRoot ? JSON.stringify([sessionId, workspaceRoot]) : null;
   const [preparedKey, setPreparedKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [selection, setSelection] = useState<{ identityKey: string; path: string } | null>(null);
+  const [selection, setSelection] = useState<FileSelection | null>(null);
+  const [lastOpened, setLastOpened] = useState<{ path: string; location?: OpenFileLocation } | null>(null);
   const selectedPath = selection?.identityKey === identityKey ? selection.path : null;
   const leasesRef = useMemo(() => new Map<string, FileEditorLease>(), []);
   const readSupported = FILES_READ_OPERATIONS.every((operation) => rpc.supportsExperimentalOperation(operation));
@@ -338,9 +364,80 @@ export const FilesSurface = memo(({ sessionId, workspaceRoot, isGlass }: FilesSu
         leasesRef.set(path, resources.editors.acquire({ sessionId, path }));
       }
       setSelection({ identityKey, path });
+      setLastOpened(null);
     },
     [identityKey, leasesRef, resources, sessionId]
   );
+  const handleOpenFileIntent = useCallback(
+    async ({ requestId, intent }: OpenFileTargetRequest): Promise<OpenFileResult> => {
+      const failed = (reason: Extract<OpenFileResult, { status: 'failed' }>['reason'], message: string) => ({
+        status: 'failed' as const,
+        requestId,
+        sessionId: intent.sessionId,
+        path: intent.path,
+        reason,
+        message,
+      });
+      if (!connected || !identityKey || !resources || !sessionId || !workspaceRoot) {
+        return failed(
+          'workspace-unavailable',
+          'Workspace files are reconnecting or the session has no workspace. Try again shortly.'
+        );
+      }
+      if (!readSupported) {
+        return failed('unsupported', 'This agent runtime does not support workspace files.');
+      }
+      if (preparedKey !== identityKey) {
+        try {
+          await rpc.serverCall('session.ensure', { session_id: sessionId, workspace_root: workspaceRoot });
+          setPreparedKey(identityKey);
+        } catch (reason) {
+          return failed(
+            'workspace-unavailable',
+            reason instanceof Error ? reason.message : 'Could not prepare the workspace session. Try again.'
+          );
+        }
+      }
+      try {
+        const stat = await fsClient.stat(sessionId, intent.path);
+        if (stat.type !== 'file') {
+          return failed('not-a-file', `${intent.path} is not a file.`);
+        }
+      } catch (reason) {
+        const message = reason instanceof Error ? reason.message : `Could not find ${intent.path}.`;
+        if (/not found|no such file|enoent/i.test(message)) {
+          return failed('missing-file', `${intent.path} does not exist in this workspace.`);
+        }
+        if (/disconnect|connection|socket/i.test(message)) {
+          return failed('workspace-unavailable', 'Workspace files disconnected while opening the file. Try again.');
+        }
+        return failed('open-failed', message);
+      }
+      if (!leasesRef.has(intent.path)) {
+        leasesRef.set(intent.path, resources.editors.acquire({ sessionId, path: intent.path }));
+      }
+      setSelection({
+        identityKey,
+        path: intent.path,
+        revealRequest: intent.location ? { requestId, location: intent.location } : undefined,
+      });
+      setLastOpened({ path: intent.path, location: intent.location });
+      return {
+        status: 'opened',
+        requestId,
+        sessionId: intent.sessionId,
+        path: intent.path,
+        location: intent.location,
+      };
+    },
+    [connected, fsClient, identityKey, leasesRef, preparedKey, readSupported, resources, rpc, sessionId, workspaceRoot]
+  );
+  useEffect(() => {
+    if (!sessionId) {
+      return;
+    }
+    return registerOpenFileTarget(sessionId, handleOpenFileIntent);
+  }, [handleOpenFileIntent, sessionId]);
   const selectedLease = selectedPath ? (leasesRef.get(selectedPath) ?? null) : null;
 
   let body;
@@ -381,6 +478,7 @@ export const FilesSurface = memo(({ sessionId, workspaceRoot, isGlass }: FilesSu
               sessionId={sessionId}
               writeSupported={writeSupported}
               isGlass={isGlass}
+              revealRequest={selection?.identityKey === identityKey ? selection.revealRequest : undefined}
             />
           ) : (
             <div className={styles.centered}>Select a text file to inspect or edit it.</div>
@@ -393,6 +491,12 @@ export const FilesSurface = memo(({ sessionId, workspaceRoot, isGlass }: FilesSu
   return (
     <section className={mergeClasses(styles.root, isGlass && styles.rootGlass)} aria-label="Workspace files">
       {body}
+      {lastOpened && (
+        <div className={styles.visuallyHidden} role="status" aria-live="polite">
+          Opened {lastOpened.path}
+          {lastOpened.location ? ` at line ${lastOpened.location.line}` : ''}
+        </div>
+      )}
     </section>
   );
 });
