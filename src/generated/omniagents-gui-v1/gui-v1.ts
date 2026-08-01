@@ -41,6 +41,7 @@ export interface ArchiveSessionParams {
 }
 export interface DeleteSessionParams {
   session_id: string;
+  cascade?: boolean;
 }
 export interface GetUserHistoryParams {
   limit?: number;
@@ -102,9 +103,123 @@ export interface AckEventsParams {
   stream_id: string;
   seq: number;
 }
+export interface ListModelsParams {
+  include_hidden?: boolean;
+  modality?: string;
+  session_id?: string;
+}
+export interface GetModelParams {
+  model: string;
+}
+export interface ListProvidersParams {
+}
+export interface SetSessionModelParams {
+  session_id: string;
+  model: string;
+}
+export interface SetSessionReasoningParams {
+  session_id: string;
+  effort: string;
+}
+export interface SetVoiceModelParams {
+  model: string;
+}
+export interface AccountStatusParams {
+}
+export interface AccountLoginStartParams {
+  provider: string;
+  mode: string;
+  api_key?: string;
+  redirect_uri?: string;
+}
+export interface AccountLoginCompleteParams {
+  login_id: string;
+  code?: string;
+}
+export interface AccountLoginCancelParams {
+  login_id: string;
+}
+export interface AccountLogoutParams {
+  provider: string;
+}
+export interface AccountRefreshParams {
+  provider: string;
+}
+export interface AccountUsageParams {
+  provider?: string;
+}
+export interface AccountSelectParams {
+  provider: string;
+}
+export interface ElicitationResponseParams {
+  elicitation_id: string;
+  action: string;
+  value?: Record<string, unknown>;
+  reason?: string;
+}
+export interface McpListServersParams {
+  session_id?: string;
+}
+export interface McpGetServerParams {
+  server_name: string;
+  refresh?: boolean;
+}
+export interface McpCreateServerParams {
+  server_name: string;
+  type: string;
+  params: Record<string, unknown>;
+  server_options?: Record<string, unknown>;
+}
+export interface McpUpdateServerParams {
+  server_name: string;
+  type?: string;
+  params?: Record<string, unknown>;
+  server_options?: Record<string, unknown>;
+}
+export interface McpDeleteServerParams {
+  server_name: string;
+}
+export interface McpReloadServerParams {
+  server_name?: string;
+}
+export interface McpAuthStartParams {
+  server_name: string;
+  redirect_uri?: string;
+  session_id?: string;
+}
+export interface McpAuthCompleteParams {
+  auth_id: string;
+  code: string;
+}
+export interface McpAuthCancelParams {
+  auth_id: string;
+}
+export interface GetThreadParams {
+  thread_id: string;
+}
+export interface ListTurnsParams {
+  thread_id: string;
+  limit?: number;
+  cursor?: string;
+  order?: string;
+}
+export interface ListItemsParams {
+  thread_id: string;
+  turn_id?: string;
+  kinds?: unknown[];
+  limit?: number;
+  cursor?: string;
+  order?: string;
+}
+export interface GetItemParams {
+  thread_id: string;
+  item_id: string;
+}
 export interface ForkSessionParams {
   session_id: string;
   new_session_id?: string;
+  from_item_id?: string;
+  from_turn_id?: string;
 }
 export interface SetSessionHoldParams {
   session_id: string;
@@ -141,6 +256,261 @@ export interface ReportIncidentParams {
 export interface ExportSessionParams {
   session_id: string;
   redact?: boolean;
+}
+export interface GetConfigParams {
+}
+export interface ValidateConfigParams {
+  updates: Record<string, unknown>;
+}
+export interface WriteConfigParams {
+  updates: Record<string, unknown>;
+}
+export interface McpReadResourceParams {
+  server_name: string;
+  uri: string;
+  session_id?: string;
+}
+export interface McpCallToolParams {
+  server_name: string;
+  tool_name: string;
+  session_id: string;
+  args?: Record<string, unknown>;
+}
+export interface McpGetPromptParams {
+  server_name: string;
+  prompt_name: string;
+  args?: Record<string, unknown>;
+  session_id?: string;
+}
+export interface FsWatchParams {
+  session_id: string;
+  path: string;
+  recursive?: boolean;
+  poll_interval_ms?: number;
+}
+export interface FsUnwatchParams {
+  session_id: string;
+  watch_id: string;
+}
+export interface FsListParams {
+  session_id: string;
+  path: string;
+  recursive?: boolean;
+}
+export interface FsStatParams {
+  session_id: string;
+  path: string;
+}
+export interface FsDownloadOpenParams {
+  session_id: string;
+  path: string;
+}
+export interface FsDownloadReadParams {
+  session_id: string;
+  transfer_id: string;
+  offset?: number;
+  length?: number;
+}
+export interface FsDownloadCloseParams {
+  session_id: string;
+  transfer_id: string;
+}
+export interface FsUploadOpenParams {
+  session_id: string;
+  path: string;
+  size: number;
+  sha256?: string;
+  expected_sha256?: string;
+  overwrite?: boolean;
+}
+export interface FsUploadChunkParams {
+  session_id: string;
+  transfer_id: string;
+  offset: number;
+  data: string;
+}
+export interface FsUploadCommitParams {
+  session_id: string;
+  transfer_id: string;
+}
+export interface FsUploadAbortParams {
+  session_id: string;
+  transfer_id: string;
+}
+export interface GitListRepositoriesParams {
+  session_id: string;
+  path?: string;
+  max_depth?: number;
+}
+export interface GitStatusParams {
+  session_id: string;
+  repo: string;
+  include_untracked?: boolean;
+  include_ignored?: boolean;
+  paths?: unknown[];
+}
+export interface GitDiffParams {
+  session_id: string;
+  repo: string;
+  mode?: string;
+  paths?: unknown[];
+  context_lines?: number;
+  from_rev?: string;
+  to_rev?: string;
+}
+export interface GitLogParams {
+  session_id: string;
+  repo: string;
+  rev?: string;
+  max_count?: number;
+  skip?: number;
+  paths?: unknown[];
+}
+export interface GitListBranchesParams {
+  session_id: string;
+  repo: string;
+  include_remote?: boolean;
+}
+export interface GitListWorktreesParams {
+  session_id: string;
+  repo: string;
+}
+export interface GitConflictsParams {
+  session_id: string;
+  repo: string;
+  paths?: unknown[];
+}
+export interface GitStageParams {
+  session_id: string;
+  repo: string;
+  paths?: unknown[];
+  hunks?: unknown[];
+  context_lines?: number;
+  mode?: string;
+}
+export interface GitUnstageParams {
+  session_id: string;
+  repo: string;
+  paths?: unknown[];
+  hunks?: unknown[];
+  context_lines?: number;
+}
+export interface GitDiscardParams {
+  session_id: string;
+  repo: string;
+  paths?: unknown[];
+  hunks?: unknown[];
+  context_lines?: number;
+  confirmation_token?: string;
+}
+export interface GitCommitParams {
+  session_id: string;
+  repo: string;
+  message: string;
+  amend?: boolean;
+  allow_empty?: boolean;
+  author?: string;
+  confirmation_token?: string;
+}
+export interface GitCheckoutParams {
+  session_id: string;
+  repo: string;
+  branch: string;
+  create?: boolean;
+  start_point?: string;
+  detach?: boolean;
+  discard_changes?: boolean;
+  confirmation_token?: string;
+}
+export interface GitResetParams {
+  session_id: string;
+  repo: string;
+  mode?: string;
+  rev?: string;
+  paths?: unknown[];
+  confirmation_token?: string;
+}
+export interface GitFetchParams {
+  session_id: string;
+  repo: string;
+  remote?: string;
+  refspec?: string;
+  prune?: boolean;
+}
+export interface GitPullParams {
+  session_id: string;
+  repo: string;
+  remote?: string;
+  refspec?: string;
+  rebase?: boolean;
+}
+export interface GitPushParams {
+  session_id: string;
+  repo: string;
+  remote?: string;
+  refspec?: string;
+  force?: boolean;
+  force_with_lease?: boolean;
+  set_upstream?: boolean;
+  confirmation_token?: string;
+}
+export interface ListThreadsParams {
+  status?: string;
+  pinned?: boolean;
+  source?: string;
+  model?: string;
+  parent_thread_id?: string;
+  created_after?: number;
+  created_before?: number;
+  updated_after?: number;
+  updated_before?: number;
+  limit?: number;
+  cursor?: string;
+  order?: string;
+}
+export interface SearchThreadsParams {
+  query: string;
+  status?: string;
+  pinned?: boolean;
+  source?: string;
+  model?: string;
+  parent_thread_id?: string;
+  created_after?: number;
+  created_before?: number;
+  updated_after?: number;
+  updated_before?: number;
+  limit?: number;
+  cursor?: string;
+}
+export interface UpdateThreadParams {
+  thread_id: string;
+  title?: string;
+  pinned?: boolean;
+  status?: string;
+  metadata?: Record<string, unknown>;
+}
+export interface ListThreadDescendantsParams {
+  thread_id: string;
+  max_depth?: number;
+  limit?: number;
+}
+export interface ExportThreadParams {
+  thread_id: string;
+  limit?: number;
+  cursor?: string;
+  include_descendants?: boolean;
+}
+export interface PurgeThreadsParams {
+  retention_days: number;
+  dry_run?: boolean;
+}
+export interface GetPlanParams {
+  thread_id: string;
+  scope?: string;
+}
+export interface GetRunDiffParams {
+  thread_id: string;
+  turn_id?: string;
 }
 export interface InitializedParams {
 }
@@ -186,6 +556,8 @@ export interface MessageOutputParams {
   run_id: string;
   session_id: string;
   content: string;
+  is_final?: boolean;
+  message_id?: string;
   seq?: number;
   stream_id?: string;
 }
@@ -197,6 +569,7 @@ export interface TokenParams {
   turn?: number;
   response_id?: string;
   model?: string;
+  model_ref?: string;
   max_input_tokens?: number;
   max_output_tokens?: number;
   truncation?: string;
@@ -209,6 +582,7 @@ export interface RunEndParams {
   end_reason: string;
   usage?: Record<string, unknown>;
   model?: string;
+  model_ref?: string;
   max_input_tokens?: number;
   max_output_tokens?: number;
   truncation?: string;
@@ -275,16 +649,119 @@ export interface QueueChangedParams {
   seq?: number;
   stream_id?: string;
 }
+export interface AccountChangedParams {
+  provider: string;
+  reason: string;
+  account?: Record<string, unknown>;
+  seq?: number;
+  stream_id?: string;
+}
+export interface ElicitationRequestedParams {
+  elicitation_id: string;
+  kind: string;
+  message: string;
+  title?: string;
+  input_schema?: Record<string, unknown>;
+  options?: unknown[];
+  url?: string;
+  session_id?: string;
+  run_id?: string;
+  item_id?: string;
+  source?: string;
+  timeout_ms?: number;
+  expires_at?: string;
+  persist_response?: boolean;
+  seq?: number;
+  stream_id?: string;
+}
+export interface ElicitationResolvedParams {
+  elicitation_id: string;
+  status: string;
+  session_id?: string;
+  run_id?: string;
+  action?: string;
+  value?: Record<string, unknown>;
+  reason?: string;
+  seq?: number;
+  stream_id?: string;
+}
+export interface McpServerStatusChangedParams {
+  server_name: string;
+  status: string;
+  previous_status?: string;
+  reason_code?: string;
+  reason?: string;
+  auth_state?: string;
+  at?: string;
+  seq?: number;
+  stream_id?: string;
+}
 export interface SessionForkedParams {
   session_id: string;
   new_session_id: string;
+  from_item_id?: string;
   seq?: number;
   stream_id?: string;
 }
 export interface SessionVariablesChangedParams {
   session_id: string;
-  changed: Record<string, unknown>;
+  changed: unknown[];
   variables: Record<string, unknown>;
+  seq?: number;
+  stream_id?: string;
+}
+export interface FsEventsParams {
+  session_id: string;
+  watch_id: string;
+  events: unknown[];
+  seq?: number;
+  stream_id?: string;
+}
+export interface FsRescanRequiredParams {
+  session_id: string;
+  watch_id: string;
+  reason: string;
+  seq?: number;
+  stream_id?: string;
+}
+export interface FsTransferProgressParams {
+  session_id: string;
+  transfer_id: string;
+  direction: string;
+  transferred: number;
+  total: number;
+  seq?: number;
+  stream_id?: string;
+}
+export interface GitOperationProgressParams {
+  session_id: string;
+  operation_id: string;
+  repo: string;
+  operation: string;
+  phase: string;
+  detail?: Record<string, unknown>;
+  seq?: number;
+  stream_id?: string;
+}
+export interface ThreadUpdatedParams {
+  thread_id: string;
+  changed: unknown[];
+  thread: Record<string, unknown>;
+  cascaded_thread_ids?: unknown[];
+  seq?: number;
+  stream_id?: string;
+}
+export interface ItemUpdatedParams {
+  session_id: string;
+  thread_id: string;
+  item_id: string;
+  kind: string;
+  status: string;
+  revision: number;
+  item_seq: number;
+  content: Record<string, unknown>;
+  turn_id?: string;
+  updated_at?: number;
   seq?: number;
   stream_id?: string;
 }
@@ -310,6 +787,34 @@ export interface RpcMethodMap {
   "cancel_queued_message": { params: CancelQueuedMessageParams; result: Record<string, unknown> };
   "resume_session": { params: ResumeSessionParams; result: Record<string, unknown> };
   "ack_events": { params: AckEventsParams; result: Record<string, unknown> };
+  "list_models": { params: ListModelsParams; result: Record<string, unknown> };
+  "get_model": { params: GetModelParams; result: Record<string, unknown> };
+  "list_providers": { params: ListProvidersParams; result: Record<string, unknown> };
+  "set_session_model": { params: SetSessionModelParams; result: Record<string, unknown> };
+  "set_session_reasoning": { params: SetSessionReasoningParams; result: Record<string, unknown> };
+  "set_voice_model": { params: SetVoiceModelParams; result: Record<string, unknown> };
+  "account_status": { params: AccountStatusParams; result: Record<string, unknown> };
+  "account_login_start": { params: AccountLoginStartParams; result: Record<string, unknown> };
+  "account_login_complete": { params: AccountLoginCompleteParams; result: Record<string, unknown> };
+  "account_login_cancel": { params: AccountLoginCancelParams; result: boolean };
+  "account_logout": { params: AccountLogoutParams; result: Record<string, unknown> };
+  "account_refresh": { params: AccountRefreshParams; result: Record<string, unknown> };
+  "account_usage": { params: AccountUsageParams; result: Record<string, unknown> };
+  "account_select": { params: AccountSelectParams; result: Record<string, unknown> };
+  "elicitation_response": { params: ElicitationResponseParams; result: Record<string, unknown> };
+  "mcp_list_servers": { params: McpListServersParams; result: Record<string, unknown> };
+  "mcp_get_server": { params: McpGetServerParams; result: Record<string, unknown> };
+  "mcp_create_server": { params: McpCreateServerParams; result: Record<string, unknown> };
+  "mcp_update_server": { params: McpUpdateServerParams; result: Record<string, unknown> };
+  "mcp_delete_server": { params: McpDeleteServerParams; result: Record<string, unknown> };
+  "mcp_reload_server": { params: McpReloadServerParams; result: Record<string, unknown> };
+  "mcp_auth_start": { params: McpAuthStartParams; result: Record<string, unknown> };
+  "mcp_auth_complete": { params: McpAuthCompleteParams; result: Record<string, unknown> };
+  "mcp_auth_cancel": { params: McpAuthCancelParams; result: boolean };
+  "get_thread": { params: GetThreadParams; result: Record<string, unknown> };
+  "list_turns": { params: ListTurnsParams; result: Record<string, unknown> };
+  "list_items": { params: ListItemsParams; result: Record<string, unknown> };
+  "get_item": { params: GetItemParams; result: Record<string, unknown> };
   "fork_session": { params: ForkSessionParams; result: Record<string, unknown> };
   "set_session_hold": { params: SetSessionHoldParams; result: Record<string, unknown> };
   "queue_status": { params: QueueStatusParams; result: Record<string, unknown> };
@@ -320,6 +825,47 @@ export interface RpcMethodMap {
   "disable_mcp_server": { params: DisableMcpServerParams; result: null };
   "report_incident": { params: ReportIncidentParams; result: null };
   "export_session": { params: ExportSessionParams; result: Record<string, unknown> };
+  "get_config": { params: GetConfigParams; result: Record<string, unknown> };
+  "validate_config": { params: ValidateConfigParams; result: Record<string, unknown> };
+  "write_config": { params: WriteConfigParams; result: Record<string, unknown> };
+  "mcp_read_resource": { params: McpReadResourceParams; result: Record<string, unknown> };
+  "mcp_call_tool": { params: McpCallToolParams; result: Record<string, unknown> };
+  "mcp_get_prompt": { params: McpGetPromptParams; result: Record<string, unknown> };
+  "fs_watch": { params: FsWatchParams; result: Record<string, unknown> };
+  "fs_unwatch": { params: FsUnwatchParams; result: boolean };
+  "fs_list": { params: FsListParams; result: Record<string, unknown> };
+  "fs_stat": { params: FsStatParams; result: Record<string, unknown> };
+  "fs_download_open": { params: FsDownloadOpenParams; result: Record<string, unknown> };
+  "fs_download_read": { params: FsDownloadReadParams; result: Record<string, unknown> };
+  "fs_download_close": { params: FsDownloadCloseParams; result: boolean };
+  "fs_upload_open": { params: FsUploadOpenParams; result: Record<string, unknown> };
+  "fs_upload_chunk": { params: FsUploadChunkParams; result: Record<string, unknown> };
+  "fs_upload_commit": { params: FsUploadCommitParams; result: Record<string, unknown> };
+  "fs_upload_abort": { params: FsUploadAbortParams; result: boolean };
+  "git_list_repositories": { params: GitListRepositoriesParams; result: Record<string, unknown> };
+  "git_status": { params: GitStatusParams; result: Record<string, unknown> };
+  "git_diff": { params: GitDiffParams; result: Record<string, unknown> };
+  "git_log": { params: GitLogParams; result: Record<string, unknown> };
+  "git_list_branches": { params: GitListBranchesParams; result: Record<string, unknown> };
+  "git_list_worktrees": { params: GitListWorktreesParams; result: Record<string, unknown> };
+  "git_conflicts": { params: GitConflictsParams; result: Record<string, unknown> };
+  "git_stage": { params: GitStageParams; result: Record<string, unknown> };
+  "git_unstage": { params: GitUnstageParams; result: Record<string, unknown> };
+  "git_discard": { params: GitDiscardParams; result: Record<string, unknown> };
+  "git_commit": { params: GitCommitParams; result: Record<string, unknown> };
+  "git_checkout": { params: GitCheckoutParams; result: Record<string, unknown> };
+  "git_reset": { params: GitResetParams; result: Record<string, unknown> };
+  "git_fetch": { params: GitFetchParams; result: Record<string, unknown> };
+  "git_pull": { params: GitPullParams; result: Record<string, unknown> };
+  "git_push": { params: GitPushParams; result: Record<string, unknown> };
+  "list_threads": { params: ListThreadsParams; result: Record<string, unknown> };
+  "search_threads": { params: SearchThreadsParams; result: Record<string, unknown> };
+  "update_thread": { params: UpdateThreadParams; result: Record<string, unknown> };
+  "list_thread_descendants": { params: ListThreadDescendantsParams; result: Record<string, unknown> };
+  "export_thread": { params: ExportThreadParams; result: Record<string, unknown> };
+  "purge_threads": { params: PurgeThreadsParams; result: Record<string, unknown> };
+  "get_plan": { params: GetPlanParams; result: Record<string, unknown> };
+  "get_run_diff": { params: GetRunDiffParams; result: Record<string, unknown> };
 }
 export interface RpcNotificationMap {
   "run_started": RunStartedParams;
@@ -336,8 +882,18 @@ export interface RpcNotificationMap {
   "client_request": ClientRequestParams;
   "client_request_resolved": ClientRequestResolvedParams;
   "queue_changed": QueueChangedParams;
+  "account_changed": AccountChangedParams;
+  "elicitation_requested": ElicitationRequestedParams;
+  "elicitation_resolved": ElicitationResolvedParams;
+  "mcp_server_status_changed": McpServerStatusChangedParams;
   "session_forked": SessionForkedParams;
   "session_variables_changed": SessionVariablesChangedParams;
+  "fs_events": FsEventsParams;
+  "fs_rescan_required": FsRescanRequiredParams;
+  "fs_transfer_progress": FsTransferProgressParams;
+  "git_operation_progress": GitOperationProgressParams;
+  "thread_updated": ThreadUpdatedParams;
+  "item_updated": ItemUpdatedParams;
 }
 export interface RpcClientNotificationMap {
   "initialized": InitializedParams;

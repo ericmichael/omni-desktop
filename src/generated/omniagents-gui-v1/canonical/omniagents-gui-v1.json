@@ -1,6 +1,85 @@
 {
   "components": {
     "errors": {
+      "AccountAuthFailed": {
+        "code": -32042,
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "account_auth_failed"
+            },
+            "provider": {
+              "type": "string"
+            },
+            "status": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "provider"
+          ],
+          "type": "object"
+        },
+        "message": "Account authentication failed"
+      },
+      "AccountCapabilityUnsupported": {
+        "code": -32040,
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "account_capability_unsupported"
+            },
+            "operation": {
+              "type": "string"
+            },
+            "provider": {
+              "type": "string"
+            },
+            "supported": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "kind",
+            "provider",
+            "operation"
+          ],
+          "type": "object"
+        },
+        "message": "Account capability unsupported"
+      },
+      "AccountStateInvalid": {
+        "code": -32041,
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "account_state_invalid"
+            },
+            "provider": {
+              "type": "string"
+            },
+            "reason": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "reason"
+          ],
+          "type": "object"
+        },
+        "message": "Account state invalid"
+      },
       "AlreadyInitialized": {
         "code": -32011,
         "data": {
@@ -95,6 +174,529 @@
         },
         "message": "Capability mismatch"
       },
+      "ConversationCursorInvalid": {
+        "code": -32082,
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "cursor": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "cursor_invalid"
+            }
+          },
+          "required": [
+            "kind",
+            "cursor"
+          ],
+          "type": "object"
+        },
+        "message": "Malformed pagination cursor"
+      },
+      "ConversationForkPointInvalid": {
+        "code": -32112,
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "item_id": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "fork_point_invalid"
+            },
+            "next_item_id": {
+              "type": "string"
+            },
+            "next_item_kind": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            },
+            "thread_id": {
+              "type": "string"
+            },
+            "turn_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        "message": "Invalid fork point"
+      },
+      "ConversationItemNotFound": {
+        "code": -32081,
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "item_id": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "item_not_found"
+            },
+            "thread_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "thread_id",
+            "item_id"
+          ],
+          "type": "object"
+        },
+        "message": "Unknown conversation item"
+      },
+      "ConversationSearchUnavailable": {
+        "code": -32110,
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "search_unavailable"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        "message": "Conversation search is unavailable"
+      },
+      "ConversationTurnNotFound": {
+        "code": -32100,
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "turn_not_found"
+            },
+            "thread_id": {
+              "type": "string"
+            },
+            "turn_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "thread_id",
+            "turn_id"
+          ],
+          "type": "object"
+        },
+        "message": "Unknown turn"
+      },
+      "ElicitationAlreadyResolved": {
+        "code": -32051,
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "elicitation_id": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "elicitation_already_resolved"
+            },
+            "status": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "elicitation_id",
+            "status"
+          ],
+          "type": "object"
+        },
+        "message": "Elicitation already resolved"
+      },
+      "ElicitationInvalidResponse": {
+        "code": -32052,
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "elicitation_id": {
+              "type": "string"
+            },
+            "errors": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "const": "elicitation_invalid_response"
+            }
+          },
+          "required": [
+            "kind",
+            "elicitation_id",
+            "errors"
+          ],
+          "type": "object"
+        },
+        "message": "Elicitation response invalid"
+      },
+      "ElicitationNotFound": {
+        "code": -32050,
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "elicitation_id": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "elicitation_not_found"
+            }
+          },
+          "required": [
+            "kind",
+            "elicitation_id"
+          ],
+          "type": "object"
+        },
+        "message": "Elicitation not found"
+      },
+      "FsNotFound": {
+        "code": -32061,
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "fs_not_found"
+            },
+            "path": {
+              "type": "string"
+            },
+            "reason": {
+              "type": "string"
+            },
+            "session_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        "message": "File or directory not found"
+      },
+      "FsPathInvalid": {
+        "code": -32060,
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "fs_path_invalid"
+            },
+            "path": {
+              "type": "string"
+            },
+            "reason": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        "message": "Filesystem path invalid"
+      },
+      "FsReadOnly": {
+        "code": -32064,
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "fs_read_only"
+            },
+            "path": {
+              "type": "string"
+            },
+            "reason": {
+              "enum": [
+                "source_read_only",
+                "backend_not_writable"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "reason"
+          ],
+          "type": "object"
+        },
+        "message": "Filesystem target is read-only"
+      },
+      "FsTransferInvalid": {
+        "code": -32062,
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "fs_transfer_invalid"
+            },
+            "reason": {
+              "type": "string"
+            },
+            "transfer_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        "message": "Filesystem transfer invalid"
+      },
+      "FsWatchInvalid": {
+        "code": -32063,
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "fs_watch_invalid"
+            },
+            "reason": {
+              "type": "string"
+            },
+            "watch_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        "message": "Filesystem watch invalid"
+      },
+      "GitCapabilityUnavailable": {
+        "code": -32095,
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "git_capability_unavailable"
+            },
+            "operation": {
+              "type": "string"
+            },
+            "reason": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "reason"
+          ],
+          "type": "object"
+        },
+        "message": "Git capability unavailable on this substrate"
+      },
+      "GitConfirmationRequired": {
+        "code": -32093,
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "confirmation_token": {
+              "type": "string"
+            },
+            "impact": {
+              "type": "object"
+            },
+            "kind": {
+              "const": "git_confirmation_required"
+            },
+            "operation": {
+              "type": "string"
+            },
+            "reason": {
+              "type": "string"
+            },
+            "repo": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "operation",
+            "confirmation_token",
+            "impact"
+          ],
+          "type": "object"
+        },
+        "message": "Git operation requires explicit confirmation"
+      },
+      "GitOperationFailed": {
+        "code": -32092,
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "command": {
+              "type": "string"
+            },
+            "exit_code": {
+              "type": "integer"
+            },
+            "kind": {
+              "const": "git_operation_failed"
+            },
+            "operation": {
+              "type": "string"
+            },
+            "reason": {
+              "type": "string"
+            },
+            "repo": {
+              "type": "string"
+            },
+            "rolled_back": {
+              "type": "boolean"
+            },
+            "stderr": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "operation"
+          ],
+          "type": "object"
+        },
+        "message": "Git operation failed"
+      },
+      "GitPathInvalid": {
+        "code": -32091,
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "git_path_invalid"
+            },
+            "path": {
+              "type": "string"
+            },
+            "reason": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        "message": "Git path invalid"
+      },
+      "GitRepositoryNotFound": {
+        "code": -32090,
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "git_repository_not_found"
+            },
+            "path": {
+              "type": "string"
+            },
+            "reason": {
+              "type": "string"
+            },
+            "repo": {
+              "type": "string"
+            },
+            "toplevel": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        "message": "Git repository not found"
+      },
+      "GitStateInvalid": {
+        "code": -32094,
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "change": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "git_state_invalid"
+            },
+            "mode": {
+              "type": "string"
+            },
+            "operation": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            },
+            "paths": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "reason": {
+              "type": "string"
+            },
+            "repo": {
+              "type": "string"
+            },
+            "scope": {
+              "type": "string"
+            },
+            "stale": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "hunk_id": {
+                    "type": "string"
+                  },
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path",
+                  "hunk_id"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "supported": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "value": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "reason"
+          ],
+          "type": "object"
+        },
+        "message": "Git repository state invalid for this operation"
+      },
       "InitializationRequired": {
         "code": -32010,
         "data": {
@@ -126,6 +728,189 @@
       "InvalidRequest": {
         "code": -32600,
         "message": "Invalid Request"
+      },
+      "McpAuthFailed": {
+        "code": -32076,
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "mcp_auth_failed"
+            },
+            "server_name": {
+              "type": "string"
+            },
+            "status": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "server_name"
+          ],
+          "type": "object"
+        },
+        "message": "MCP authorization failed"
+      },
+      "McpAuthStateInvalid": {
+        "code": -32075,
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "mcp_auth_state_invalid"
+            },
+            "reason": {
+              "type": "string"
+            },
+            "server_name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "reason"
+          ],
+          "type": "object"
+        },
+        "message": "MCP auth state invalid"
+      },
+      "McpConfigInvalid": {
+        "code": -32071,
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "errors": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "code": {
+                    "type": "string"
+                  },
+                  "field": {
+                    "type": "string"
+                  },
+                  "message": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "code",
+                  "message"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "const": "mcp_config_invalid"
+            },
+            "server_name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "errors"
+          ],
+          "type": "object"
+        },
+        "message": "MCP server configuration is invalid"
+      },
+      "McpOperationUnsupported": {
+        "code": -32073,
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "mcp_operation_unsupported"
+            },
+            "operation": {
+              "type": "string"
+            },
+            "server_name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "server_name",
+            "operation"
+          ],
+          "type": "object"
+        },
+        "message": "MCP operation unsupported"
+      },
+      "McpServerNotFound": {
+        "code": -32070,
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "mcp_server_not_found"
+            },
+            "server_name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "server_name"
+          ],
+          "type": "object"
+        },
+        "message": "MCP server not found"
+      },
+      "McpServerReadOnly": {
+        "code": -32072,
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "mcp_server_read_only"
+            },
+            "reason": {
+              "type": "string"
+            },
+            "server_name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "server_name",
+            "reason"
+          ],
+          "type": "object"
+        },
+        "message": "MCP server is read-only"
+      },
+      "McpServerUnavailable": {
+        "code": -32074,
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "mcp_server_unavailable"
+            },
+            "reason_code": {
+              "type": "string"
+            },
+            "server_name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "server_name",
+            "reason_code"
+          ],
+          "type": "object"
+        },
+        "message": "MCP server unavailable"
       },
       "MethodNotFound": {
         "code": -32601,
@@ -188,6 +973,120 @@
           "type": "object"
         },
         "message": "Resync required"
+      },
+      "ThreadHasDescendants": {
+        "code": -32111,
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "descendant_count": {
+              "type": "integer"
+            },
+            "descendant_thread_ids": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "const": "thread_has_descendants"
+            },
+            "thread_id": {
+              "type": "string"
+            },
+            "truncated": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "kind",
+            "thread_id",
+            "descendant_thread_ids",
+            "descendant_count",
+            "truncated"
+          ],
+          "type": "object"
+        },
+        "message": "Thread has descendant threads"
+      },
+      "ThreadMetadataInvalid": {
+        "code": -32114,
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "keys": {
+              "type": "integer"
+            },
+            "kind": {
+              "const": "thread_metadata_invalid"
+            },
+            "max_keys": {
+              "type": "integer"
+            },
+            "max_size": {
+              "type": "integer"
+            },
+            "size": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        "message": "Thread metadata exceeds the permitted size"
+      },
+      "ThreadNotFound": {
+        "code": -32080,
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "thread_not_found"
+            },
+            "thread_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "thread_id"
+          ],
+          "type": "object"
+        },
+        "message": "Unknown thread"
+      },
+      "ThreadOnLegalHold": {
+        "code": -32113,
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "held_count": {
+              "type": "integer"
+            },
+            "held_thread_ids": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "const": "thread_on_legal_hold"
+            },
+            "thread_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "thread_id",
+            "held_thread_ids",
+            "held_count"
+          ],
+          "type": "object"
+        },
+        "message": "Session is under legal hold"
       },
       "TransportOverloaded": {
         "code": -32020,
@@ -677,6 +1576,12 @@
         },
         {
           "$ref": "#/components/errors/InitializationRequired"
+        },
+        {
+          "$ref": "#/components/errors/ThreadHasDescendants"
+        },
+        {
+          "$ref": "#/components/errors/ThreadOnLegalHold"
         }
       ],
       "name": "delete_session",
@@ -687,6 +1592,13 @@
           "required": true,
           "schema": {
             "$ref": "./schemas/gui-v1.schema.json#/$defs/delete_session/properties/session_id"
+          }
+        },
+        {
+          "name": "cascade",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/delete_session/properties/cascade"
           }
         }
       ],
@@ -1474,6 +2386,1788 @@
           "$ref": "#/components/errors/InitializationRequired"
         }
       ],
+      "name": "list_models",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "include_hidden",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/list_models/properties/include_hidden"
+          }
+        },
+        {
+          "name": "modality",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/list_models/properties/modality"
+          }
+        },
+        {
+          "name": "session_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/list_models/properties/session_id"
+          }
+        }
+      ],
+      "result": {
+        "name": "list_models_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation list_models",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/list_models"
+      },
+      "x-omni-stability": "stable"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        }
+      ],
+      "name": "get_model",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "model",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/get_model/properties/model"
+          }
+        }
+      ],
+      "result": {
+        "name": "get_model_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation get_model",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/get_model"
+      },
+      "x-omni-stability": "stable"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        }
+      ],
+      "name": "list_providers",
+      "paramStructure": "by-name",
+      "params": [],
+      "result": {
+        "name": "list_providers_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation list_providers",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/list_providers"
+      },
+      "x-omni-stability": "stable"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        }
+      ],
+      "name": "set_session_model",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "session_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/set_session_model/properties/session_id"
+          }
+        },
+        {
+          "name": "model",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/set_session_model/properties/model"
+          }
+        }
+      ],
+      "result": {
+        "name": "set_session_model_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation set_session_model",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/set_session_model"
+      },
+      "x-omni-stability": "stable"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        }
+      ],
+      "name": "set_session_reasoning",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "session_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/set_session_reasoning/properties/session_id"
+          }
+        },
+        {
+          "name": "effort",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/set_session_reasoning/properties/effort"
+          }
+        }
+      ],
+      "result": {
+        "name": "set_session_reasoning_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation set_session_reasoning",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/set_session_reasoning"
+      },
+      "x-omni-stability": "stable"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        }
+      ],
+      "name": "set_voice_model",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "model",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/set_voice_model/properties/model"
+          }
+        }
+      ],
+      "result": {
+        "name": "set_voice_model_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation set_voice_model",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/set_voice_model"
+      },
+      "x-omni-stability": "stable"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        },
+        {
+          "$ref": "#/components/errors/AccountCapabilityUnsupported"
+        },
+        {
+          "$ref": "#/components/errors/AccountStateInvalid"
+        },
+        {
+          "$ref": "#/components/errors/AccountAuthFailed"
+        }
+      ],
+      "name": "account_status",
+      "paramStructure": "by-name",
+      "params": [],
+      "result": {
+        "name": "account_status_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation account_status",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/account_status"
+      },
+      "x-omni-stability": "stable"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        },
+        {
+          "$ref": "#/components/errors/AccountCapabilityUnsupported"
+        },
+        {
+          "$ref": "#/components/errors/AccountStateInvalid"
+        },
+        {
+          "$ref": "#/components/errors/AccountAuthFailed"
+        }
+      ],
+      "name": "account_login_start",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "provider",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/account_login_start/properties/provider"
+          }
+        },
+        {
+          "name": "mode",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/account_login_start/properties/mode"
+          }
+        },
+        {
+          "name": "api_key",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/account_login_start/properties/api_key"
+          }
+        },
+        {
+          "name": "redirect_uri",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/account_login_start/properties/redirect_uri"
+          }
+        }
+      ],
+      "result": {
+        "name": "account_login_start_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation account_login_start",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/account_login_start"
+      },
+      "x-omni-stability": "stable"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        },
+        {
+          "$ref": "#/components/errors/AccountCapabilityUnsupported"
+        },
+        {
+          "$ref": "#/components/errors/AccountStateInvalid"
+        },
+        {
+          "$ref": "#/components/errors/AccountAuthFailed"
+        }
+      ],
+      "name": "account_login_complete",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "login_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/account_login_complete/properties/login_id"
+          }
+        },
+        {
+          "name": "code",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/account_login_complete/properties/code"
+          }
+        }
+      ],
+      "result": {
+        "name": "account_login_complete_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation account_login_complete",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/account_login_complete"
+      },
+      "x-omni-stability": "stable"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        },
+        {
+          "$ref": "#/components/errors/AccountCapabilityUnsupported"
+        },
+        {
+          "$ref": "#/components/errors/AccountStateInvalid"
+        },
+        {
+          "$ref": "#/components/errors/AccountAuthFailed"
+        }
+      ],
+      "name": "account_login_cancel",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "login_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/account_login_cancel/properties/login_id"
+          }
+        }
+      ],
+      "result": {
+        "name": "account_login_cancel_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation account_login_cancel",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/account_login_cancel"
+      },
+      "x-omni-stability": "stable"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        },
+        {
+          "$ref": "#/components/errors/AccountCapabilityUnsupported"
+        },
+        {
+          "$ref": "#/components/errors/AccountStateInvalid"
+        },
+        {
+          "$ref": "#/components/errors/AccountAuthFailed"
+        }
+      ],
+      "name": "account_logout",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "provider",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/account_logout/properties/provider"
+          }
+        }
+      ],
+      "result": {
+        "name": "account_logout_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation account_logout",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/account_logout"
+      },
+      "x-omni-stability": "stable"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        },
+        {
+          "$ref": "#/components/errors/AccountCapabilityUnsupported"
+        },
+        {
+          "$ref": "#/components/errors/AccountStateInvalid"
+        },
+        {
+          "$ref": "#/components/errors/AccountAuthFailed"
+        }
+      ],
+      "name": "account_refresh",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "provider",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/account_refresh/properties/provider"
+          }
+        }
+      ],
+      "result": {
+        "name": "account_refresh_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation account_refresh",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/account_refresh"
+      },
+      "x-omni-stability": "stable"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        },
+        {
+          "$ref": "#/components/errors/AccountCapabilityUnsupported"
+        },
+        {
+          "$ref": "#/components/errors/AccountStateInvalid"
+        },
+        {
+          "$ref": "#/components/errors/AccountAuthFailed"
+        }
+      ],
+      "name": "account_usage",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "provider",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/account_usage/properties/provider"
+          }
+        }
+      ],
+      "result": {
+        "name": "account_usage_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation account_usage",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/account_usage"
+      },
+      "x-omni-stability": "stable"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        },
+        {
+          "$ref": "#/components/errors/AccountCapabilityUnsupported"
+        },
+        {
+          "$ref": "#/components/errors/AccountStateInvalid"
+        },
+        {
+          "$ref": "#/components/errors/AccountAuthFailed"
+        }
+      ],
+      "name": "account_select",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "provider",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/account_select/properties/provider"
+          }
+        }
+      ],
+      "result": {
+        "name": "account_select_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation account_select",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/account_select"
+      },
+      "x-omni-stability": "stable"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        },
+        {
+          "$ref": "#/components/errors/ElicitationNotFound"
+        },
+        {
+          "$ref": "#/components/errors/ElicitationAlreadyResolved"
+        },
+        {
+          "$ref": "#/components/errors/ElicitationInvalidResponse"
+        }
+      ],
+      "name": "elicitation_response",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "elicitation_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/elicitation_response/properties/elicitation_id"
+          }
+        },
+        {
+          "name": "action",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/elicitation_response/properties/action"
+          }
+        },
+        {
+          "name": "value",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/elicitation_response/properties/value"
+          }
+        },
+        {
+          "name": "reason",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/elicitation_response/properties/reason"
+          }
+        }
+      ],
+      "result": {
+        "name": "elicitation_response_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation elicitation_response",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/elicitation_response"
+      },
+      "x-omni-stability": "stable"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        },
+        {
+          "$ref": "#/components/errors/McpServerNotFound"
+        },
+        {
+          "$ref": "#/components/errors/McpConfigInvalid"
+        },
+        {
+          "$ref": "#/components/errors/McpServerReadOnly"
+        },
+        {
+          "$ref": "#/components/errors/McpOperationUnsupported"
+        },
+        {
+          "$ref": "#/components/errors/McpServerUnavailable"
+        },
+        {
+          "$ref": "#/components/errors/McpAuthStateInvalid"
+        },
+        {
+          "$ref": "#/components/errors/McpAuthFailed"
+        }
+      ],
+      "name": "mcp_list_servers",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "session_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_list_servers/properties/session_id"
+          }
+        }
+      ],
+      "result": {
+        "name": "mcp_list_servers_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation mcp_list_servers",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_list_servers"
+      },
+      "x-omni-stability": "stable"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        },
+        {
+          "$ref": "#/components/errors/McpServerNotFound"
+        },
+        {
+          "$ref": "#/components/errors/McpConfigInvalid"
+        },
+        {
+          "$ref": "#/components/errors/McpServerReadOnly"
+        },
+        {
+          "$ref": "#/components/errors/McpOperationUnsupported"
+        },
+        {
+          "$ref": "#/components/errors/McpServerUnavailable"
+        },
+        {
+          "$ref": "#/components/errors/McpAuthStateInvalid"
+        },
+        {
+          "$ref": "#/components/errors/McpAuthFailed"
+        }
+      ],
+      "name": "mcp_get_server",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "server_name",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_get_server/properties/server_name"
+          }
+        },
+        {
+          "name": "refresh",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_get_server/properties/refresh"
+          }
+        }
+      ],
+      "result": {
+        "name": "mcp_get_server_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation mcp_get_server",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_get_server"
+      },
+      "x-omni-stability": "stable"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        },
+        {
+          "$ref": "#/components/errors/McpServerNotFound"
+        },
+        {
+          "$ref": "#/components/errors/McpConfigInvalid"
+        },
+        {
+          "$ref": "#/components/errors/McpServerReadOnly"
+        },
+        {
+          "$ref": "#/components/errors/McpOperationUnsupported"
+        },
+        {
+          "$ref": "#/components/errors/McpServerUnavailable"
+        },
+        {
+          "$ref": "#/components/errors/McpAuthStateInvalid"
+        },
+        {
+          "$ref": "#/components/errors/McpAuthFailed"
+        }
+      ],
+      "name": "mcp_create_server",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "server_name",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_create_server/properties/server_name"
+          }
+        },
+        {
+          "name": "type",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_create_server/properties/type"
+          }
+        },
+        {
+          "name": "params",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_create_server/properties/params"
+          }
+        },
+        {
+          "name": "server_options",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_create_server/properties/server_options"
+          }
+        }
+      ],
+      "result": {
+        "name": "mcp_create_server_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation mcp_create_server",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_create_server"
+      },
+      "x-omni-stability": "stable"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        },
+        {
+          "$ref": "#/components/errors/McpServerNotFound"
+        },
+        {
+          "$ref": "#/components/errors/McpConfigInvalid"
+        },
+        {
+          "$ref": "#/components/errors/McpServerReadOnly"
+        },
+        {
+          "$ref": "#/components/errors/McpOperationUnsupported"
+        },
+        {
+          "$ref": "#/components/errors/McpServerUnavailable"
+        },
+        {
+          "$ref": "#/components/errors/McpAuthStateInvalid"
+        },
+        {
+          "$ref": "#/components/errors/McpAuthFailed"
+        }
+      ],
+      "name": "mcp_update_server",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "server_name",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_update_server/properties/server_name"
+          }
+        },
+        {
+          "name": "type",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_update_server/properties/type"
+          }
+        },
+        {
+          "name": "params",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_update_server/properties/params"
+          }
+        },
+        {
+          "name": "server_options",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_update_server/properties/server_options"
+          }
+        }
+      ],
+      "result": {
+        "name": "mcp_update_server_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation mcp_update_server",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_update_server"
+      },
+      "x-omni-stability": "stable"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        },
+        {
+          "$ref": "#/components/errors/McpServerNotFound"
+        },
+        {
+          "$ref": "#/components/errors/McpConfigInvalid"
+        },
+        {
+          "$ref": "#/components/errors/McpServerReadOnly"
+        },
+        {
+          "$ref": "#/components/errors/McpOperationUnsupported"
+        },
+        {
+          "$ref": "#/components/errors/McpServerUnavailable"
+        },
+        {
+          "$ref": "#/components/errors/McpAuthStateInvalid"
+        },
+        {
+          "$ref": "#/components/errors/McpAuthFailed"
+        }
+      ],
+      "name": "mcp_delete_server",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "server_name",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_delete_server/properties/server_name"
+          }
+        }
+      ],
+      "result": {
+        "name": "mcp_delete_server_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation mcp_delete_server",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_delete_server"
+      },
+      "x-omni-stability": "stable"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        },
+        {
+          "$ref": "#/components/errors/McpServerNotFound"
+        },
+        {
+          "$ref": "#/components/errors/McpConfigInvalid"
+        },
+        {
+          "$ref": "#/components/errors/McpServerReadOnly"
+        },
+        {
+          "$ref": "#/components/errors/McpOperationUnsupported"
+        },
+        {
+          "$ref": "#/components/errors/McpServerUnavailable"
+        },
+        {
+          "$ref": "#/components/errors/McpAuthStateInvalid"
+        },
+        {
+          "$ref": "#/components/errors/McpAuthFailed"
+        }
+      ],
+      "name": "mcp_reload_server",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "server_name",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_reload_server/properties/server_name"
+          }
+        }
+      ],
+      "result": {
+        "name": "mcp_reload_server_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation mcp_reload_server",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_reload_server"
+      },
+      "x-omni-stability": "stable"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        },
+        {
+          "$ref": "#/components/errors/McpServerNotFound"
+        },
+        {
+          "$ref": "#/components/errors/McpConfigInvalid"
+        },
+        {
+          "$ref": "#/components/errors/McpServerReadOnly"
+        },
+        {
+          "$ref": "#/components/errors/McpOperationUnsupported"
+        },
+        {
+          "$ref": "#/components/errors/McpServerUnavailable"
+        },
+        {
+          "$ref": "#/components/errors/McpAuthStateInvalid"
+        },
+        {
+          "$ref": "#/components/errors/McpAuthFailed"
+        }
+      ],
+      "name": "mcp_auth_start",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "server_name",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_auth_start/properties/server_name"
+          }
+        },
+        {
+          "name": "redirect_uri",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_auth_start/properties/redirect_uri"
+          }
+        },
+        {
+          "name": "session_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_auth_start/properties/session_id"
+          }
+        }
+      ],
+      "result": {
+        "name": "mcp_auth_start_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation mcp_auth_start",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_auth_start"
+      },
+      "x-omni-stability": "stable"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        },
+        {
+          "$ref": "#/components/errors/McpServerNotFound"
+        },
+        {
+          "$ref": "#/components/errors/McpConfigInvalid"
+        },
+        {
+          "$ref": "#/components/errors/McpServerReadOnly"
+        },
+        {
+          "$ref": "#/components/errors/McpOperationUnsupported"
+        },
+        {
+          "$ref": "#/components/errors/McpServerUnavailable"
+        },
+        {
+          "$ref": "#/components/errors/McpAuthStateInvalid"
+        },
+        {
+          "$ref": "#/components/errors/McpAuthFailed"
+        }
+      ],
+      "name": "mcp_auth_complete",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "auth_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_auth_complete/properties/auth_id"
+          }
+        },
+        {
+          "name": "code",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_auth_complete/properties/code"
+          }
+        }
+      ],
+      "result": {
+        "name": "mcp_auth_complete_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation mcp_auth_complete",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_auth_complete"
+      },
+      "x-omni-stability": "stable"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        },
+        {
+          "$ref": "#/components/errors/McpServerNotFound"
+        },
+        {
+          "$ref": "#/components/errors/McpConfigInvalid"
+        },
+        {
+          "$ref": "#/components/errors/McpServerReadOnly"
+        },
+        {
+          "$ref": "#/components/errors/McpOperationUnsupported"
+        },
+        {
+          "$ref": "#/components/errors/McpServerUnavailable"
+        },
+        {
+          "$ref": "#/components/errors/McpAuthStateInvalid"
+        },
+        {
+          "$ref": "#/components/errors/McpAuthFailed"
+        }
+      ],
+      "name": "mcp_auth_cancel",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "auth_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_auth_cancel/properties/auth_id"
+          }
+        }
+      ],
+      "result": {
+        "name": "mcp_auth_cancel_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation mcp_auth_cancel",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_auth_cancel"
+      },
+      "x-omni-stability": "stable"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        },
+        {
+          "$ref": "#/components/errors/ThreadNotFound"
+        }
+      ],
+      "name": "get_thread",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "thread_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/get_thread/properties/thread_id"
+          }
+        }
+      ],
+      "result": {
+        "name": "get_thread_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation get_thread",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/get_thread"
+      },
+      "x-omni-stability": "stable"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        },
+        {
+          "$ref": "#/components/errors/ThreadNotFound"
+        },
+        {
+          "$ref": "#/components/errors/ConversationCursorInvalid"
+        }
+      ],
+      "name": "list_turns",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "thread_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/list_turns/properties/thread_id"
+          }
+        },
+        {
+          "name": "limit",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/list_turns/properties/limit"
+          }
+        },
+        {
+          "name": "cursor",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/list_turns/properties/cursor"
+          }
+        },
+        {
+          "name": "order",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/list_turns/properties/order"
+          }
+        }
+      ],
+      "result": {
+        "name": "list_turns_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation list_turns",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/list_turns"
+      },
+      "x-omni-stability": "stable"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        },
+        {
+          "$ref": "#/components/errors/ThreadNotFound"
+        },
+        {
+          "$ref": "#/components/errors/ConversationCursorInvalid"
+        }
+      ],
+      "name": "list_items",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "thread_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/list_items/properties/thread_id"
+          }
+        },
+        {
+          "name": "turn_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/list_items/properties/turn_id"
+          }
+        },
+        {
+          "name": "kinds",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/list_items/properties/kinds"
+          }
+        },
+        {
+          "name": "limit",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/list_items/properties/limit"
+          }
+        },
+        {
+          "name": "cursor",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/list_items/properties/cursor"
+          }
+        },
+        {
+          "name": "order",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/list_items/properties/order"
+          }
+        }
+      ],
+      "result": {
+        "name": "list_items_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation list_items",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/list_items"
+      },
+      "x-omni-stability": "stable"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        },
+        {
+          "$ref": "#/components/errors/ThreadNotFound"
+        },
+        {
+          "$ref": "#/components/errors/ConversationItemNotFound"
+        }
+      ],
+      "name": "get_item",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "thread_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/get_item/properties/thread_id"
+          }
+        },
+        {
+          "name": "item_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/get_item/properties/item_id"
+          }
+        }
+      ],
+      "result": {
+        "name": "get_item_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation get_item",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/get_item"
+      },
+      "x-omni-stability": "stable"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        },
+        {
+          "$ref": "#/components/errors/ThreadNotFound"
+        },
+        {
+          "$ref": "#/components/errors/ConversationItemNotFound"
+        },
+        {
+          "$ref": "#/components/errors/ConversationForkPointInvalid"
+        }
+      ],
       "name": "fork_session",
       "paramStructure": "by-name",
       "params": [
@@ -1489,6 +4183,20 @@
           "required": false,
           "schema": {
             "$ref": "./schemas/gui-v1.schema.json#/$defs/fork_session/properties/new_session_id"
+          }
+        },
+        {
+          "name": "from_item_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fork_session/properties/from_item_id"
+          }
+        },
+        {
+          "name": "from_turn_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fork_session/properties/from_turn_id"
           }
         }
       ],
@@ -1984,6 +4692,3364 @@
       "x-omni-stability": "experimental"
     },
     {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        }
+      ],
+      "name": "get_config",
+      "paramStructure": "by-name",
+      "params": [],
+      "result": {
+        "name": "get_config_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation get_config",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/get_config"
+      },
+      "x-omni-stability": "experimental"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        }
+      ],
+      "name": "validate_config",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "updates",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/validate_config/properties/updates"
+          }
+        }
+      ],
+      "result": {
+        "name": "validate_config_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation validate_config",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/validate_config"
+      },
+      "x-omni-stability": "experimental"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        }
+      ],
+      "name": "write_config",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "updates",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/write_config/properties/updates"
+          }
+        }
+      ],
+      "result": {
+        "name": "write_config_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation write_config",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/write_config"
+      },
+      "x-omni-stability": "experimental"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        },
+        {
+          "$ref": "#/components/errors/McpServerNotFound"
+        },
+        {
+          "$ref": "#/components/errors/McpConfigInvalid"
+        },
+        {
+          "$ref": "#/components/errors/McpServerReadOnly"
+        },
+        {
+          "$ref": "#/components/errors/McpOperationUnsupported"
+        },
+        {
+          "$ref": "#/components/errors/McpServerUnavailable"
+        },
+        {
+          "$ref": "#/components/errors/McpAuthStateInvalid"
+        },
+        {
+          "$ref": "#/components/errors/McpAuthFailed"
+        }
+      ],
+      "name": "mcp_read_resource",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "server_name",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_read_resource/properties/server_name"
+          }
+        },
+        {
+          "name": "uri",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_read_resource/properties/uri"
+          }
+        },
+        {
+          "name": "session_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_read_resource/properties/session_id"
+          }
+        }
+      ],
+      "result": {
+        "name": "mcp_read_resource_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation mcp_read_resource",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_read_resource"
+      },
+      "x-omni-stability": "experimental"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        },
+        {
+          "$ref": "#/components/errors/McpServerNotFound"
+        },
+        {
+          "$ref": "#/components/errors/McpConfigInvalid"
+        },
+        {
+          "$ref": "#/components/errors/McpServerReadOnly"
+        },
+        {
+          "$ref": "#/components/errors/McpOperationUnsupported"
+        },
+        {
+          "$ref": "#/components/errors/McpServerUnavailable"
+        },
+        {
+          "$ref": "#/components/errors/McpAuthStateInvalid"
+        },
+        {
+          "$ref": "#/components/errors/McpAuthFailed"
+        }
+      ],
+      "name": "mcp_call_tool",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "server_name",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_call_tool/properties/server_name"
+          }
+        },
+        {
+          "name": "tool_name",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_call_tool/properties/tool_name"
+          }
+        },
+        {
+          "name": "session_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_call_tool/properties/session_id"
+          }
+        },
+        {
+          "name": "args",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_call_tool/properties/args"
+          }
+        }
+      ],
+      "result": {
+        "name": "mcp_call_tool_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation mcp_call_tool",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_call_tool"
+      },
+      "x-omni-stability": "experimental"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        },
+        {
+          "$ref": "#/components/errors/McpServerNotFound"
+        },
+        {
+          "$ref": "#/components/errors/McpConfigInvalid"
+        },
+        {
+          "$ref": "#/components/errors/McpServerReadOnly"
+        },
+        {
+          "$ref": "#/components/errors/McpOperationUnsupported"
+        },
+        {
+          "$ref": "#/components/errors/McpServerUnavailable"
+        },
+        {
+          "$ref": "#/components/errors/McpAuthStateInvalid"
+        },
+        {
+          "$ref": "#/components/errors/McpAuthFailed"
+        }
+      ],
+      "name": "mcp_get_prompt",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "server_name",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_get_prompt/properties/server_name"
+          }
+        },
+        {
+          "name": "prompt_name",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_get_prompt/properties/prompt_name"
+          }
+        },
+        {
+          "name": "args",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_get_prompt/properties/args"
+          }
+        },
+        {
+          "name": "session_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_get_prompt/properties/session_id"
+          }
+        }
+      ],
+      "result": {
+        "name": "mcp_get_prompt_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation mcp_get_prompt",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_get_prompt"
+      },
+      "x-omni-stability": "experimental"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        },
+        {
+          "$ref": "#/components/errors/FsPathInvalid"
+        },
+        {
+          "$ref": "#/components/errors/FsNotFound"
+        },
+        {
+          "$ref": "#/components/errors/FsTransferInvalid"
+        },
+        {
+          "$ref": "#/components/errors/FsWatchInvalid"
+        },
+        {
+          "$ref": "#/components/errors/FsReadOnly"
+        }
+      ],
+      "name": "fs_watch",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "session_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_watch/properties/session_id"
+          }
+        },
+        {
+          "name": "path",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_watch/properties/path"
+          }
+        },
+        {
+          "name": "recursive",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_watch/properties/recursive"
+          }
+        },
+        {
+          "name": "poll_interval_ms",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_watch/properties/poll_interval_ms"
+          }
+        }
+      ],
+      "result": {
+        "name": "fs_watch_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation fs_watch",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_watch"
+      },
+      "x-omni-stability": "experimental"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        },
+        {
+          "$ref": "#/components/errors/FsPathInvalid"
+        },
+        {
+          "$ref": "#/components/errors/FsNotFound"
+        },
+        {
+          "$ref": "#/components/errors/FsTransferInvalid"
+        },
+        {
+          "$ref": "#/components/errors/FsWatchInvalid"
+        },
+        {
+          "$ref": "#/components/errors/FsReadOnly"
+        }
+      ],
+      "name": "fs_unwatch",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "session_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_unwatch/properties/session_id"
+          }
+        },
+        {
+          "name": "watch_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_unwatch/properties/watch_id"
+          }
+        }
+      ],
+      "result": {
+        "name": "fs_unwatch_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation fs_unwatch",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_unwatch"
+      },
+      "x-omni-stability": "experimental"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        },
+        {
+          "$ref": "#/components/errors/FsPathInvalid"
+        },
+        {
+          "$ref": "#/components/errors/FsNotFound"
+        },
+        {
+          "$ref": "#/components/errors/FsTransferInvalid"
+        },
+        {
+          "$ref": "#/components/errors/FsWatchInvalid"
+        },
+        {
+          "$ref": "#/components/errors/FsReadOnly"
+        }
+      ],
+      "name": "fs_list",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "session_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_list/properties/session_id"
+          }
+        },
+        {
+          "name": "path",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_list/properties/path"
+          }
+        },
+        {
+          "name": "recursive",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_list/properties/recursive"
+          }
+        }
+      ],
+      "result": {
+        "name": "fs_list_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation fs_list",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_list"
+      },
+      "x-omni-stability": "experimental"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        },
+        {
+          "$ref": "#/components/errors/FsPathInvalid"
+        },
+        {
+          "$ref": "#/components/errors/FsNotFound"
+        },
+        {
+          "$ref": "#/components/errors/FsTransferInvalid"
+        },
+        {
+          "$ref": "#/components/errors/FsWatchInvalid"
+        },
+        {
+          "$ref": "#/components/errors/FsReadOnly"
+        }
+      ],
+      "name": "fs_stat",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "session_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_stat/properties/session_id"
+          }
+        },
+        {
+          "name": "path",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_stat/properties/path"
+          }
+        }
+      ],
+      "result": {
+        "name": "fs_stat_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation fs_stat",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_stat"
+      },
+      "x-omni-stability": "experimental"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        },
+        {
+          "$ref": "#/components/errors/FsPathInvalid"
+        },
+        {
+          "$ref": "#/components/errors/FsNotFound"
+        },
+        {
+          "$ref": "#/components/errors/FsTransferInvalid"
+        },
+        {
+          "$ref": "#/components/errors/FsWatchInvalid"
+        },
+        {
+          "$ref": "#/components/errors/FsReadOnly"
+        }
+      ],
+      "name": "fs_download_open",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "session_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_download_open/properties/session_id"
+          }
+        },
+        {
+          "name": "path",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_download_open/properties/path"
+          }
+        }
+      ],
+      "result": {
+        "name": "fs_download_open_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation fs_download_open",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_download_open"
+      },
+      "x-omni-stability": "experimental"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        },
+        {
+          "$ref": "#/components/errors/FsPathInvalid"
+        },
+        {
+          "$ref": "#/components/errors/FsNotFound"
+        },
+        {
+          "$ref": "#/components/errors/FsTransferInvalid"
+        },
+        {
+          "$ref": "#/components/errors/FsWatchInvalid"
+        },
+        {
+          "$ref": "#/components/errors/FsReadOnly"
+        }
+      ],
+      "name": "fs_download_read",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "session_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_download_read/properties/session_id"
+          }
+        },
+        {
+          "name": "transfer_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_download_read/properties/transfer_id"
+          }
+        },
+        {
+          "name": "offset",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_download_read/properties/offset"
+          }
+        },
+        {
+          "name": "length",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_download_read/properties/length"
+          }
+        }
+      ],
+      "result": {
+        "name": "fs_download_read_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation fs_download_read",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_download_read"
+      },
+      "x-omni-stability": "experimental"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        },
+        {
+          "$ref": "#/components/errors/FsPathInvalid"
+        },
+        {
+          "$ref": "#/components/errors/FsNotFound"
+        },
+        {
+          "$ref": "#/components/errors/FsTransferInvalid"
+        },
+        {
+          "$ref": "#/components/errors/FsWatchInvalid"
+        },
+        {
+          "$ref": "#/components/errors/FsReadOnly"
+        }
+      ],
+      "name": "fs_download_close",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "session_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_download_close/properties/session_id"
+          }
+        },
+        {
+          "name": "transfer_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_download_close/properties/transfer_id"
+          }
+        }
+      ],
+      "result": {
+        "name": "fs_download_close_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation fs_download_close",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_download_close"
+      },
+      "x-omni-stability": "experimental"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        },
+        {
+          "$ref": "#/components/errors/FsPathInvalid"
+        },
+        {
+          "$ref": "#/components/errors/FsNotFound"
+        },
+        {
+          "$ref": "#/components/errors/FsTransferInvalid"
+        },
+        {
+          "$ref": "#/components/errors/FsWatchInvalid"
+        },
+        {
+          "$ref": "#/components/errors/FsReadOnly"
+        }
+      ],
+      "name": "fs_upload_open",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "session_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_upload_open/properties/session_id"
+          }
+        },
+        {
+          "name": "path",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_upload_open/properties/path"
+          }
+        },
+        {
+          "name": "size",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_upload_open/properties/size"
+          }
+        },
+        {
+          "name": "sha256",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_upload_open/properties/sha256"
+          }
+        },
+        {
+          "name": "expected_sha256",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_upload_open/properties/expected_sha256"
+          }
+        },
+        {
+          "name": "overwrite",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_upload_open/properties/overwrite"
+          }
+        }
+      ],
+      "result": {
+        "name": "fs_upload_open_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation fs_upload_open",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_upload_open"
+      },
+      "x-omni-stability": "experimental"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        },
+        {
+          "$ref": "#/components/errors/FsPathInvalid"
+        },
+        {
+          "$ref": "#/components/errors/FsNotFound"
+        },
+        {
+          "$ref": "#/components/errors/FsTransferInvalid"
+        },
+        {
+          "$ref": "#/components/errors/FsWatchInvalid"
+        },
+        {
+          "$ref": "#/components/errors/FsReadOnly"
+        }
+      ],
+      "name": "fs_upload_chunk",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "session_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_upload_chunk/properties/session_id"
+          }
+        },
+        {
+          "name": "transfer_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_upload_chunk/properties/transfer_id"
+          }
+        },
+        {
+          "name": "offset",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_upload_chunk/properties/offset"
+          }
+        },
+        {
+          "name": "data",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_upload_chunk/properties/data"
+          }
+        }
+      ],
+      "result": {
+        "name": "fs_upload_chunk_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation fs_upload_chunk",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_upload_chunk"
+      },
+      "x-omni-stability": "experimental"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        },
+        {
+          "$ref": "#/components/errors/FsPathInvalid"
+        },
+        {
+          "$ref": "#/components/errors/FsNotFound"
+        },
+        {
+          "$ref": "#/components/errors/FsTransferInvalid"
+        },
+        {
+          "$ref": "#/components/errors/FsWatchInvalid"
+        },
+        {
+          "$ref": "#/components/errors/FsReadOnly"
+        }
+      ],
+      "name": "fs_upload_commit",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "session_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_upload_commit/properties/session_id"
+          }
+        },
+        {
+          "name": "transfer_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_upload_commit/properties/transfer_id"
+          }
+        }
+      ],
+      "result": {
+        "name": "fs_upload_commit_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation fs_upload_commit",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_upload_commit"
+      },
+      "x-omni-stability": "experimental"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        },
+        {
+          "$ref": "#/components/errors/FsPathInvalid"
+        },
+        {
+          "$ref": "#/components/errors/FsNotFound"
+        },
+        {
+          "$ref": "#/components/errors/FsTransferInvalid"
+        },
+        {
+          "$ref": "#/components/errors/FsWatchInvalid"
+        },
+        {
+          "$ref": "#/components/errors/FsReadOnly"
+        }
+      ],
+      "name": "fs_upload_abort",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "session_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_upload_abort/properties/session_id"
+          }
+        },
+        {
+          "name": "transfer_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_upload_abort/properties/transfer_id"
+          }
+        }
+      ],
+      "result": {
+        "name": "fs_upload_abort_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation fs_upload_abort",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_upload_abort"
+      },
+      "x-omni-stability": "experimental"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        },
+        {
+          "$ref": "#/components/errors/GitRepositoryNotFound"
+        },
+        {
+          "$ref": "#/components/errors/GitPathInvalid"
+        },
+        {
+          "$ref": "#/components/errors/GitOperationFailed"
+        },
+        {
+          "$ref": "#/components/errors/GitConfirmationRequired"
+        },
+        {
+          "$ref": "#/components/errors/GitStateInvalid"
+        },
+        {
+          "$ref": "#/components/errors/GitCapabilityUnavailable"
+        }
+      ],
+      "name": "git_list_repositories",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "session_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_list_repositories/properties/session_id"
+          }
+        },
+        {
+          "name": "path",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_list_repositories/properties/path"
+          }
+        },
+        {
+          "name": "max_depth",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_list_repositories/properties/max_depth"
+          }
+        }
+      ],
+      "result": {
+        "name": "git_list_repositories_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation git_list_repositories",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/git_list_repositories"
+      },
+      "x-omni-stability": "experimental"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        },
+        {
+          "$ref": "#/components/errors/GitRepositoryNotFound"
+        },
+        {
+          "$ref": "#/components/errors/GitPathInvalid"
+        },
+        {
+          "$ref": "#/components/errors/GitOperationFailed"
+        },
+        {
+          "$ref": "#/components/errors/GitConfirmationRequired"
+        },
+        {
+          "$ref": "#/components/errors/GitStateInvalid"
+        },
+        {
+          "$ref": "#/components/errors/GitCapabilityUnavailable"
+        }
+      ],
+      "name": "git_status",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "session_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_status/properties/session_id"
+          }
+        },
+        {
+          "name": "repo",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_status/properties/repo"
+          }
+        },
+        {
+          "name": "include_untracked",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_status/properties/include_untracked"
+          }
+        },
+        {
+          "name": "include_ignored",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_status/properties/include_ignored"
+          }
+        },
+        {
+          "name": "paths",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_status/properties/paths"
+          }
+        }
+      ],
+      "result": {
+        "name": "git_status_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation git_status",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/git_status"
+      },
+      "x-omni-stability": "experimental"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        },
+        {
+          "$ref": "#/components/errors/GitRepositoryNotFound"
+        },
+        {
+          "$ref": "#/components/errors/GitPathInvalid"
+        },
+        {
+          "$ref": "#/components/errors/GitOperationFailed"
+        },
+        {
+          "$ref": "#/components/errors/GitConfirmationRequired"
+        },
+        {
+          "$ref": "#/components/errors/GitStateInvalid"
+        },
+        {
+          "$ref": "#/components/errors/GitCapabilityUnavailable"
+        }
+      ],
+      "name": "git_diff",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "session_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_diff/properties/session_id"
+          }
+        },
+        {
+          "name": "repo",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_diff/properties/repo"
+          }
+        },
+        {
+          "name": "mode",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_diff/properties/mode"
+          }
+        },
+        {
+          "name": "paths",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_diff/properties/paths"
+          }
+        },
+        {
+          "name": "context_lines",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_diff/properties/context_lines"
+          }
+        },
+        {
+          "name": "from_rev",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_diff/properties/from_rev"
+          }
+        },
+        {
+          "name": "to_rev",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_diff/properties/to_rev"
+          }
+        }
+      ],
+      "result": {
+        "name": "git_diff_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation git_diff",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/git_diff"
+      },
+      "x-omni-stability": "experimental"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        },
+        {
+          "$ref": "#/components/errors/GitRepositoryNotFound"
+        },
+        {
+          "$ref": "#/components/errors/GitPathInvalid"
+        },
+        {
+          "$ref": "#/components/errors/GitOperationFailed"
+        },
+        {
+          "$ref": "#/components/errors/GitConfirmationRequired"
+        },
+        {
+          "$ref": "#/components/errors/GitStateInvalid"
+        },
+        {
+          "$ref": "#/components/errors/GitCapabilityUnavailable"
+        }
+      ],
+      "name": "git_log",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "session_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_log/properties/session_id"
+          }
+        },
+        {
+          "name": "repo",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_log/properties/repo"
+          }
+        },
+        {
+          "name": "rev",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_log/properties/rev"
+          }
+        },
+        {
+          "name": "max_count",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_log/properties/max_count"
+          }
+        },
+        {
+          "name": "skip",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_log/properties/skip"
+          }
+        },
+        {
+          "name": "paths",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_log/properties/paths"
+          }
+        }
+      ],
+      "result": {
+        "name": "git_log_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation git_log",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/git_log"
+      },
+      "x-omni-stability": "experimental"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        },
+        {
+          "$ref": "#/components/errors/GitRepositoryNotFound"
+        },
+        {
+          "$ref": "#/components/errors/GitPathInvalid"
+        },
+        {
+          "$ref": "#/components/errors/GitOperationFailed"
+        },
+        {
+          "$ref": "#/components/errors/GitConfirmationRequired"
+        },
+        {
+          "$ref": "#/components/errors/GitStateInvalid"
+        },
+        {
+          "$ref": "#/components/errors/GitCapabilityUnavailable"
+        }
+      ],
+      "name": "git_list_branches",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "session_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_list_branches/properties/session_id"
+          }
+        },
+        {
+          "name": "repo",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_list_branches/properties/repo"
+          }
+        },
+        {
+          "name": "include_remote",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_list_branches/properties/include_remote"
+          }
+        }
+      ],
+      "result": {
+        "name": "git_list_branches_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation git_list_branches",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/git_list_branches"
+      },
+      "x-omni-stability": "experimental"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        },
+        {
+          "$ref": "#/components/errors/GitRepositoryNotFound"
+        },
+        {
+          "$ref": "#/components/errors/GitPathInvalid"
+        },
+        {
+          "$ref": "#/components/errors/GitOperationFailed"
+        },
+        {
+          "$ref": "#/components/errors/GitConfirmationRequired"
+        },
+        {
+          "$ref": "#/components/errors/GitStateInvalid"
+        },
+        {
+          "$ref": "#/components/errors/GitCapabilityUnavailable"
+        }
+      ],
+      "name": "git_list_worktrees",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "session_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_list_worktrees/properties/session_id"
+          }
+        },
+        {
+          "name": "repo",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_list_worktrees/properties/repo"
+          }
+        }
+      ],
+      "result": {
+        "name": "git_list_worktrees_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation git_list_worktrees",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/git_list_worktrees"
+      },
+      "x-omni-stability": "experimental"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        },
+        {
+          "$ref": "#/components/errors/GitRepositoryNotFound"
+        },
+        {
+          "$ref": "#/components/errors/GitPathInvalid"
+        },
+        {
+          "$ref": "#/components/errors/GitOperationFailed"
+        },
+        {
+          "$ref": "#/components/errors/GitConfirmationRequired"
+        },
+        {
+          "$ref": "#/components/errors/GitStateInvalid"
+        },
+        {
+          "$ref": "#/components/errors/GitCapabilityUnavailable"
+        }
+      ],
+      "name": "git_conflicts",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "session_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_conflicts/properties/session_id"
+          }
+        },
+        {
+          "name": "repo",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_conflicts/properties/repo"
+          }
+        },
+        {
+          "name": "paths",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_conflicts/properties/paths"
+          }
+        }
+      ],
+      "result": {
+        "name": "git_conflicts_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation git_conflicts",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/git_conflicts"
+      },
+      "x-omni-stability": "experimental"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        },
+        {
+          "$ref": "#/components/errors/GitRepositoryNotFound"
+        },
+        {
+          "$ref": "#/components/errors/GitPathInvalid"
+        },
+        {
+          "$ref": "#/components/errors/GitOperationFailed"
+        },
+        {
+          "$ref": "#/components/errors/GitConfirmationRequired"
+        },
+        {
+          "$ref": "#/components/errors/GitStateInvalid"
+        },
+        {
+          "$ref": "#/components/errors/GitCapabilityUnavailable"
+        }
+      ],
+      "name": "git_stage",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "session_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_stage/properties/session_id"
+          }
+        },
+        {
+          "name": "repo",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_stage/properties/repo"
+          }
+        },
+        {
+          "name": "paths",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_stage/properties/paths"
+          }
+        },
+        {
+          "name": "hunks",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_stage/properties/hunks"
+          }
+        },
+        {
+          "name": "context_lines",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_stage/properties/context_lines"
+          }
+        },
+        {
+          "name": "mode",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_stage/properties/mode"
+          }
+        }
+      ],
+      "result": {
+        "name": "git_stage_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation git_stage",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/git_stage"
+      },
+      "x-omni-stability": "experimental"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        },
+        {
+          "$ref": "#/components/errors/GitRepositoryNotFound"
+        },
+        {
+          "$ref": "#/components/errors/GitPathInvalid"
+        },
+        {
+          "$ref": "#/components/errors/GitOperationFailed"
+        },
+        {
+          "$ref": "#/components/errors/GitConfirmationRequired"
+        },
+        {
+          "$ref": "#/components/errors/GitStateInvalid"
+        },
+        {
+          "$ref": "#/components/errors/GitCapabilityUnavailable"
+        }
+      ],
+      "name": "git_unstage",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "session_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_unstage/properties/session_id"
+          }
+        },
+        {
+          "name": "repo",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_unstage/properties/repo"
+          }
+        },
+        {
+          "name": "paths",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_unstage/properties/paths"
+          }
+        },
+        {
+          "name": "hunks",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_unstage/properties/hunks"
+          }
+        },
+        {
+          "name": "context_lines",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_unstage/properties/context_lines"
+          }
+        }
+      ],
+      "result": {
+        "name": "git_unstage_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation git_unstage",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/git_unstage"
+      },
+      "x-omni-stability": "experimental"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        },
+        {
+          "$ref": "#/components/errors/GitRepositoryNotFound"
+        },
+        {
+          "$ref": "#/components/errors/GitPathInvalid"
+        },
+        {
+          "$ref": "#/components/errors/GitOperationFailed"
+        },
+        {
+          "$ref": "#/components/errors/GitConfirmationRequired"
+        },
+        {
+          "$ref": "#/components/errors/GitStateInvalid"
+        },
+        {
+          "$ref": "#/components/errors/GitCapabilityUnavailable"
+        }
+      ],
+      "name": "git_discard",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "session_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_discard/properties/session_id"
+          }
+        },
+        {
+          "name": "repo",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_discard/properties/repo"
+          }
+        },
+        {
+          "name": "paths",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_discard/properties/paths"
+          }
+        },
+        {
+          "name": "hunks",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_discard/properties/hunks"
+          }
+        },
+        {
+          "name": "context_lines",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_discard/properties/context_lines"
+          }
+        },
+        {
+          "name": "confirmation_token",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_discard/properties/confirmation_token"
+          }
+        }
+      ],
+      "result": {
+        "name": "git_discard_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation git_discard",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/git_discard"
+      },
+      "x-omni-stability": "experimental"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        },
+        {
+          "$ref": "#/components/errors/GitRepositoryNotFound"
+        },
+        {
+          "$ref": "#/components/errors/GitPathInvalid"
+        },
+        {
+          "$ref": "#/components/errors/GitOperationFailed"
+        },
+        {
+          "$ref": "#/components/errors/GitConfirmationRequired"
+        },
+        {
+          "$ref": "#/components/errors/GitStateInvalid"
+        },
+        {
+          "$ref": "#/components/errors/GitCapabilityUnavailable"
+        }
+      ],
+      "name": "git_commit",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "session_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_commit/properties/session_id"
+          }
+        },
+        {
+          "name": "repo",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_commit/properties/repo"
+          }
+        },
+        {
+          "name": "message",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_commit/properties/message"
+          }
+        },
+        {
+          "name": "amend",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_commit/properties/amend"
+          }
+        },
+        {
+          "name": "allow_empty",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_commit/properties/allow_empty"
+          }
+        },
+        {
+          "name": "author",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_commit/properties/author"
+          }
+        },
+        {
+          "name": "confirmation_token",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_commit/properties/confirmation_token"
+          }
+        }
+      ],
+      "result": {
+        "name": "git_commit_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation git_commit",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/git_commit"
+      },
+      "x-omni-stability": "experimental"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        },
+        {
+          "$ref": "#/components/errors/GitRepositoryNotFound"
+        },
+        {
+          "$ref": "#/components/errors/GitPathInvalid"
+        },
+        {
+          "$ref": "#/components/errors/GitOperationFailed"
+        },
+        {
+          "$ref": "#/components/errors/GitConfirmationRequired"
+        },
+        {
+          "$ref": "#/components/errors/GitStateInvalid"
+        },
+        {
+          "$ref": "#/components/errors/GitCapabilityUnavailable"
+        }
+      ],
+      "name": "git_checkout",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "session_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_checkout/properties/session_id"
+          }
+        },
+        {
+          "name": "repo",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_checkout/properties/repo"
+          }
+        },
+        {
+          "name": "branch",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_checkout/properties/branch"
+          }
+        },
+        {
+          "name": "create",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_checkout/properties/create"
+          }
+        },
+        {
+          "name": "start_point",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_checkout/properties/start_point"
+          }
+        },
+        {
+          "name": "detach",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_checkout/properties/detach"
+          }
+        },
+        {
+          "name": "discard_changes",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_checkout/properties/discard_changes"
+          }
+        },
+        {
+          "name": "confirmation_token",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_checkout/properties/confirmation_token"
+          }
+        }
+      ],
+      "result": {
+        "name": "git_checkout_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation git_checkout",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/git_checkout"
+      },
+      "x-omni-stability": "experimental"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        },
+        {
+          "$ref": "#/components/errors/GitRepositoryNotFound"
+        },
+        {
+          "$ref": "#/components/errors/GitPathInvalid"
+        },
+        {
+          "$ref": "#/components/errors/GitOperationFailed"
+        },
+        {
+          "$ref": "#/components/errors/GitConfirmationRequired"
+        },
+        {
+          "$ref": "#/components/errors/GitStateInvalid"
+        },
+        {
+          "$ref": "#/components/errors/GitCapabilityUnavailable"
+        }
+      ],
+      "name": "git_reset",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "session_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_reset/properties/session_id"
+          }
+        },
+        {
+          "name": "repo",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_reset/properties/repo"
+          }
+        },
+        {
+          "name": "mode",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_reset/properties/mode"
+          }
+        },
+        {
+          "name": "rev",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_reset/properties/rev"
+          }
+        },
+        {
+          "name": "paths",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_reset/properties/paths"
+          }
+        },
+        {
+          "name": "confirmation_token",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_reset/properties/confirmation_token"
+          }
+        }
+      ],
+      "result": {
+        "name": "git_reset_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation git_reset",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/git_reset"
+      },
+      "x-omni-stability": "experimental"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        },
+        {
+          "$ref": "#/components/errors/GitRepositoryNotFound"
+        },
+        {
+          "$ref": "#/components/errors/GitPathInvalid"
+        },
+        {
+          "$ref": "#/components/errors/GitOperationFailed"
+        },
+        {
+          "$ref": "#/components/errors/GitConfirmationRequired"
+        },
+        {
+          "$ref": "#/components/errors/GitStateInvalid"
+        },
+        {
+          "$ref": "#/components/errors/GitCapabilityUnavailable"
+        }
+      ],
+      "name": "git_fetch",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "session_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_fetch/properties/session_id"
+          }
+        },
+        {
+          "name": "repo",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_fetch/properties/repo"
+          }
+        },
+        {
+          "name": "remote",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_fetch/properties/remote"
+          }
+        },
+        {
+          "name": "refspec",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_fetch/properties/refspec"
+          }
+        },
+        {
+          "name": "prune",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_fetch/properties/prune"
+          }
+        }
+      ],
+      "result": {
+        "name": "git_fetch_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation git_fetch",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/git_fetch"
+      },
+      "x-omni-stability": "experimental"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        },
+        {
+          "$ref": "#/components/errors/GitRepositoryNotFound"
+        },
+        {
+          "$ref": "#/components/errors/GitPathInvalid"
+        },
+        {
+          "$ref": "#/components/errors/GitOperationFailed"
+        },
+        {
+          "$ref": "#/components/errors/GitConfirmationRequired"
+        },
+        {
+          "$ref": "#/components/errors/GitStateInvalid"
+        },
+        {
+          "$ref": "#/components/errors/GitCapabilityUnavailable"
+        }
+      ],
+      "name": "git_pull",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "session_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_pull/properties/session_id"
+          }
+        },
+        {
+          "name": "repo",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_pull/properties/repo"
+          }
+        },
+        {
+          "name": "remote",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_pull/properties/remote"
+          }
+        },
+        {
+          "name": "refspec",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_pull/properties/refspec"
+          }
+        },
+        {
+          "name": "rebase",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_pull/properties/rebase"
+          }
+        }
+      ],
+      "result": {
+        "name": "git_pull_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation git_pull",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/git_pull"
+      },
+      "x-omni-stability": "experimental"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        },
+        {
+          "$ref": "#/components/errors/GitRepositoryNotFound"
+        },
+        {
+          "$ref": "#/components/errors/GitPathInvalid"
+        },
+        {
+          "$ref": "#/components/errors/GitOperationFailed"
+        },
+        {
+          "$ref": "#/components/errors/GitConfirmationRequired"
+        },
+        {
+          "$ref": "#/components/errors/GitStateInvalid"
+        },
+        {
+          "$ref": "#/components/errors/GitCapabilityUnavailable"
+        }
+      ],
+      "name": "git_push",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "session_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_push/properties/session_id"
+          }
+        },
+        {
+          "name": "repo",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_push/properties/repo"
+          }
+        },
+        {
+          "name": "remote",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_push/properties/remote"
+          }
+        },
+        {
+          "name": "refspec",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_push/properties/refspec"
+          }
+        },
+        {
+          "name": "force",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_push/properties/force"
+          }
+        },
+        {
+          "name": "force_with_lease",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_push/properties/force_with_lease"
+          }
+        },
+        {
+          "name": "set_upstream",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_push/properties/set_upstream"
+          }
+        },
+        {
+          "name": "confirmation_token",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_push/properties/confirmation_token"
+          }
+        }
+      ],
+      "result": {
+        "name": "git_push_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation git_push",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/git_push"
+      },
+      "x-omni-stability": "experimental"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        },
+        {
+          "$ref": "#/components/errors/ConversationCursorInvalid"
+        }
+      ],
+      "name": "list_threads",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "status",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/list_threads/properties/status"
+          }
+        },
+        {
+          "name": "pinned",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/list_threads/properties/pinned"
+          }
+        },
+        {
+          "name": "source",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/list_threads/properties/source"
+          }
+        },
+        {
+          "name": "model",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/list_threads/properties/model"
+          }
+        },
+        {
+          "name": "parent_thread_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/list_threads/properties/parent_thread_id"
+          }
+        },
+        {
+          "name": "created_after",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/list_threads/properties/created_after"
+          }
+        },
+        {
+          "name": "created_before",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/list_threads/properties/created_before"
+          }
+        },
+        {
+          "name": "updated_after",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/list_threads/properties/updated_after"
+          }
+        },
+        {
+          "name": "updated_before",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/list_threads/properties/updated_before"
+          }
+        },
+        {
+          "name": "limit",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/list_threads/properties/limit"
+          }
+        },
+        {
+          "name": "cursor",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/list_threads/properties/cursor"
+          }
+        },
+        {
+          "name": "order",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/list_threads/properties/order"
+          }
+        }
+      ],
+      "result": {
+        "name": "list_threads_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation list_threads",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/list_threads"
+      },
+      "x-omni-stability": "experimental"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        },
+        {
+          "$ref": "#/components/errors/ConversationCursorInvalid"
+        },
+        {
+          "$ref": "#/components/errors/ConversationSearchUnavailable"
+        }
+      ],
+      "name": "search_threads",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "query",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/search_threads/properties/query"
+          }
+        },
+        {
+          "name": "status",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/search_threads/properties/status"
+          }
+        },
+        {
+          "name": "pinned",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/search_threads/properties/pinned"
+          }
+        },
+        {
+          "name": "source",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/search_threads/properties/source"
+          }
+        },
+        {
+          "name": "model",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/search_threads/properties/model"
+          }
+        },
+        {
+          "name": "parent_thread_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/search_threads/properties/parent_thread_id"
+          }
+        },
+        {
+          "name": "created_after",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/search_threads/properties/created_after"
+          }
+        },
+        {
+          "name": "created_before",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/search_threads/properties/created_before"
+          }
+        },
+        {
+          "name": "updated_after",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/search_threads/properties/updated_after"
+          }
+        },
+        {
+          "name": "updated_before",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/search_threads/properties/updated_before"
+          }
+        },
+        {
+          "name": "limit",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/search_threads/properties/limit"
+          }
+        },
+        {
+          "name": "cursor",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/search_threads/properties/cursor"
+          }
+        }
+      ],
+      "result": {
+        "name": "search_threads_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation search_threads",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/search_threads"
+      },
+      "x-omni-stability": "experimental"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        },
+        {
+          "$ref": "#/components/errors/ThreadNotFound"
+        },
+        {
+          "$ref": "#/components/errors/ThreadMetadataInvalid"
+        }
+      ],
+      "name": "update_thread",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "thread_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/update_thread/properties/thread_id"
+          }
+        },
+        {
+          "name": "title",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/update_thread/properties/title"
+          }
+        },
+        {
+          "name": "pinned",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/update_thread/properties/pinned"
+          }
+        },
+        {
+          "name": "status",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/update_thread/properties/status"
+          }
+        },
+        {
+          "name": "metadata",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/update_thread/properties/metadata"
+          }
+        }
+      ],
+      "result": {
+        "name": "update_thread_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation update_thread",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/update_thread"
+      },
+      "x-omni-stability": "experimental"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        },
+        {
+          "$ref": "#/components/errors/ThreadNotFound"
+        }
+      ],
+      "name": "list_thread_descendants",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "thread_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/list_thread_descendants/properties/thread_id"
+          }
+        },
+        {
+          "name": "max_depth",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/list_thread_descendants/properties/max_depth"
+          }
+        },
+        {
+          "name": "limit",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/list_thread_descendants/properties/limit"
+          }
+        }
+      ],
+      "result": {
+        "name": "list_thread_descendants_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation list_thread_descendants",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/list_thread_descendants"
+      },
+      "x-omni-stability": "experimental"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        },
+        {
+          "$ref": "#/components/errors/ThreadNotFound"
+        },
+        {
+          "$ref": "#/components/errors/ConversationCursorInvalid"
+        }
+      ],
+      "name": "export_thread",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "thread_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/export_thread/properties/thread_id"
+          }
+        },
+        {
+          "name": "limit",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/export_thread/properties/limit"
+          }
+        },
+        {
+          "name": "cursor",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/export_thread/properties/cursor"
+          }
+        },
+        {
+          "name": "include_descendants",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/export_thread/properties/include_descendants"
+          }
+        }
+      ],
+      "result": {
+        "name": "export_thread_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation export_thread",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/export_thread"
+      },
+      "x-omni-stability": "experimental"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        }
+      ],
+      "name": "purge_threads",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "retention_days",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/purge_threads/properties/retention_days"
+          }
+        },
+        {
+          "name": "dry_run",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/purge_threads/properties/dry_run"
+          }
+        }
+      ],
+      "result": {
+        "name": "purge_threads_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation purge_threads",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/purge_threads"
+      },
+      "x-omni-stability": "experimental"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        },
+        {
+          "$ref": "#/components/errors/ThreadNotFound"
+        }
+      ],
+      "name": "get_plan",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "thread_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/get_plan/properties/thread_id"
+          }
+        },
+        {
+          "name": "scope",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/get_plan/properties/scope"
+          }
+        }
+      ],
+      "result": {
+        "name": "get_plan_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation get_plan",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/get_plan"
+      },
+      "x-omni-stability": "experimental"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        },
+        {
+          "$ref": "#/components/errors/ThreadNotFound"
+        },
+        {
+          "$ref": "#/components/errors/ConversationTurnNotFound"
+        }
+      ],
+      "name": "get_run_diff",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "thread_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/get_run_diff/properties/thread_id"
+          }
+        },
+        {
+          "name": "turn_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/get_run_diff/properties/turn_id"
+          }
+        }
+      ],
+      "result": {
+        "name": "get_run_diff_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation get_run_diff",
+      "x-omni-direction": "client_to_server",
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/get_run_diff"
+      },
+      "x-omni-stability": "experimental"
+    },
+    {
       "name": "initialized",
       "paramStructure": "by-name",
       "params": [],
@@ -2313,6 +8379,20 @@
           }
         },
         {
+          "name": "is_final",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/message_output/properties/is_final"
+          }
+        },
+        {
+          "name": "message_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/message_output/properties/message_id"
+          }
+        },
+        {
           "name": "seq",
           "required": false,
           "schema": {
@@ -2392,6 +8472,13 @@
           "required": false,
           "schema": {
             "$ref": "./schemas/gui-v1.schema.json#/$defs/token/properties/model"
+          }
+        },
+        {
+          "name": "model_ref",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/token/properties/model_ref"
           }
         },
         {
@@ -2481,6 +8568,13 @@
           "required": false,
           "schema": {
             "$ref": "./schemas/gui-v1.schema.json#/$defs/run_end/properties/model"
+          }
+        },
+        {
+          "name": "model_ref",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/run_end/properties/model_ref"
           }
         },
         {
@@ -2993,6 +9087,359 @@
       "x-omni-stability": "stable"
     },
     {
+      "name": "account_changed",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "provider",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/account_changed/properties/provider"
+          }
+        },
+        {
+          "name": "reason",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/account_changed/properties/reason"
+          }
+        },
+        {
+          "name": "account",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/account_changed/properties/account"
+          }
+        },
+        {
+          "name": "seq",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/account_changed/properties/seq"
+          }
+        },
+        {
+          "name": "stream_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/account_changed/properties/stream_id"
+          }
+        }
+      ],
+      "result": {
+        "name": "account_changed_result",
+        "schema": {
+          "type": "null"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation account_changed",
+      "x-omni-direction": "server_to_client",
+      "x-omni-kind": "notification",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/account_changed"
+      },
+      "x-omni-stability": "stable"
+    },
+    {
+      "name": "elicitation_requested",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "elicitation_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/elicitation_requested/properties/elicitation_id"
+          }
+        },
+        {
+          "name": "kind",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/elicitation_requested/properties/kind"
+          }
+        },
+        {
+          "name": "message",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/elicitation_requested/properties/message"
+          }
+        },
+        {
+          "name": "title",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/elicitation_requested/properties/title"
+          }
+        },
+        {
+          "name": "input_schema",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/elicitation_requested/properties/input_schema"
+          }
+        },
+        {
+          "name": "options",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/elicitation_requested/properties/options"
+          }
+        },
+        {
+          "name": "url",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/elicitation_requested/properties/url"
+          }
+        },
+        {
+          "name": "session_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/elicitation_requested/properties/session_id"
+          }
+        },
+        {
+          "name": "run_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/elicitation_requested/properties/run_id"
+          }
+        },
+        {
+          "name": "item_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/elicitation_requested/properties/item_id"
+          }
+        },
+        {
+          "name": "source",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/elicitation_requested/properties/source"
+          }
+        },
+        {
+          "name": "timeout_ms",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/elicitation_requested/properties/timeout_ms"
+          }
+        },
+        {
+          "name": "expires_at",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/elicitation_requested/properties/expires_at"
+          }
+        },
+        {
+          "name": "persist_response",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/elicitation_requested/properties/persist_response"
+          }
+        },
+        {
+          "name": "seq",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/elicitation_requested/properties/seq"
+          }
+        },
+        {
+          "name": "stream_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/elicitation_requested/properties/stream_id"
+          }
+        }
+      ],
+      "result": {
+        "name": "elicitation_requested_result",
+        "schema": {
+          "type": "null"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation elicitation_requested",
+      "x-omni-correlation": {
+        "requestField": "elicitation_id",
+        "responseMethod": "elicitation_response"
+      },
+      "x-omni-direction": "server_to_client",
+      "x-omni-kind": "correlated_notification",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/elicitation_requested"
+      },
+      "x-omni-stability": "stable"
+    },
+    {
+      "name": "elicitation_resolved",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "elicitation_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/elicitation_resolved/properties/elicitation_id"
+          }
+        },
+        {
+          "name": "status",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/elicitation_resolved/properties/status"
+          }
+        },
+        {
+          "name": "session_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/elicitation_resolved/properties/session_id"
+          }
+        },
+        {
+          "name": "run_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/elicitation_resolved/properties/run_id"
+          }
+        },
+        {
+          "name": "action",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/elicitation_resolved/properties/action"
+          }
+        },
+        {
+          "name": "value",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/elicitation_resolved/properties/value"
+          }
+        },
+        {
+          "name": "reason",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/elicitation_resolved/properties/reason"
+          }
+        },
+        {
+          "name": "seq",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/elicitation_resolved/properties/seq"
+          }
+        },
+        {
+          "name": "stream_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/elicitation_resolved/properties/stream_id"
+          }
+        }
+      ],
+      "result": {
+        "name": "elicitation_resolved_result",
+        "schema": {
+          "type": "null"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation elicitation_resolved",
+      "x-omni-direction": "server_to_client",
+      "x-omni-kind": "notification",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/elicitation_resolved"
+      },
+      "x-omni-stability": "stable"
+    },
+    {
+      "name": "mcp_server_status_changed",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "server_name",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_server_status_changed/properties/server_name"
+          }
+        },
+        {
+          "name": "status",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_server_status_changed/properties/status"
+          }
+        },
+        {
+          "name": "previous_status",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_server_status_changed/properties/previous_status"
+          }
+        },
+        {
+          "name": "reason_code",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_server_status_changed/properties/reason_code"
+          }
+        },
+        {
+          "name": "reason",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_server_status_changed/properties/reason"
+          }
+        },
+        {
+          "name": "auth_state",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_server_status_changed/properties/auth_state"
+          }
+        },
+        {
+          "name": "at",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_server_status_changed/properties/at"
+          }
+        },
+        {
+          "name": "seq",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_server_status_changed/properties/seq"
+          }
+        },
+        {
+          "name": "stream_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_server_status_changed/properties/stream_id"
+          }
+        }
+      ],
+      "result": {
+        "name": "mcp_server_status_changed_result",
+        "schema": {
+          "type": "null"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation mcp_server_status_changed",
+      "x-omni-direction": "server_to_client",
+      "x-omni-kind": "notification",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_server_status_changed"
+      },
+      "x-omni-stability": "stable"
+    },
+    {
       "name": "session_forked",
       "paramStructure": "by-name",
       "params": [
@@ -3008,6 +9455,13 @@
           "required": true,
           "schema": {
             "$ref": "./schemas/gui-v1.schema.json#/$defs/session_forked/properties/new_session_id"
+          }
+        },
+        {
+          "name": "from_item_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/session_forked/properties/from_item_id"
           }
         },
         {
@@ -3090,6 +9544,421 @@
       "x-omni-kind": "notification",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/session_variables_changed"
+      },
+      "x-omni-stability": "experimental"
+    },
+    {
+      "name": "fs_events",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "session_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_events/properties/session_id"
+          }
+        },
+        {
+          "name": "watch_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_events/properties/watch_id"
+          }
+        },
+        {
+          "name": "events",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_events/properties/events"
+          }
+        },
+        {
+          "name": "seq",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_events/properties/seq"
+          }
+        },
+        {
+          "name": "stream_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_events/properties/stream_id"
+          }
+        }
+      ],
+      "result": {
+        "name": "fs_events_result",
+        "schema": {
+          "type": "null"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation fs_events",
+      "x-omni-direction": "server_to_client",
+      "x-omni-kind": "notification",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_events"
+      },
+      "x-omni-stability": "experimental"
+    },
+    {
+      "name": "fs_rescan_required",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "session_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_rescan_required/properties/session_id"
+          }
+        },
+        {
+          "name": "watch_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_rescan_required/properties/watch_id"
+          }
+        },
+        {
+          "name": "reason",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_rescan_required/properties/reason"
+          }
+        },
+        {
+          "name": "seq",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_rescan_required/properties/seq"
+          }
+        },
+        {
+          "name": "stream_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_rescan_required/properties/stream_id"
+          }
+        }
+      ],
+      "result": {
+        "name": "fs_rescan_required_result",
+        "schema": {
+          "type": "null"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation fs_rescan_required",
+      "x-omni-direction": "server_to_client",
+      "x-omni-kind": "notification",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_rescan_required"
+      },
+      "x-omni-stability": "experimental"
+    },
+    {
+      "name": "fs_transfer_progress",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "session_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_transfer_progress/properties/session_id"
+          }
+        },
+        {
+          "name": "transfer_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_transfer_progress/properties/transfer_id"
+          }
+        },
+        {
+          "name": "direction",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_transfer_progress/properties/direction"
+          }
+        },
+        {
+          "name": "transferred",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_transfer_progress/properties/transferred"
+          }
+        },
+        {
+          "name": "total",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_transfer_progress/properties/total"
+          }
+        },
+        {
+          "name": "seq",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_transfer_progress/properties/seq"
+          }
+        },
+        {
+          "name": "stream_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_transfer_progress/properties/stream_id"
+          }
+        }
+      ],
+      "result": {
+        "name": "fs_transfer_progress_result",
+        "schema": {
+          "type": "null"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation fs_transfer_progress",
+      "x-omni-direction": "server_to_client",
+      "x-omni-kind": "notification",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_transfer_progress"
+      },
+      "x-omni-stability": "experimental"
+    },
+    {
+      "name": "git_operation_progress",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "session_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_operation_progress/properties/session_id"
+          }
+        },
+        {
+          "name": "operation_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_operation_progress/properties/operation_id"
+          }
+        },
+        {
+          "name": "repo",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_operation_progress/properties/repo"
+          }
+        },
+        {
+          "name": "operation",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_operation_progress/properties/operation"
+          }
+        },
+        {
+          "name": "phase",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_operation_progress/properties/phase"
+          }
+        },
+        {
+          "name": "detail",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_operation_progress/properties/detail"
+          }
+        },
+        {
+          "name": "seq",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_operation_progress/properties/seq"
+          }
+        },
+        {
+          "name": "stream_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_operation_progress/properties/stream_id"
+          }
+        }
+      ],
+      "result": {
+        "name": "git_operation_progress_result",
+        "schema": {
+          "type": "null"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation git_operation_progress",
+      "x-omni-direction": "server_to_client",
+      "x-omni-kind": "notification",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/git_operation_progress"
+      },
+      "x-omni-stability": "experimental"
+    },
+    {
+      "name": "thread_updated",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "thread_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/thread_updated/properties/thread_id"
+          }
+        },
+        {
+          "name": "changed",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/thread_updated/properties/changed"
+          }
+        },
+        {
+          "name": "thread",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/thread_updated/properties/thread"
+          }
+        },
+        {
+          "name": "cascaded_thread_ids",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/thread_updated/properties/cascaded_thread_ids"
+          }
+        },
+        {
+          "name": "seq",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/thread_updated/properties/seq"
+          }
+        },
+        {
+          "name": "stream_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/thread_updated/properties/stream_id"
+          }
+        }
+      ],
+      "result": {
+        "name": "thread_updated_result",
+        "schema": {
+          "type": "null"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation thread_updated",
+      "x-omni-direction": "server_to_client",
+      "x-omni-kind": "notification",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/thread_updated"
+      },
+      "x-omni-stability": "experimental"
+    },
+    {
+      "name": "item_updated",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "session_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/item_updated/properties/session_id"
+          }
+        },
+        {
+          "name": "thread_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/item_updated/properties/thread_id"
+          }
+        },
+        {
+          "name": "item_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/item_updated/properties/item_id"
+          }
+        },
+        {
+          "name": "kind",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/item_updated/properties/kind"
+          }
+        },
+        {
+          "name": "status",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/item_updated/properties/status"
+          }
+        },
+        {
+          "name": "revision",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/item_updated/properties/revision"
+          }
+        },
+        {
+          "name": "item_seq",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/item_updated/properties/item_seq"
+          }
+        },
+        {
+          "name": "content",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/item_updated/properties/content"
+          }
+        },
+        {
+          "name": "turn_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/item_updated/properties/turn_id"
+          }
+        },
+        {
+          "name": "updated_at",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/item_updated/properties/updated_at"
+          }
+        },
+        {
+          "name": "seq",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/item_updated/properties/seq"
+          }
+        },
+        {
+          "name": "stream_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/item_updated/properties/stream_id"
+          }
+        }
+      ],
+      "result": {
+        "name": "item_updated_result",
+        "schema": {
+          "type": "null"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation item_updated",
+      "x-omni-direction": "server_to_client",
+      "x-omni-kind": "notification",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/item_updated"
       },
       "x-omni-stability": "experimental"
     }

@@ -1,6 +1,14 @@
 import { createActor } from 'xstate';
 
-import type { JsonRpcError, JsonRpcId, RpcMethodMap, RpcNotificationMap } from '@/generated/omniagents-gui-v1/gui-v1';
+import type {
+  Capabilities,
+  InitializeResult,
+  JsonRpcError,
+  JsonRpcId,
+  RpcClientNotificationMap,
+  RpcMethodMap,
+  RpcNotificationMap,
+} from '@/generated/omniagents-gui-v1/gui-v1';
 import { withConnectTicket } from '@/renderer/omniagents-ui/rpc/ws-ticket';
 import { createMachineLogger } from '@/shared/machines/machine-logger';
 import {
@@ -48,6 +56,73 @@ type PendingEntry = {
  */
 export const ACK_DEBOUNCE_MS = 500;
 
+/**
+ * Workspace operations are one negotiated surface: requests and their
+ * notifications must be named explicitly in ``experimental_operations``.
+ * Keep this list exhaustive so a successful handshake is sufficient to
+ * build the explorer without a second capability round trip.
+ */
+export const WORKSPACE_EXPERIMENTAL_OPERATIONS = [
+  'fs_watch',
+  'fs_unwatch',
+  'fs_list',
+  'fs_stat',
+  'fs_download_open',
+  'fs_download_read',
+  'fs_download_close',
+  'fs_upload_open',
+  'fs_upload_chunk',
+  'fs_upload_commit',
+  'fs_upload_abort',
+  'git_list_repositories',
+  'git_status',
+  'git_diff',
+  'git_log',
+  'git_list_branches',
+  'git_list_worktrees',
+  'git_conflicts',
+  'git_stage',
+  'git_unstage',
+  'git_discard',
+  'git_commit',
+  'git_checkout',
+  'git_reset',
+  'git_fetch',
+  'git_pull',
+  'git_push',
+  'fs_events',
+  'fs_rescan_required',
+  'fs_transfer_progress',
+  'git_operation_progress',
+] as const;
+
+const requestedCapabilities = (experimentalOperations: readonly string[]): Capabilities => ({
+  realtime: true,
+  mcp_apps: true,
+  client_functions: true,
+  approvals: true,
+  artifacts: true,
+  replay: true,
+  terminal: true,
+  experimental_operations: [...experimentalOperations],
+  disabled_notifications: [],
+});
+
+function unsupportedExperimentalCapabilities(error: unknown): string[] | null {
+  if (!(error instanceof OmniagentsRpcError) || error.code !== -32013) {
+    return null;
+  }
+  const data = error.data;
+  if (!data || typeof data !== 'object' || (data as { kind?: unknown }).kind !== 'capability_not_negotiated') {
+    return null;
+  }
+  const unsupported = (data as { unsupported_capabilities?: unknown }).unsupported_capabilities;
+  if (!Array.isArray(unsupported) || unsupported.some((capability) => typeof capability !== 'string')) {
+    return null;
+  }
+  return unsupported;
+}
+
 function profileEnabled(): boolean {
   try {
     return typeof localStorage !== 'undefined' && localStorage.getItem('debug:profile') === '1';
@@ -72,6 +147,8 @@ export class RPCClient {
   private disposed = false;
   private reconnectSub: { unsubscribe(): void } | null = null;
   private connectInFlight: Promise<void> | null = null;
+  private negotiatedInitialization: InitializeResult | null = null;
+  private unavailableExperimentalOperations = new Set<string>();
   private replay: SessionReplayCoordinator;
   private ackTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private resyncListeners = new Set<(sessionId: string) => void>();
@@ -128,6 +205,21 @@ export class RPCClient {
   /** True when the WebSocket is open and ready for calls. */
   get isConnected(): boolean {
     return this.connectionState === 'connected';
+  }
+
+  /** The server capability intersection from the latest successful handshake. */
+  get initializeResult(): InitializeResult | null {
+    return this.negotiatedInitialization;
+  }
+
+  /** True only when the current connection negotiated this experimental operation. */
+  supportsExperimentalOperation(operation: string): boolean {
+    return this.negotiatedInitialization?.capabilities.experimental_operations.includes(operation) ?? false;
+  }
+
+  /** Operations rejected by an older runtime and omitted by the degraded handshake. */
+  get degradedExperimentalOperations(): readonly string[] {
+    return [...this.unavailableExperimentalOperations];
   }
 
   async connect(): Promise<void> {
@@ -217,7 +309,6 @@ export class RPCClient {
         if (isStale()) {
           return;
         }
-        this.send({ type: 'WS_OPEN' });
         resolve();
       };
       const onError = () => {
@@ -259,7 +350,8 @@ export class RPCClient {
     // that's already connected via the replacement socket.
     const attachedWs = this.ws;
 
-    // Wire up ongoing message handling
+    // Wire up ongoing message handling before sending initialize: a server is
+    // allowed to answer in the same task as WebSocket.send().
     this.ws.onmessage = (ev) => {
       if (this.ws !== attachedWs) {
         return;
@@ -331,12 +423,74 @@ export class RPCClient {
       // onclose will fire after onerror
     };
 
+    try {
+      await this.initializeConnection(attachedWs);
+    } catch (error) {
+      // A failed handshake never produces a connected state. Close only the
+      // socket that attempted it; an onclose from an already-replaced socket
+      // must not disturb the replacement connection.
+      if (this.ws === attachedWs) {
+        this.rejectAllPending('GUI protocol handshake failed');
+        attachedWs.onmessage = null;
+        attachedWs.onclose = null;
+        attachedWs.onerror = null;
+        try {
+          attachedWs.close();
+        } catch {}
+        this.ws = null;
+        this.send({ type: 'WS_ERROR', error: (error as Error).message || 'GUI protocol handshake failed' });
+      }
+      throw error;
+    }
+
+    // Raw transport open is not application readiness. Only transition the
+    // lifecycle machine and resolve connect() after initialize was accepted
+    // and initialized was put on the wire.
+    this.send({ type: 'WS_OPEN' });
+
     // Reconnect hook: proactively backfill every session we hold a replay
     // cursor for, before any re-render depends on live events. The
     // resume_session call replays events missed while disconnected AND
     // re-registers this channel for live notifications. On the first
     // connect no cursors exist yet, so this is a no-op.
     this.replay.resumeAll();
+  }
+
+  private async initializeConnection(socket: WebSocket): Promise<void> {
+    let requestedExperimental = [...WORKSPACE_EXPERIMENTAL_OPERATIONS] as string[];
+    this.negotiatedInitialization = null;
+    this.unavailableExperimentalOperations.clear();
+
+    while (true) {
+      try {
+        const result = await this.call('initialize', {
+          protocol_version: '1.0.0',
+          identity: { name: 'omni-desktop', version: '1.0.0' },
+          platform: { os: 'browser', arch: 'unknown' },
+          capabilities: requestedCapabilities(requestedExperimental),
+        });
+        if (this.ws !== socket) {
+          throw new Error('WebSocket replaced during GUI protocol handshake');
+        }
+        this.negotiatedInitialization = result;
+        this.notify('initialized', {});
+        return;
+      } catch (error) {
+        const unsupported = unsupportedExperimentalCapabilities(error);
+        if (!unsupported) {
+          throw error;
+        }
+        const unsupportedSet = new Set(unsupported);
+        const reduced = requestedExperimental.filter((operation) => !unsupportedSet.has(operation));
+        if (reduced.length === requestedExperimental.length) {
+          throw error;
+        }
+        for (const operation of unsupported) {
+          this.unavailableExperimentalOperations.add(operation);
+        }
+        requestedExperimental = reduced;
+      }
+    }
   }
 
   disconnect(): void {
@@ -518,6 +672,16 @@ export class RPCClient {
 
     this.ws.send(serialized);
     return p;
+  }
+
+  private notify<Method extends keyof RpcClientNotificationMap>(
+    method: Method,
+    params: RpcClientNotificationMap[Method]
+  ): void {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      throw new Error('WebSocket not connected');
+    }
+    this.ws.send(JSON.stringify({ jsonrpc: '2.0' as const, method, params }));
   }
 
   private rejectAllPending(reason: string): void {

@@ -3,18 +3,14 @@
  * messages/alarms round-trips, the delete cascades, and the log bound
  * (docs/residents-in-projects-db-plan.md).
  */
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { runMigrations } from './migrate.js';
 import { ProjectsRepo } from './repo.js';
 import type { ResidentMessageRow, ResidentRow } from './types.js';
 
-let tmpDir: string;
 let db: DatabaseSync;
 let repo: ProjectsRepo;
 
@@ -43,17 +39,26 @@ const messageRow = (id: number, overrides: Partial<ResidentMessageRow> = {}): Re
   ...overrides,
 });
 
-beforeEach(() => {
-  tmpDir = mkdtempSync(join(tmpdir(), 'projects-db-resident-test-'));
-  db = new DatabaseSync(join(tmpDir, 'test.db'));
+beforeAll(() => {
+  db = new DatabaseSync(':memory:');
   db.exec('PRAGMA foreign_keys = ON');
   runMigrations(db);
   repo = new ProjectsRepo(db);
 });
 
 afterEach(() => {
+  db.exec(`
+    DELETE FROM resident_messages;
+    DELETE FROM resident_channels;
+    DELETE FROM resident_memories;
+    DELETE FROM resident_alarms;
+    DELETE FROM resident_agents;
+    DELETE FROM team_handbook;
+  `);
+});
+
+afterAll(() => {
   db.close();
-  rmSync(tmpDir, { recursive: true, force: true });
 });
 
 describe('resident roster', () => {
