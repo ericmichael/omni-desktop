@@ -1,7 +1,5 @@
 import type { FieldProps, LabelProps } from '@fluentui/react-components';
 import {
-  AvatarGroup,
-  AvatarGroupItem,
   Divider as LabeledDivider,
   Field,
   InfoLabel,
@@ -93,7 +91,7 @@ import { $glassEnabled } from '@/renderer/theme/use-glass';
 import type { Project, ResidentAgent, ResidentAgentRuntime, ResidentChannelMessage } from '@/shared/types';
 
 import type { AgentPresence } from './agent-avatar';
-import { AgentAvatar, participantPresence, presenceStatus } from './agent-avatar';
+import { AgentAvatar, AgentAvatarGroup, participantPresence, PRESENCE_LABEL, presenceStatus } from './agent-avatar';
 import { $dmSpokenReplies, speakDmMessage, toggleDmSpokenReplies } from './dm-voice';
 import {
   $residentStatus,
@@ -1506,6 +1504,7 @@ const MemberChip = memo(function MemberChip({
   // While busy the tooltip carries the wake reason — a one-line headline of
   // what the agent is on, without opening its session.
   const headline = busy && runtime?.lastReason ? ` · ${runtime.lastReason}` : '';
+  const presence = presenceStatus(state, agent.enabled);
   return (
     <Tooltip
       content={`Open ${agent.name}'s session — ${STATE_LABEL[state ?? 'parked']}${headline}`}
@@ -1513,9 +1512,16 @@ const MemberChip = memo(function MemberChip({
     >
       <InteractionTag size="small" shape="circular">
         <InteractionTagPrimary
-          media={<AgentAvatar name={agent.name} colorId={agent.id} presence={presenceStatus(state, agent.enabled)} />}
+          // 20px matches the AvatarContextProvider `InteractionTag size="small"`
+          // publishes; the chip is a 24px pill, so an unsized avatar would
+          // default to 32 and burst it.
+          media={<AgentAvatar name={agent.name} colorId={agent.id} size={20} presence={presence} />}
           onClick={handleClick}
-          aria-label={`Open ${agent.name}'s session`}
+          // The button's own label wins over everything in its subtree, so the
+          // avatar's off-screen status never reaches AT here — the label has
+          // to carry presence itself. It quotes the badge, not STATE_LABEL: a
+          // disabled agent reads `offline` while its runtime still says idle.
+          aria-label={`Open ${agent.name}'s session — ${PRESENCE_LABEL[presence]}`}
         >
           {agent.name}
         </InteractionTagPrimary>
@@ -1619,11 +1625,13 @@ const stopPropagation = (e: React.SyntheticEvent) => e.stopPropagation();
  *  threads, a stacked pair for agent↔agent), last-message snippet, time.
  *  This is the Conversations tab's browse row — sidebar DMs are nav rows
  *  (`DmNavRow`). */
+/** One agent identity inside a DM row: who it is, plus its live presence. */
+type DmAvatar = { name: string; colorId: string; presence?: AgentPresence };
+
 const DmRow = memo(function DmRow({
   channelId,
   title,
   avatars,
-  presence,
   snippet,
   lastAt,
   unread,
@@ -1631,10 +1639,9 @@ const DmRow = memo(function DmRow({
 }: {
   channelId: string;
   title: string;
-  /** name/colorId pairs — one for a user↔agent thread, two for agent↔agent. */
-  avatars: ReadonlyArray<{ name: string; colorId: string }>;
-  /** Live presence for the single-peer case. */
-  presence?: AgentPresence;
+  /** Identity of each thread participant that is an agent — one for a
+   *  user↔agent thread, two for agent↔agent — each with its live presence. */
+  avatars: ReadonlyArray<DmAvatar>;
   snippet: string;
   lastAt: number;
   unread: number;
@@ -1647,13 +1654,14 @@ const DmRow = memo(function DmRow({
     <button type="button" className={styles.row} onClick={handleClick}>
       <span className={styles.rowTop}>
         {single ? (
-          <AgentAvatar name={single.name} colorId={single.colorId} size={32} {...(presence ? { presence } : {})} />
+          <AgentAvatar
+            name={single.name}
+            colorId={single.colorId}
+            size={32}
+            {...(single.presence ? { presence: single.presence } : {})}
+          />
         ) : (
-          <AvatarGroup layout="stack" size={24}>
-            {avatars.map((a) => (
-              <AvatarGroupItem key={a.colorId} color="colorful" name={a.name} idForColor={a.colorId} />
-            ))}
-          </AvatarGroup>
+          <AgentAvatarGroup avatars={avatars} size={24} />
         )}
         <span className={styles.rowLines}>
           <span className={mergeClasses(styles.rowTitle, unread > 0 && styles.rowTitleUnread)}>
@@ -2240,16 +2248,14 @@ function AgentConversations({
         const pair = dmParticipants(t.id);
         const other = pair?.find((p) => p !== agent.id) ?? USER_PARTICIPANT;
         const peer = other === USER_PARTICIPANT ? null : roster.find((a) => a.id === other);
-        const presence =
-          other === USER_PARTICIPANT ? undefined : presenceStatus(statuses[other]?.state, peer?.enabled ?? true);
+        const presence = participantPresence(other, roster, statuses);
         const otherName = other === USER_PARTICIPANT ? 'You' : (peer?.name ?? other);
         return (
           <DmRow
             key={t.id}
             channelId={t.id}
             title={otherName}
-            avatars={[{ name: otherName, colorId: other }]}
-            {...(presence ? { presence } : {})}
+            avatars={[{ name: otherName, colorId: other, ...(presence ? { presence } : {}) }]}
             snippet={`${t.last.from === USER_PARTICIPANT ? 'You' : (t.last.fromName ?? t.last.from)}: ${t.last.text}`}
             lastAt={t.last.at}
             unread={unreadIn[t.id] ?? 0}
@@ -2769,16 +2775,18 @@ export function ResidentsTab(): React.JSX.Element {
   /** Row identity for a DM thread: the agent participants' avatars, and the
    *  peer's live presence when it's a user↔agent thread. */
   const dmRowIdentity = useCallback(
-    (channelId: string): { avatars: { name: string; colorId: string }[]; presence?: AgentPresence } => {
+    (channelId: string): { avatars: DmAvatar[] } => {
       const pair = dmParticipants(channelId);
       const agentIds = (pair ?? []).filter((p) => p !== USER_PARTICIPANT);
-      const avatars = agentIds.map((p) => ({ name: roster.find((a) => a.id === p)?.name ?? p, colorId: p }));
+      // Every agent in the thread carries its own presence — an observed
+      // agent↔agent row shows both, not just the first.
+      const avatars: DmAvatar[] = agentIds.map((p) => ({
+        name: roster.find((a) => a.id === p)?.name ?? p,
+        colorId: p,
+        ...(participantPresence(p, roster, statuses) ? { presence: participantPresence(p, roster, statuses) } : {}),
+      }));
       if (avatars.length === 0) {
         avatars.push({ name: 'You', colorId: USER_PARTICIPANT });
-      }
-      if (agentIds.length === 1 && agentIds[0]) {
-        const peer = roster.find((a) => a.id === agentIds[0]);
-        return { avatars, presence: presenceStatus(statuses[agentIds[0]]?.state, peer?.enabled ?? true) };
       }
       return { avatars };
     },
@@ -2799,14 +2807,10 @@ export function ResidentsTab(): React.JSX.Element {
               name={single.name}
               colorId={single.colorId}
               size={28}
-              {...(identity.presence ? { presence: identity.presence } : {})}
+              {...(single.presence ? { presence: single.presence } : {})}
             />
           ) : (
-            <AvatarGroup layout="stack" size={24}>
-              {identity.avatars.map((a) => (
-                <AvatarGroupItem key={a.colorId} color="colorful" name={a.name} idForColor={a.colorId} />
-              ))}
-            </AvatarGroup>
+            <AgentAvatarGroup avatars={identity.avatars} size={24} />
           )}
           <span className={styles.feedHeaderTitle}>{dmTitle(selectedChannel)}</span>
           {selectedIsAgentDm && <span className={styles.feedHeaderMeta}>agent↔agent — observed</span>}

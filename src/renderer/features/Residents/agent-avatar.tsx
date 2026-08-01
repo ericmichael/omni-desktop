@@ -1,8 +1,23 @@
 import type { PresenceBadgeStatus } from '@fluentui/react-components';
-import { Avatar } from '@fluentui/react-components';
+import { Avatar, AvatarGroup, AvatarGroupItem, makeStyles } from '@fluentui/react-components';
 import { memo } from 'react';
 
 import type { ResidentAgent, ResidentAgentRuntime } from '@/shared/types';
+
+const useStyles = makeStyles({
+  /** Off-screen but announced — the presence dot's text equivalent. */
+  srOnly: {
+    position: 'absolute',
+    width: '1px',
+    height: '1px',
+    padding: 0,
+    margin: '-1px',
+    overflow: 'hidden',
+    clipPath: 'inset(50%)',
+    whiteSpace: 'nowrap',
+    border: 'none',
+  },
+});
 
 /** The presence values agent surfaces can show — the product has no "away"
  *  or "out of office" for agents, so the type pins the three we derive. */
@@ -50,43 +65,105 @@ export const participantPresence = (
   return agent ? presenceStatus(statuses[participantId]?.state, agent.enabled) : undefined;
 };
 
-/** The Agents surface's one identity mark: colorful Avatar keyed by the
- *  STABLE id (a rename keeps the color), presence composed in where live
- *  state matters. */
+/** Spoken form of each presence — Fluent's own PresenceBadge wording, so the
+ *  text equivalent matches what the glyph means. */
+export const PRESENCE_LABEL: Record<AgentPresence, string> = {
+  available: 'available',
+  busy: 'busy',
+  offline: 'offline',
+};
+
+export type AvatarSize = 20 | 24 | 28 | 32 | 36 | 40 | 48;
+
+/**
+ * The badge slot shared by every agent avatar. Below 28px Fluent auto-drops
+ * the badge to `tiny` (6px), where the status glyph is illegible — pin the
+ * 10px `extra-small` so small rows still read, without swallowing the mark.
+ */
+const presenceBadge = (presence: AgentPresence, size: AvatarSize | undefined) => ({
+  status: presence,
+  ...(size !== undefined && size < 28 ? { size: 'extra-small' as const } : {}),
+});
+
+/**
+ * The Agents surface's one identity mark: colorful Avatar keyed by the STABLE
+ * id (a rename keeps the color), presence composed in where live state
+ * matters.
+ *
+ * Accessibility: the avatar itself is ALWAYS decorative — every surface
+ * renders the agent's name as text right beside it, and an exposed Avatar
+ * folds both its name and its badge into the enclosing row's
+ * name-from-content ("Ada Lovelace busy Ada Lovelace Engineer"). Instead the
+ * mark stays `aria-hidden` and the status is announced exactly once, by the
+ * off-screen sibling below, which lands inside the row's own label. Sighted
+ * users get the same information from the badge glyph, which differs in SHAPE
+ * per status at every size — never colour alone.
+ *
+ * `size` is deliberately un-defaulted: Fluent resolves `props.size ??
+ * avatarContextSize ?? 32`, so a hardcoded default would beat the
+ * `AvatarContextProvider` that slots like `InteractionTagPrimary` publish and
+ * blow the avatar out of its container.
+ */
 export const AgentAvatar = memo(function AgentAvatar({
   name,
   colorId,
   presence,
-  size = 32,
+  size,
 }: {
   name: string;
   /** Stable color key — agent id, or the `user` participant. */
   colorId: string;
   presence?: AgentPresence;
-  size?: 20 | 24 | 28 | 32 | 36 | 40 | 48;
+  /** Omit to inherit an ambient Fluent avatar context (slot media, etc). */
+  size?: AvatarSize;
 }): React.JSX.Element {
+  const styles = useStyles();
   return (
-    <Avatar
-      color="colorful"
-      name={name}
-      idForColor={colorId}
-      size={size}
-      /* A presence-less avatar always sits beside its own name, so it stays
-         decorative. With a badge the avatar becomes the ONLY carrier of
-         status, so it must stay exposed: Fluent then labels the root
-         `<name> <status>` via aria-labelledby, and the badge draws a distinct
-         glyph per status at every size — status is never colour alone. */
-      {...(presence
-        ? {
-            badge: {
-              status: presence,
-              /* Below 28px Fluent auto-drops the badge to `tiny` (6px), where
-                 the status glyph is illegible — pin the 10px size small rows
-                 still read, without swallowing the avatar. */
-              ...(size < 28 ? { size: 'extra-small' as const } : {}),
-            },
-          }
-        : { 'aria-hidden': 'true' as const })}
-    />
+    <>
+      <Avatar
+        color="colorful"
+        name={name}
+        idForColor={colorId}
+        aria-hidden="true"
+        {...(size !== undefined ? { size } : {})}
+        {...(presence ? { badge: presenceBadge(presence, size) } : {})}
+      />
+      {presence ? <span className={styles.srOnly}>{PRESENCE_LABEL[presence]}</span> : null}
+    </>
+  );
+});
+
+/**
+ * Two-agent identity (an observed agent↔agent DM). `spread`, never `stack`:
+ * stacked items carry a negative left margin that clips the leading avatar's
+ * badge, and the whole point here is that both agents' presence is readable.
+ * Same decorative-mark + one off-screen status rule as `AgentAvatar`, except
+ * the status text names each agent — with two of them, "busy" alone would not
+ * say whose.
+ */
+export const AgentAvatarGroup = memo(function AgentAvatarGroup({
+  avatars,
+  size = 24,
+}: {
+  avatars: ReadonlyArray<{ name: string; colorId: string; presence?: AgentPresence }>;
+  size?: AvatarSize;
+}): React.JSX.Element {
+  const styles = useStyles();
+  const spoken = avatars.flatMap((a) => (a.presence ? [`${a.name} ${PRESENCE_LABEL[a.presence]}`] : []));
+  return (
+    <>
+      <AvatarGroup layout="spread" size={size} aria-hidden="true">
+        {avatars.map((a) => (
+          <AvatarGroupItem
+            key={a.colorId}
+            color="colorful"
+            name={a.name}
+            idForColor={a.colorId}
+            {...(a.presence ? { badge: presenceBadge(a.presence, size) } : {})}
+          />
+        ))}
+      </AvatarGroup>
+      {spoken.length > 0 ? <span className={styles.srOnly}>{spoken.join(', ')}</span> : null}
+    </>
   );
 });
