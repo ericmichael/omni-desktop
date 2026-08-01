@@ -1,12 +1,34 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { OmniagentsRpcError } from './client';
-import { RPCClient } from './client';
+import { RPCClient, WORKSPACE_EXPERIMENTAL_OPERATIONS } from './client';
+
+type InitializeRequest = {
+  id: number;
+  method: 'initialize';
+  params: {
+    protocol_version: string;
+    identity: { name: string; version: string };
+    platform: { os: string; arch: string };
+    capabilities: {
+      experimental_operations: string[];
+      [key: string]: unknown;
+    };
+  };
+};
+
+const initializeResult = (request: InitializeRequest) => ({
+  protocol_version: '1.0.0',
+  identity: { name: 'omniagents', version: '1.0.0' },
+  platform: { os: 'linux', arch: 'x86_64' },
+  capabilities: request.params.capabilities,
+});
 
 class MockWebSocket {
   static OPEN = 1;
   static CONNECTING = 0;
   static instances: MockWebSocket[] = [];
+  static autoInitialize = true;
 
   readyState = MockWebSocket.CONNECTING;
   onmessage: ((event: { data: string }) => void) | null = null;
@@ -38,6 +60,13 @@ class MockWebSocket {
 
   send(payload: string): void {
     this.sent.push(payload);
+    const request = JSON.parse(payload) as { method?: string };
+    if (request.method === 'initialize' && MockWebSocket.autoInitialize) {
+      queueMicrotask(() => {
+        const initialize = request as InitializeRequest;
+        this.receive({ jsonrpc: '2.0', id: initialize.id, result: initializeResult(initialize) });
+      });
+    }
   }
 
   receive(payload: unknown): void {
@@ -55,12 +84,144 @@ async function connectedClient(): Promise<{ client: RPCClient; socket: MockWebSo
   const socket = MockWebSocket.instances.at(-1)!;
   socket.open();
   await connection;
+  // Most tests below exercise post-connect calls. Handshake ordering has
+  // dedicated assertions and request ids intentionally remain monotonic.
+  socket.sent.length = 0;
   return { client, socket };
 }
+
+describe('RPCClient GUI protocol handshake', () => {
+  beforeEach(() => {
+    MockWebSocket.instances = [];
+    MockWebSocket.autoInitialize = true;
+    vi.stubGlobal('WebSocket', MockWebSocket);
+  });
+
+  afterEach(() => {
+    MockWebSocket.autoInitialize = true;
+    vi.unstubAllGlobals();
+  });
+
+  it('sends initialize then initialized before connect resolves', async () => {
+    MockWebSocket.autoInitialize = false;
+    const client = new RPCClient('ws://example.test/ws');
+    let connected = false;
+    const connection = client.connect().then(() => {
+      connected = true;
+    });
+    const socket = MockWebSocket.instances[0]!;
+
+    socket.open();
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(1));
+
+    const initialize = JSON.parse(socket.sent[0]!) as InitializeRequest;
+    expect(connected).toBe(false);
+    expect(client.connectionState).toBe('connecting');
+    expect(initialize).toEqual({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'initialize',
+      params: {
+        protocol_version: '1.0.0',
+        identity: { name: 'omni-desktop', version: '1.0.0' },
+        platform: { os: 'browser', arch: 'unknown' },
+        capabilities: {
+          realtime: true,
+          mcp_apps: true,
+          client_functions: true,
+          approvals: true,
+          artifacts: true,
+          replay: true,
+          terminal: true,
+          experimental_operations: [...WORKSPACE_EXPERIMENTAL_OPERATIONS],
+          disabled_notifications: [],
+        },
+      },
+    });
+
+    socket.receive({ jsonrpc: '2.0', id: initialize.id, result: initializeResult(initialize) });
+    await connection;
+
+    expect(socket.sent.map((frame) => JSON.parse(frame))).toEqual([
+      initialize,
+      { jsonrpc: '2.0', method: 'initialized', params: {} },
+    ]);
+    expect(client.isConnected).toBe(true);
+    expect(client.initializeResult).toEqual(initializeResult(initialize));
+    client.dispose();
+  });
+
+  it('retries without explicitly unsupported experimental operations', async () => {
+    MockWebSocket.autoInitialize = false;
+    const client = new RPCClient('ws://example.test/ws');
+    const connection = client.connect();
+    const socket = MockWebSocket.instances[0]!;
+    socket.open();
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(1));
+
+    const first = JSON.parse(socket.sent[0]!) as InitializeRequest;
+    socket.receive({
+      jsonrpc: '2.0',
+      id: first.id,
+      error: {
+        code: -32013,
+        message: 'Unsupported experimental capabilities',
+        data: { kind: 'capability_not_negotiated', unsupported_capabilities: ['git_push'] },
+      },
+    });
+
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(2));
+    const second = JSON.parse(socket.sent[1]!) as InitializeRequest;
+    expect(first.params.capabilities.experimental_operations).toContain('git_push');
+    expect(second.params.capabilities.experimental_operations).not.toContain('git_push');
+    expect(second.params.capabilities.experimental_operations).toHaveLength(
+      WORKSPACE_EXPERIMENTAL_OPERATIONS.length - 1
+    );
+
+    socket.receive({ jsonrpc: '2.0', id: second.id, result: initializeResult(second) });
+    await connection;
+
+    expect(JSON.parse(socket.sent[2]!)).toEqual({ jsonrpc: '2.0', method: 'initialized', params: {} });
+    expect(client.degradedExperimentalOperations).toEqual(['git_push']);
+    expect(client.supportsExperimentalOperation('git_push')).toBe(false);
+    expect(client.supportsExperimentalOperation('fs_stat')).toBe(true);
+    client.dispose();
+  });
+
+  it('does not degrade an unrelated capability mismatch', async () => {
+    MockWebSocket.autoInitialize = false;
+    const client = new RPCClient('ws://example.test/ws');
+    const connection = client.connect();
+    const socket = MockWebSocket.instances[0]!;
+    socket.open();
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(1));
+
+    const initialize = JSON.parse(socket.sent[0]!) as InitializeRequest;
+    socket.receive({
+      jsonrpc: '2.0',
+      id: initialize.id,
+      error: {
+        code: -32013,
+        message: 'A mandatory notification cannot be disabled',
+        data: { kind: 'mandatory_capability_disabled', disabled: ['run_started'] },
+      },
+    });
+
+    await expect(connection).rejects.toMatchObject({
+      name: 'OmniagentsRpcError',
+      code: -32013,
+      message: 'A mandatory notification cannot be disabled',
+    });
+    expect(socket.sent).toHaveLength(1);
+    expect(client.initializeResult).toBeNull();
+    client.dispose();
+  });
+});
 
 describe('RPCClient generated protocol integration', () => {
   beforeEach(() => {
     MockWebSocket.instances = [];
+    MockWebSocket.autoInitialize = true;
     vi.stubGlobal('WebSocket', MockWebSocket);
   });
 
@@ -75,7 +236,7 @@ describe('RPCClient generated protocol integration', () => {
 
     expect(request).toEqual({
       jsonrpc: '2.0',
-      id: 1,
+      id: 2,
       method: 'delete_session',
       params: { session_id: 'session-1' },
     });
@@ -333,6 +494,12 @@ describe('RPCClient durable event replay', () => {
     await vi.waitFor(() => expect(MockWebSocket.instances.length).toBeGreaterThan(1), { timeout: 3000 });
     const socket2 = MockWebSocket.instances.at(-1)!;
     socket2.open();
+
+    await vi.waitFor(() => expect(socket2.sent).toHaveLength(3), { timeout: 3000 });
+    expect(socket2.sent.slice(0, 2).map((frame) => (JSON.parse(frame) as { method: string }).method)).toEqual([
+      'initialize',
+      'initialized',
+    ]);
 
     // The fresh connection must resume from the stored cursor before any
     // live event arrives, recovering exactly the missed events.

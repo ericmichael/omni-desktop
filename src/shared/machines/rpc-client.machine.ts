@@ -139,6 +139,10 @@ export const rpcClientMachine = setup({
         WS_OPEN: { target: 'connected', actions: 'resetReconnect' },
         WS_ERROR: { target: 'reconnecting' },
         WS_CLOSE: { target: 'reconnecting' },
+        // initialize is a regular correlated JSON-RPC call, made while the
+        // transport is open but before application readiness.
+        CALL_STARTED: { actions: 'incrementPending' },
+        CALL_SETTLED: { actions: 'decrementPending' },
       },
       after: {
         [WS_CONNECT_TIMEOUT_MS]: { target: 'reconnecting' },
