@@ -36,6 +36,8 @@ type JSONRPCNotification = {
 
 export type ServerEvent = JSONRPCNotification;
 
+export type RPCConnectionState = 'disconnected' | 'connecting' | 'connected' | 'reconnecting';
+
 type Listener = (payload: any) => void;
 
 export { OmniagentsRpcError } from '@/shared/omniagents-rpc';
@@ -195,7 +197,7 @@ export class RPCClient {
   }
 
   /** Current connection state from the machine. */
-  get connectionState(): 'disconnected' | 'connecting' | 'connected' | 'reconnecting' {
+  get connectionState(): RPCConnectionState {
     if (this.disposed) {
       return 'disconnected';
     }
@@ -571,6 +573,26 @@ export class RPCClient {
     return () => this.resyncListeners.delete(handler);
   }
 
+  /**
+   * Observe application-level connection readiness. The current state is
+   * delivered immediately; subsequent `connected` values are emitted only
+   * after the GUI handshake has completed. This is intentionally higher
+   * level than raw WebSocket events so connection-bound resources (watches,
+   * transfers) can rebuild safely after reconnect.
+   */
+  onConnectionState(handler: (state: RPCConnectionState) => void): () => void {
+    let previous = this.connectionState;
+    handler(previous);
+    const subscription = this.actor.subscribe((snapshot) => {
+      const state = snapshot.value as RPCConnectionState;
+      if (state !== previous) {
+        previous = state;
+        handler(state);
+      }
+    });
+    return () => subscription.unsubscribe();
+  }
+
   private emitResyncRequired(sessionId: string): void {
     for (const fn of this.resyncListeners) {
       try {
@@ -629,6 +651,19 @@ export class RPCClient {
         fn(payload);
       } catch {}
     }
+  }
+
+  /** Typed request entry point for protocol-specific client modules. */
+  request<Method extends keyof RpcMethodMap>(
+    method: Method,
+    ...args: Record<never, never> extends RpcMethodMap[Method]['params']
+      ? [params?: RpcMethodMap[Method]['params']]
+      : [params: RpcMethodMap[Method]['params']]
+  ): Promise<RpcMethodMap[Method]['result']> {
+    if (!this.isConnected) {
+      return Promise.reject(new Error('RPC client handshake is not complete'));
+    }
+    return this.call(method, ...args);
   }
 
   private async call<Method extends keyof RpcMethodMap>(

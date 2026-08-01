@@ -151,6 +151,49 @@ describe('RPCClient GUI protocol handshake', () => {
     client.dispose();
   });
 
+  it('exposes typed requests and handshake-level connection state changes', async () => {
+    const client = new RPCClient('ws://example.test/ws');
+    const states: string[] = [];
+    const unsubscribe = client.onConnectionState((state) => states.push(state));
+    const connection = client.connect();
+    const socket = MockWebSocket.instances[0]!;
+    socket.open();
+    await connection;
+
+    const request = client.request('fs_stat', { session_id: 'session', path: '.' });
+    const frame = JSON.parse(socket.sent.at(-1)!) as { id: number; method: string; params: unknown };
+    expect(frame).toMatchObject({ method: 'fs_stat', params: { session_id: 'session', path: '.' } });
+    socket.receive({ jsonrpc: '2.0', id: frame.id, result: { path: '.', type: 'directory' } });
+
+    await expect(request).resolves.toEqual({ path: '.', type: 'directory' });
+    expect(states).toEqual(['disconnected', 'connecting', 'connected']);
+    unsubscribe();
+    client.dispose();
+  });
+
+  it('does not allow public fs/git requests onto a raw-open socket before initialized', async () => {
+    MockWebSocket.autoInitialize = false;
+    const client = new RPCClient('ws://example.test/ws');
+    const connection = client.connect();
+    const socket = MockWebSocket.instances[0]!;
+    socket.open();
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(1));
+
+    await expect(client.request('fs_stat', { session_id: 'session', path: '.' })).rejects.toThrow(
+      'handshake is not complete'
+    );
+    await expect(client.request('git_status', { session_id: 'session', repo: '.' })).rejects.toThrow(
+      'handshake is not complete'
+    );
+    expect(socket.sent.map((frame) => JSON.parse(frame).method)).toEqual(['initialize']);
+
+    const initialize = JSON.parse(socket.sent[0]!) as InitializeRequest;
+    socket.receive({ jsonrpc: '2.0', id: initialize.id, result: initializeResult(initialize) });
+    await connection;
+    expect(socket.sent.map((frame) => JSON.parse(frame).method)).toEqual(['initialize', 'initialized']);
+    client.dispose();
+  });
+
   it('retries without explicitly unsupported experimental operations', async () => {
     MockWebSocket.autoInitialize = false;
     const client = new RPCClient('ws://example.test/ws');
