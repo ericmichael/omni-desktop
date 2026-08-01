@@ -69,6 +69,17 @@ const badges = (scope: ParentNode = host): HTMLElement[] => [
 const badgeLabels = (scope: ParentNode = host): (string | null)[] =>
   badges(scope).map((b) => b.getAttribute('aria-label'));
 const avatars = (scope: ParentNode = host): HTMLElement[] => [...scope.querySelectorAll<HTMLElement>('.fui-Avatar')];
+/** The off-screen span carrying the presence word. */
+const statusSpan = (scope: ParentNode = host): HTMLElement => {
+  const span = [...scope.querySelectorAll<HTMLElement>('span')].find(
+    (el) => el.children.length === 0 && ['available', 'busy', 'offline'].includes(el.textContent ?? '')
+  );
+  if (!span) {
+    throw new Error('no presence status text rendered');
+  }
+  return span;
+};
+
 const first = (els: HTMLElement[]): Element => {
   const el = els[0];
   if (!el) {
@@ -248,6 +259,24 @@ describe('AgentAvatar', () => {
     expect(host.textContent).toContain(label);
   });
 
+  it('hides the status text in a way that KEEPS it in the accessibility tree', () => {
+    // The whole D2/D3 fix rests on this one technique. `display: none` or
+    // `visibility: hidden` would look identical on screen and identical in
+    // every other assertion here, while silently deleting the status from
+    // assistive tech — so pin both halves: off-screen, but still rendered.
+    render(<AgentAvatar name="Ada Lovelace" colorId="a1" size={20} presence="busy" />);
+    const span = statusSpan();
+    const style = getComputedStyle(span);
+
+    // Still in the a11y tree.
+    expect(style.display).not.toBe('none');
+    expect(style.visibility).not.toBe('hidden');
+    // Still off-screen — a "fix" that just shows the word is not a fix.
+    expect(style.position).toBe('absolute');
+    expect(style.width).toBe('1px');
+    expect(style.height).toBe('1px');
+  });
+
   it('keeps the mark itself decorative so a row never announces the agent twice', () => {
     render(<AgentAvatar name="Ada Lovelace" colorId="a1" size={32} presence="busy" />);
     expect(first(avatars()).getAttribute('aria-hidden')).toBe('true');
@@ -327,6 +356,27 @@ describe('AgentAvatar inside a Fluent slot', () => {
     }
   });
 
+  it('still pins the badge when the size comes from the context rather than a prop', () => {
+    // The pin keys off the PROP, which is undefined here — so an unsized
+    // avatar in a compact slot must not fall through to Fluent's 6px `tiny`.
+    render(
+      <InteractionTag size="small" shape="circular">
+        <InteractionTagPrimary media={<AgentAvatar name="Ada Lovelace" colorId="a1" presence="busy" />}>
+          Ada
+        </InteractionTagPrimary>
+      </InteractionTag>
+    );
+    const inherited = atomClasses(first(badges()));
+
+    render(<Avatar name="Ada Lovelace" size={20} badge={{ status: 'busy', size: 'extra-small' }} />);
+    const extraSmall = atomClasses(first(badges()));
+    render(<Avatar name="Ada Lovelace" size={20} badge={{ status: 'busy' }} />);
+    const tiny = atomClasses(first(badges()));
+
+    expect(tiny).not.toEqual(extraSmall);
+    expect(inherited).toEqual(extraSmall);
+  });
+
   it('resolves the same 20px when the member chip asks for it explicitly', () => {
     const { only20, only32 } = sizeAtoms();
     const explicit = inSmallTag(<AgentAvatar name="Ada Lovelace" colorId="a1" size={20} presence="busy" />);
@@ -377,6 +427,16 @@ describe('AgentAvatarGroup', () => {
   it('names each agent in the status text, since a bare status could not say whose', () => {
     render(<AgentAvatarGroup avatars={pair} size={24} />);
     expect(accessibleName(host)).toBe('Ada busy, Grace available');
+  });
+
+  it('hides its status text the same reachable way', () => {
+    render(<AgentAvatarGroup avatars={pair} size={24} />);
+    const span = [...host.querySelectorAll<HTMLElement>('span')].find((el) => el.textContent?.includes('Ada busy'));
+    expect(span).toBeDefined();
+    const style = getComputedStyle(span as HTMLElement);
+    expect(style.display).not.toBe('none');
+    expect(style.visibility).not.toBe('hidden');
+    expect(style.position).toBe('absolute');
   });
 });
 

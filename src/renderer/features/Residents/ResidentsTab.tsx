@@ -1621,13 +1621,14 @@ function MemberBar({
 
 const stopPropagation = (e: React.SyntheticEvent) => e.stopPropagation();
 
-/** A DM thread row: the peer's identity (avatar + presence for your own
- *  threads, a stacked pair for agent↔agent), last-message snippet, time.
- *  This is the Conversations tab's browse row — sidebar DMs are nav rows
- *  (`DmNavRow`). */
 /** One agent identity inside a DM row: who it is, plus its live presence. */
 type DmAvatar = { name: string; colorId: string; presence?: AgentPresence };
 
+/** A DM thread row: the peer's identity (avatar + presence), last-message
+ *  snippet, time. This is the Conversations tab's browse row — sidebar DMs
+ *  are nav rows (`DmNavRow`). The multi-avatar branch is the component's
+ *  declared contract but currently unreachable: the one call site renders an
+ *  agent's own Conversations tab, which always names a single counterparty. */
 const DmRow = memo(function DmRow({
   channelId,
   title,

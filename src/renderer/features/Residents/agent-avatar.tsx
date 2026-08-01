@@ -77,12 +77,21 @@ export type AvatarSize = 20 | 24 | 28 | 32 | 36 | 40 | 48;
 
 /**
  * The badge slot shared by every agent avatar. Below 28px Fluent auto-drops
- * the badge to `tiny` (6px), where the status glyph is illegible — pin the
- * 10px `extra-small` so small rows still read, without swallowing the mark.
+ * the badge to `tiny`, whose 6px box crops the glyph down to a bare dot — pin
+ * `extra-small`, whose 10px box shows the whole shape, so small rows still
+ * read a status rather than just a colour. (Both sizes ship the SAME 10px SVG;
+ * only the badge box and its cutout differ.)
+ *
+ * An omitted `size` also pins, rather than falling through to Fluent: the
+ * resolved size then comes from an ambient `AvatarContextProvider` that this
+ * helper cannot see, and every context in the app is a compact slot
+ * (`InteractionTag` publishes 16/20/28, all of which want `extra-small` or
+ * smaller). Guessing `extra-small` there can only ever raise a 6px badge, never
+ * shrink a correct one.
  */
 const presenceBadge = (presence: AgentPresence, size: AvatarSize | undefined) => ({
   status: presence,
-  ...(size !== undefined && size < 28 ? { size: 'extra-small' as const } : {}),
+  ...(size === undefined || size < 28 ? { size: 'extra-small' as const } : {}),
 });
 
 /**
