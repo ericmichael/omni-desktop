@@ -5,6 +5,7 @@ export type AppKind =
   | 'builtin-code'
   | 'builtin-desktop'
   | 'builtin-browser'
+  | 'builtin-files'
   | 'builtin-terminal'
   | 'webview';
 
@@ -85,6 +86,16 @@ export const BUILTIN_APPS: AppDescriptor[] = [
     scope: 'always',
     builtin: true,
     order: 30,
+    columnScoped: true,
+  },
+  {
+    id: 'files',
+    label: 'Files',
+    icon: 'Folder20Regular',
+    kind: 'builtin-files',
+    scope: 'always',
+    builtin: true,
+    order: 35,
     columnScoped: true,
   },
   {

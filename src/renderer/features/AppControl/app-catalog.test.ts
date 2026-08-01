@@ -43,6 +43,12 @@ describe('buildAppCatalog', () => {
     expect(terminal!.handleId).toBe('tab-t1:terminal');
   });
 
+  it('lists the native Files surface without claiming separate app-control support', () => {
+    const cat = buildAppCatalog(base({ filter: { tabId: 't1', allowGlobal: true } }));
+    const files = cat.find((app) => app.id === 'files' && app.tabId === 't1');
+    expect(files).toMatchObject({ available: true, controllable: false, kind: 'builtin-files', running: false });
+  });
+
   it('excludes the agent chat surface from the catalog', () => {
     const cat = buildAppCatalog(base({ filter: { tabId: 't1', allowGlobal: true } }));
     expect(cat.some((a) => a.id === 'chat')).toBe(false);

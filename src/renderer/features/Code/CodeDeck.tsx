@@ -1569,6 +1569,7 @@ BrowserColumn.displayName = 'BrowserColumn';
 type SidecarBodyProps = {
   app: AppDescriptor;
   originTabId: CodeTabId;
+  filesHost: HTMLDivElement;
   sandboxUrls: { services?: Record<string, string> } | undefined;
   previewUrl?: string;
   onPreviewUrlChange?: (url: string) => void;
@@ -1583,7 +1584,7 @@ type SidecarBodyProps = {
  * browser page, loaded code-server session, etc.
  */
 const SidecarBody = memo(
-  ({ app, originTabId, sandboxUrls, previewUrl, onPreviewUrlChange, isGlass, hidden }: SidecarBodyProps) => {
+  ({ app, originTabId, filesHost, sandboxUrls, previewUrl, onPreviewUrlChange, isGlass, hidden }: SidecarBodyProps) => {
     const styles = useStyles();
     const registryProps = useMemo(
       () => ({
@@ -1611,6 +1612,8 @@ const SidecarBody = memo(
       );
     } else if (app.kind === 'builtin-terminal') {
       body = <ConsoleStarted tabId={originTabId} />;
+    } else if (app.kind === 'builtin-files') {
+      body = <TabContentSlot host={filesHost} />;
     } else if (app.kind === 'builtin-code') {
       body = sandboxUrls?.services?.['code_server'] ? (
         <Webview src={sandboxUrls.services['code_server']} showUnavailable={false} registry={registryProps} />
@@ -1651,6 +1654,7 @@ const SidecarColumn = memo(
   ({
     originTab,
     app,
+    filesHost,
     sandboxUrls,
     previewUrl,
     onPreviewUrlChange,
@@ -1661,6 +1665,7 @@ const SidecarColumn = memo(
   }: {
     originTab: CodeTab;
     app: AppDescriptor;
+    filesHost: HTMLDivElement;
     sandboxUrls: { services?: Record<string, string> } | undefined;
     previewUrl?: string;
     onPreviewUrlChange?: (url: string) => void;
@@ -1723,6 +1728,7 @@ const SidecarColumn = memo(
                 key={mountedApp.id}
                 app={mountedApp}
                 originTabId={originTab.id}
+                filesHost={filesHost}
                 sandboxUrls={sandboxUrls}
                 previewUrl={previewUrl}
                 onPreviewUrlChange={onPreviewUrlChange}
@@ -2076,6 +2082,7 @@ export const CodeDeck = memo(() => {
   // detached host that the live layout mode's TabContentSlot adopts.
   const sessionTabs = useMemo(() => tabs.filter((t) => !t.customAppId), [tabs]);
   const contentHostsRef = useRef<Map<CodeTabId, HTMLDivElement>>(new Map());
+  const filesHostsRef = useRef<Map<CodeTabId, HTMLDivElement>>(new Map());
   const getContentHost = useCallback((tabId: CodeTabId): HTMLDivElement => {
     let host = contentHostsRef.current.get(tabId);
     if (!host) {
@@ -2085,11 +2092,27 @@ export const CodeDeck = memo(() => {
     }
     return host;
   }, []);
+  const getFilesHost = useCallback((tabId: CodeTabId): HTMLDivElement => {
+    let host = filesHostsRef.current.get(tabId);
+    if (!host) {
+      host = document.createElement('div');
+      host.style.width = '100%';
+      host.style.height = '100%';
+      host.style.minHeight = '0';
+      filesHostsRef.current.set(tabId, host);
+    }
+    return host;
+  }, []);
   useEffect(() => {
     const live = new Set<string>(sessionTabs.map((t) => t.id));
     for (const id of [...contentHostsRef.current.keys()]) {
       if (!live.has(id)) {
         contentHostsRef.current.delete(id);
+      }
+    }
+    for (const id of [...filesHostsRef.current.keys()]) {
+      if (!live.has(id)) {
+        filesHostsRef.current.delete(id);
       }
     }
   }, [sessionTabs]);
@@ -2755,6 +2778,7 @@ export const CodeDeck = memo(() => {
                             <SidecarColumn
                               originTab={tab}
                               app={mountedSidecarApp}
+                              filesHost={getFilesHost(tab.id)}
                               sandboxUrls={tabSandboxUrls}
                               previewUrl={previewUrls[tab.id]}
                               onPreviewUrlChange={(url) => handlePreviewUrlChange(tab.id, url)}
@@ -2887,6 +2911,7 @@ export const CodeDeck = memo(() => {
               dockTargetId={tile ? `code-deck-dock-target-${tab.id}` : undefined}
               isGlass={isGlass}
               sidecarMode={tile}
+              filesHost={getFilesHost(tab.id)}
             />,
             getContentHost(tab.id),
             `tab-content-${tab.id}`

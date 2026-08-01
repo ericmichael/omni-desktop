@@ -49,6 +49,8 @@ type OmniAgentsAppProps = {
    *  pre-fill the workspace chip so it doesn't flash "Select workspace" while
    *  the chat-boot RPC resolves. */
   workspaceDir?: string;
+  /** Additional column UI that must share this exact RPC connection. */
+  providerChildren?: ReactNode;
 };
 
 const ThemeSync = ({ children }: { children: ReactNode }) => {
@@ -90,6 +92,7 @@ export const OmniAgentsApp = ({
   ticketId,
   routineId,
   workspaceDir,
+  providerChildren,
 }: OmniAgentsAppProps) => {
   // Resolve relative ``/proxy/...`` payloads against the launcher's actual
   // origin — same-origin in browser server mode, cloud baseUrl in
@@ -125,6 +128,7 @@ export const OmniAgentsApp = ({
             routineId={routineId}
             workspaceDir={workspaceDir}
           />
+          {providerChildren}
         </ThemeSync>
       </RPCClientProvider>
     </UiConfigProvider>

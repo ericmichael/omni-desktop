@@ -40,6 +40,7 @@ type LaunchedApp = {
 
 type E2eApp = {
   readonly page: Page;
+  readonly workspaceDir: string;
   restart: () => Promise<Page>;
 };
 
@@ -188,6 +189,9 @@ export const test = base.extend<E2eFixtures>({
     const app: E2eApp = {
       get page() {
         return launched.page;
+      },
+      get workspaceDir() {
+        return state.workspaceDir;
       },
       restart: async () => {
         await launched.close();

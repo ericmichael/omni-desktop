@@ -6,6 +6,7 @@ export type E2eState = {
   rootDir: string;
   homeDir: string;
   xdgConfigHome: string;
+  workspaceDir: string;
   cleanup: () => void;
 };
 
@@ -13,6 +14,7 @@ export type SeedState =
   | 'blank'
   | 'planning'
   | 'no-workspace'
+  | 'workspace-files'
   | 'lazy-ready'
   | 'lazy-error-pending'
   | 'lazy-error-empty';
@@ -32,6 +34,52 @@ const modelsConfig = {
 };
 
 const seededAt = 1_700_000_000_000;
+
+const workspaceFilesSeed = (workspaceDir: string) => ({
+  projects: [
+    {
+      id: 'proj_e2e_workspace_files',
+      label: 'Workspace Files',
+      slug: 'workspace-files',
+      sources: [
+        {
+          id: 'src_e2e_workspace_files',
+          mountName: 'workspace-files',
+          kind: 'local',
+          workspaceDir,
+          gitDetected: false,
+        },
+      ],
+      createdAt: seededAt,
+    },
+  ],
+  codeTabs: [
+    {
+      id: 'code-e2e-workspace-files',
+      projectId: 'proj_e2e_workspace_files',
+      sessionId: 'session-e2e-workspace-files',
+      workspaceDir,
+      profileName: 'host',
+      profileNameExplicit: true,
+      createdAt: seededAt,
+      activatedAt: seededAt,
+    },
+  ],
+  activeCodeTabId: 'code-e2e-workspace-files',
+  codeLayoutMode: 'focus',
+});
+
+function seedWorkspaceFiles(workspaceDir: string): void {
+  const sourceDir = path.join(workspaceDir, 'src');
+  mkdirSync(sourceDir, { recursive: true });
+  writeFileSync(path.join(workspaceDir, 'README.md'), '# Workspace files fixture\n', 'utf-8');
+  writeFileSync(
+    path.join(sourceDir, 'index.ts'),
+    "export const greeting = 'hello';\r\nconsole.log(greeting);\r\n",
+    'utf-8'
+  );
+  writeFileSync(path.join(sourceDir, 'utility.ts'), 'export const answer = 42;\n', 'utf-8');
+}
 
 const planningSeed = {
   projects: [
@@ -79,7 +127,7 @@ const planningSeed = {
   ],
 };
 
-function launcherConfig(seedState: SeedState) {
+function launcherConfig(seedState: SeedState, workspaceDir: string) {
   const errorProfile = 'missing-e2e-profile';
   const lazyState = ['no-workspace', 'lazy-ready', 'lazy-error-pending', 'lazy-error-empty'].includes(seedState);
   const errorWithoutPending = seedState === 'lazy-error-empty';
@@ -89,7 +137,7 @@ function launcherConfig(seedState: SeedState) {
     defaultProfileName: seedState.startsWith('lazy-error') ? errorProfile : 'host',
     modelsConfig,
     envVars: '',
-    ...(seedState !== 'no-workspace' ? { workspaceDir: '/tmp' } : {}),
+    ...(seedState !== 'no-workspace' ? { workspaceDir: seedState === 'workspace-files' ? workspaceDir : '/tmp' } : {}),
     ...(lazyState
       ? {
           codeTabs: [
@@ -106,6 +154,7 @@ function launcherConfig(seedState: SeedState) {
         }
       : {}),
     ...(seedState === 'planning' ? planningSeed : {}),
+    ...(seedState === 'workspace-files' ? workspaceFilesSeed(workspaceDir) : {}),
   };
 }
 
@@ -113,33 +162,42 @@ export function createE2eState(label: string): E2eState {
   const rootDir = mkdtempSync(path.join(tmpdir(), `omni-desktop-e2e-${label}-`));
   const homeDir = path.join(rootDir, 'home');
   const xdgConfigHome = path.join(rootDir, 'xdg');
+  const workspaceDir = path.join(rootDir, 'workspace');
   mkdirSync(homeDir, { recursive: true });
   mkdirSync(xdgConfigHome, { recursive: true });
+  mkdirSync(workspaceDir, { recursive: true });
 
   return {
     rootDir,
     homeDir,
     xdgConfigHome,
+    workspaceDir,
     cleanup: () => rmSync(rootDir, { recursive: true, force: true }),
   };
 }
 
 export function seedServerState(state: E2eState, seedState: SeedState): void {
+  if (seedState === 'workspace-files') {
+    seedWorkspaceFiles(state.workspaceDir);
+  }
   const configDir = path.join(state.homeDir, '.config', 'Omni Code');
   mkdirSync(configDir, { recursive: true });
   writeFileSync(
     path.join(configDir, 'config.json'),
-    `${JSON.stringify(launcherConfig(seedState), null, 2)}\n`,
+    `${JSON.stringify(launcherConfig(seedState, state.workspaceDir), null, 2)}\n`,
     'utf-8'
   );
 }
 
 export function seedElectronState(state: E2eState, seedState: SeedState): void {
+  if (seedState === 'workspace-files') {
+    seedWorkspaceFiles(state.workspaceDir);
+  }
   const configDir = path.join(state.xdgConfigHome, 'Omni Code');
   mkdirSync(configDir, { recursive: true });
   writeFileSync(
     path.join(configDir, 'config.json'),
-    `${JSON.stringify(launcherConfig(seedState), null, 2)}\n`,
+    `${JSON.stringify(launcherConfig(seedState, state.workspaceDir), null, 2)}\n`,
     'utf-8'
   );
 }

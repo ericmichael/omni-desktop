@@ -9,6 +9,7 @@ import type { WebviewRegistryProps } from '@/renderer/common/Webview';
 import { Webview } from '@/renderer/common/Webview';
 import { BrowserView } from '@/renderer/features/Browser/BrowserView';
 import { ConsoleStarted } from '@/renderer/features/Console/ConsoleRunning';
+import { WorkspaceFilesPortal } from '@/renderer/features/Files/FilesSurface';
 import { OmniAgentsApp } from '@/renderer/omniagents-ui';
 import type { ClientToolCallHandler } from '@/renderer/omniagents-ui/App';
 import type { PendingMessage } from '@/renderer/omniagents-ui/ChatShell';
@@ -81,6 +82,8 @@ type CodeWorkspaceLayoutProps = {
    * deck column). Chat stays visible and no in-column overlay is drawn.
    */
   sidecarMode?: boolean;
+  /** Stable portal host for the Files surface owned by this session column. */
+  filesHost: HTMLDivElement;
   /** Ticket bound to this column — enables the supervisor bridge actor. */
   ticketId?: TicketId;
   /** Routine bound to this column — enables the routine bridge actor. */
@@ -287,6 +290,19 @@ const useStyles = makeStyles({
 
 const transition = { type: 'spring' as const, duration: 0.28, bounce: 0.08 };
 
+const FilesHostSlot = memo(({ host }: { host: HTMLDivElement }) => {
+  const ref = useCallback(
+    (element: HTMLDivElement | null) => {
+      if (element) {
+        element.appendChild(host);
+      }
+    },
+    [host]
+  );
+  return <div ref={ref} style={{ width: '100%', height: '100%', minHeight: 0 }} />;
+});
+FilesHostSlot.displayName = 'FilesHostSlot';
+
 const BUILTIN_TITLES: Record<string, string> = {
   code: 'VS Code',
   desktop: "Omni's PC",
@@ -324,12 +340,14 @@ const AppSurfaceView = memo(
     onUrlChange,
     isGlass,
     tabId,
+    filesHost,
   }: {
     app: AppDescriptor;
     src?: string;
     onUrlChange?: (url: string) => void;
     isGlass?: boolean;
     tabId?: string;
+    filesHost: HTMLDivElement;
   }) => {
     const styles = useStyles();
     const registryProps = useMemo(() => makeRegistryProps(app, tabId), [app, tabId]);
@@ -381,6 +399,22 @@ const AppSurfaceView = memo(
         >
           <SurfaceFrame app={app} isGlass={isGlass}>
             <ConsoleStarted tabId={tabId} />
+          </SurfaceFrame>
+        </motion.div>
+      );
+    }
+
+    if (app.kind === 'builtin-files') {
+      return (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={transition}
+          className={mergeClasses(styles.surfaceCard, isGlass && styles.surfaceCardGlass)}
+        >
+          <SurfaceFrame app={app} isGlass={isGlass}>
+            <FilesHostSlot host={filesHost} />
           </SurfaceFrame>
         </motion.div>
       );
@@ -464,6 +498,7 @@ export const CodeWorkspaceLayout = memo(
     tabId,
     agentWorkspaceDir,
     sidecarMode,
+    filesHost,
     ticketId,
     routineId,
   }: CodeWorkspaceLayoutProps) => {
@@ -530,6 +565,12 @@ export const CodeWorkspaceLayout = memo(
     }, [activeApp, codeServerSrc, vncSrc, onActiveAppChange]);
 
     const [dockTarget, setDockTarget] = useState<HTMLElement | null>(null);
+    const [filesActivated, setFilesActivated] = useState(activeApp === 'files');
+    useEffect(() => {
+      if (activeApp === 'files') {
+        setFilesActivated(true);
+      }
+    }, [activeApp]);
     useLayoutEffect(() => {
       if (!dockTargetId) {
         setDockTarget(null);
@@ -583,6 +624,16 @@ export const CodeWorkspaceLayout = memo(
               ticketId={ticketId}
               routineId={routineId}
               workspaceDir={agentWorkspaceDir}
+              providerChildren={
+                filesActivated ? (
+                  <WorkspaceFilesPortal
+                    host={filesHost}
+                    sessionId={sessionId}
+                    workspaceRoot={agentWorkspaceDir}
+                    isGlass={isGlass}
+                  />
+                ) : undefined
+              }
             />
           </div>
           {!sidecarMode && (
@@ -594,6 +645,7 @@ export const CodeWorkspaceLayout = memo(
                   onUrlChange={activeDescriptor.kind === 'builtin-browser' ? onPreviewUrlChange : undefined}
                   isGlass={isGlass}
                   tabId={tabId}
+                  filesHost={filesHost}
                 />
               )}
             </AnimatePresence>
