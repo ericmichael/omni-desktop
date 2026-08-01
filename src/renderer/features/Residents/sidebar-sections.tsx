@@ -1,4 +1,3 @@
-import type { PresenceBadgeStatus } from '@fluentui/react-components';
 import { Field, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
 import {
   Add20Regular,
@@ -47,6 +46,7 @@ import {
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { ResidentChannelDef, ResidentChannelMessage } from '@/shared/types';
 
+import type { AgentPresence } from './agent-avatar';
 import { AgentAvatar, presenceStatus } from './agent-avatar';
 import {
   $activityUnread,
@@ -524,7 +524,7 @@ const DmNavRow = memo(function DmNavRow({
   channelId: string;
   title: string;
   avatar: { name: string; colorId: string };
-  presence?: PresenceBadgeStatus;
+  presence?: AgentPresence;
   selected: boolean;
   unread: number;
   onSelect: (id: string) => void;
