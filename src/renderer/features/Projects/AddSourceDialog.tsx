@@ -19,6 +19,7 @@ import {
   AnimatedDialog,
   Button,
   Caption1,
+  Checkbox,
   DialogBody,
   DialogContent,
   DialogFooter,
@@ -99,6 +100,7 @@ export const AddSourceDialog = memo(({ open, onClose, project }: AddSourceDialog
   const [repoUrl, setRepoUrl] = useState('');
   const [urlMount, setUrlMount] = useState('');
   const [branch, setBranch] = useState('');
+  const [readOnly, setReadOnly] = useState(false);
   const [addTokenHost, setAddTokenHost] = useState<string | null>(null);
 
   const [error, setError] = useState<string | null>(null);
@@ -112,6 +114,7 @@ export const AddSourceDialog = memo(({ open, onClose, project }: AddSourceDialog
       setRepoUrl('');
       setUrlMount('');
       setBranch('');
+      setReadOnly(false);
       setError(null);
     }
   }, [open, githubLinked]);
@@ -171,10 +174,11 @@ export const AddSourceDialog = memo(({ open, onClose, project }: AddSourceDialog
         kind: 'git-remote',
         repoUrl: repo.cloneUrl,
         defaultBranch: repo.defaultBranch,
+        readOnly,
       };
       void addDraft({ ...draft, mountName: deriveMountName(draft) }, true);
     },
-    [addDraft]
+    [addDraft, readOnly]
   );
 
   // Provider adapters for the generic RepoPicker.
@@ -216,8 +220,11 @@ export const AddSourceDialog = memo(({ open, onClose, project }: AddSourceDialog
   }, []);
   const handleLocalMount = useCallback((e: React.ChangeEvent<HTMLInputElement>) => setLocalMount(e.target.value), []);
   const handleAddLocal = useCallback(() => {
-    void addDraft({ ...emptyLocalDraft(), kind: 'local', workspaceDir: localDir, mountName: localMount }, false);
-  }, [addDraft, localDir, localMount]);
+    void addDraft(
+      { ...emptyLocalDraft(), kind: 'local', workspaceDir: localDir, mountName: localMount, readOnly },
+      false
+    );
+  }, [addDraft, localDir, localMount, readOnly]);
 
   // Git URL
   const handleRepoUrl = useCallback((e: React.ChangeEvent<HTMLInputElement>) => setRepoUrl(e.target.value), []);
@@ -226,10 +233,10 @@ export const AddSourceDialog = memo(({ open, onClose, project }: AddSourceDialog
   const closeAddToken = useCallback(() => setAddTokenHost(null), []);
   const handleAddUrl = useCallback(() => {
     void addDraft(
-      { ...emptyLocalDraft(), kind: 'git-remote', repoUrl, defaultBranch: branch, mountName: urlMount },
+      { ...emptyLocalDraft(), kind: 'git-remote', repoUrl, defaultBranch: branch, mountName: urlMount, readOnly },
       false
     );
-  }, [addDraft, repoUrl, branch, urlMount]);
+  }, [addDraft, repoUrl, branch, urlMount, readOnly]);
 
   const localPlaceholder = deriveMountName({ ...emptyLocalDraft(), workspaceDir: localDir });
   const urlPlaceholder = deriveMountName({ ...emptyLocalDraft(), kind: 'git-remote', repoUrl });
@@ -353,6 +360,11 @@ export const AddSourceDialog = memo(({ open, onClose, project }: AddSourceDialog
                 </div>
               </>
             )}
+
+            <div className={styles.field}>
+              <Checkbox checked={readOnly} onCheckedChange={setReadOnly} label="Read-only source" />
+              <span className={styles.hint}>Omni’s file editor can inspect this source but cannot change its files.</span>
+            </div>
 
             {error && (
               <div role="alert" style={{ color: 'var(--colorPaletteRedForeground1)' }}>

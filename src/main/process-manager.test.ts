@@ -60,7 +60,7 @@ vi.mock('node:child_process', async () => {
 // ---------------------------------------------------------------------------
 
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync } from 'node:fs';
+import { mkdirSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -216,6 +216,43 @@ describe('ProcessManager', () => {
       });
 
       expect(pm.getProjectContainerId('p1')).toBeNull();
+    });
+  });
+
+  describe('source writability', () => {
+    it('maps missing readOnly to writable and readOnly to non-writable for every source kind', async () => {
+      const localDir = mkdtempSync(path.join(tmpdir(), 'omni-source-local-'));
+      const localGitDir = mkdtempSync(path.join(tmpdir(), 'omni-source-git-'));
+      mkdirSync(path.join(localGitDir, '.git'));
+      const project: Project = {
+        id: 'proj_sources',
+        label: 'Sources',
+        slug: 'sources',
+        createdAt: 0,
+        sources: [
+          { id: 'local', mountName: 'local', kind: 'local', workspaceDir: localDir },
+          { id: 'local-git', mountName: 'local-git', kind: 'local', workspaceDir: localGitDir, readOnly: true },
+          {
+            id: 'remote',
+            mountName: 'remote',
+            kind: 'git-remote',
+            repoUrl: 'https://github.com/acme/reference.git',
+            readOnly: true,
+          },
+        ],
+      };
+      const { pm } = makePm({ storeData: { projects: [project] } });
+
+      await pm.start('tab-1', { workspaceDir: localDir, projectId: project.id });
+
+      const arg = hoisted.agentProcessInstances[0]!.start.mock.calls[0]![0] as {
+        sources: Array<{ kind: string; writable?: boolean }>;
+      };
+      expect(arg.sources.map(({ kind, writable }) => ({ kind, writable }))).toEqual([
+        { kind: 'local', writable: true },
+        { kind: 'local-git', writable: false },
+        { kind: 'git-remote', writable: false },
+      ]);
     });
   });
 

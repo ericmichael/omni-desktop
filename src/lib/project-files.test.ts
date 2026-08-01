@@ -425,6 +425,44 @@ describe('project config roundtrip', () => {
     }
   });
 
+  it('roundtrips read-only source policy', () => {
+    const p = makeProject({
+      sources: [
+        {
+          id: 'src-readonly',
+          mountName: 'reference',
+          kind: 'local',
+          workspaceDir: '/home/user/reference',
+          readOnly: true,
+        },
+      ],
+    });
+    const text = serializeProjectConfig(p);
+    const parsed = parseProjectConfig(text);
+
+    expect(text).toContain('readOnly: true');
+    expect(parsed.isOk() && parsed.value.sources[0]?.readOnly).toBe(true);
+  });
+
+  it('keeps old source records without readOnly valid', () => {
+    const text = [
+      'id: p1',
+      'label: Legacy',
+      'slug: legacy',
+      'createdAt: 2026-04-12T00:00:00Z',
+      'sources:',
+      '  - id: src-1',
+      '    mountName: code',
+      '    kind: local',
+      '    workspaceDir: /home/user/code',
+      '',
+    ].join('\n');
+    const parsed = parseProjectConfig(text);
+
+    expect(parsed.isOk()).toBe(true);
+    expect(parsed.isOk() && parsed.value.sources[0]?.readOnly).toBeUndefined();
+  });
+
   it('rejects an unknown source kind', () => {
     const text =
       'id: p1\nlabel: X\nslug: x\ncreatedAt: 2026-04-12T00:00:00Z\nsources:\n  - kind: carrier-pigeon\n    address: home\n';

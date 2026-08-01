@@ -71,7 +71,7 @@ export type AgentProcessMode = 'serve' | 'compute';
  * they keep the explicit "Apply to my folder" gate. Launcher-side only; the
  * ``--source`` descriptor sent to omni serve does not include it.
  */
-export type AgentProcessSource = { mountName: string } & (
+export type AgentProcessSource = { mountName: string; writable?: boolean } & (
   | { kind: 'local-git'; workspaceDir: string; ref?: string; launcherOwned?: boolean }
   | { kind: 'local'; workspaceDir: string; launcherOwned?: boolean }
   | {
@@ -737,7 +737,12 @@ export class AgentProcess {
     // One ``--source <json>`` per source — omni serve's argparse uses
     // ``action="append"``, so each emits a fresh dict.
     for (const s of arg.sources) {
-      const desc: Record<string, unknown> = { kind: s.kind, mountName: s.mountName };
+      const desc: Record<string, unknown> = {
+        kind: s.kind,
+        mountName: s.mountName,
+        // Older callers predate source-level policy and remain writable.
+        writable: s.writable ?? true,
+      };
       if (s.kind === 'local' || s.kind === 'local-git') {
         desc.path = s.workspaceDir;
       }

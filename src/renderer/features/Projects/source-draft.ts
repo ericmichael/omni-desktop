@@ -18,6 +18,7 @@ export type SourceDraft = {
   workspaceDir: string;
   repoUrl: string;
   defaultBranch: string;
+  readOnly: boolean;
 };
 
 /** Auto-derive a mountName slug from a path or repo URL. */
@@ -42,7 +43,16 @@ const newSourceId = (): string => Math.random().toString(36).slice(2, 18);
 
 /** Construct a fresh empty local-source draft. */
 export function emptyLocalDraft(): SourceDraft {
-  return { uid: nextUid(), id: null, kind: 'local', mountName: '', workspaceDir: '', repoUrl: '', defaultBranch: '' };
+  return {
+    uid: nextUid(),
+    id: null,
+    kind: 'local',
+    mountName: '',
+    workspaceDir: '',
+    repoUrl: '',
+    defaultBranch: '',
+    readOnly: false,
+  };
 }
 
 /**
@@ -65,7 +75,7 @@ export function draftsToSources(
       return { ok: false, error: `Duplicate mount name: "${mountName}". Each source needs a unique name.` };
     }
     seenMountNames.add(mountName);
-    const baseFields = { id: d.id ?? newSourceId(), mountName };
+    const baseFields = { id: d.id ?? newSourceId(), mountName, ...(d.readOnly ? { readOnly: true } : {}) };
     if (d.kind === 'local') {
       sources.push({ ...baseFields, kind: 'local', workspaceDir: path });
     } else {
