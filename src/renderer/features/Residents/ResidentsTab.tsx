@@ -1,6 +1,5 @@
-import type { FieldProps, LabelProps, PresenceBadgeStatus } from '@fluentui/react-components';
+import type { FieldProps, LabelProps } from '@fluentui/react-components';
 import {
-  Avatar,
   AvatarGroup,
   AvatarGroupItem,
   Divider as LabeledDivider,
@@ -93,7 +92,8 @@ import { VoiceScopeContext } from '@/renderer/services/voice-recording';
 import { $glassEnabled } from '@/renderer/theme/use-glass';
 import type { Project, ResidentAgent, ResidentAgentRuntime, ResidentChannelMessage } from '@/shared/types';
 
-import { AgentAvatar, presenceStatus } from './agent-avatar';
+import type { AgentPresence } from './agent-avatar';
+import { AgentAvatar, participantPresence, presenceStatus } from './agent-avatar';
 import { $dmSpokenReplies, speakDmMessage, toggleDmSpokenReplies } from './dm-voice';
 import {
   $residentStatus,
@@ -712,12 +712,15 @@ const MentionItem = memo(function MentionItem({
   agent,
   index,
   active,
+  presence,
   onPick,
   onHover,
 }: {
   agent: ResidentAgent;
   index: number;
   active: boolean;
+  /** Live presence — who you're about to address is worth knowing here. */
+  presence?: AgentPresence;
   onPick: (agent: ResidentAgent) => void;
   onHover: (index: number) => void;
 }): React.JSX.Element {
@@ -739,7 +742,7 @@ const MentionItem = memo(function MentionItem({
       onMouseDown={handleMouseDown}
       onMouseEnter={handleMouseEnter}
     >
-      <AgentAvatar name={agent.name} colorId={agent.id} size={24} />
+      <AgentAvatar name={agent.name} colorId={agent.id} size={24} {...(presence ? { presence } : {})} />
       <span>{agent.name}</span>
       <span className={styles.mentionItemRole}>{agent.role}</span>
     </button>
@@ -790,6 +793,10 @@ function ActivityFeed({
 }): React.JSX.Element {
   const styles = useStyles();
   const storeData = useStore(persistedStoreApi.$atom);
+  // Same presence source as the sidebar — every avatar this feed paints
+  // (message gutters, the @-mention typeahead) reads from it, so a state
+  // change repaints them all together.
+  const statuses = useStore($residentStatus);
   const [draft, setDraft] = useState('');
   const [sendError, setSendError] = useState<string | null>(null);
   // The message a composed post replies to (named channels only). Send
@@ -1123,6 +1130,10 @@ function ActivityFeed({
       : `Message #${channel ?? TEAM_CHANNEL}`;
   const participantName = (m: ResidentChannelMessage): string =>
     m.from === USER_PARTICIPANT ? 'you' : (m.fromName ?? m.from);
+  /** Presence for a message's sender — `undefined` for you, #system, and
+   *  agents that have since left the roster (no live identity to report). */
+  const senderPresence = (m: ResidentChannelMessage): AgentPresence | undefined =>
+    participantPresence(m.from, roster, statuses);
 
   return (
     <>
@@ -1175,6 +1186,7 @@ function ActivityFeed({
             const rootMsg = m.replyTo !== undefined ? messageById.get(m.replyTo) : undefined;
             const showReplyMarker = m.replyTo !== undefined && !indent;
             const fromName = participantName(m);
+            const fromPresence = senderPresence(m);
             return (
               <div
                 key={m.id}
@@ -1192,6 +1204,7 @@ function ActivityFeed({
                       name={m.from === USER_PARTICIPANT ? 'You' : fromName}
                       colorId={m.from}
                       size={indent ? 24 : 32}
+                      {...(fromPresence ? { presence: fromPresence } : {})}
                     />
                   )}
                 </div>
@@ -1259,6 +1272,7 @@ function ActivityFeed({
                   agent={a}
                   index={i}
                   active={i === mentionIndex}
+                  presence={presenceStatus(statuses[a.id]?.state, a.enabled)}
                   onPick={acceptMention}
                   onHover={setMentionIndex}
                 />
@@ -1499,14 +1513,7 @@ const MemberChip = memo(function MemberChip({
     >
       <InteractionTag size="small" shape="circular">
         <InteractionTagPrimary
-          media={
-            <Avatar
-              color="colorful"
-              name={agent.name}
-              idForColor={agent.id}
-              badge={{ status: presenceStatus(state, agent.enabled) }}
-            />
-          }
+          media={<AgentAvatar name={agent.name} colorId={agent.id} presence={presenceStatus(state, agent.enabled)} />}
           onClick={handleClick}
           aria-label={`Open ${agent.name}'s session`}
         >
@@ -1627,7 +1634,7 @@ const DmRow = memo(function DmRow({
   /** name/colorId pairs — one for a user↔agent thread, two for agent↔agent. */
   avatars: ReadonlyArray<{ name: string; colorId: string }>;
   /** Live presence for the single-peer case. */
-  presence?: PresenceBadgeStatus;
+  presence?: AgentPresence;
   snippet: string;
   lastAt: number;
   unread: number;
@@ -2762,7 +2769,7 @@ export function ResidentsTab(): React.JSX.Element {
   /** Row identity for a DM thread: the agent participants' avatars, and the
    *  peer's live presence when it's a user↔agent thread. */
   const dmRowIdentity = useCallback(
-    (channelId: string): { avatars: { name: string; colorId: string }[]; presence?: PresenceBadgeStatus } => {
+    (channelId: string): { avatars: { name: string; colorId: string }[]; presence?: AgentPresence } => {
       const pair = dmParticipants(channelId);
       const agentIds = (pair ?? []).filter((p) => p !== USER_PARTICIPANT);
       const avatars = agentIds.map((p) => ({ name: roster.find((a) => a.id === p)?.name ?? p, colorId: p }));
