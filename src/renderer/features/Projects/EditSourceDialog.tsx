@@ -15,7 +15,16 @@ import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useState } from 'react';
 
-import { AnimatedDialog, Button, DialogBody, DialogContent, DialogFooter, DialogHeader, Input } from '@/renderer/ds';
+import {
+  AnimatedDialog,
+  Button,
+  Checkbox,
+  DialogBody,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  Input,
+} from '@/renderer/ds';
 import { GitCredentialDialog } from '@/renderer/features/SettingsModal/GitCredentialDialog';
 import { DirectoryBrowserDialog } from '@/renderer/features/Tickets/DirectoryBrowserDialog';
 import { persistedStoreApi } from '@/renderer/services/store';
@@ -66,6 +75,7 @@ export const EditSourceDialog = memo(({ open, onClose, project, source }: EditSo
   const [workspaceDir, setWorkspaceDir] = useState('');
   const [repoUrl, setRepoUrl] = useState('');
   const [branch, setBranch] = useState('');
+  const [readOnly, setReadOnly] = useState(false);
   const [browseDir, setBrowseDir] = useState(false);
   const [addTokenHost, setAddTokenHost] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -79,6 +89,7 @@ export const EditSourceDialog = memo(({ open, onClose, project, source }: EditSo
       setWorkspaceDir(source.kind === 'local' ? source.workspaceDir : '');
       setRepoUrl(source.kind === 'git-remote' ? source.repoUrl : '');
       setBranch(source.kind === 'git-remote' ? (source.defaultBranch ?? '') : '');
+      setReadOnly(source.readOnly ?? false);
       setError(null);
     }
   }, [open, source]);
@@ -116,13 +127,21 @@ export const EditSourceDialog = memo(({ open, onClose, project, source }: EditSo
     const trimmedBranch = branch.trim();
     const next: ProjectSource =
       source.kind === 'local'
-        ? { id: source.id, mountName, kind: 'local', workspaceDir: path }
+        ? {
+            id: source.id,
+            mountName,
+            kind: 'local',
+            workspaceDir: path,
+            ...(source.gitDetected !== undefined ? { gitDetected: source.gitDetected } : {}),
+            ...(readOnly ? { readOnly: true } : {}),
+          }
         : {
             id: source.id,
             mountName,
             kind: 'git-remote',
             repoUrl: path,
             ...(trimmedBranch ? { defaultBranch: trimmedBranch } : {}),
+            ...(readOnly ? { readOnly: true } : {}),
           };
 
     const existingIdentities = new Set(project.sources.filter((s) => s.id !== source.id).map(sourceIdentityKey));
@@ -143,7 +162,7 @@ export const EditSourceDialog = memo(({ open, onClose, project, source }: EditSo
     } finally {
       setSaving(false);
     }
-  }, [isLocal, workspaceDir, repoUrl, mount, branch, project.id, project.sources, source, onClose]);
+  }, [isLocal, workspaceDir, repoUrl, mount, branch, readOnly, project.id, project.sources, source, onClose]);
 
   const mountPlaceholder = deriveMountName(
     isLocal ? { ...emptyLocalDraft(), workspaceDir } : { ...emptyLocalDraft(), kind: 'git-remote', repoUrl }
@@ -206,6 +225,11 @@ export const EditSourceDialog = memo(({ open, onClose, project, source }: EditSo
                 />
               </div>
             )}
+
+            <div className={styles.field}>
+              <Checkbox checked={readOnly} onCheckedChange={setReadOnly} label="Read-only source" />
+              <span className={styles.hint}>Omni’s file editor can inspect this source but cannot change its files.</span>
+            </div>
 
             {error && (
               <div role="alert" style={{ color: 'var(--colorPaletteRedForeground1)' }}>

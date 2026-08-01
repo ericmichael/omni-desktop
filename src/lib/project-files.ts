@@ -211,6 +211,7 @@ const ProjectSourceSchema: z.ZodType<ProjectSource> = z.discriminatedUnion('kind
     mountName: z.string(),
     workspaceDir: z.string(),
     gitDetected: z.boolean().optional(),
+    readOnly: z.boolean().optional(),
   }),
   z.object({
     kind: z.literal('git-remote'),
@@ -218,6 +219,7 @@ const ProjectSourceSchema: z.ZodType<ProjectSource> = z.discriminatedUnion('kind
     mountName: z.string(),
     repoUrl: z.string(),
     defaultBranch: z.string().optional(),
+    readOnly: z.boolean().optional(),
   }),
 ]) as unknown as z.ZodType<ProjectSource>;
 

@@ -218,7 +218,9 @@ describe('AgentProcess (serve mode)', () => {
     expect(args).toContain('json');
     expect(args).toContain('--workspace');
     expect(args[args.indexOf('--workspace') + 1]).toBe('/test/workspace');
-    expect(sourceDescriptors(args)).toEqual([{ kind: 'local-git', mountName: 'launcher', path: '/test/workspace' }]);
+    expect(sourceDescriptors(args)).toEqual([
+      { kind: 'local-git', mountName: 'launcher', writable: true, path: '/test/workspace' },
+    ]);
   });
 
   it('emits multiple --source descriptors for a multi-source project', async () => {
@@ -233,9 +235,15 @@ describe('AgentProcess (serve mode)', () => {
     });
     const [, args] = spawnCall(0);
     expect(sourceDescriptors(args)).toEqual([
-      { kind: 'local-git', mountName: 'launcher', path: '/repos/launcher' },
-      { kind: 'local-git', mountName: 'omni-code', path: '/repos/omni-code' },
-      { kind: 'git-remote', mountName: 'omniagents', repoUrl: 'https://github.com/me/omniagents.git', ref: 'main' },
+      { kind: 'local-git', mountName: 'launcher', writable: true, path: '/repos/launcher' },
+      { kind: 'local-git', mountName: 'omni-code', writable: true, path: '/repos/omni-code' },
+      {
+        kind: 'git-remote',
+        mountName: 'omniagents',
+        writable: true,
+        repoUrl: 'https://github.com/me/omniagents.git',
+        ref: 'main',
+      },
     ]);
   });
 
@@ -248,6 +256,7 @@ describe('AgentProcess (serve mode)', () => {
     expect(sourceDescriptors(spawnCall(0)[1])[0]).toEqual({
       kind: 'git-remote',
       mountName: 'bar',
+      writable: true,
       repoUrl: 'https://github.com/foo/bar.git',
       ref: 'main',
     });

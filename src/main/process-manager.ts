@@ -478,6 +478,7 @@ export class ProcessManager {
         mountName,
         kind: this.directoryHasGit(workspaceDir) ? 'local-git' : 'local',
         workspaceDir,
+        writable: true,
         ...(isLauncherOwnedDir(workspaceDir) ? { launcherOwned: true } : {}),
       },
     ];
@@ -490,6 +491,7 @@ export class ProcessManager {
         mountName: source.mountName,
         kind: 'git-remote',
         repoUrl: source.repoUrl,
+        writable: !source.readOnly,
       };
       if (source.defaultBranch) {
         result.ref = source.defaultBranch;
@@ -503,6 +505,7 @@ export class ProcessManager {
       mountName: source.mountName,
       kind: this.directoryHasGit(source.workspaceDir) ? 'local-git' : 'local',
       workspaceDir: source.workspaceDir,
+      writable: !source.readOnly,
     };
   }
 
@@ -574,6 +577,7 @@ export class ProcessManager {
         mountName,
         kind: this.directoryHasGit(extra.workspaceDir) ? 'local-git' : 'local',
         workspaceDir: extra.workspaceDir,
+        writable: true,
         ...(isLauncherOwnedDir(extra.workspaceDir) ? { launcherOwned: true } : {}),
       });
       mountedDirs.add(resolved);

@@ -1973,6 +1973,8 @@ export type ProjectSource = (
 ) & {
   id: string;
   mountName: string;
+  /** When true, filesystem tools must not mutate this source. Missing means writable. */
+  readOnly?: boolean;
 };
 
 /**
