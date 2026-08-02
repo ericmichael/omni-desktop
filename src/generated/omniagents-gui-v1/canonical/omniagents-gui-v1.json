@@ -1205,10 +1205,12 @@
       },
       "summary": "OmniAgents GUI protocol operation initialize",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/initialize"
       },
+      "x-omni-resource-scope": "connection",
       "x-omni-stability": "stable"
     },
     {
@@ -1240,6 +1242,13 @@
           "required": true,
           "schema": {
             "$ref": "./schemas/gui-v1.schema.json#/$defs/start_run/properties/prompt"
+          }
+        },
+        {
+          "name": "environment_selection",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/start_run/properties/environment_selection"
           }
         },
         {
@@ -1307,10 +1316,14 @@
       },
       "summary": "OmniAgents GUI protocol operation start_run",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [
+        "run_plan"
+      ],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/start_run"
       },
+      "x-omni-resource-scope": "thread",
       "x-omni-stability": "stable"
     },
     {
@@ -1353,10 +1366,12 @@
       },
       "summary": "OmniAgents GUI protocol operation stop_run",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/stop_run"
       },
+      "x-omni-resource-scope": "run",
       "x-omni-stability": "stable"
     },
     {
@@ -1406,10 +1421,12 @@
       },
       "summary": "OmniAgents GUI protocol operation send_user_message",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/send_user_message"
       },
+      "x-omni-resource-scope": "run",
       "x-omni-stability": "stable"
     },
     {
@@ -1452,10 +1469,12 @@
       },
       "summary": "OmniAgents GUI protocol operation get_session_history",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/get_session_history"
       },
+      "x-omni-resource-scope": "thread",
       "x-omni-stability": "stable"
     },
     {
@@ -1505,10 +1524,12 @@
       },
       "summary": "OmniAgents GUI protocol operation list_sessions",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/list_sessions"
       },
+      "x-omni-resource-scope": "principal",
       "x-omni-stability": "stable"
     },
     {
@@ -1551,10 +1572,12 @@
       },
       "summary": "OmniAgents GUI protocol operation archive_session",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/archive_session"
       },
+      "x-omni-resource-scope": "thread",
       "x-omni-stability": "stable"
     },
     {
@@ -1610,10 +1633,12 @@
       },
       "summary": "OmniAgents GUI protocol operation delete_session",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/delete_session"
       },
+      "x-omni-resource-scope": "thread",
       "x-omni-stability": "stable"
     },
     {
@@ -1663,10 +1688,12 @@
       },
       "summary": "OmniAgents GUI protocol operation get_user_history",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/get_user_history"
       },
+      "x-omni-resource-scope": "principal",
       "x-omni-stability": "stable"
     },
     {
@@ -1701,10 +1728,12 @@
       },
       "summary": "OmniAgents GUI protocol operation get_agent_info",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/get_agent_info"
       },
+      "x-omni-resource-scope": "agent",
       "x-omni-stability": "stable"
     },
     {
@@ -1768,10 +1797,12 @@
       },
       "summary": "OmniAgents GUI protocol operation tool_approval_response",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/tool_approval_response"
       },
+      "x-omni-resource-scope": "run",
       "x-omni-stability": "stable"
     },
     {
@@ -1828,10 +1859,12 @@
       },
       "summary": "OmniAgents GUI protocol operation mcp_approval_response",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_approval_response"
       },
+      "x-omni-resource-scope": "run",
       "x-omni-stability": "stable"
     },
     {
@@ -1881,10 +1914,12 @@
       },
       "summary": "OmniAgents GUI protocol operation client_functions",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/client_functions"
       },
+      "x-omni-resource-scope": "connection",
       "x-omni-stability": "stable"
     },
     {
@@ -1948,10 +1983,12 @@
       },
       "summary": "OmniAgents GUI protocol operation client_response",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/client_response"
       },
+      "x-omni-resource-scope": "run",
       "x-omni-stability": "stable"
     },
     {
@@ -1986,10 +2023,12 @@
       },
       "summary": "OmniAgents GUI protocol operation list_server_functions",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/list_server_functions"
       },
+      "x-omni-resource-scope": "agent",
       "x-omni-stability": "stable"
     },
     {
@@ -2036,6 +2075,27 @@
           "schema": {
             "$ref": "./schemas/gui-v1.schema.json#/$defs/server_call/properties/session_id"
           }
+        },
+        {
+          "name": "environment_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/server_call/properties/environment_id"
+          }
+        },
+        {
+          "name": "workspace_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/server_call/properties/workspace_id"
+          }
+        },
+        {
+          "name": "environment_generation",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/server_call/properties/environment_generation"
+          }
         }
       ],
       "result": {
@@ -2046,10 +2106,14 @@
       },
       "summary": "OmniAgents GUI protocol operation server_call",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [
+        "extension_declared"
+      ],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/server_call"
       },
+      "x-omni-resource-scope": "extension",
       "x-omni-stability": "stable"
     },
     {
@@ -2134,10 +2198,12 @@
       },
       "summary": "OmniAgents GUI protocol operation enqueue_message",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/enqueue_message"
       },
+      "x-omni-resource-scope": "thread",
       "x-omni-stability": "stable"
     },
     {
@@ -2180,10 +2246,12 @@
       },
       "summary": "OmniAgents GUI protocol operation list_queue",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/list_queue"
       },
+      "x-omni-resource-scope": "thread",
       "x-omni-stability": "stable"
     },
     {
@@ -2233,10 +2301,12 @@
       },
       "summary": "OmniAgents GUI protocol operation cancel_queued_message",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/cancel_queued_message"
       },
+      "x-omni-resource-scope": "thread",
       "x-omni-stability": "stable"
     },
     {
@@ -2296,10 +2366,12 @@
       },
       "summary": "OmniAgents GUI protocol operation resume_session",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/resume_session"
       },
+      "x-omni-resource-scope": "thread",
       "x-omni-stability": "stable"
     },
     {
@@ -2359,10 +2431,12 @@
       },
       "summary": "OmniAgents GUI protocol operation ack_events",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/ack_events"
       },
+      "x-omni-resource-scope": "thread",
       "x-omni-stability": "stable"
     },
     {
@@ -2419,10 +2493,12 @@
       },
       "summary": "OmniAgents GUI protocol operation list_models",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/list_models"
       },
+      "x-omni-resource-scope": "agent",
       "x-omni-stability": "stable"
     },
     {
@@ -2465,10 +2541,12 @@
       },
       "summary": "OmniAgents GUI protocol operation get_model",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/get_model"
       },
+      "x-omni-resource-scope": "agent",
       "x-omni-stability": "stable"
     },
     {
@@ -2503,10 +2581,12 @@
       },
       "summary": "OmniAgents GUI protocol operation list_providers",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/list_providers"
       },
+      "x-omni-resource-scope": "agent",
       "x-omni-stability": "stable"
     },
     {
@@ -2556,10 +2636,12 @@
       },
       "summary": "OmniAgents GUI protocol operation set_session_model",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/set_session_model"
       },
+      "x-omni-resource-scope": "thread",
       "x-omni-stability": "stable"
     },
     {
@@ -2609,10 +2691,12 @@
       },
       "summary": "OmniAgents GUI protocol operation set_session_reasoning",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/set_session_reasoning"
       },
+      "x-omni-resource-scope": "thread",
       "x-omni-stability": "stable"
     },
     {
@@ -2655,10 +2739,12 @@
       },
       "summary": "OmniAgents GUI protocol operation set_voice_model",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/set_voice_model"
       },
+      "x-omni-resource-scope": "agent_host",
       "x-omni-stability": "stable"
     },
     {
@@ -2702,10 +2788,12 @@
       },
       "summary": "OmniAgents GUI protocol operation account_status",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/account_status"
       },
+      "x-omni-resource-scope": "principal",
       "x-omni-stability": "stable"
     },
     {
@@ -2778,10 +2866,12 @@
       },
       "summary": "OmniAgents GUI protocol operation account_login_start",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/account_login_start"
       },
+      "x-omni-resource-scope": "principal",
       "x-omni-stability": "stable"
     },
     {
@@ -2840,10 +2930,12 @@
       },
       "summary": "OmniAgents GUI protocol operation account_login_complete",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/account_login_complete"
       },
+      "x-omni-resource-scope": "principal",
       "x-omni-stability": "stable"
     },
     {
@@ -2895,10 +2987,12 @@
       },
       "summary": "OmniAgents GUI protocol operation account_login_cancel",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/account_login_cancel"
       },
+      "x-omni-resource-scope": "principal",
       "x-omni-stability": "stable"
     },
     {
@@ -2950,10 +3044,12 @@
       },
       "summary": "OmniAgents GUI protocol operation account_logout",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/account_logout"
       },
+      "x-omni-resource-scope": "principal",
       "x-omni-stability": "stable"
     },
     {
@@ -3005,10 +3101,12 @@
       },
       "summary": "OmniAgents GUI protocol operation account_refresh",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/account_refresh"
       },
+      "x-omni-resource-scope": "principal",
       "x-omni-stability": "stable"
     },
     {
@@ -3060,10 +3158,12 @@
       },
       "summary": "OmniAgents GUI protocol operation account_usage",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/account_usage"
       },
+      "x-omni-resource-scope": "principal",
       "x-omni-stability": "stable"
     },
     {
@@ -3115,10 +3215,12 @@
       },
       "summary": "OmniAgents GUI protocol operation account_select",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/account_select"
       },
+      "x-omni-resource-scope": "principal",
       "x-omni-stability": "stable"
     },
     {
@@ -3191,10 +3293,12 @@
       },
       "summary": "OmniAgents GUI protocol operation elicitation_response",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/elicitation_response"
       },
+      "x-omni-resource-scope": "run",
       "x-omni-stability": "stable"
     },
     {
@@ -3258,10 +3362,12 @@
       },
       "summary": "OmniAgents GUI protocol operation mcp_list_servers",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_list_servers"
       },
+      "x-omni-resource-scope": "agent",
       "x-omni-stability": "stable"
     },
     {
@@ -3332,10 +3438,12 @@
       },
       "summary": "OmniAgents GUI protocol operation mcp_get_server",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_get_server"
       },
+      "x-omni-resource-scope": "agent",
       "x-omni-stability": "stable"
     },
     {
@@ -3420,10 +3528,12 @@
       },
       "summary": "OmniAgents GUI protocol operation mcp_create_server",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_create_server"
       },
+      "x-omni-resource-scope": "agent",
       "x-omni-stability": "stable"
     },
     {
@@ -3508,10 +3618,12 @@
       },
       "summary": "OmniAgents GUI protocol operation mcp_update_server",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_update_server"
       },
+      "x-omni-resource-scope": "agent",
       "x-omni-stability": "stable"
     },
     {
@@ -3575,10 +3687,12 @@
       },
       "summary": "OmniAgents GUI protocol operation mcp_delete_server",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_delete_server"
       },
+      "x-omni-resource-scope": "agent",
       "x-omni-stability": "stable"
     },
     {
@@ -3642,10 +3756,12 @@
       },
       "summary": "OmniAgents GUI protocol operation mcp_reload_server",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_reload_server"
       },
+      "x-omni-resource-scope": "agent",
       "x-omni-stability": "stable"
     },
     {
@@ -3723,10 +3839,12 @@
       },
       "summary": "OmniAgents GUI protocol operation mcp_auth_start",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_auth_start"
       },
+      "x-omni-resource-scope": "agent",
       "x-omni-stability": "stable"
     },
     {
@@ -3797,10 +3915,12 @@
       },
       "summary": "OmniAgents GUI protocol operation mcp_auth_complete",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_auth_complete"
       },
+      "x-omni-resource-scope": "agent",
       "x-omni-stability": "stable"
     },
     {
@@ -3864,10 +3984,12 @@
       },
       "summary": "OmniAgents GUI protocol operation mcp_auth_cancel",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_auth_cancel"
       },
+      "x-omni-resource-scope": "agent",
       "x-omni-stability": "stable"
     },
     {
@@ -3913,10 +4035,12 @@
       },
       "summary": "OmniAgents GUI protocol operation get_thread",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/get_thread"
       },
+      "x-omni-resource-scope": "thread",
       "x-omni-stability": "stable"
     },
     {
@@ -3986,10 +4110,12 @@
       },
       "summary": "OmniAgents GUI protocol operation list_turns",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/list_turns"
       },
+      "x-omni-resource-scope": "thread",
       "x-omni-stability": "stable"
     },
     {
@@ -4073,10 +4199,12 @@
       },
       "summary": "OmniAgents GUI protocol operation list_items",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/list_items"
       },
+      "x-omni-resource-scope": "thread",
       "x-omni-stability": "stable"
     },
     {
@@ -4132,10 +4260,12 @@
       },
       "summary": "OmniAgents GUI protocol operation get_item",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/get_item"
       },
+      "x-omni-resource-scope": "thread",
       "x-omni-stability": "stable"
     },
     {
@@ -4208,10 +4338,12 @@
       },
       "summary": "OmniAgents GUI protocol operation fork_session",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/fork_session"
       },
+      "x-omni-resource-scope": "thread",
       "x-omni-stability": "experimental"
     },
     {
@@ -4261,10 +4393,12 @@
       },
       "summary": "OmniAgents GUI protocol operation set_session_hold",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/set_session_hold"
       },
+      "x-omni-resource-scope": "thread",
       "x-omni-stability": "experimental"
     },
     {
@@ -4307,10 +4441,12 @@
       },
       "summary": "OmniAgents GUI protocol operation queue_status",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/queue_status"
       },
+      "x-omni-resource-scope": "thread",
       "x-omni-stability": "experimental"
     },
     {
@@ -4374,10 +4510,12 @@
       },
       "summary": "OmniAgents GUI protocol operation enqueue_notification",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/enqueue_notification"
       },
+      "x-omni-resource-scope": "thread",
       "x-omni-stability": "experimental"
     },
     {
@@ -4427,10 +4565,12 @@
       },
       "summary": "OmniAgents GUI protocol operation update_session_variables",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/update_session_variables"
       },
+      "x-omni-resource-scope": "thread",
       "x-omni-stability": "experimental"
     },
     {
@@ -4473,10 +4613,12 @@
       },
       "summary": "OmniAgents GUI protocol operation set_client_status",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/set_client_status"
       },
+      "x-omni-resource-scope": "connection",
       "x-omni-stability": "experimental"
     },
     {
@@ -4519,10 +4661,12 @@
       },
       "summary": "OmniAgents GUI protocol operation disable_tool",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/disable_tool"
       },
+      "x-omni-resource-scope": "agent",
       "x-omni-stability": "experimental"
     },
     {
@@ -4565,10 +4709,12 @@
       },
       "summary": "OmniAgents GUI protocol operation disable_mcp_server",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/disable_mcp_server"
       },
+      "x-omni-resource-scope": "agent",
       "x-omni-stability": "experimental"
     },
     {
@@ -4632,10 +4778,12 @@
       },
       "summary": "OmniAgents GUI protocol operation report_incident",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/report_incident"
       },
+      "x-omni-resource-scope": "thread",
       "x-omni-stability": "experimental"
     },
     {
@@ -4685,10 +4833,12 @@
       },
       "summary": "OmniAgents GUI protocol operation export_session",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/export_session"
       },
+      "x-omni-resource-scope": "thread",
       "x-omni-stability": "experimental"
     },
     {
@@ -4723,10 +4873,12 @@
       },
       "summary": "OmniAgents GUI protocol operation get_config",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/get_config"
       },
+      "x-omni-resource-scope": "agent_host",
       "x-omni-stability": "experimental"
     },
     {
@@ -4769,10 +4921,12 @@
       },
       "summary": "OmniAgents GUI protocol operation validate_config",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/validate_config"
       },
+      "x-omni-resource-scope": "agent_host",
       "x-omni-stability": "experimental"
     },
     {
@@ -4815,10 +4969,12 @@
       },
       "summary": "OmniAgents GUI protocol operation write_config",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/write_config"
       },
+      "x-omni-resource-scope": "agent_host",
       "x-omni-stability": "experimental"
     },
     {
@@ -4896,10 +5052,12 @@
       },
       "summary": "OmniAgents GUI protocol operation mcp_read_resource",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_read_resource"
       },
+      "x-omni-resource-scope": "agent",
       "x-omni-stability": "experimental"
     },
     {
@@ -4984,10 +5142,12 @@
       },
       "summary": "OmniAgents GUI protocol operation mcp_call_tool",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_call_tool"
       },
+      "x-omni-resource-scope": "thread",
       "x-omni-stability": "experimental"
     },
     {
@@ -5072,10 +5232,12 @@
       },
       "summary": "OmniAgents GUI protocol operation mcp_get_prompt",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_get_prompt"
       },
+      "x-omni-resource-scope": "agent",
       "x-omni-stability": "experimental"
     },
     {
@@ -5118,10 +5280,10 @@
       "paramStructure": "by-name",
       "params": [
         {
-          "name": "session_id",
+          "name": "environment_id",
           "required": true,
           "schema": {
-            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_watch/properties/session_id"
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_watch/properties/environment_id"
           }
         },
         {
@@ -5144,6 +5306,20 @@
           "schema": {
             "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_watch/properties/poll_interval_ms"
           }
+        },
+        {
+          "name": "workspace_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_watch/properties/workspace_id"
+          }
+        },
+        {
+          "name": "environment_generation",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_watch/properties/environment_generation"
+          }
         }
       ],
       "result": {
@@ -5154,10 +5330,14 @@
       },
       "summary": "OmniAgents GUI protocol operation fs_watch",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [
+        "workspace_read"
+      ],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_watch"
       },
+      "x-omni-resource-scope": "workspace",
       "x-omni-stability": "experimental"
     },
     {
@@ -5200,10 +5380,10 @@
       "paramStructure": "by-name",
       "params": [
         {
-          "name": "session_id",
+          "name": "environment_id",
           "required": true,
           "schema": {
-            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_unwatch/properties/session_id"
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_unwatch/properties/environment_id"
           }
         },
         {
@@ -5211,6 +5391,20 @@
           "required": true,
           "schema": {
             "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_unwatch/properties/watch_id"
+          }
+        },
+        {
+          "name": "workspace_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_unwatch/properties/workspace_id"
+          }
+        },
+        {
+          "name": "environment_generation",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_unwatch/properties/environment_generation"
           }
         }
       ],
@@ -5222,10 +5416,14 @@
       },
       "summary": "OmniAgents GUI protocol operation fs_unwatch",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [
+        "workspace_read"
+      ],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_unwatch"
       },
+      "x-omni-resource-scope": "workspace",
       "x-omni-stability": "experimental"
     },
     {
@@ -5268,10 +5466,10 @@
       "paramStructure": "by-name",
       "params": [
         {
-          "name": "session_id",
+          "name": "environment_id",
           "required": true,
           "schema": {
-            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_list/properties/session_id"
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_list/properties/environment_id"
           }
         },
         {
@@ -5287,6 +5485,20 @@
           "schema": {
             "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_list/properties/recursive"
           }
+        },
+        {
+          "name": "workspace_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_list/properties/workspace_id"
+          }
+        },
+        {
+          "name": "environment_generation",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_list/properties/environment_generation"
+          }
         }
       ],
       "result": {
@@ -5297,10 +5509,14 @@
       },
       "summary": "OmniAgents GUI protocol operation fs_list",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [
+        "workspace_read"
+      ],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_list"
       },
+      "x-omni-resource-scope": "workspace",
       "x-omni-stability": "experimental"
     },
     {
@@ -5343,10 +5559,10 @@
       "paramStructure": "by-name",
       "params": [
         {
-          "name": "session_id",
+          "name": "environment_id",
           "required": true,
           "schema": {
-            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_stat/properties/session_id"
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_stat/properties/environment_id"
           }
         },
         {
@@ -5354,6 +5570,20 @@
           "required": true,
           "schema": {
             "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_stat/properties/path"
+          }
+        },
+        {
+          "name": "workspace_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_stat/properties/workspace_id"
+          }
+        },
+        {
+          "name": "environment_generation",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_stat/properties/environment_generation"
           }
         }
       ],
@@ -5365,10 +5595,14 @@
       },
       "summary": "OmniAgents GUI protocol operation fs_stat",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [
+        "workspace_read"
+      ],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_stat"
       },
+      "x-omni-resource-scope": "workspace",
       "x-omni-stability": "experimental"
     },
     {
@@ -5411,10 +5645,10 @@
       "paramStructure": "by-name",
       "params": [
         {
-          "name": "session_id",
+          "name": "environment_id",
           "required": true,
           "schema": {
-            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_download_open/properties/session_id"
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_download_open/properties/environment_id"
           }
         },
         {
@@ -5422,6 +5656,20 @@
           "required": true,
           "schema": {
             "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_download_open/properties/path"
+          }
+        },
+        {
+          "name": "workspace_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_download_open/properties/workspace_id"
+          }
+        },
+        {
+          "name": "environment_generation",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_download_open/properties/environment_generation"
           }
         }
       ],
@@ -5433,10 +5681,14 @@
       },
       "summary": "OmniAgents GUI protocol operation fs_download_open",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [
+        "workspace_read"
+      ],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_download_open"
       },
+      "x-omni-resource-scope": "workspace",
       "x-omni-stability": "experimental"
     },
     {
@@ -5479,10 +5731,10 @@
       "paramStructure": "by-name",
       "params": [
         {
-          "name": "session_id",
+          "name": "environment_id",
           "required": true,
           "schema": {
-            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_download_read/properties/session_id"
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_download_read/properties/environment_id"
           }
         },
         {
@@ -5505,6 +5757,20 @@
           "schema": {
             "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_download_read/properties/length"
           }
+        },
+        {
+          "name": "workspace_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_download_read/properties/workspace_id"
+          }
+        },
+        {
+          "name": "environment_generation",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_download_read/properties/environment_generation"
+          }
         }
       ],
       "result": {
@@ -5515,10 +5781,14 @@
       },
       "summary": "OmniAgents GUI protocol operation fs_download_read",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [
+        "workspace_read"
+      ],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_download_read"
       },
+      "x-omni-resource-scope": "workspace",
       "x-omni-stability": "experimental"
     },
     {
@@ -5561,10 +5831,10 @@
       "paramStructure": "by-name",
       "params": [
         {
-          "name": "session_id",
+          "name": "environment_id",
           "required": true,
           "schema": {
-            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_download_close/properties/session_id"
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_download_close/properties/environment_id"
           }
         },
         {
@@ -5572,6 +5842,20 @@
           "required": true,
           "schema": {
             "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_download_close/properties/transfer_id"
+          }
+        },
+        {
+          "name": "workspace_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_download_close/properties/workspace_id"
+          }
+        },
+        {
+          "name": "environment_generation",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_download_close/properties/environment_generation"
           }
         }
       ],
@@ -5583,10 +5867,14 @@
       },
       "summary": "OmniAgents GUI protocol operation fs_download_close",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [
+        "workspace_read"
+      ],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_download_close"
       },
+      "x-omni-resource-scope": "workspace",
       "x-omni-stability": "experimental"
     },
     {
@@ -5629,10 +5917,10 @@
       "paramStructure": "by-name",
       "params": [
         {
-          "name": "session_id",
+          "name": "environment_id",
           "required": true,
           "schema": {
-            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_upload_open/properties/session_id"
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_upload_open/properties/environment_id"
           }
         },
         {
@@ -5669,6 +5957,20 @@
           "schema": {
             "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_upload_open/properties/overwrite"
           }
+        },
+        {
+          "name": "workspace_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_upload_open/properties/workspace_id"
+          }
+        },
+        {
+          "name": "environment_generation",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_upload_open/properties/environment_generation"
+          }
         }
       ],
       "result": {
@@ -5679,10 +5981,14 @@
       },
       "summary": "OmniAgents GUI protocol operation fs_upload_open",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [
+        "workspace_write"
+      ],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_upload_open"
       },
+      "x-omni-resource-scope": "workspace",
       "x-omni-stability": "experimental"
     },
     {
@@ -5725,10 +6031,10 @@
       "paramStructure": "by-name",
       "params": [
         {
-          "name": "session_id",
+          "name": "environment_id",
           "required": true,
           "schema": {
-            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_upload_chunk/properties/session_id"
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_upload_chunk/properties/environment_id"
           }
         },
         {
@@ -5751,6 +6057,20 @@
           "schema": {
             "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_upload_chunk/properties/data"
           }
+        },
+        {
+          "name": "workspace_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_upload_chunk/properties/workspace_id"
+          }
+        },
+        {
+          "name": "environment_generation",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_upload_chunk/properties/environment_generation"
+          }
         }
       ],
       "result": {
@@ -5761,10 +6081,14 @@
       },
       "summary": "OmniAgents GUI protocol operation fs_upload_chunk",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [
+        "workspace_write"
+      ],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_upload_chunk"
       },
+      "x-omni-resource-scope": "workspace",
       "x-omni-stability": "experimental"
     },
     {
@@ -5807,10 +6131,10 @@
       "paramStructure": "by-name",
       "params": [
         {
-          "name": "session_id",
+          "name": "environment_id",
           "required": true,
           "schema": {
-            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_upload_commit/properties/session_id"
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_upload_commit/properties/environment_id"
           }
         },
         {
@@ -5818,6 +6142,20 @@
           "required": true,
           "schema": {
             "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_upload_commit/properties/transfer_id"
+          }
+        },
+        {
+          "name": "workspace_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_upload_commit/properties/workspace_id"
+          }
+        },
+        {
+          "name": "environment_generation",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_upload_commit/properties/environment_generation"
           }
         }
       ],
@@ -5829,10 +6167,14 @@
       },
       "summary": "OmniAgents GUI protocol operation fs_upload_commit",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [
+        "workspace_write"
+      ],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_upload_commit"
       },
+      "x-omni-resource-scope": "workspace",
       "x-omni-stability": "experimental"
     },
     {
@@ -5875,10 +6217,10 @@
       "paramStructure": "by-name",
       "params": [
         {
-          "name": "session_id",
+          "name": "environment_id",
           "required": true,
           "schema": {
-            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_upload_abort/properties/session_id"
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_upload_abort/properties/environment_id"
           }
         },
         {
@@ -5886,6 +6228,20 @@
           "required": true,
           "schema": {
             "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_upload_abort/properties/transfer_id"
+          }
+        },
+        {
+          "name": "workspace_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_upload_abort/properties/workspace_id"
+          }
+        },
+        {
+          "name": "environment_generation",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_upload_abort/properties/environment_generation"
           }
         }
       ],
@@ -5897,10 +6253,14 @@
       },
       "summary": "OmniAgents GUI protocol operation fs_upload_abort",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [
+        "workspace_write"
+      ],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_upload_abort"
       },
+      "x-omni-resource-scope": "workspace",
       "x-omni-stability": "experimental"
     },
     {
@@ -5946,10 +6306,10 @@
       "paramStructure": "by-name",
       "params": [
         {
-          "name": "session_id",
+          "name": "environment_id",
           "required": true,
           "schema": {
-            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_list_repositories/properties/session_id"
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_list_repositories/properties/environment_id"
           }
         },
         {
@@ -5965,6 +6325,20 @@
           "schema": {
             "$ref": "./schemas/gui-v1.schema.json#/$defs/git_list_repositories/properties/max_depth"
           }
+        },
+        {
+          "name": "workspace_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_list_repositories/properties/workspace_id"
+          }
+        },
+        {
+          "name": "environment_generation",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_list_repositories/properties/environment_generation"
+          }
         }
       ],
       "result": {
@@ -5975,10 +6349,15 @@
       },
       "summary": "OmniAgents GUI protocol operation git_list_repositories",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [
+        "workspace_read",
+        "process"
+      ],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/git_list_repositories"
       },
+      "x-omni-resource-scope": "workspace",
       "x-omni-stability": "experimental"
     },
     {
@@ -6024,10 +6403,10 @@
       "paramStructure": "by-name",
       "params": [
         {
-          "name": "session_id",
+          "name": "environment_id",
           "required": true,
           "schema": {
-            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_status/properties/session_id"
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_status/properties/environment_id"
           }
         },
         {
@@ -6057,6 +6436,20 @@
           "schema": {
             "$ref": "./schemas/gui-v1.schema.json#/$defs/git_status/properties/paths"
           }
+        },
+        {
+          "name": "workspace_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_status/properties/workspace_id"
+          }
+        },
+        {
+          "name": "environment_generation",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_status/properties/environment_generation"
+          }
         }
       ],
       "result": {
@@ -6067,10 +6460,15 @@
       },
       "summary": "OmniAgents GUI protocol operation git_status",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [
+        "workspace_read",
+        "process"
+      ],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/git_status"
       },
+      "x-omni-resource-scope": "workspace",
       "x-omni-stability": "experimental"
     },
     {
@@ -6116,10 +6514,10 @@
       "paramStructure": "by-name",
       "params": [
         {
-          "name": "session_id",
+          "name": "environment_id",
           "required": true,
           "schema": {
-            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_diff/properties/session_id"
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_diff/properties/environment_id"
           }
         },
         {
@@ -6163,6 +6561,20 @@
           "schema": {
             "$ref": "./schemas/gui-v1.schema.json#/$defs/git_diff/properties/to_rev"
           }
+        },
+        {
+          "name": "workspace_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_diff/properties/workspace_id"
+          }
+        },
+        {
+          "name": "environment_generation",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_diff/properties/environment_generation"
+          }
         }
       ],
       "result": {
@@ -6173,10 +6585,15 @@
       },
       "summary": "OmniAgents GUI protocol operation git_diff",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [
+        "workspace_read",
+        "process"
+      ],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/git_diff"
       },
+      "x-omni-resource-scope": "workspace",
       "x-omni-stability": "experimental"
     },
     {
@@ -6222,10 +6639,10 @@
       "paramStructure": "by-name",
       "params": [
         {
-          "name": "session_id",
+          "name": "environment_id",
           "required": true,
           "schema": {
-            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_log/properties/session_id"
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_log/properties/environment_id"
           }
         },
         {
@@ -6262,6 +6679,20 @@
           "schema": {
             "$ref": "./schemas/gui-v1.schema.json#/$defs/git_log/properties/paths"
           }
+        },
+        {
+          "name": "workspace_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_log/properties/workspace_id"
+          }
+        },
+        {
+          "name": "environment_generation",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_log/properties/environment_generation"
+          }
         }
       ],
       "result": {
@@ -6272,10 +6703,15 @@
       },
       "summary": "OmniAgents GUI protocol operation git_log",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [
+        "workspace_read",
+        "process"
+      ],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/git_log"
       },
+      "x-omni-resource-scope": "workspace",
       "x-omni-stability": "experimental"
     },
     {
@@ -6321,10 +6757,10 @@
       "paramStructure": "by-name",
       "params": [
         {
-          "name": "session_id",
+          "name": "environment_id",
           "required": true,
           "schema": {
-            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_list_branches/properties/session_id"
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_list_branches/properties/environment_id"
           }
         },
         {
@@ -6340,6 +6776,20 @@
           "schema": {
             "$ref": "./schemas/gui-v1.schema.json#/$defs/git_list_branches/properties/include_remote"
           }
+        },
+        {
+          "name": "workspace_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_list_branches/properties/workspace_id"
+          }
+        },
+        {
+          "name": "environment_generation",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_list_branches/properties/environment_generation"
+          }
         }
       ],
       "result": {
@@ -6350,10 +6800,15 @@
       },
       "summary": "OmniAgents GUI protocol operation git_list_branches",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [
+        "workspace_read",
+        "process"
+      ],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/git_list_branches"
       },
+      "x-omni-resource-scope": "workspace",
       "x-omni-stability": "experimental"
     },
     {
@@ -6399,10 +6854,10 @@
       "paramStructure": "by-name",
       "params": [
         {
-          "name": "session_id",
+          "name": "environment_id",
           "required": true,
           "schema": {
-            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_list_worktrees/properties/session_id"
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_list_worktrees/properties/environment_id"
           }
         },
         {
@@ -6410,6 +6865,20 @@
           "required": true,
           "schema": {
             "$ref": "./schemas/gui-v1.schema.json#/$defs/git_list_worktrees/properties/repo"
+          }
+        },
+        {
+          "name": "workspace_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_list_worktrees/properties/workspace_id"
+          }
+        },
+        {
+          "name": "environment_generation",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_list_worktrees/properties/environment_generation"
           }
         }
       ],
@@ -6421,10 +6890,15 @@
       },
       "summary": "OmniAgents GUI protocol operation git_list_worktrees",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [
+        "workspace_read",
+        "process"
+      ],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/git_list_worktrees"
       },
+      "x-omni-resource-scope": "workspace",
       "x-omni-stability": "experimental"
     },
     {
@@ -6470,10 +6944,10 @@
       "paramStructure": "by-name",
       "params": [
         {
-          "name": "session_id",
+          "name": "environment_id",
           "required": true,
           "schema": {
-            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_conflicts/properties/session_id"
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_conflicts/properties/environment_id"
           }
         },
         {
@@ -6489,6 +6963,20 @@
           "schema": {
             "$ref": "./schemas/gui-v1.schema.json#/$defs/git_conflicts/properties/paths"
           }
+        },
+        {
+          "name": "workspace_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_conflicts/properties/workspace_id"
+          }
+        },
+        {
+          "name": "environment_generation",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_conflicts/properties/environment_generation"
+          }
         }
       ],
       "result": {
@@ -6499,10 +6987,15 @@
       },
       "summary": "OmniAgents GUI protocol operation git_conflicts",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [
+        "workspace_read",
+        "process"
+      ],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/git_conflicts"
       },
+      "x-omni-resource-scope": "workspace",
       "x-omni-stability": "experimental"
     },
     {
@@ -6548,10 +7041,10 @@
       "paramStructure": "by-name",
       "params": [
         {
-          "name": "session_id",
+          "name": "environment_id",
           "required": true,
           "schema": {
-            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_stage/properties/session_id"
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_stage/properties/environment_id"
           }
         },
         {
@@ -6588,6 +7081,20 @@
           "schema": {
             "$ref": "./schemas/gui-v1.schema.json#/$defs/git_stage/properties/mode"
           }
+        },
+        {
+          "name": "workspace_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_stage/properties/workspace_id"
+          }
+        },
+        {
+          "name": "environment_generation",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_stage/properties/environment_generation"
+          }
         }
       ],
       "result": {
@@ -6598,10 +7105,15 @@
       },
       "summary": "OmniAgents GUI protocol operation git_stage",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [
+        "workspace_write",
+        "process"
+      ],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/git_stage"
       },
+      "x-omni-resource-scope": "workspace",
       "x-omni-stability": "experimental"
     },
     {
@@ -6647,10 +7159,10 @@
       "paramStructure": "by-name",
       "params": [
         {
-          "name": "session_id",
+          "name": "environment_id",
           "required": true,
           "schema": {
-            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_unstage/properties/session_id"
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_unstage/properties/environment_id"
           }
         },
         {
@@ -6680,6 +7192,20 @@
           "schema": {
             "$ref": "./schemas/gui-v1.schema.json#/$defs/git_unstage/properties/context_lines"
           }
+        },
+        {
+          "name": "workspace_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_unstage/properties/workspace_id"
+          }
+        },
+        {
+          "name": "environment_generation",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_unstage/properties/environment_generation"
+          }
         }
       ],
       "result": {
@@ -6690,10 +7216,15 @@
       },
       "summary": "OmniAgents GUI protocol operation git_unstage",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [
+        "workspace_write",
+        "process"
+      ],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/git_unstage"
       },
+      "x-omni-resource-scope": "workspace",
       "x-omni-stability": "experimental"
     },
     {
@@ -6739,10 +7270,10 @@
       "paramStructure": "by-name",
       "params": [
         {
-          "name": "session_id",
+          "name": "environment_id",
           "required": true,
           "schema": {
-            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_discard/properties/session_id"
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_discard/properties/environment_id"
           }
         },
         {
@@ -6779,6 +7310,20 @@
           "schema": {
             "$ref": "./schemas/gui-v1.schema.json#/$defs/git_discard/properties/confirmation_token"
           }
+        },
+        {
+          "name": "workspace_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_discard/properties/workspace_id"
+          }
+        },
+        {
+          "name": "environment_generation",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_discard/properties/environment_generation"
+          }
         }
       ],
       "result": {
@@ -6789,10 +7334,15 @@
       },
       "summary": "OmniAgents GUI protocol operation git_discard",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [
+        "workspace_write",
+        "process"
+      ],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/git_discard"
       },
+      "x-omni-resource-scope": "workspace",
       "x-omni-stability": "experimental"
     },
     {
@@ -6838,10 +7388,10 @@
       "paramStructure": "by-name",
       "params": [
         {
-          "name": "session_id",
+          "name": "environment_id",
           "required": true,
           "schema": {
-            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_commit/properties/session_id"
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_commit/properties/environment_id"
           }
         },
         {
@@ -6885,6 +7435,20 @@
           "schema": {
             "$ref": "./schemas/gui-v1.schema.json#/$defs/git_commit/properties/confirmation_token"
           }
+        },
+        {
+          "name": "workspace_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_commit/properties/workspace_id"
+          }
+        },
+        {
+          "name": "environment_generation",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_commit/properties/environment_generation"
+          }
         }
       ],
       "result": {
@@ -6895,10 +7459,15 @@
       },
       "summary": "OmniAgents GUI protocol operation git_commit",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [
+        "workspace_write",
+        "process"
+      ],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/git_commit"
       },
+      "x-omni-resource-scope": "workspace",
       "x-omni-stability": "experimental"
     },
     {
@@ -6944,10 +7513,10 @@
       "paramStructure": "by-name",
       "params": [
         {
-          "name": "session_id",
+          "name": "environment_id",
           "required": true,
           "schema": {
-            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_checkout/properties/session_id"
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_checkout/properties/environment_id"
           }
         },
         {
@@ -6998,6 +7567,20 @@
           "schema": {
             "$ref": "./schemas/gui-v1.schema.json#/$defs/git_checkout/properties/confirmation_token"
           }
+        },
+        {
+          "name": "workspace_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_checkout/properties/workspace_id"
+          }
+        },
+        {
+          "name": "environment_generation",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_checkout/properties/environment_generation"
+          }
         }
       ],
       "result": {
@@ -7008,10 +7591,15 @@
       },
       "summary": "OmniAgents GUI protocol operation git_checkout",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [
+        "workspace_write",
+        "process"
+      ],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/git_checkout"
       },
+      "x-omni-resource-scope": "workspace",
       "x-omni-stability": "experimental"
     },
     {
@@ -7057,10 +7645,10 @@
       "paramStructure": "by-name",
       "params": [
         {
-          "name": "session_id",
+          "name": "environment_id",
           "required": true,
           "schema": {
-            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_reset/properties/session_id"
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_reset/properties/environment_id"
           }
         },
         {
@@ -7097,6 +7685,20 @@
           "schema": {
             "$ref": "./schemas/gui-v1.schema.json#/$defs/git_reset/properties/confirmation_token"
           }
+        },
+        {
+          "name": "workspace_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_reset/properties/workspace_id"
+          }
+        },
+        {
+          "name": "environment_generation",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_reset/properties/environment_generation"
+          }
         }
       ],
       "result": {
@@ -7107,10 +7709,15 @@
       },
       "summary": "OmniAgents GUI protocol operation git_reset",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [
+        "workspace_write",
+        "process"
+      ],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/git_reset"
       },
+      "x-omni-resource-scope": "workspace",
       "x-omni-stability": "experimental"
     },
     {
@@ -7156,10 +7763,10 @@
       "paramStructure": "by-name",
       "params": [
         {
-          "name": "session_id",
+          "name": "environment_id",
           "required": true,
           "schema": {
-            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_fetch/properties/session_id"
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_fetch/properties/environment_id"
           }
         },
         {
@@ -7189,6 +7796,20 @@
           "schema": {
             "$ref": "./schemas/gui-v1.schema.json#/$defs/git_fetch/properties/prune"
           }
+        },
+        {
+          "name": "workspace_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_fetch/properties/workspace_id"
+          }
+        },
+        {
+          "name": "environment_generation",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_fetch/properties/environment_generation"
+          }
         }
       ],
       "result": {
@@ -7199,10 +7820,16 @@
       },
       "summary": "OmniAgents GUI protocol operation git_fetch",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [
+        "workspace_write",
+        "process",
+        "network"
+      ],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/git_fetch"
       },
+      "x-omni-resource-scope": "workspace",
       "x-omni-stability": "experimental"
     },
     {
@@ -7248,10 +7875,10 @@
       "paramStructure": "by-name",
       "params": [
         {
-          "name": "session_id",
+          "name": "environment_id",
           "required": true,
           "schema": {
-            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_pull/properties/session_id"
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_pull/properties/environment_id"
           }
         },
         {
@@ -7281,6 +7908,20 @@
           "schema": {
             "$ref": "./schemas/gui-v1.schema.json#/$defs/git_pull/properties/rebase"
           }
+        },
+        {
+          "name": "workspace_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_pull/properties/workspace_id"
+          }
+        },
+        {
+          "name": "environment_generation",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_pull/properties/environment_generation"
+          }
         }
       ],
       "result": {
@@ -7291,10 +7932,16 @@
       },
       "summary": "OmniAgents GUI protocol operation git_pull",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [
+        "workspace_write",
+        "process",
+        "network"
+      ],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/git_pull"
       },
+      "x-omni-resource-scope": "workspace",
       "x-omni-stability": "experimental"
     },
     {
@@ -7340,10 +7987,10 @@
       "paramStructure": "by-name",
       "params": [
         {
-          "name": "session_id",
+          "name": "environment_id",
           "required": true,
           "schema": {
-            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_push/properties/session_id"
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_push/properties/environment_id"
           }
         },
         {
@@ -7394,6 +8041,20 @@
           "schema": {
             "$ref": "./schemas/gui-v1.schema.json#/$defs/git_push/properties/confirmation_token"
           }
+        },
+        {
+          "name": "workspace_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_push/properties/workspace_id"
+          }
+        },
+        {
+          "name": "environment_generation",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_push/properties/environment_generation"
+          }
         }
       ],
       "result": {
@@ -7404,10 +8065,16 @@
       },
       "summary": "OmniAgents GUI protocol operation git_push",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [
+        "workspace_write",
+        "process",
+        "network"
+      ],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/git_push"
       },
+      "x-omni-resource-scope": "workspace",
       "x-omni-stability": "experimental"
     },
     {
@@ -7530,10 +8197,12 @@
       },
       "summary": "OmniAgents GUI protocol operation list_threads",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/list_threads"
       },
+      "x-omni-resource-scope": "principal",
       "x-omni-stability": "experimental"
     },
     {
@@ -7659,10 +8328,12 @@
       },
       "summary": "OmniAgents GUI protocol operation search_threads",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/search_threads"
       },
+      "x-omni-resource-scope": "principal",
       "x-omni-stability": "experimental"
     },
     {
@@ -7739,10 +8410,12 @@
       },
       "summary": "OmniAgents GUI protocol operation update_thread",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/update_thread"
       },
+      "x-omni-resource-scope": "thread",
       "x-omni-stability": "experimental"
     },
     {
@@ -7802,10 +8475,12 @@
       },
       "summary": "OmniAgents GUI protocol operation list_thread_descendants",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/list_thread_descendants"
       },
+      "x-omni-resource-scope": "thread",
       "x-omni-stability": "experimental"
     },
     {
@@ -7875,10 +8550,12 @@
       },
       "summary": "OmniAgents GUI protocol operation export_thread",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/export_thread"
       },
+      "x-omni-resource-scope": "thread",
       "x-omni-stability": "experimental"
     },
     {
@@ -7928,10 +8605,12 @@
       },
       "summary": "OmniAgents GUI protocol operation purge_threads",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/purge_threads"
       },
+      "x-omni-resource-scope": "agent_host",
       "x-omni-stability": "experimental"
     },
     {
@@ -7984,10 +8663,12 @@
       },
       "summary": "OmniAgents GUI protocol operation get_plan",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/get_plan"
       },
+      "x-omni-resource-scope": "thread",
       "x-omni-stability": "experimental"
     },
     {
@@ -8043,10 +8724,12 @@
       },
       "summary": "OmniAgents GUI protocol operation get_run_diff",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/get_run_diff"
       },
+      "x-omni-resource-scope": "thread",
       "x-omni-stability": "experimental"
     },
     {
@@ -8061,10 +8744,12 @@
       },
       "summary": "OmniAgents GUI protocol operation initialized",
       "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "notification",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/initialized"
       },
+      "x-omni-resource-scope": "connection",
       "x-omni-stability": "stable"
     },
     {
@@ -8122,10 +8807,12 @@
       },
       "summary": "OmniAgents GUI protocol operation run_started",
       "x-omni-direction": "server_to_client",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "notification",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/run_started"
       },
+      "x-omni-resource-scope": "run",
       "x-omni-stability": "stable"
     },
     {
@@ -8204,10 +8891,12 @@
       },
       "summary": "OmniAgents GUI protocol operation run_status",
       "x-omni-direction": "server_to_client",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "notification",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/run_status"
       },
+      "x-omni-resource-scope": "run",
       "x-omni-stability": "stable"
     },
     {
@@ -8272,10 +8961,12 @@
       },
       "summary": "OmniAgents GUI protocol operation tool_called",
       "x-omni-direction": "server_to_client",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "notification",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/tool_called"
       },
+      "x-omni-resource-scope": "run",
       "x-omni-stability": "stable"
     },
     {
@@ -8347,10 +9038,12 @@
       },
       "summary": "OmniAgents GUI protocol operation tool_result",
       "x-omni-direction": "server_to_client",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "notification",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/tool_result"
       },
+      "x-omni-resource-scope": "run",
       "x-omni-stability": "stable"
     },
     {
@@ -8415,10 +9108,12 @@
       },
       "summary": "OmniAgents GUI protocol operation message_output",
       "x-omni-direction": "server_to_client",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "notification",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/message_output"
       },
+      "x-omni-resource-scope": "run",
       "x-omni-stability": "stable"
     },
     {
@@ -8525,10 +9220,12 @@
       },
       "summary": "OmniAgents GUI protocol operation token",
       "x-omni-direction": "server_to_client",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "notification",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/token"
       },
+      "x-omni-resource-scope": "run",
       "x-omni-stability": "stable"
     },
     {
@@ -8628,10 +9325,12 @@
       },
       "summary": "OmniAgents GUI protocol operation run_end",
       "x-omni-direction": "server_to_client",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "notification",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/run_end"
       },
+      "x-omni-resource-scope": "run",
       "x-omni-stability": "stable"
     },
     {
@@ -8703,10 +9402,12 @@
       },
       "summary": "OmniAgents GUI protocol operation tool_approval_requested",
       "x-omni-direction": "server_to_client",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "notification",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/tool_approval_requested"
       },
+      "x-omni-resource-scope": "run",
       "x-omni-stability": "stable"
     },
     {
@@ -8757,10 +9458,12 @@
       },
       "summary": "OmniAgents GUI protocol operation tool_approval_resolved",
       "x-omni-direction": "server_to_client",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "notification",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/tool_approval_resolved"
       },
+      "x-omni-resource-scope": "run",
       "x-omni-stability": "stable"
     },
     {
@@ -8839,10 +9542,12 @@
       },
       "summary": "OmniAgents GUI protocol operation mcp_approval_requested",
       "x-omni-direction": "server_to_client",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "notification",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_approval_requested"
       },
+      "x-omni-resource-scope": "run",
       "x-omni-stability": "stable"
     },
     {
@@ -8893,10 +9598,12 @@
       },
       "summary": "OmniAgents GUI protocol operation mcp_approval_resolved",
       "x-omni-direction": "server_to_client",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "notification",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_approval_resolved"
       },
+      "x-omni-resource-scope": "run",
       "x-omni-stability": "stable"
     },
     {
@@ -8972,10 +9679,12 @@
         "responseMethod": "client_response"
       },
       "x-omni-direction": "server_to_client",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "correlated_notification",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/client_request"
       },
+      "x-omni-resource-scope": "run",
       "x-omni-stability": "stable"
     },
     {
@@ -9026,10 +9735,12 @@
       },
       "summary": "OmniAgents GUI protocol operation client_request_resolved",
       "x-omni-direction": "server_to_client",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "notification",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/client_request_resolved"
       },
+      "x-omni-resource-scope": "run",
       "x-omni-stability": "stable"
     },
     {
@@ -9080,10 +9791,12 @@
       },
       "summary": "OmniAgents GUI protocol operation queue_changed",
       "x-omni-direction": "server_to_client",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "notification",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/queue_changed"
       },
+      "x-omni-resource-scope": "thread",
       "x-omni-stability": "stable"
     },
     {
@@ -9134,10 +9847,12 @@
       },
       "summary": "OmniAgents GUI protocol operation account_changed",
       "x-omni-direction": "server_to_client",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "notification",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/account_changed"
       },
+      "x-omni-resource-scope": "principal",
       "x-omni-stability": "stable"
     },
     {
@@ -9269,10 +9984,12 @@
         "responseMethod": "elicitation_response"
       },
       "x-omni-direction": "server_to_client",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "correlated_notification",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/elicitation_requested"
       },
+      "x-omni-resource-scope": "run",
       "x-omni-stability": "stable"
     },
     {
@@ -9351,10 +10068,12 @@
       },
       "summary": "OmniAgents GUI protocol operation elicitation_resolved",
       "x-omni-direction": "server_to_client",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "notification",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/elicitation_resolved"
       },
+      "x-omni-resource-scope": "run",
       "x-omni-stability": "stable"
     },
     {
@@ -9433,10 +10152,12 @@
       },
       "summary": "OmniAgents GUI protocol operation mcp_server_status_changed",
       "x-omni-direction": "server_to_client",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "notification",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_server_status_changed"
       },
+      "x-omni-resource-scope": "agent",
       "x-omni-stability": "stable"
     },
     {
@@ -9487,10 +10208,12 @@
       },
       "summary": "OmniAgents GUI protocol operation session_forked",
       "x-omni-direction": "server_to_client",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "notification",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/session_forked"
       },
+      "x-omni-resource-scope": "thread",
       "x-omni-stability": "experimental"
     },
     {
@@ -9541,10 +10264,12 @@
       },
       "summary": "OmniAgents GUI protocol operation session_variables_changed",
       "x-omni-direction": "server_to_client",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "notification",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/session_variables_changed"
       },
+      "x-omni-resource-scope": "thread",
       "x-omni-stability": "experimental"
     },
     {
@@ -9552,10 +10277,10 @@
       "paramStructure": "by-name",
       "params": [
         {
-          "name": "session_id",
+          "name": "environment_id",
           "required": true,
           "schema": {
-            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_events/properties/session_id"
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_events/properties/environment_id"
           }
         },
         {
@@ -9570,6 +10295,20 @@
           "required": true,
           "schema": {
             "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_events/properties/events"
+          }
+        },
+        {
+          "name": "workspace_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_events/properties/workspace_id"
+          }
+        },
+        {
+          "name": "environment_generation",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_events/properties/environment_generation"
           }
         },
         {
@@ -9595,10 +10334,12 @@
       },
       "summary": "OmniAgents GUI protocol operation fs_events",
       "x-omni-direction": "server_to_client",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "notification",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_events"
       },
+      "x-omni-resource-scope": "workspace",
       "x-omni-stability": "experimental"
     },
     {
@@ -9606,10 +10347,10 @@
       "paramStructure": "by-name",
       "params": [
         {
-          "name": "session_id",
+          "name": "environment_id",
           "required": true,
           "schema": {
-            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_rescan_required/properties/session_id"
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_rescan_required/properties/environment_id"
           }
         },
         {
@@ -9624,6 +10365,20 @@
           "required": true,
           "schema": {
             "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_rescan_required/properties/reason"
+          }
+        },
+        {
+          "name": "workspace_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_rescan_required/properties/workspace_id"
+          }
+        },
+        {
+          "name": "environment_generation",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_rescan_required/properties/environment_generation"
           }
         },
         {
@@ -9649,10 +10404,12 @@
       },
       "summary": "OmniAgents GUI protocol operation fs_rescan_required",
       "x-omni-direction": "server_to_client",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "notification",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_rescan_required"
       },
+      "x-omni-resource-scope": "workspace",
       "x-omni-stability": "experimental"
     },
     {
@@ -9660,10 +10417,10 @@
       "paramStructure": "by-name",
       "params": [
         {
-          "name": "session_id",
+          "name": "environment_id",
           "required": true,
           "schema": {
-            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_transfer_progress/properties/session_id"
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_transfer_progress/properties/environment_id"
           }
         },
         {
@@ -9695,6 +10452,20 @@
           }
         },
         {
+          "name": "workspace_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_transfer_progress/properties/workspace_id"
+          }
+        },
+        {
+          "name": "environment_generation",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_transfer_progress/properties/environment_generation"
+          }
+        },
+        {
           "name": "seq",
           "required": false,
           "schema": {
@@ -9717,10 +10488,12 @@
       },
       "summary": "OmniAgents GUI protocol operation fs_transfer_progress",
       "x-omni-direction": "server_to_client",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "notification",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_transfer_progress"
       },
+      "x-omni-resource-scope": "workspace",
       "x-omni-stability": "experimental"
     },
     {
@@ -9728,10 +10501,10 @@
       "paramStructure": "by-name",
       "params": [
         {
-          "name": "session_id",
+          "name": "environment_id",
           "required": true,
           "schema": {
-            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_operation_progress/properties/session_id"
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_operation_progress/properties/environment_id"
           }
         },
         {
@@ -9770,6 +10543,20 @@
           }
         },
         {
+          "name": "workspace_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_operation_progress/properties/workspace_id"
+          }
+        },
+        {
+          "name": "environment_generation",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_operation_progress/properties/environment_generation"
+          }
+        },
+        {
           "name": "seq",
           "required": false,
           "schema": {
@@ -9792,10 +10579,12 @@
       },
       "summary": "OmniAgents GUI protocol operation git_operation_progress",
       "x-omni-direction": "server_to_client",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "notification",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/git_operation_progress"
       },
+      "x-omni-resource-scope": "workspace",
       "x-omni-stability": "experimental"
     },
     {
@@ -9853,10 +10642,12 @@
       },
       "summary": "OmniAgents GUI protocol operation thread_updated",
       "x-omni-direction": "server_to_client",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "notification",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/thread_updated"
       },
+      "x-omni-resource-scope": "thread",
       "x-omni-stability": "experimental"
     },
     {
@@ -9956,10 +10747,12 @@
       },
       "summary": "OmniAgents GUI protocol operation item_updated",
       "x-omni-direction": "server_to_client",
+      "x-omni-execution-requirements": [],
       "x-omni-kind": "notification",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/item_updated"
       },
+      "x-omni-resource-scope": "thread",
       "x-omni-stability": "experimental"
     }
   ],

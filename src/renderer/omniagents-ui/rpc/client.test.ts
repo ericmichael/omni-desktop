@@ -160,14 +160,56 @@ describe('RPCClient GUI protocol handshake', () => {
     socket.open();
     await connection;
 
-    const request = client.request('fs_stat', { session_id: 'session', path: '.' });
+    const request = client.request('fs_stat', { environment_id: 'environment', path: '.' });
     const frame = JSON.parse(socket.sent.at(-1)!) as { id: number; method: string; params: unknown };
-    expect(frame).toMatchObject({ method: 'fs_stat', params: { session_id: 'session', path: '.' } });
+    expect(frame).toMatchObject({ method: 'fs_stat', params: { environment_id: 'environment', path: '.' } });
     socket.receive({ jsonrpc: '2.0', id: frame.id, result: { path: '.', type: 'directory' } });
 
     await expect(request).resolves.toEqual({ path: '.', type: 'directory' });
     expect(states).toEqual(['disconnected', 'connecting', 'connected']);
     unsubscribe();
+    client.dispose();
+  });
+
+  it('addresses start_run with an explicit environment selection', async () => {
+    const { client, socket } = await connectedClient();
+
+    const pending = client.startRun(
+      'inspect the project',
+      {
+        mode: 'explicit',
+        environment_id: 'environment-1',
+        environment_generation: 4,
+      },
+      'session-1'
+    );
+    const frame = JSON.parse(socket.sent.at(-1)!) as {
+      id: number;
+      method: string;
+      params: unknown;
+    };
+    expect(frame).toMatchObject({
+      method: 'start_run',
+      params: {
+        prompt: 'inspect the project',
+        session_id: 'session-1',
+        environment_selection: {
+          mode: 'explicit',
+          environment_id: 'environment-1',
+          environment_generation: 4,
+        },
+      },
+    });
+    socket.receive({
+      jsonrpc: '2.0',
+      id: frame.id,
+      result: { run_id: 'run-1', session_id: 'session-1' },
+    });
+
+    await expect(pending).resolves.toEqual({
+      run_id: 'run-1',
+      session_id: 'session-1',
+    });
     client.dispose();
   });
 
@@ -179,10 +221,10 @@ describe('RPCClient GUI protocol handshake', () => {
     socket.open();
     await vi.waitFor(() => expect(socket.sent).toHaveLength(1));
 
-    await expect(client.request('fs_stat', { session_id: 'session', path: '.' })).rejects.toThrow(
+    await expect(client.request('fs_stat', { environment_id: 'environment', path: '.' })).rejects.toThrow(
       'handshake is not complete'
     );
-    await expect(client.request('git_status', { session_id: 'session', repo: '.' })).rejects.toThrow(
+    await expect(client.request('git_status', { environment_id: 'environment', repo: '.' })).rejects.toThrow(
       'handshake is not complete'
     );
     expect(socket.sent.map((frame) => JSON.parse(frame).method)).toEqual(['initialize']);
@@ -286,6 +328,28 @@ describe('RPCClient generated protocol integration', () => {
 
     socket.receive({ jsonrpc: '2.0', id: request.id, result: true });
     await expect(response).resolves.toBe(true);
+    client.dispose();
+  });
+
+  it('keeps conversation and execution identities separate in server_call', async () => {
+    const { client, socket } = await connectedClient();
+    const response = client.serverCall('bash_jobs.list', {}, 'session-1', 'environment-1');
+    const request = JSON.parse(socket.sent[0]!) as Record<string, unknown>;
+
+    expect(request).toEqual({
+      jsonrpc: '2.0',
+      id: 2,
+      method: 'server_call',
+      params: {
+        function: 'bash_jobs.list',
+        args: {},
+        session_id: 'session-1',
+        environment_id: 'environment-1',
+      },
+    });
+
+    socket.receive({ jsonrpc: '2.0', id: request.id, result: { snapshot: [] } });
+    await expect(response).resolves.toEqual({ snapshot: [] });
     client.dispose();
   });
 

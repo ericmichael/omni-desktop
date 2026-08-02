@@ -189,6 +189,12 @@ type ServeReadyPayload = {
   sandbox_url: string;
   ws_url: string;
   ui_url: string;
+  /** Stable identity of the agent host that owns runtime registries. */
+  agent_host_id: string;
+  /** Stable workspace resource resolved by execution-environment routing. */
+  workspace_id: string;
+  /** Required address for filesystem, git, terminal, and other tool execution. */
+  environment_id: string;
   /**
    * Bearer token WS clients must present as an ``Authorization: Bearer``
    * upgrade header (or exchange at ``POST /auth/ws-ticket``). ``ws_url``
@@ -207,9 +213,24 @@ type ServeReadyPayload = {
 const servePayloadToData = (payload: ServeReadyPayload): AgentProcessData => {
   assert(payload.ui_url, 'Missing ui_url in omni serve payload');
   assert(payload.ports?.ui, 'Missing ports.ui in omni serve payload');
+  assert(
+    typeof payload.agent_host_id === 'string' && payload.agent_host_id.trim(),
+    'Missing agent_host_id in omni serve payload'
+  );
+  assert(
+    typeof payload.workspace_id === 'string' && payload.workspace_id.trim(),
+    'Missing workspace_id in omni serve payload'
+  );
+  assert(
+    typeof payload.environment_id === 'string' && payload.environment_id.trim(),
+    'Missing environment_id in omni serve payload'
+  );
   return {
     uiUrl: payload.ui_url,
     wsUrl: payload.ws_url,
+    agentHostId: payload.agent_host_id,
+    workspaceId: payload.workspace_id,
+    environmentId: payload.environment_id,
     ...(payload.auth_token ? { authToken: payload.auth_token } : {}),
     sandboxUrl: payload.sandbox_url,
     services: payload.services ?? {},
@@ -248,6 +269,7 @@ const SANDBOX_SWITCH_TIMEOUT_MS = 5 * 60_000;
  */
 async function oneShotServerCall(
   wsUrl: string,
+  environmentId: string,
   fn: string,
   args: Record<string, unknown> = {},
   timeoutMs: number = SERVER_CALL_TIMEOUT_MS,
@@ -278,7 +300,7 @@ async function oneShotServerCall(
             jsonrpc: '2.0',
             id: 1,
             method: 'server_call',
-            params: { function: fn, args },
+            params: { function: fn, args, environment_id: environmentId },
           })
         );
       } catch (err) {
@@ -468,14 +490,17 @@ export class AgentProcess {
     // Capture the WS URL + auth before flipping status — `stopping` carries no data.
     const data = this.status.type === 'running' || this.status.type === 'connecting' ? this.status.data : undefined;
     const wsUrl = data?.wsUrl;
+    const environmentId = data?.environmentId;
     const authToken = data?.authToken;
     this.updateStatus({ type: 'stopping' });
-    if (opts?.discardSnapshot && wsUrl) {
+    if (opts?.discardSnapshot && wsUrl && environmentId) {
       // Terminal close: the caller deletes the snapshot tar right after this
       // stop, so tell serve to skip the persist (fingerprint + full workspace
       // tar export + scrub) in its SIGTERM teardown. Best-effort — on timeout
       // or an older serve without the function, teardown persists as before.
-      await oneShotServerCall(wsUrl, 'sandbox.discard_snapshot', {}, SERVER_CALL_TIMEOUT_MS, authToken);
+      await oneShotServerCall(wsUrl, environmentId, 'sandbox.discard_snapshot', {}, SERVER_CALL_TIMEOUT_MS, authToken);
+    } else if (opts?.discardSnapshot && wsUrl) {
+      this.ipcRawOutput('Cannot discard the sandbox snapshot: no execution environment is available.\r\n');
     }
     await this.killProcess();
     this.updateStatus({ type: 'exited' });
@@ -545,12 +570,16 @@ export class AgentProcess {
     if (!wsUrl) {
       return { ok: false, fallback: true, reason: 'no ws_url available' };
     }
+    if (!data.environmentId) {
+      return { ok: false, fallback: true, reason: 'no execution environment is available' };
+    }
     // Flag the transition so the renderer can overlay a scrim over the (still
     // mounted) conversation. Cleared in `finally` regardless of outcome.
     this.updateAgentProcessData({ switching: true });
     try {
       const res = await oneShotServerCall(
         wsUrl,
+        data.environmentId,
         'sandbox.switch',
         { profile: resolved.path },
         SANDBOX_SWITCH_TIMEOUT_MS,
@@ -595,15 +624,20 @@ export class AgentProcess {
       return;
     }
     const data = (this.status as Extract<AgentProcessStatus, { type: 'running' | 'connecting' }>).data;
-    if (!data.wsUrl) {
+    if (!data.wsUrl || !data.environmentId) {
       return;
     }
-    void oneShotServerCall(data.wsUrl, 'sandbox.notify_activity', {}, SERVER_CALL_TIMEOUT_MS, data.authToken).catch(
-      () => {
-        // Best-effort. A dropped ping costs us ~60s of headroom (the
-        // renderer's throttle window) before the next one tries.
-      }
-    );
+    void oneShotServerCall(
+      data.wsUrl,
+      data.environmentId,
+      'sandbox.notify_activity',
+      {},
+      SERVER_CALL_TIMEOUT_MS,
+      data.authToken
+    ).catch(() => {
+      // Best-effort. A dropped ping costs us ~60s of headroom (the
+      // renderer's throttle window) before the next one tries.
+    });
   };
 
   private callSandboxLifecycle = async (
@@ -621,8 +655,11 @@ export class AgentProcess {
     if (!wsUrl) {
       return { ok: false, supported: false, reason: 'no ws_url available' };
     }
+    if (!data.environmentId) {
+      return { ok: false, supported: false, reason: 'no execution environment is available' };
+    }
     try {
-      const result = await oneShotServerCall(wsUrl, fn, {}, SERVER_CALL_TIMEOUT_MS, data.authToken);
+      const result = await oneShotServerCall(wsUrl, data.environmentId, fn, {}, SERVER_CALL_TIMEOUT_MS, data.authToken);
       // Trust the server function's reported paused state when supported.
       if (result.ok && result.supported) {
         this.updateAgentProcessData({

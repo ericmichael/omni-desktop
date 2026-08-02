@@ -389,10 +389,10 @@ export class FsClient {
     return this.rpc.on(event, handler);
   }
 
-  async list(sessionId: string, path: string, recursive = false): Promise<FsListResult> {
+  async list(environmentId: string, path: string, recursive = false): Promise<FsListResult> {
     const requestedPath = validateFsPath(path);
     const result = parseList(
-      await this.rpc.request('fs_list', { session_id: sessionId, path: requestedPath, recursive })
+      await this.rpc.request('fs_list', { environment_id: environmentId, path: requestedPath, recursive })
     );
     if (result.path !== requestedPath) {
       throw new FsProtocolError('fs_list returned the wrong path');
@@ -400,23 +400,23 @@ export class FsClient {
     return result;
   }
 
-  async stat(sessionId: string, path: string): Promise<FsStatResult> {
+  async stat(environmentId: string, path: string): Promise<FsStatResult> {
     const requestedPath = validateFsPath(path);
-    const result = parseStat(await this.rpc.request('fs_stat', { session_id: sessionId, path: requestedPath }));
+    const result = parseStat(await this.rpc.request('fs_stat', { environment_id: environmentId, path: requestedPath }));
     if (result.path !== requestedPath) {
       throw new FsProtocolError('fs_stat returned the wrong path');
     }
     return result;
   }
 
-  async watch(sessionId: string, path: string): Promise<string> {
+  async watch(environmentId: string, path: string): Promise<string> {
     const requestedPath = validateFsPath(path);
     const result = record(
-      await this.rpc.request('fs_watch', { session_id: sessionId, path: requestedPath, recursive: false }),
+      await this.rpc.request('fs_watch', { environment_id: environmentId, path: requestedPath, recursive: false }),
       'fs_watch result'
     );
     if (
-      stringField(result, 'session_id', 'fs_watch result') !== sessionId ||
+      stringField(result, 'environment_id', 'fs_watch result') !== environmentId ||
       validateFsPath(stringField(result, 'path', 'fs_watch result')) !== requestedPath ||
       result.recursive !== false
     ) {
@@ -425,14 +425,14 @@ export class FsClient {
     return stringField(result, 'watch_id', 'fs_watch result');
   }
 
-  async unwatch(sessionId: string, watchId: string): Promise<void> {
-    const removed = await this.rpc.request('fs_unwatch', { session_id: sessionId, watch_id: watchId });
+  async unwatch(environmentId: string, watchId: string): Promise<void> {
+    const removed = await this.rpc.request('fs_unwatch', { environment_id: environmentId, watch_id: watchId });
     if (removed !== true) {
       throw new FsProtocolError('fs_unwatch result must be true');
     }
   }
 
-  async downloadBytes(sessionId: string, path: string, options: TransferOptions = {}): Promise<FsDownloadResult> {
+  async downloadBytes(environmentId: string, path: string, options: TransferOptions = {}): Promise<FsDownloadResult> {
     const requestedPath = validateFsPath(path);
     const limit = validateLimit(options.maxBytes ?? DEFAULT_BINARY_FILE_LIMIT_BYTES);
     const { retries, timeoutMs } = validateTransferOptions(options);
@@ -445,13 +445,13 @@ export class FsClient {
       let transferId: string | null = null;
       try {
         const opened = record(
-          await this.rpc.request('fs_download_open', { session_id: sessionId, path: requestedPath }),
+          await this.rpc.request('fs_download_open', { environment_id: environmentId, path: requestedPath }),
           'fs_download_open result'
         );
         transferId = stringField(opened, 'transfer_id', 'fs_download_open result');
         const chunkSize = validateChunkSize(opened, 'fs_download_open result');
-        if (stringField(opened, 'session_id', 'fs_download_open result') !== sessionId) {
-          throw new FsProtocolError('fs_download_open returned the wrong session_id');
+        if (stringField(opened, 'environment_id', 'fs_download_open result') !== environmentId) {
+          throw new FsProtocolError('fs_download_open returned the wrong environment_id');
         }
         const metadata = {
           path: validateFsPath(stringField(opened, 'path', 'fs_download_open result')),
@@ -477,7 +477,7 @@ export class FsClient {
         while (offset < expected.size) {
           const response = record(
             await this.rpc.request('fs_download_read', {
-              session_id: sessionId,
+              environment_id: environmentId,
               transfer_id: transferId,
               offset,
               length: Math.min(chunkSize, expected.size - offset),
@@ -526,7 +526,7 @@ export class FsClient {
       } finally {
         if (transferId && this.rpc.connectionState === 'connected') {
           await this.rpc
-            .request('fs_download_close', { session_id: sessionId, transfer_id: transferId })
+            .request('fs_download_close', { environment_id: environmentId, transfer_id: transferId })
             .catch(() => {});
         }
       }
@@ -534,7 +534,7 @@ export class FsClient {
   }
 
   async uploadBytes(
-    sessionId: string,
+    environmentId: string,
     path: string,
     bytes: Uint8Array,
     options: UploadOptions = {}
@@ -558,7 +558,7 @@ export class FsClient {
       try {
         const opened = record(
           await this.rpc.request('fs_upload_open', {
-            session_id: sessionId,
+            environment_id: environmentId,
             path: requestedPath,
             size: uploadBytes.byteLength,
             sha256: digest,
@@ -570,16 +570,16 @@ export class FsClient {
         transferId = stringField(opened, 'transfer_id', 'fs_upload_open result');
         const chunkSize = validateChunkSize(opened, 'fs_upload_open result');
         if (
-          stringField(opened, 'session_id', 'fs_upload_open result') !== sessionId ||
+          stringField(opened, 'environment_id', 'fs_upload_open result') !== environmentId ||
           validateFsPath(stringField(opened, 'path', 'fs_upload_open result')) !== requestedPath
         ) {
-          throw new FsProtocolError('fs_upload_open returned the wrong session or path');
+          throw new FsProtocolError('fs_upload_open returned the wrong environment or path');
         }
         for (let offset = 0; offset < uploadBytes.byteLength; offset += chunkSize) {
           const chunk = uploadBytes.subarray(offset, Math.min(offset + chunkSize, uploadBytes.byteLength));
           const response = record(
             await this.rpc.request('fs_upload_chunk', {
-              session_id: sessionId,
+              environment_id: environmentId,
               transfer_id: transferId,
               offset,
               data: encodeBase64(chunk),
@@ -595,7 +595,7 @@ export class FsClient {
           }
         }
         const result = record(
-          await this.rpc.request('fs_upload_commit', { session_id: sessionId, transfer_id: transferId }),
+          await this.rpc.request('fs_upload_commit', { environment_id: environmentId, transfer_id: transferId }),
           'fs_upload_commit result'
         );
         const parsed = {
@@ -618,14 +618,16 @@ export class FsClient {
         await this.waitForConnected(timeoutMs);
       } finally {
         if (transferId && !committed && this.rpc.connectionState === 'connected') {
-          await this.rpc.request('fs_upload_abort', { session_id: sessionId, transfer_id: transferId }).catch(() => {});
+          await this.rpc
+            .request('fs_upload_abort', { environment_id: environmentId, transfer_id: transferId })
+            .catch(() => {});
         }
       }
     }
   }
 
-  async readTextFile(sessionId: string, path: string, options: TransferOptions = {}): Promise<TextFileReadResult> {
-    const downloaded = await this.downloadBytes(sessionId, path, {
+  async readTextFile(environmentId: string, path: string, options: TransferOptions = {}): Promise<TextFileReadResult> {
+    const downloaded = await this.downloadBytes(environmentId, path, {
       ...options,
       maxBytes: options.maxBytes ?? DEFAULT_TEXT_FILE_LIMIT_BYTES,
     });
@@ -656,7 +658,7 @@ export class FsClient {
   }
 
   async writeTextFile(
-    sessionId: string,
+    environmentId: string,
     path: string,
     text: string,
     options: WriteTextOptions = {}
@@ -669,7 +671,7 @@ export class FsClient {
       bytes.set([0xef, 0xbb, 0xbf]);
       bytes.set(content, 3);
     }
-    return this.uploadBytes(sessionId, path, bytes, {
+    return this.uploadBytes(environmentId, path, bytes, {
       ...options,
       maxBytes: options.maxBytes ?? DEFAULT_TEXT_FILE_LIMIT_BYTES,
     });
@@ -721,9 +723,9 @@ export interface WatchCallbacks {
 }
 
 interface WatchClient {
-  watch(sessionId: string, path: string): Promise<string>;
-  unwatch(sessionId: string, watchId: string): Promise<void>;
-  list(sessionId: string, path: string, recursive?: boolean): Promise<FsListResult>;
+  watch(environmentId: string, path: string): Promise<string>;
+  unwatch(environmentId: string, watchId: string): Promise<void>;
+  list(environmentId: string, path: string, recursive?: boolean): Promise<FsListResult>;
   on<Event extends 'fs_events' | 'fs_rescan_required'>(
     event: Event,
     handler: (payload: RpcNotificationMap[Event]) => void
@@ -751,7 +753,7 @@ export class WatchRegistry {
 
   constructor(
     private readonly client: WatchClient,
-    private readonly sessionId: string,
+    private readonly environmentId: string,
     private readonly limit = DEFAULT_WATCH_LIMIT
   ) {
     if (!Number.isInteger(limit) || limit < 1 || limit > MAX_CLIENT_WATCHES) {
@@ -851,14 +853,14 @@ export class WatchRegistry {
   private async install(entry: WatchEntry, reason: 'initial' | 'reconnect'): Promise<void> {
     const generation = ++entry.generation;
     try {
-      const watchId = await this.client.watch(this.sessionId, entry.path);
+      const watchId = await this.client.watch(this.environmentId, entry.path);
       if (
         this.disposed ||
         !this.entries.has(entry.path) ||
         generation !== entry.generation ||
         this.state !== 'connected'
       ) {
-        await this.client.unwatch(this.sessionId, watchId).catch(() => {});
+        await this.client.unwatch(this.environmentId, watchId).catch(() => {});
         return;
       }
       entry.watchId = watchId;
@@ -870,7 +872,7 @@ export class WatchRegistry {
   }
 
   private handleEvents(payload: FsEventsParams): void {
-    if (payload.session_id !== this.sessionId) {
+    if (payload.environment_id !== this.environmentId) {
       return;
     }
     const entry = this.watchIds.get(payload.watch_id);
@@ -904,7 +906,7 @@ export class WatchRegistry {
   }
 
   private handleRescanRequired(payload: FsRescanRequiredParams): void {
-    if (payload.session_id !== this.sessionId) {
+    if (payload.environment_id !== this.environmentId) {
       return;
     }
     const entry = this.watchIds.get(payload.watch_id);
@@ -930,7 +932,7 @@ export class WatchRegistry {
 
   private async rescan(entry: WatchEntry, reason: WatchRescanReason): Promise<void> {
     try {
-      const listing = await this.client.list(this.sessionId, entry.path, false);
+      const listing = await this.client.list(this.environmentId, entry.path, false);
       for (const callback of entry.callbacks) {
         callback.onRescan?.(listing, reason);
       }
@@ -947,7 +949,7 @@ export class WatchRegistry {
       const watchId = entry.watchId;
       entry.watchId = null;
       if (this.state === 'connected') {
-        await this.client.unwatch(this.sessionId, watchId).catch(() => {});
+        await this.client.unwatch(this.environmentId, watchId).catch(() => {});
       }
     }
     if (evicted) {

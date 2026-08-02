@@ -10,11 +10,13 @@ type DirEntry = {
 
 export function WorkspacePicker({
   sessionId,
+  environmentId,
   initialPath,
   onSelect,
   onClose,
 }: {
   sessionId?: string;
+  environmentId?: string;
   initialPath?: string;
   onSelect: (path: string) => void;
   onClose: () => void;
@@ -32,6 +34,11 @@ export function WorkspacePicker({
     async (path?: string | null) => {
       setLoading(true);
       setError(null);
+      if (!environmentId) {
+        setError('Execution environment unavailable');
+        setLoading(false);
+        return;
+      }
       try {
         const res = (await client.serverCall(
           'fs_list_dir',
@@ -40,7 +47,8 @@ export function WorkspacePicker({
             include_files: false,
             ignore_hidden: true,
           },
-          sessionId
+          sessionId,
+          environmentId
         )) as any;
         setCurrentPath(res.path || null);
         setParentPath(res.parent || null);
@@ -60,7 +68,7 @@ export function WorkspacePicker({
         setLoading(false);
       }
     },
-    [client, sessionId]
+    [client, environmentId, sessionId]
   );
 
   useEffect(() => {
@@ -72,7 +80,7 @@ export function WorkspacePicker({
       // container and would make the (sandbox-aware) lister fail.
       let start: string | undefined;
       try {
-        const res = (await client.serverCall('fs_get_workspace_root', {}, sessionId)) as any;
+        const res = (await client.serverCall('fs_get_workspace_root', {}, sessionId, environmentId)) as any;
         start = res?.path;
       } catch {}
       if (!start) {
@@ -80,7 +88,7 @@ export function WorkspacePicker({
       }
       if (!start) {
         try {
-          const res = (await client.serverCall('fs_get_home', {}, sessionId)) as any;
+          const res = (await client.serverCall('fs_get_home', {}, sessionId, environmentId)) as any;
           start = res?.path;
         } catch {}
       }
@@ -145,7 +153,7 @@ export function WorkspacePicker({
           <button
             onClick={async () => {
               try {
-                const res = (await client.serverCall('fs_get_home', {}, sessionId)) as any;
+                const res = (await client.serverCall('fs_get_home', {}, sessionId, environmentId)) as any;
                 if (res?.path) {
                   load(res.path);
                 }

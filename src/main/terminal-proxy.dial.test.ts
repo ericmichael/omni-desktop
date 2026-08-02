@@ -83,7 +83,12 @@ const makeProcessManager = (status: WithTimestamp<AgentProcessStatus>): ProcessM
 const runningStatus = (wsUrl: string, authToken?: string): WithTimestamp<AgentProcessStatus> => ({
   type: 'running',
   timestamp: Date.now(),
-  data: { uiUrl: wsUrl.replace(/^ws:/, 'http:').replace(/\/ws$/, ''), wsUrl, ...(authToken ? { authToken } : {}) },
+  data: {
+    uiUrl: wsUrl.replace(/^ws:/, 'http:').replace(/\/ws$/, ''),
+    wsUrl,
+    environmentId: 'environment-1',
+    ...(authToken ? { authToken } : {}),
+  },
 });
 
 const waitFor = async (cond: () => boolean, ms = 5_000): Promise<void> => {
@@ -129,6 +134,14 @@ describe('TerminalProxy dials', () => {
     // No token / terminal credentials in either dial URL.
     expect(rpcConn?.query).toBe('');
     expect(ioConn?.query).toBe('');
+
+    const createCall = rpcConn?.messages
+      .map((message) => JSON.parse(message) as { params?: Record<string, unknown> })
+      .find((message) => message.params?.['function'] === 'terminal.create');
+    expect(createCall?.params).toMatchObject({
+      session_id: 'sess-1',
+      environment_id: 'environment-1',
+    });
 
     // The attach frame is the FIRST message on the IO socket…
     await waitFor(() => (ioConn?.messages.length ?? 0) >= 1);

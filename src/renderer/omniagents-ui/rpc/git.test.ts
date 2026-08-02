@@ -8,11 +8,11 @@ import { GitClient, workspaceRepo } from './git';
 type Transport = Pick<RPCClient, 'request' | 'on'>;
 
 const repo = workspaceRepo('apps/web');
-const session = 'session-1';
+const environment = 'environment-1';
 
 function status(overrides: Record<string, unknown> = {}) {
   return {
-    session_id: session,
+    environment_id: environment,
     repo,
     head: { detached: false, unborn: false, branch: 'main', oid: 'abc' },
     upstream: { name: 'origin/main', ahead: 1, behind: 2 },
@@ -65,26 +65,32 @@ describe('workspaceRepo', () => {
 });
 
 describe('GitClient read boundaries', () => {
-  it('always sends the explicit session and repository, and omits unset options', async () => {
+  it('always sends the explicit environment and repository, and omits unset options', async () => {
     const rpc = transport(status());
-    const client = new GitClient(rpc, session);
+    const client = new GitClient(rpc, environment);
 
     await client.status(repo);
 
-    expect(rpc.request).toHaveBeenCalledWith('git_status', { session_id: session, repo });
+    expect(rpc.request).toHaveBeenCalledWith('git_status', { environment_id: environment, repo });
   });
 
   it('validates status echoes and nested fields instead of casting open records', async () => {
     const rpc = transport(status({ repo: 'other/repo' }));
-    await expect(new GitClient(rpc, session).status(repo)).rejects.toThrow(/wrong repository/);
+    await expect(new GitClient(rpc, environment).status(repo)).rejects.toThrow(/wrong repository/);
+
+    vi.mocked(rpc.request).mockResolvedValue(status({ environment_id: 'other-environment' }) as never);
+    await expect(new GitClient(rpc, environment).status(repo)).rejects.toThrow(/wrong environment/);
+
+    vi.mocked(rpc.request).mockResolvedValue(status({ environment_id: undefined }) as never);
+    await expect(new GitClient(rpc, environment).status(repo)).rejects.toThrow(/environment_id/);
 
     vi.mocked(rpc.request).mockResolvedValue(status({ head: { branch: 42 } }) as never);
-    await expect(new GitClient(rpc, session).status(repo)).rejects.toThrow(/head.detached/);
+    await expect(new GitClient(rpc, environment).status(repo)).rejects.toThrow(/head.detached/);
   });
 
   it('preserves content-addressed hunk ids, scope, and effective context', async () => {
     const rpc = transport({
-      session_id: session,
+      environment_id: environment,
       repo,
       mode: 'head',
       context_lines: 64,
@@ -121,12 +127,12 @@ describe('GitClient read boundaries', () => {
         },
       ],
     });
-    const result = await new GitClient(rpc, session).diff(repo, { mode: 'head', contextLines: 999 });
+    const result = await new GitClient(rpc, environment).diff(repo, { mode: 'head', contextLines: 999 });
 
     expect(result.context_lines_clamped).toBe(true);
     expect(result.files[0]?.hunks[0]?.hunk_id).toBe('deadbeefdeadbeef');
     expect(rpc.request).toHaveBeenCalledWith('git_diff', {
-      session_id: session,
+      environment_id: environment,
       repo,
       mode: 'head',
       context_lines: 999,
@@ -135,7 +141,7 @@ describe('GitClient read boundaries', () => {
 
   it('parses repository discovery clamps and unreachable sources', async () => {
     const rpc = transport({
-      session_id: session,
+      environment_id: environment,
       path: '.',
       repositories: [
         {
@@ -159,7 +165,7 @@ describe('GitClient read boundaries', () => {
       truncated: true,
     });
 
-    const result = await new GitClient(rpc, session).listRepositories({ maxDepth: 99 });
+    const result = await new GitClient(rpc, environment).listRepositories({ maxDepth: 99 });
     expect(result.repositories[0]?.repo).toBe(repo);
     expect(result.max_depth_clamped).toBe(true);
     expect(result.unreachable_sources[0]?.reason).toBe('not_in_workspace');
@@ -167,7 +173,7 @@ describe('GitClient read boundaries', () => {
 
   it('rejects invalid discovery depth and a mismatched echoed path', async () => {
     const rpc = transport({
-      session_id: session,
+      environment_id: environment,
       path: 'other',
       repositories: [],
       sources: [],
@@ -176,7 +182,7 @@ describe('GitClient read boundaries', () => {
       max_depth_clamped: false,
       truncated: false,
     });
-    const client = new GitClient(rpc, session);
+    const client = new GitClient(rpc, environment);
 
     await expect(client.listRepositories({ maxDepth: -1 })).rejects.toThrow(/non-negative safe integer/);
     await expect(client.listRepositories({ maxDepth: 1.5 })).rejects.toThrow(/non-negative safe integer/);
@@ -184,7 +190,7 @@ describe('GitClient read boundaries', () => {
     expect(rpc.request).toHaveBeenCalledTimes(1);
   });
 
-  it('filters operation progress to its session and unsubscribes through the public event API', () => {
+  it('filters operation progress to its environment and unsubscribes through the public event API', () => {
     let handler: ((payload: Record<string, unknown>) => void) | undefined;
     const unsubscribe = vi.fn();
     const rpc = transport(status());
@@ -194,9 +200,12 @@ describe('GitClient read boundaries', () => {
     });
     const received = vi.fn();
 
-    const stop = new GitClient(rpc, session).onOperationProgress(received);
-    handler?.({ session_id: 'other', operation_id: '1', repo, operation: 'fetch', phase: 'started' });
-    handler?.({ session_id: session, operation_id: '2', repo, operation: 'fetch', phase: 'completed' });
+    const stop = new GitClient(rpc, environment).onOperationProgress(received);
+    handler?.({ environment_id: 'other', operation_id: '1', repo, operation: 'fetch', phase: 'started' });
+    handler?.({ environment_id: environment, operation_id: '2', repo, operation: 'fetch', phase: 'completed' });
+    expect(() => handler?.({ operation_id: '3', repo, operation: 'fetch', phase: 'started' })).toThrow(
+      /progress.environment_id/
+    );
     stop();
 
     expect(rpc.on).toHaveBeenCalledWith('git_operation_progress', expect.any(Function));
@@ -209,12 +218,12 @@ describe('GitClient read boundaries', () => {
 describe('GitClient mutations', () => {
   it('sends hunk ids with the exact diff scope and context', async () => {
     const rpc = transport({
-      session_id: session,
+      environment_id: environment,
       repo,
       staged_paths: [],
       staged_hunks: [{ path: 'a.ts', hunk_id: '0123456789abcdef' }],
     });
-    const result = await new GitClient(rpc, session).stage(repo, {
+    const result = await new GitClient(rpc, environment).stage(repo, {
       hunks: [{ path: 'a.ts', hunk_id: '0123456789abcdef' }],
       mode: 'head',
       contextLines: 12,
@@ -222,7 +231,7 @@ describe('GitClient mutations', () => {
 
     expect(result.staged_hunks[0]?.hunk_id).toBe('0123456789abcdef');
     expect(rpc.request).toHaveBeenCalledWith('git_stage', {
-      session_id: session,
+      environment_id: environment,
       repo,
       hunks: [{ path: 'a.ts', hunk_id: '0123456789abcdef' }],
       mode: 'head',
@@ -234,8 +243,13 @@ describe('GitClient mutations', () => {
     const rpc = transport(undefined);
     vi.mocked(rpc.request)
       .mockRejectedValueOnce(confirmationError('discard_changes'))
-      .mockResolvedValueOnce({ session_id: session, repo, discarded_paths: ['a.ts'], discarded_hunks: [] } as never);
-    const client = new GitClient(rpc, session);
+      .mockResolvedValueOnce({
+        environment_id: environment,
+        repo,
+        discarded_paths: ['a.ts'],
+        discarded_hunks: [],
+      } as never);
+    const client = new GitClient(rpc, environment);
     const selection = { paths: ['a.ts'], contextLines: 3 };
 
     const first = await client.discard(repo, selection);
@@ -247,13 +261,13 @@ describe('GitClient mutations', () => {
 
     await client.confirmDiscard(repo, selection, first.confirmation);
     expect(rpc.request).toHaveBeenNthCalledWith(1, 'git_discard', {
-      session_id: session,
+      environment_id: environment,
       repo,
       paths: ['a.ts'],
       context_lines: 3,
     });
     expect(rpc.request).toHaveBeenNthCalledWith(2, 'git_discard', {
-      session_id: session,
+      environment_id: environment,
       repo,
       paths: ['a.ts'],
       context_lines: 3,
@@ -265,7 +279,7 @@ describe('GitClient mutations', () => {
   it('refuses a token when any bound operation input changes', async () => {
     const rpc = transport(undefined);
     vi.mocked(rpc.request).mockRejectedValueOnce(confirmationError('reset_hard'));
-    const client = new GitClient(rpc, session);
+    const client = new GitClient(rpc, environment);
     const first = await client.reset(repo, { mode: 'hard', rev: 'HEAD' });
     if (first.kind !== 'confirmation_required') {
       throw new Error('challenge expected');
@@ -280,7 +294,7 @@ describe('GitClient mutations', () => {
     const rpc = transport(undefined);
     vi.mocked(rpc.request).mockRejectedValueOnce(confirmationError('reset_hard', {}, 'unexpected_reason'));
 
-    await expect(new GitClient(rpc, session).reset(repo, { mode: 'hard' })).rejects.toThrow(
+    await expect(new GitClient(rpc, environment).reset(repo, { mode: 'hard' })).rejects.toThrow(
       /Invalid confirmation reason/
     );
   });
@@ -290,7 +304,7 @@ describe('GitClient mutations', () => {
     vi.mocked(rpc.request)
       .mockRejectedValueOnce(confirmationError('amend_commit'))
       .mockRejectedValueOnce(confirmationError('amend_commit', { staged_paths: ['new.ts'] }));
-    const client = new GitClient(rpc, session);
+    const client = new GitClient(rpc, environment);
     const first = await client.commit(repo, 'amend', { amend: true });
     if (first.kind !== 'confirmation_required') {
       throw new Error('challenge expected');
@@ -307,18 +321,18 @@ describe('GitClient mutations', () => {
 
   it('keeps conflicted pulls and rejected pushes as structured results', async () => {
     const rpc = transport({
-      session_id: session,
+      environment_id: environment,
       repo,
       ok: false,
       state: 'merging',
       conflicted: ['a.ts'],
       head: { detached: false, unborn: false, branch: 'main', oid: 'abc' },
     });
-    const client = new GitClient(rpc, session);
+    const client = new GitClient(rpc, environment);
     await expect(client.pull(repo)).resolves.toMatchObject({ ok: false, conflicted: ['a.ts'] });
 
     vi.mocked(rpc.request).mockResolvedValue({
-      session_id: session,
+      environment_id: environment,
       repo,
       ok: false,
       remote_url: 'https://example.test/repo',
@@ -342,12 +356,12 @@ describe('GitClient mutations', () => {
   });
 
   it('covers repository, history, branch, worktree, conflict, unstage, checkout, fetch, and network request names', async () => {
-    const rpc = transport({ session_id: session, repo, unstaged_paths: [], unstaged_hunks: [] });
-    const client = new GitClient(rpc, session);
+    const rpc = transport({ environment_id: environment, repo, unstaged_paths: [], unstaged_hunks: [] });
+    const client = new GitClient(rpc, environment);
     await client.unstage(repo, { paths: ['a.ts'] });
 
     vi.mocked(rpc.request).mockResolvedValue({
-      session_id: session,
+      environment_id: environment,
       repo,
       head: status().head,
       upstream: null,
@@ -362,7 +376,7 @@ describe('GitClient mutations', () => {
     await client.checkout(repo, 'main');
 
     vi.mocked(rpc.request).mockResolvedValue({
-      session_id: session,
+      environment_id: environment,
       repo,
       remote: 'origin',
       updated_refs: [],

@@ -78,7 +78,13 @@ const makeMockChild = (): MockChild => {
   return child;
 };
 
-type ServeConn = { path: string; query: string; authorization: string | undefined; calls: string[] };
+type ServeConn = {
+  path: string;
+  query: string;
+  authorization: string | undefined;
+  calls: string[];
+  environmentIds: unknown[];
+};
 
 const startFakeServe = async () => {
   const wss = new WebSocketServer({ host: '127.0.0.1', port: 0 });
@@ -90,11 +96,16 @@ const startFakeServe = async () => {
       query: url.search,
       authorization: req.headers.authorization,
       calls: [],
+      environmentIds: [],
     };
     connections.push(conn);
     socket.on('message', (raw) => {
-      const msg = JSON.parse(String(raw)) as { id: number; params: { function: string } };
+      const msg = JSON.parse(String(raw)) as {
+        id: number;
+        params: { function: string; environment_id?: unknown };
+      };
       conn.calls.push(msg.params.function);
+      conn.environmentIds.push(msg.params.environment_id);
       socket.send(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { ok: true, supported: true, paused: true } }));
     });
   });
@@ -154,6 +165,9 @@ describe('AgentProcess dial auth (serve mode)', () => {
         sandbox_url: `http://127.0.0.1:${serve.port}`,
         ws_url: `ws://127.0.0.1:${serve.port}/ws`,
         ui_url: `http://127.0.0.1:${serve.port}`,
+        agent_host_id: 'agent-host-authenticated',
+        workspace_id: 'workspace-authenticated',
+        environment_id: 'environment-authenticated',
         auth_token: 'serve-token-1',
         services: {},
         ports: { ui: serve.port },
@@ -182,6 +196,7 @@ describe('AgentProcess dial auth (serve mode)', () => {
     const callConn = serve.connections.find((c) => c.calls.includes('sandbox.pause'));
     expect(callConn?.authorization).toBe('Bearer serve-token-1');
     expect(callConn?.query).toBe('');
+    expect(callConn?.environmentIds).toEqual(['environment-authenticated']);
 
     // The echoed readiness line (renderer log viewer / stdout) never carries
     // the token — it is redacted at the echo chokepoint.
@@ -207,6 +222,9 @@ describe('AgentProcess dial auth (serve mode)', () => {
         sandbox_url: `http://127.0.0.1:${serve.port}`,
         ws_url: `ws://127.0.0.1:${serve.port}/ws`,
         ui_url: `http://127.0.0.1:${serve.port}`,
+        agent_host_id: 'agent-host-unauthenticated',
+        workspace_id: 'workspace-unauthenticated',
+        environment_id: 'environment-unauthenticated',
         auth_token: null,
         services: {},
         ports: { ui: serve.port },

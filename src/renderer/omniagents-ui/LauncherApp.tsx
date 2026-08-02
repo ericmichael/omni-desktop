@@ -15,6 +15,8 @@ import { UiConfigProvider, useUiConfig } from './ui-config';
 type OmniAgentsAppProps = {
   uiUrl: string;
   sessionId?: string;
+  /** Execution environment used by workspace, process, and terminal RPCs. */
+  environmentId?: string;
   onSessionChange?: (sessionId: string | undefined) => void;
   variables?: Record<string, unknown>;
   voiceVariables?: Record<string, unknown>;
@@ -70,6 +72,7 @@ const ThemeSync = ({ children }: { children: ReactNode }) => {
 export const OmniAgentsApp = ({
   uiUrl,
   sessionId,
+  environmentId,
   onSessionChange,
   variables,
   voiceVariables,
@@ -105,6 +108,7 @@ export const OmniAgentsApp = ({
         <ThemeSync>
           <OmniAgentsCore
             sessionId={sessionId}
+            environmentId={environmentId}
             onSessionChange={onSessionChange}
             variables={variables}
             voiceVariables={voiceVariables}

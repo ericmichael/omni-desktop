@@ -68,17 +68,18 @@ function isPreconditionFailure(error: unknown): boolean {
 export class FsFileEditorIO implements FileEditorIO {
   constructor(
     private readonly fsClient: FsClient,
-    private readonly watchRegistry: WatchRegistry
+    private readonly watchRegistry: WatchRegistry,
+    private readonly environmentId: string
   ) {}
 
   async load(identity: FileEditorIdentity): Promise<FileEditorFile> {
-    return textFile(await this.fsClient.readTextFile(identity.sessionId, identity.path));
+    return textFile(await this.fsClient.readTextFile(this.environmentId, identity.path));
   }
 
   async save(input: Parameters<FileEditorIO['save']>[0]): Promise<FileEditorFile> {
     const newline = ['lf', 'crlf', 'cr'].includes(input.newline) ? (input.newline as 'lf' | 'crlf' | 'cr') : undefined;
     try {
-      const result = await this.fsClient.writeTextFile(input.identity.sessionId, input.identity.path, input.content, {
+      const result = await this.fsClient.writeTextFile(this.environmentId, input.identity.path, input.content, {
         bom: input.encoding === 'utf-8-bom',
         expectedSha256: input.expectedVersion ?? undefined,
         newline,

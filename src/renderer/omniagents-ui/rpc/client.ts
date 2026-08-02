@@ -2,6 +2,7 @@ import { createActor } from 'xstate';
 
 import type {
   Capabilities,
+  EnvironmentSelection,
   InitializeResult,
   JsonRpcError,
   JsonRpcId,
@@ -741,11 +742,15 @@ export class RPCClient {
 
   async startRun(
     prompt: string,
+    environmentSelection: EnvironmentSelection,
     sessionId?: string,
     variables?: Record<string, unknown>,
     content?: unknown
   ): Promise<{ run_id: string; session_id: string }> {
-    const params: RpcMethodMap['start_run']['params'] = { prompt };
+    const params: RpcMethodMap['start_run']['params'] = {
+      prompt,
+      environment_selection: environmentSelection,
+    };
     if (sessionId) {
       params.session_id = sessionId;
     }
@@ -901,13 +906,21 @@ export class RPCClient {
     >;
   }
 
-  async serverCall(func: string, args?: Record<string, unknown>, sessionId?: string): Promise<Record<string, unknown>> {
+  async serverCall(
+    func: string,
+    args?: Record<string, unknown>,
+    sessionId?: string,
+    environmentId?: string
+  ): Promise<Record<string, unknown>> {
     const params: RpcMethodMap['server_call']['params'] = { function: func };
     if (args) {
       params.args = args;
     }
     if (sessionId) {
       params.session_id = sessionId;
+    }
+    if (environmentId) {
+      params.environment_id = environmentId;
     }
     return this.call('server_call', params);
   }

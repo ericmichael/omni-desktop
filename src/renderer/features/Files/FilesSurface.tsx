@@ -20,6 +20,7 @@ import {
 import { WorkspaceFileTree } from './WorkspaceFileTree';
 
 type FilesSurfaceProps = {
+  environmentId: string;
   sessionId?: string;
   workspaceRoot?: string;
   isGlass?: boolean;
@@ -27,7 +28,7 @@ type FilesSurfaceProps = {
 
 type FileEditorPaneProps = {
   path: string;
-  sessionId: string;
+  environmentId: string;
   fsClient: FsClient;
   connected: boolean;
   lease: FileEditorLease;
@@ -141,7 +142,16 @@ const useStyles = makeStyles({
 });
 
 const FileEditorPane = memo(
-  ({ path, sessionId, fsClient, connected, lease, writeSupported, isGlass, revealRequest }: FileEditorPaneProps) => {
+  ({
+    path,
+    environmentId,
+    fsClient,
+    connected,
+    lease,
+    writeSupported,
+    isGlass,
+    revealRequest,
+  }: FileEditorPaneProps) => {
     const styles = useStyles();
     const snapshot = useSelector(lease.actor, (value) => value);
     const [writable, setWritable] = useState<boolean | null>(null);
@@ -158,7 +168,7 @@ const FileEditorPane = memo(
         };
       }
       void fsClient
-        .stat(sessionId, path)
+        .stat(environmentId, path)
         .then((result) => {
           if (active) {
             setWritable(result.writable && writeSupported);
@@ -173,7 +183,7 @@ const FileEditorPane = memo(
       return () => {
         active = false;
       };
-    }, [connected, fsClient, path, sessionId, statAttempt, writeSupported]);
+    }, [connected, environmentId, fsClient, path, statAttempt, writeSupported]);
 
     const state = String(snapshot.value);
     const isLoading = snapshot.matches('loading');
@@ -288,13 +298,13 @@ const FileEditorPane = memo(
 );
 FileEditorPane.displayName = 'FileEditorPane';
 
-export const FilesSurface = memo(({ sessionId, workspaceRoot, isGlass }: FilesSurfaceProps) => {
+export const FilesSurface = memo(({ environmentId, sessionId, workspaceRoot, isGlass }: FilesSurfaceProps) => {
   const styles = useStyles();
   const rpc = useRPCClient();
   const connected = useRPCConnected();
   const fsClient = useMemo(() => new FsClient(rpc), [rpc]);
   useEffect(() => () => fsClient.dispose(), [fsClient]);
-  const identityKey = sessionId && workspaceRoot ? JSON.stringify([sessionId, workspaceRoot]) : null;
+  const identityKey = sessionId && workspaceRoot ? JSON.stringify([sessionId, environmentId, workspaceRoot]) : null;
   const [preparedKey, setPreparedKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selection, setSelection] = useState<FileSelection | null>(null);
@@ -308,10 +318,10 @@ export const FilesSurface = memo(({ sessionId, workspaceRoot, isGlass }: FilesSu
     if (!sessionId || !workspaceRoot) {
       return null;
     }
-    const watches = new WatchRegistry(fsClient, sessionId);
-    const editors = new FileEditorRegistry(new FsFileEditorIO(fsClient, watches));
+    const watches = new WatchRegistry(fsClient, environmentId);
+    const editors = new FileEditorRegistry(new FsFileEditorIO(fsClient, watches, environmentId));
     return { watches, editors };
-  }, [fsClient, sessionId, workspaceRoot]);
+  }, [environmentId, fsClient, sessionId, workspaceRoot]);
   useEffect(
     () => () => {
       for (const lease of leasesRef.values()) {
@@ -399,7 +409,7 @@ export const FilesSurface = memo(({ sessionId, workspaceRoot, isGlass }: FilesSu
         }
       }
       try {
-        const stat = await fsClient.stat(sessionId, intent.path);
+        const stat = await fsClient.stat(environmentId, intent.path);
         if (stat.type !== 'file') {
           return failed('not-a-file', `${intent.path} is not a file.`);
         }
@@ -430,7 +440,19 @@ export const FilesSurface = memo(({ sessionId, workspaceRoot, isGlass }: FilesSu
         location: intent.location,
       };
     },
-    [connected, fsClient, identityKey, leasesRef, preparedKey, readSupported, resources, rpc, sessionId, workspaceRoot]
+    [
+      connected,
+      environmentId,
+      fsClient,
+      identityKey,
+      leasesRef,
+      preparedKey,
+      readSupported,
+      resources,
+      rpc,
+      sessionId,
+      workspaceRoot,
+    ]
   );
   useEffect(() => {
     if (!sessionId) {
@@ -459,10 +481,10 @@ export const FilesSurface = memo(({ sessionId, workspaceRoot, isGlass }: FilesSu
       <>
         <div className={styles.treePane}>
           <WorkspaceFileTree
+            environmentId={environmentId}
             fsClient={fsClient}
             onOpenFile={handleOpenFile}
             selectedPath={selectedPath}
-            sessionId={sessionId}
             watchRegistry={resources.watches}
             isGlass={isGlass}
           />
@@ -471,11 +493,11 @@ export const FilesSurface = memo(({ sessionId, workspaceRoot, isGlass }: FilesSu
           {selectedPath && selectedLease ? (
             <FileEditorPane
               connected={connected}
+              environmentId={environmentId}
               fsClient={fsClient}
               key={`${sessionId}:${selectedPath}`}
               lease={selectedLease}
               path={selectedPath}
-              sessionId={sessionId}
               writeSupported={writeSupported}
               isGlass={isGlass}
               revealRequest={selection?.identityKey === identityKey ? selection.revealRequest : undefined}
@@ -505,9 +527,18 @@ FilesSurface.displayName = 'FilesSurface';
 /** Portal rendered inside the column's existing RPC provider. */
 export function WorkspaceFilesPortal({
   host,
+  environmentId,
   sessionId,
   workspaceRoot,
   isGlass,
 }: FilesSurfaceProps & { host: HTMLDivElement }) {
-  return createPortal(<FilesSurface sessionId={sessionId} workspaceRoot={workspaceRoot} isGlass={isGlass} />, host);
+  return createPortal(
+    <FilesSurface
+      environmentId={environmentId}
+      sessionId={sessionId}
+      workspaceRoot={workspaceRoot}
+      isGlass={isGlass}
+    />,
+    host
+  );
 }

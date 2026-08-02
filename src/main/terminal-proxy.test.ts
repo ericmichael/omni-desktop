@@ -82,7 +82,10 @@ const settle = async (): Promise<void> => {
 const makeProxy = () => {
   const sendToWindow = vi.fn();
   const processManager = {
-    getStatus: () => ({ type: 'running', data: { wsUrl: 'ws://127.0.0.1:9000/ws?token=abc' } }),
+    getStatus: () => ({
+      type: 'running',
+      data: { wsUrl: 'ws://127.0.0.1:9000/ws?token=abc', environmentId: 'environment-1' },
+    }),
   } as unknown as ProcessManager;
   return { proxy: new TerminalProxy({ processManager, sendToWindow }), sendToWindow };
 };
@@ -175,6 +178,31 @@ describe('TerminalProxy lifecycle', () => {
 
     ioWs.emit('close', 1000, Buffer.from(''));
     expect(sendToWindow).toHaveBeenCalledWith('terminal:exited', 'tab-1', 'term-1', 0);
+  });
+
+  it('addresses terminal.create to the readiness execution environment', async () => {
+    const { proxy } = makeProxy();
+    const { rpcWs } = await completeCreate(proxy, 'tab-1');
+
+    const createFrame = JSON.parse(rpcWs.sent[1]!) as { params: Record<string, unknown> };
+    expect(createFrame.params).toMatchObject({
+      function: 'terminal.create',
+      session_id: 'sess-1',
+      environment_id: 'environment-1',
+    });
+  });
+
+  it('fails before dialing when the process has no execution environment', async () => {
+    const processManager = {
+      getStatus: () => ({ type: 'running', data: { wsUrl: 'ws://127.0.0.1:9000/ws' } }),
+    } as unknown as ProcessManager;
+    const proxy = new TerminalProxy({ processManager, sendToWindow: vi.fn() });
+
+    await expect(proxy.create('tab-1')).rejects.toMatchObject({
+      kind: 'terminal_unavailable',
+      message: expect.stringContaining('execution environment'),
+    });
+    expect(FakeWs.instances).toHaveLength(0);
   });
 
   it('uses the standard 60s lifecycle RPC deadline (not the old 15s)', async () => {

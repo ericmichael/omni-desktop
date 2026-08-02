@@ -52,6 +52,7 @@ export type ClientToolCallHandler = (
 
 export function App({
   sessionId: sessionIdProp,
+  environmentId,
   onSessionChange,
   variables: variablesProp,
   voiceVariables,
@@ -76,6 +77,8 @@ export function App({
   workspaceDir,
 }: {
   sessionId?: string;
+  /** Explicit execution identity. Never inferred from the conversation id. */
+  environmentId?: string;
   onSessionChange?: (sessionId: string | undefined) => void;
   variables?: Record<string, unknown>;
   voiceVariables?: Record<string, unknown>;
@@ -251,6 +254,7 @@ export function App({
     client,
     chatSession: machine,
     sessionId: initialBootSessionId,
+    environmentId,
     wsRealtimeUrl: uiConfig.wsRealtimeUrl,
     token: uiConfig.token,
   });
@@ -723,33 +727,57 @@ export function App({
 
   const handleWorkerKill = useCallback(
     async (worker_id: string): Promise<WorkersKillResult> => {
-      const res = (await client.serverCall('workers.kill', { worker_id }, sessionId)) as unknown as WorkersKillResult;
+      if (!environmentId) {
+        throw new Error('Execution environment unavailable');
+      }
+      const res = (await client.serverCall(
+        'workers.kill',
+        { worker_id },
+        sessionId,
+        environmentId
+      )) as unknown as WorkersKillResult;
       if (Array.isArray(res?.snapshot)) {
         setWorkers(res.snapshot as WorkerSummary[]);
       }
       return res;
     },
-    [client, sessionId]
+    [client, environmentId, sessionId]
   );
 
   const handleBashKill = useCallback(
     async (job_id: string): Promise<BashJobsKillResult> => {
-      const res = (await client.serverCall('bash_jobs.kill', { job_id }, sessionId)) as unknown as BashJobsKillResult;
+      if (!environmentId) {
+        throw new Error('Execution environment unavailable');
+      }
+      const res = (await client.serverCall(
+        'bash_jobs.kill',
+        { job_id },
+        sessionId,
+        environmentId
+      )) as unknown as BashJobsKillResult;
       if (Array.isArray(res?.snapshot)) {
         setLiveBashJobs(res.snapshot);
       }
       return res;
     },
-    [client, sessionId]
+    [client, environmentId, sessionId]
   );
 
   const handleBashTail = useCallback(
     async (job_id: string, lines?: number): Promise<BashJobsTailResult> => {
+      if (!environmentId) {
+        throw new Error('Execution environment unavailable');
+      }
       const args: Record<string, unknown> = { job_id };
       if (typeof lines === 'number') {
         args.lines = lines;
       }
-      const res = (await client.serverCall('bash_jobs.tail', args, sessionId)) as unknown as BashJobsTailResult & {
+      const res = (await client.serverCall(
+        'bash_jobs.tail',
+        args,
+        sessionId,
+        environmentId
+      )) as unknown as BashJobsTailResult & {
         snapshot?: BashJobSummary[];
       };
       if (Array.isArray(res?.snapshot)) {
@@ -757,17 +785,20 @@ export function App({
       }
       return res;
     },
-    [client, sessionId]
+    [client, environmentId, sessionId]
   );
 
   const handleBashWarmup = useCallback(async () => {
-    const res = (await client.serverCall('bash_jobs.list', {}, sessionId)) as unknown as {
+    if (!environmentId) {
+      throw new Error('Execution environment unavailable');
+    }
+    const res = (await client.serverCall('bash_jobs.list', {}, sessionId, environmentId)) as unknown as {
       snapshot?: BashJobSummary[];
     };
     if (Array.isArray(res?.snapshot)) {
       setLiveBashJobs(res.snapshot);
     }
-  }, [client, sessionId]);
+  }, [client, environmentId, sessionId]);
 
   const handleBashDismiss = useCallback((job_id: string) => {
     setDismissedJobIds((prev) => {
@@ -928,7 +959,13 @@ export function App({
                 await client.enqueueMessage(sid, text, { triggerRun: true, role: 'user', source: 'ui' });
               }
             } else {
-              await client.startRun(text, sessionId);
+              await client.startRun(
+                text,
+                environmentId
+                  ? { mode: 'explicit', environment_id: environmentId }
+                  : { mode: 'none' },
+                sessionId
+              );
             }
             return;
           }
@@ -949,7 +986,7 @@ export function App({
               args = { text: argText };
             }
           }
-          const result = await client.serverCall(name, args, sessionId);
+          const result = await client.serverCall(name, args, sessionId, environmentId);
           // /recap renders in the docked RecapPanel via the ui.recap
           // broadcast — don't also dump it into the chat transcript. The
           // return value carries the text as a fallback if the broadcast
@@ -1113,7 +1150,15 @@ export function App({
           clearStagedContext();
         }
 
-        const startResult = await client.startRun(agentPrompt, liveSessionId, variables, content);
+        const startResult = await client.startRun(
+          agentPrompt,
+          environmentId
+            ? { mode: 'explicit', environment_id: environmentId }
+            : { mode: 'none' },
+          liveSessionId,
+          variables,
+          content
+        );
         if (workspaceSupported) {
           setWorkspaceLocked(true);
         }
@@ -1125,6 +1170,7 @@ export function App({
     },
     [
       client,
+      environmentId,
       sessionId,
       actor,
       bootState.actor,
@@ -1332,14 +1378,14 @@ export function App({
         if (runOverrides?.safeToolOverrides) {
           goalArgs.safe_tool_overrides = runOverrides.safeToolOverrides;
         }
-        await client.serverCall('goal', goalArgs, sid);
+        await client.serverCall('goal', goalArgs, sid, environmentId);
       },
       goalStop: async () => {
         const sid = actor.getSnapshot().context.sessionId;
         if (!sid) {
           return;
         }
-        await client.serverCall('goal.stop', {}, sid).catch(() => {});
+        await client.serverCall('goal.stop', {}, sid, environmentId).catch(() => {});
       },
       send: async (message) => {
         await awaitChatReady();
@@ -1648,7 +1694,7 @@ export function App({
       if (id) {
         if (workspaceSupported) {
           try {
-            const res = (await client.serverCall('fs_get_workspace_root', {}, id)) as any;
+            const res = (await client.serverCall('fs_get_workspace_root', {}, id, environmentId)) as any;
             if (res?.path) {
               setWorkspacePath(res.path);
             }
@@ -1662,7 +1708,7 @@ export function App({
             // Match the chat-boot path: prefer the sandbox manifest root
             // over omni serve's host cwd so docker / remote sandboxes show
             // the path the agent's tools actually operate on.
-            const res = (await client.serverCall('fs_get_workspace_root')) as any;
+            const res = (await client.serverCall('fs_get_workspace_root', undefined, undefined, environmentId)) as any;
             if (res?.path) {
               setWorkspacePath(res.path);
             }
@@ -1716,7 +1762,9 @@ export function App({
       // running when we attach.
       if (resolvedId) {
         try {
-          const res = (await client.serverCall('workers.list', {}, resolvedId)) as { snapshot?: unknown } | undefined;
+          const res = (await client.serverCall('workers.list', {}, resolvedId, environmentId)) as
+            | { snapshot?: unknown }
+            | undefined;
           const snap = res?.snapshot;
           setWorkers(Array.isArray(snap) ? (snap as WorkerSummary[]) : []);
         } catch {
@@ -1727,7 +1775,7 @@ export function App({
       }
       setUI('chat');
     },
-    [client, loadSession, workspaceSupported, onSessionChange]
+    [client, environmentId, loadSession, workspaceSupported, onSessionChange]
   );
   // Controller `newSession` → fresh conversation (loadSession mints a new id).
   newSessionRef.current = () => void handleSelectSession(undefined);
@@ -2077,6 +2125,7 @@ export function App({
         {workspacePickerOpen && (
           <WorkspacePicker
             sessionId={sessionId}
+            environmentId={environmentId}
             initialPath={workspacePath || undefined}
             onSelect={(path) => {
               setWorkspacePath(path);

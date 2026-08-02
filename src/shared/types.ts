@@ -1560,6 +1560,20 @@ export type AgentProcessData = {
   /** Direct WS URL for JSON-RPC; renderer derives from uiUrl if unset. */
   wsUrl?: string;
   /**
+   * Agent-host identity emitted by local ``omni serve``. Optional on the
+   * unified process shape because delegated compute backends have not yet
+   * adopted the local readiness contract.
+   */
+  agentHostId?: string;
+  /** Workspace resource bound to ``environmentId`` by the agent host. */
+  workspaceId?: string;
+  /**
+   * Execution-environment address for filesystem, git, terminal, and other
+   * tool operations. Local ``omni serve`` always supplies it; it is kept
+   * separate from the conversation ``sessionId`` by design.
+   */
+  environmentId?: string;
+  /**
    * Bearer token for authenticating WS/HTTP calls against this agent's
    * server. Main-process dials send it as an `Authorization: Bearer`
    * upgrade header; browser contexts exchange it for a one-time

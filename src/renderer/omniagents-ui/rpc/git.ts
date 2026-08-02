@@ -58,7 +58,7 @@ export type GitUnreachableSource = {
 };
 
 export type GitListRepositoriesResult = {
-  session_id: string;
+  environment_id: string;
   path: string;
   repositories: GitRepository[];
   sources: Record<string, unknown>[];
@@ -82,7 +82,7 @@ export type GitStatusEntry = {
 };
 
 export type GitStatusResult = {
-  session_id: string;
+  environment_id: string;
   repo: WorkspaceRepo;
   head: { detached: boolean; unborn: boolean; branch: string | null; oid: string | null };
   upstream: { name: string; ahead: number; behind: number } | null;
@@ -134,7 +134,7 @@ export type GitDiffFile = {
 };
 
 export type GitDiffResult = {
-  session_id: string;
+  environment_id: string;
   repo: WorkspaceRepo;
   mode: GitDiffMode;
   context_lines: number;
@@ -157,7 +157,7 @@ export type GitCommitSummary = {
   body: string;
 };
 export type GitLogResult = {
-  session_id: string;
+  environment_id: string;
   repo: WorkspaceRepo;
   commits: GitCommitSummary[];
   max_count: number;
@@ -175,7 +175,7 @@ export type GitBranch = {
   worktree_path: string | null;
   category: 'branch' | 'worker';
 };
-export type GitListBranchesResult = { session_id: string; repo: WorkspaceRepo; branches: GitBranch[] };
+export type GitListBranchesResult = { environment_id: string; repo: WorkspaceRepo; branches: GitBranch[] };
 
 export type GitWorktree = {
   path: string;
@@ -191,7 +191,7 @@ export type GitWorktree = {
   inaccessible_reason: 'outside_workspace' | null;
   category: 'worktree' | 'worker';
 };
-export type GitListWorktreesResult = { session_id: string; repo: WorkspaceRepo; worktrees: GitWorktree[] };
+export type GitListWorktreesResult = { environment_id: string; repo: WorkspaceRepo; worktrees: GitWorktree[] };
 
 export type GitConflictRegion = {
   start_line: number;
@@ -215,7 +215,7 @@ export type GitConflict = {
   regions_available: boolean;
 };
 export type GitConflictsResult = {
-  session_id: string;
+  environment_id: string;
   repo: WorkspaceRepo;
   state: GitStatusResult['state'];
   conflicts: GitConflict[];
@@ -233,24 +233,24 @@ export type GitSelection = GitFileSelection & {
   mode?: 'worktree' | 'head';
 };
 export type GitStageResult = {
-  session_id: string;
+  environment_id: string;
   repo: WorkspaceRepo;
   staged_paths: string[];
   staged_hunks: GitHunkRef[];
 };
 export type GitUnstageResult = {
-  session_id: string;
+  environment_id: string;
   repo: WorkspaceRepo;
   unstaged_paths: string[];
   unstaged_hunks: GitHunkRef[];
 };
 export type GitDiscardResult = {
-  session_id: string;
+  environment_id: string;
   repo: WorkspaceRepo;
   discarded_paths: string[];
   discarded_hunks: GitHunkRef[];
 };
-export type GitCommitResult = { session_id: string; repo: WorkspaceRepo; oid: string; amended: boolean };
+export type GitCommitResult = { environment_id: string; repo: WorkspaceRepo; oid: string; amended: boolean };
 export type GitRefUpdate = {
   ref: string;
   old_oid: string | null;
@@ -258,13 +258,13 @@ export type GitRefUpdate = {
   change: 'created' | 'updated' | 'deleted';
 };
 export type GitFetchResult = {
-  session_id: string;
+  environment_id: string;
   repo: WorkspaceRepo;
   remote: string | null;
   updated_refs: GitRefUpdate[];
 };
 export type GitPullResult = {
-  session_id: string;
+  environment_id: string;
   repo: WorkspaceRepo;
   ok: boolean;
   state: GitStatusResult['state'];
@@ -281,7 +281,7 @@ export type GitPushUpdate = {
   reason_raw: string | null;
 };
 export type GitPushResult = {
-  session_id: string;
+  environment_id: string;
   repo: WorkspaceRepo;
   ok: boolean;
   remote_url: string | null;
@@ -434,10 +434,10 @@ function hunkId(value: unknown, label: string): string {
   return id;
 }
 
-function resultBase(value: unknown, expectedSession: string, expectedRepo: WorkspaceRepo, label: string) {
+function resultBase(value: unknown, expectedEnvironment: string, expectedRepo: WorkspaceRepo, label: string) {
   const item = record(value, label);
-  if (string(item.session_id, `${label}.session_id`) !== expectedSession) {
-    throw new TypeError(`${label} has the wrong session`);
+  if (string(item.environment_id, `${label}.environment_id`) !== expectedEnvironment) {
+    throw new TypeError(`${label} has the wrong environment`);
   }
   if (workspaceRepo(string(item.repo, `${label}.repo`)) !== expectedRepo) {
     throw new TypeError(`${label} has the wrong repository`);
@@ -445,8 +445,8 @@ function resultBase(value: unknown, expectedSession: string, expectedRepo: Works
   return item;
 }
 
-function parseStatus(value: unknown, session: string, repo: WorkspaceRepo): GitStatusResult {
-  const item = resultBase(value, session, repo, 'git_status result');
+function parseStatus(value: unknown, environment: string, repo: WorkspaceRepo): GitStatusResult {
+  const item = resultBase(value, environment, repo, 'git_status result');
   const head = record(item.head, 'git_status head');
   const upstream = item.upstream === null ? null : record(item.upstream, 'git_status upstream');
   const states = new Set<GitStatusResult['state']>(['clean', 'merging', 'rebasing', 'cherry_picking', 'reverting']);
@@ -455,7 +455,7 @@ function parseStatus(value: unknown, session: string, repo: WorkspaceRepo): GitS
     throw new TypeError('Invalid git_status state');
   }
   return {
-    session_id: session,
+    environment_id: environment,
     repo,
     head: {
       detached: boolean(head.detached, 'head.detached'),
@@ -501,15 +501,15 @@ function parseStatus(value: unknown, session: string, repo: WorkspaceRepo): GitS
   };
 }
 
-function parseDiff(value: unknown, session: string, repo: WorkspaceRepo): GitDiffResult {
-  const item = resultBase(value, session, repo, 'git_diff result');
+function parseDiff(value: unknown, environment: string, repo: WorkspaceRepo): GitDiffResult {
+  const item = resultBase(value, environment, repo, 'git_diff result');
   const modes = new Set<GitDiffMode>(['worktree', 'staged', 'head', 'range']);
   const mode = string(item.mode, 'git_diff mode') as GitDiffMode;
   if (!modes.has(mode)) {
     throw new TypeError('Invalid git_diff mode');
   }
   return {
-    session_id: session,
+    environment_id: environment,
     repo,
     mode,
     context_lines: number(item.context_lines, 'git_diff context_lines'),
@@ -592,7 +592,7 @@ function stableKey(value: Record<string, unknown>): string {
   return JSON.stringify(stable(value));
 }
 
-function selectionParams(session: string, repo: WorkspaceRepo, selection: GitSelection): Record<string, unknown> {
+function selectionParams(environment: string, repo: WorkspaceRepo, selection: GitSelection): Record<string, unknown> {
   if (!selection.paths?.length && !selection.hunks?.length) {
     throw new TypeError('Git selection must not be empty');
   }
@@ -601,7 +601,7 @@ function selectionParams(session: string, repo: WorkspaceRepo, selection: GitSel
     validateGitPath(path);
     hunkId(hunk_id, 'Git hunk id');
   });
-  const params: Record<string, unknown> = { session_id: session, repo };
+  const params: Record<string, unknown> = { environment_id: environment, repo };
   if (selection.paths !== undefined) {
     params.paths = selection.paths;
   }
@@ -625,21 +625,21 @@ function validateGitPath(path: string): void {
 
 export class GitClient {
   readonly #rpc: GitTransport;
-  readonly #session: string;
+  readonly #environment: string;
 
-  constructor(rpc: GitTransport, sessionId: string) {
-    if (!sessionId) {
-      throw new TypeError('Git client requires a session id');
+  constructor(rpc: GitTransport, environmentId: string) {
+    if (!environmentId) {
+      throw new TypeError('Git client requires an environment id');
     }
     this.#rpc = rpc;
-    this.#session = sessionId;
+    this.#environment = environmentId;
   }
 
   onOperationProgress(handler: (progress: GitOperationProgress) => void): () => void {
     return this.#rpc.on('git_operation_progress', (payload) => {
       const item = record(payload, 'git operation progress');
-      const eventSession = string(item.session_id, 'progress.session_id');
-      if (eventSession !== this.#session) {
+      const eventEnvironment = string(item.environment_id, 'progress.environment_id');
+      if (eventEnvironment !== this.#environment) {
         return;
       }
       const operation = string(item.operation, 'progress.operation') as GitOperationProgress['operation'];
@@ -652,7 +652,7 @@ export class GitClient {
       }
       handler({
         ...payload,
-        session_id: eventSession,
+        environment_id: eventEnvironment,
         operation_id: string(item.operation_id, 'progress.operation_id'),
         repo: workspaceRepo(string(item.repo, 'progress.repo')),
         operation,
@@ -668,20 +668,20 @@ export class GitClient {
       throw new TypeError('Repository discovery maxDepth must be a non-negative safe integer');
     }
     const raw = await this.#rpc.request('git_list_repositories', {
-      session_id: this.#session,
+      environment_id: this.#environment,
       ...(opts.path === undefined ? {} : { path: requestedPath }),
       ...(opts.maxDepth === undefined ? {} : { max_depth: opts.maxDepth }),
     });
     const item = record(raw, 'git_list_repositories result');
-    if (string(item.session_id, 'repositories.session_id') !== this.#session) {
-      throw new TypeError('Repository result has the wrong session');
+    if (string(item.environment_id, 'repositories.environment_id') !== this.#environment) {
+      throw new TypeError('Repository result has the wrong environment');
     }
     const resultPath = workspaceRepo(string(item.path, 'repositories.path'));
     if (resultPath !== requestedPath) {
       throw new TypeError('Repository result has the wrong path');
     }
     return {
-      session_id: this.#session,
+      environment_id: this.#environment,
       path: resultPath,
       repositories: array(
         item.repositories,
@@ -734,13 +734,13 @@ export class GitClient {
     opts.paths?.forEach(validateGitPath);
     return parseStatus(
       await this.#rpc.request('git_status', {
-        session_id: this.#session,
+        environment_id: this.#environment,
         repo,
         ...(opts.includeUntracked === undefined ? {} : { include_untracked: opts.includeUntracked }),
         ...(opts.includeIgnored === undefined ? {} : { include_ignored: opts.includeIgnored }),
         ...(opts.paths === undefined ? {} : { paths: opts.paths }),
       }),
-      this.#session,
+      this.#environment,
       repo
     );
   }
@@ -753,7 +753,7 @@ export class GitClient {
     opts.paths?.forEach(validateGitPath);
     return parseDiff(
       await this.#rpc.request('git_diff', {
-        session_id: this.#session,
+        environment_id: this.#environment,
         repo,
         ...(opts.mode === undefined ? {} : { mode: opts.mode }),
         ...(opts.paths === undefined ? {} : { paths: opts.paths }),
@@ -761,7 +761,7 @@ export class GitClient {
         ...(opts.fromRev === undefined ? {} : { from_rev: opts.fromRev }),
         ...(opts.toRev === undefined ? {} : { to_rev: opts.toRev }),
       }),
-      this.#session,
+      this.#environment,
       repo
     );
   }
@@ -773,16 +773,16 @@ export class GitClient {
     workspaceRepo(repo);
     opts.paths?.forEach(validateGitPath);
     const raw = await this.#rpc.request('git_log', {
-      session_id: this.#session,
+      environment_id: this.#environment,
       repo,
       ...(opts.rev === undefined ? {} : { rev: opts.rev }),
       ...(opts.maxCount === undefined ? {} : { max_count: opts.maxCount }),
       ...(opts.skip === undefined ? {} : { skip: opts.skip }),
       ...(opts.paths === undefined ? {} : { paths: opts.paths }),
     });
-    const item = resultBase(raw, this.#session, repo, 'git_log result');
+    const item = resultBase(raw, this.#environment, repo, 'git_log result');
     return {
-      session_id: this.#session,
+      environment_id: this.#environment,
       repo,
       commits: array(
         item.commits,
@@ -814,16 +814,16 @@ export class GitClient {
     workspaceRepo(repo);
     const item = resultBase(
       await this.#rpc.request('git_list_branches', {
-        session_id: this.#session,
+        environment_id: this.#environment,
         repo,
         ...(includeRemote === undefined ? {} : { include_remote: includeRemote }),
       }),
-      this.#session,
+      this.#environment,
       repo,
       'git_list_branches result'
     );
     return {
-      session_id: this.#session,
+      environment_id: this.#environment,
       repo,
       branches: array(
         item.branches,
@@ -853,13 +853,13 @@ export class GitClient {
   async worktrees(repo: WorkspaceRepo): Promise<GitListWorktreesResult> {
     workspaceRepo(repo);
     const item = resultBase(
-      await this.#rpc.request('git_list_worktrees', { session_id: this.#session, repo }),
-      this.#session,
+      await this.#rpc.request('git_list_worktrees', { environment_id: this.#environment, repo }),
+      this.#environment,
       repo,
       'git_list_worktrees result'
     );
     return {
-      session_id: this.#session,
+      environment_id: this.#environment,
       repo,
       worktrees: array(
         item.worktrees,
@@ -898,11 +898,11 @@ export class GitClient {
     paths?.forEach(validateGitPath);
     const item = resultBase(
       await this.#rpc.request('git_conflicts', {
-        session_id: this.#session,
+        environment_id: this.#environment,
         repo,
         ...(paths === undefined ? {} : { paths }),
       }),
-      this.#session,
+      this.#environment,
       repo,
       'git_conflicts result'
     );
@@ -912,7 +912,7 @@ export class GitClient {
       throw new TypeError('Invalid git_conflicts state');
     }
     return {
-      session_id: this.#session,
+      environment_id: this.#environment,
       repo,
       state,
       conflicts: array(
@@ -964,13 +964,13 @@ export class GitClient {
   async stage(repo: WorkspaceRepo, selection: GitSelection): Promise<GitStageResult> {
     const raw = await this.#rpc.request(
       'git_stage',
-      selectionParams(this.#session, workspaceRepo(repo), selection) as unknown as GitParams<'git_stage'>
+      selectionParams(this.#environment, workspaceRepo(repo), selection) as unknown as GitParams<'git_stage'>
     );
     return this.#selectionResult(raw, repo, 'staged') as GitStageResult;
   }
 
   async unstage(repo: WorkspaceRepo, selection: GitFileSelection): Promise<GitUnstageResult> {
-    const params = selectionParams(this.#session, workspaceRepo(repo), selection);
+    const params = selectionParams(this.#environment, workspaceRepo(repo), selection);
     const raw = await this.#rpc.request('git_unstage', params as unknown as GitParams<'git_unstage'>);
     return this.#selectionResult(raw, repo, 'unstaged') as GitUnstageResult;
   }
@@ -979,7 +979,7 @@ export class GitClient {
     return this.#mutation(
       'git_discard',
       repo,
-      selectionParams(this.#session, workspaceRepo(repo), selection),
+      selectionParams(this.#environment, workspaceRepo(repo), selection),
       (raw) => this.#selectionResult(raw, repo, 'discarded') as GitDiscardResult
     );
   }
@@ -992,7 +992,7 @@ export class GitClient {
     return this.#confirm(
       'git_discard',
       repo,
-      selectionParams(this.#session, workspaceRepo(repo), selection),
+      selectionParams(this.#environment, workspaceRepo(repo), selection),
       confirmation,
       (raw) => this.#selectionResult(raw, repo, 'discarded') as GitDiscardResult
     );
@@ -1007,7 +1007,7 @@ export class GitClient {
       throw new TypeError('Commit message must not be empty');
     }
     const params = {
-      session_id: this.#session,
+      environment_id: this.#environment,
       repo: workspaceRepo(repo),
       message,
       ...(opts.amend === undefined ? {} : { amend: opts.amend }),
@@ -1024,7 +1024,7 @@ export class GitClient {
     confirmation: GitConfirmation
   ): Promise<GitMutationOutcome<GitCommitResult>> {
     const params = {
-      session_id: this.#session,
+      environment_id: this.#environment,
       repo: workspaceRepo(repo),
       message,
       ...(opts.amend === undefined ? {} : { amend: opts.amend }),
@@ -1043,7 +1043,7 @@ export class GitClient {
       throw new TypeError('Checkout branch must not be empty');
     }
     const params = this.#checkoutParams(repo, branch, opts);
-    return this.#mutation('git_checkout', repo, params, (raw) => parseStatus(raw, this.#session, repo));
+    return this.#mutation('git_checkout', repo, params, (raw) => parseStatus(raw, this.#environment, repo));
   }
 
   async confirmCheckout(
@@ -1053,7 +1053,7 @@ export class GitClient {
     confirmation: GitConfirmation
   ): Promise<GitMutationOutcome<GitStatusResult>> {
     return this.#confirm('git_checkout', repo, this.#checkoutParams(repo, branch, opts), confirmation, (raw) =>
-      parseStatus(raw, this.#session, repo)
+      parseStatus(raw, this.#environment, repo)
     );
   }
 
@@ -1063,13 +1063,13 @@ export class GitClient {
   ): Promise<GitMutationOutcome<GitStatusResult>> {
     opts.paths?.forEach(validateGitPath);
     const params = {
-      session_id: this.#session,
+      environment_id: this.#environment,
       repo: workspaceRepo(repo),
       ...(opts.mode === undefined ? {} : { mode: opts.mode }),
       ...(opts.rev === undefined ? {} : { rev: opts.rev }),
       ...(opts.paths === undefined ? {} : { paths: opts.paths }),
     };
-    return this.#mutation('git_reset', repo, params, (raw) => parseStatus(raw, this.#session, repo));
+    return this.#mutation('git_reset', repo, params, (raw) => parseStatus(raw, this.#environment, repo));
   }
 
   async confirmReset(
@@ -1079,13 +1079,13 @@ export class GitClient {
   ): Promise<GitMutationOutcome<GitStatusResult>> {
     opts.paths?.forEach(validateGitPath);
     const params = {
-      session_id: this.#session,
+      environment_id: this.#environment,
       repo: workspaceRepo(repo),
       ...(opts.mode === undefined ? {} : { mode: opts.mode }),
       ...(opts.rev === undefined ? {} : { rev: opts.rev }),
       ...(opts.paths === undefined ? {} : { paths: opts.paths }),
     };
-    return this.#confirm('git_reset', repo, params, confirmation, (raw) => parseStatus(raw, this.#session, repo));
+    return this.#confirm('git_reset', repo, params, confirmation, (raw) => parseStatus(raw, this.#environment, repo));
   }
 
   async fetch(
@@ -1093,15 +1093,15 @@ export class GitClient {
     opts: { remote?: string; refspec?: string; prune?: boolean } = {}
   ): Promise<GitFetchResult> {
     const raw = await this.#rpc.request('git_fetch', {
-      session_id: this.#session,
+      environment_id: this.#environment,
       repo: workspaceRepo(repo),
       ...(opts.remote === undefined ? {} : { remote: opts.remote }),
       ...(opts.refspec === undefined ? {} : { refspec: opts.refspec }),
       ...(opts.prune === undefined ? {} : { prune: opts.prune }),
     });
-    const item = resultBase(raw, this.#session, repo, 'git_fetch result');
+    const item = resultBase(raw, this.#environment, repo, 'git_fetch result');
     return {
-      session_id: this.#session,
+      environment_id: this.#environment,
       repo,
       remote: nullable(item.remote, string, 'fetch.remote'),
       updated_refs: array(
@@ -1130,13 +1130,13 @@ export class GitClient {
   ): Promise<GitPullResult> {
     const item = resultBase(
       await this.#rpc.request('git_pull', {
-        session_id: this.#session,
+        environment_id: this.#environment,
         repo: workspaceRepo(repo),
         ...(opts.remote === undefined ? {} : { remote: opts.remote }),
         ...(opts.refspec === undefined ? {} : { refspec: opts.refspec }),
         ...(opts.rebase === undefined ? {} : { rebase: opts.rebase }),
       }),
-      this.#session,
+      this.#environment,
       repo,
       'git_pull result'
     );
@@ -1151,11 +1151,11 @@ export class GitClient {
         clean: false,
         upstream: null,
       },
-      this.#session,
+      this.#environment,
       repo
     );
     return {
-      session_id: this.#session,
+      environment_id: this.#environment,
       repo,
       ok: boolean(item.ok, 'pull.ok'),
       state: status.state,
@@ -1190,7 +1190,7 @@ export class GitClient {
       throw new TypeError('Checkout branch must not be empty');
     }
     return {
-      session_id: this.#session,
+      environment_id: this.#environment,
       repo: workspaceRepo(repo),
       branch,
       ...(opts.create === undefined ? {} : { create: opts.create }),
@@ -1205,7 +1205,7 @@ export class GitClient {
     opts: { remote?: string; refspec?: string; force?: boolean; forceWithLease?: boolean; setUpstream?: boolean }
   ) {
     return {
-      session_id: this.#session,
+      environment_id: this.#environment,
       repo: workspaceRepo(repo),
       ...(opts.remote === undefined ? {} : { remote: opts.remote }),
       ...(opts.refspec === undefined ? {} : { refspec: opts.refspec }),
@@ -1216,7 +1216,7 @@ export class GitClient {
   }
 
   #selectionResult(raw: unknown, repo: WorkspaceRepo, verb: 'staged' | 'unstaged' | 'discarded') {
-    const item = resultBase(raw, this.#session, repo, `git_${verb} result`);
+    const item = resultBase(raw, this.#environment, repo, `git_${verb} result`);
     const parseRefs = (value: unknown, label: string) =>
       array(
         value,
@@ -1227,7 +1227,7 @@ export class GitClient {
         label
       );
     return {
-      session_id: this.#session,
+      environment_id: this.#environment,
       repo,
       [`${verb}_paths`]: strings(item[`${verb}_paths`], `${verb}_paths`),
       [`${verb}_hunks`]: parseRefs(item[`${verb}_hunks`], `${verb}_hunks`),
@@ -1235,9 +1235,9 @@ export class GitClient {
   }
 
   #parseCommit(raw: unknown, repo: WorkspaceRepo): GitCommitResult {
-    const item = resultBase(raw, this.#session, repo, 'git_commit result');
+    const item = resultBase(raw, this.#environment, repo, 'git_commit result');
     return {
-      session_id: this.#session,
+      environment_id: this.#environment,
       repo,
       oid: string(item.oid, 'commit.oid'),
       amended: boolean(item.amended, 'commit.amended'),
@@ -1245,9 +1245,9 @@ export class GitClient {
   }
 
   #parsePush(raw: unknown, repo: WorkspaceRepo): GitPushResult {
-    const item = resultBase(raw, this.#session, repo, 'git_push result');
+    const item = resultBase(raw, this.#environment, repo, 'git_push result');
     return {
-      session_id: this.#session,
+      environment_id: this.#environment,
       repo,
       ok: boolean(item.ok, 'push.ok'),
       remote_url: nullable(item.remote_url, string, 'push.remote_url'),

@@ -62,8 +62,8 @@ async function renderTree(): Promise<void> {
   await act(async () => {
     root.render(
       <WorkspaceFileTree
+        environmentId="environment-1"
         fsClient={{ list } as never}
-        sessionId="session-1"
         onOpenFile={onOpenFile}
         watchRegistry={registry}
       />
@@ -98,7 +98,7 @@ describe('WorkspaceFileTree', () => {
 
     const retry = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Retry')!;
     await act(async () => retry.click());
-    expect(list).toHaveBeenCalledWith('session-1', '.', false);
+    expect(list).toHaveBeenCalledWith('environment-1', '.', false);
     expect(container.querySelector('[role="status"]')?.textContent).toContain('This workspace is empty');
   });
 
@@ -130,7 +130,7 @@ describe('WorkspaceFileTree', () => {
 
   it('refreshes an expanded directory after watched events and exposes manual refresh', async () => {
     vi.useFakeTimers();
-    list.mockImplementation(async (_sessionId: string, path: string) =>
+    list.mockImplementation(async (_environmentId: string, path: string) =>
       path === '.' ? listing('.', [directory('source')]) : listing('source', [file('source/new.ts')])
     );
     await renderTree();
@@ -143,11 +143,11 @@ describe('WorkspaceFileTree', () => {
       registry.callbacks.get('source')?.onEvents?.([{ type: 'created', path: 'source/new.ts', entryType: 'file' }]);
       await vi.advanceTimersByTimeAsync(50);
     });
-    expect(list).toHaveBeenCalledWith('session-1', 'source', false);
+    expect(list).toHaveBeenCalledWith('environment-1', 'source', false);
     expect(container.textContent).toContain('new.ts');
 
     const refresh = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Refresh')!;
     await act(async () => refresh.click());
-    expect(list).toHaveBeenCalledWith('session-1', '.', false);
+    expect(list).toHaveBeenCalledWith('environment-1', '.', false);
   });
 });

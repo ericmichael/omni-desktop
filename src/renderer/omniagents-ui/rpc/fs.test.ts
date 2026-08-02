@@ -63,6 +63,8 @@ class FakeRpc {
 }
 
 const sha256Hello = '2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824';
+const sha256Empty = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
+const environmentId = 'environment-1';
 
 async function digest(bytes: Uint8Array): Promise<string> {
   const result = await crypto.subtle.digest('SHA-256', Uint8Array.from(bytes).buffer);
@@ -74,7 +76,7 @@ function downloadResponder(bytes: Uint8Array, sha256 = sha256Hello) {
     if (method === 'fs_download_open') {
       return {
         transfer_id: 'download-1',
-        session_id: 'session',
+        environment_id: environmentId,
         path: params.path,
         size: bytes.byteLength,
         mime: 'text/plain',
@@ -123,11 +125,11 @@ describe('FsClient', () => {
 
     const rpc = new FakeRpc();
     const client = new FsClient(rpc as FileSystemRpcTransport);
-    await expect(client.list('session', '../outside')).rejects.toBeInstanceOf(FsPathValidationError);
-    await expect(client.stat('session', '/etc/passwd')).rejects.toBeInstanceOf(FsPathValidationError);
-    await expect(client.watch('session', 'src\\nested')).rejects.toBeInstanceOf(FsPathValidationError);
-    await expect(client.downloadBytes('session', 'src//file')).rejects.toBeInstanceOf(FsPathValidationError);
-    await expect(client.uploadBytes('session', 'C:/file', new Uint8Array())).rejects.toBeInstanceOf(
+    await expect(client.list(environmentId, '../outside')).rejects.toBeInstanceOf(FsPathValidationError);
+    await expect(client.stat(environmentId, '/etc/passwd')).rejects.toBeInstanceOf(FsPathValidationError);
+    await expect(client.watch(environmentId, 'src\\nested')).rejects.toBeInstanceOf(FsPathValidationError);
+    await expect(client.downloadBytes(environmentId, 'src//file')).rejects.toBeInstanceOf(FsPathValidationError);
+    await expect(client.uploadBytes(environmentId, 'C:/file', new Uint8Array())).rejects.toBeInstanceOf(
       FsPathValidationError
     );
     expect(rpc.calls).toEqual([]);
@@ -149,11 +151,11 @@ describe('FsClient', () => {
     };
     const client = new FsClient(rpc as FileSystemRpcTransport);
 
-    await expect(client.list('session', '.')).resolves.toMatchObject({ entries: [{ path: 'src', size: null }] });
-    await expect(client.stat('session', 'src')).resolves.toMatchObject({ type: 'directory', mime: null });
+    await expect(client.list(environmentId, '.')).resolves.toMatchObject({ entries: [{ path: 'src', size: null }] });
+    await expect(client.stat(environmentId, 'src')).resolves.toMatchObject({ type: 'directory', mime: null });
 
     rpc.responder = () => ({ path: '.', writable: true, truncated: false, entries: [{ path: 'bad', type: 'pipe' }] });
-    await expect(client.list('session', '.')).rejects.toBeInstanceOf(FsProtocolError);
+    await expect(client.list(environmentId, '.')).rejects.toBeInstanceOf(FsProtocolError);
     client.dispose();
   });
 
@@ -162,10 +164,10 @@ describe('FsClient', () => {
     const client = new FsClient(rpc as FileSystemRpcTransport);
 
     rpc.responder = () => ({ path: 'other', writable: true, truncated: false, entries: [] });
-    await expect(client.list('session', 'src')).rejects.toBeInstanceOf(FsProtocolError);
+    await expect(client.list(environmentId, 'src')).rejects.toBeInstanceOf(FsProtocolError);
 
     rpc.responder = () => ({ path: 'other', type: 'directory', size: null, mtime: null, writable: true });
-    await expect(client.stat('session', 'src')).rejects.toBeInstanceOf(FsProtocolError);
+    await expect(client.stat(environmentId, 'src')).rejects.toBeInstanceOf(FsProtocolError);
 
     rpc.responder = () => ({
       path: 'src',
@@ -173,7 +175,7 @@ describe('FsClient', () => {
       truncated: false,
       entries: [{ path: '../outside', type: 'file', size: 1, mtime: 1, writable: false }],
     });
-    await expect(client.list('session', 'src')).rejects.toBeInstanceOf(FsPathValidationError);
+    await expect(client.list(environmentId, 'src')).rejects.toBeInstanceOf(FsPathValidationError);
     client.dispose();
   });
 
@@ -182,11 +184,58 @@ describe('FsClient', () => {
     rpc.responder = downloadResponder(new TextEncoder().encode('hello'));
     const client = new FsClient(rpc as FileSystemRpcTransport);
 
-    const result = await client.downloadBytes('session', 'hello.txt');
+    const result = await client.downloadBytes(environmentId, 'hello.txt');
 
     expect(new TextDecoder().decode(result.bytes)).toBe('hello');
     expect(rpc.calls.map((call) => call.method)).toEqual(['fs_download_open', 'fs_download_read', 'fs_download_close']);
+    expect(rpc.calls[0]!.params).toMatchObject({ environment_id: environmentId });
     expect(rpc.calls[1]!.params).toMatchObject({ offset: 0, length: 5 });
+    client.dispose();
+  });
+
+  it('rejects filesystem handles opened for another environment', async () => {
+    const rpc = new FakeRpc();
+    rpc.responder = (method, params) => {
+      if (method === 'fs_watch') {
+        return {
+          environment_id: 'environment-other',
+          watch_id: 'watch-1',
+          path: params.path,
+          recursive: false,
+        };
+      }
+      if (method === 'fs_download_open') {
+        return {
+          environment_id: 'environment-other',
+          transfer_id: 'download-1',
+          path: params.path,
+          size: 0,
+          mime: null,
+          mtime: null,
+          sha256: sha256Empty,
+          chunk_size: 256 * 1024,
+        };
+      }
+      return true;
+    };
+    const client = new FsClient(rpc as FileSystemRpcTransport);
+
+    await expect(client.watch(environmentId, '.')).rejects.toBeInstanceOf(FsProtocolError);
+    await expect(client.downloadBytes(environmentId, 'empty.txt')).rejects.toBeInstanceOf(FsProtocolError);
+    rpc.responder = (method, params) => {
+      if (method === 'fs_upload_open') {
+        return {
+          environment_id: 'environment-other',
+          transfer_id: 'upload-1',
+          path: params.path,
+          chunk_size: 256 * 1024,
+        };
+      }
+      return true;
+    };
+    await expect(client.uploadBytes(environmentId, 'empty.txt', new Uint8Array())).rejects.toBeInstanceOf(
+      FsProtocolError
+    );
     client.dispose();
   });
 
@@ -200,7 +249,7 @@ describe('FsClient', () => {
         openCount += 1;
         return {
           transfer_id: `download-${openCount}`,
-          session_id: 'session',
+          environment_id: environmentId,
           path: 'hello.txt',
           size: 5,
           mime: 'text/plain',
@@ -236,7 +285,7 @@ describe('FsClient', () => {
     };
     const client = new FsClient(rpc as FileSystemRpcTransport);
 
-    const result = await client.downloadBytes('session', 'hello.txt');
+    const result = await client.downloadBytes(environmentId, 'hello.txt');
 
     expect(new TextDecoder().decode(result.bytes)).toBe('hello');
     expect(openCount).toBe(2);
@@ -253,7 +302,7 @@ describe('FsClient', () => {
       method === 'fs_download_open'
         ? {
             transfer_id: 'large',
-            session_id: 'session',
+            environment_id: environmentId,
             path: 'large.txt',
             size: DEFAULT_TEXT_FILE_LIMIT_BYTES + 1,
             mime: 'text/plain',
@@ -264,7 +313,7 @@ describe('FsClient', () => {
         : true;
     const client = new FsClient(rpc as FileSystemRpcTransport);
 
-    await expect(client.readTextFile('session', 'large.txt')).rejects.toBeInstanceOf(FsFileTooLargeError);
+    await expect(client.readTextFile(environmentId, 'large.txt')).rejects.toBeInstanceOf(FsFileTooLargeError);
     expect(rpc.calls.some((call) => call.method === 'fs_download_read')).toBe(false);
     client.dispose();
   });
@@ -289,7 +338,7 @@ describe('FsClient', () => {
       const rpc = new FakeRpc();
       rpc.responder = downloadResponder(testCase.bytes, await digest(testCase.bytes));
       const client = new FsClient(rpc as FileSystemRpcTransport);
-      await expect(client.readTextFile('session', 'file')).resolves.toMatchObject(testCase.expected as object);
+      await expect(client.readTextFile(environmentId, 'file')).resolves.toMatchObject(testCase.expected as object);
       client.dispose();
     }
   });
@@ -299,7 +348,7 @@ describe('FsClient', () => {
     const existingDigest = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
     rpc.responder = (method, params) => {
       if (method === 'fs_upload_open') {
-        return { transfer_id: 'upload-1', session_id: 'session', path: 'file.txt', chunk_size: 256 * 1024 };
+        return { transfer_id: 'upload-1', environment_id: environmentId, path: 'file.txt', chunk_size: 256 * 1024 };
       }
       if (method === 'fs_upload_chunk') {
         return { transfer_id: 'upload-1', received: atob(params.data).length, size: 5 };
@@ -315,11 +364,15 @@ describe('FsClient', () => {
     const client = new FsClient(rpc as FileSystemRpcTransport);
 
     await expect(
-      client.writeTextFile('session', 'file.txt', 'hello', { expectedSha256: existingDigest })
+      client.writeTextFile(environmentId, 'file.txt', 'hello', { expectedSha256: existingDigest })
     ).resolves.toEqual({ path: 'file.txt', size: 5, sha256: sha256Hello });
 
     const opened = rpc.calls.find((call) => call.method === 'fs_upload_open')!.params;
-    expect(opened).toMatchObject({ sha256: sha256Hello, expected_sha256: existingDigest });
+    expect(opened).toMatchObject({
+      environment_id: environmentId,
+      sha256: sha256Hello,
+      expected_sha256: existingDigest,
+    });
     expect((opened as any).sha256).not.toBe((opened as any).expected_sha256);
     client.dispose();
   });
@@ -333,7 +386,7 @@ describe('FsClient', () => {
         openCount += 1;
         return {
           transfer_id: `upload-${openCount}`,
-          session_id: 'session',
+          environment_id: environmentId,
           path: 'file.txt',
           chunk_size: 256 * 1024,
         };
@@ -357,7 +410,9 @@ describe('FsClient', () => {
     };
     const client = new FsClient(rpc as FileSystemRpcTransport);
 
-    await expect(client.writeTextFile('session', 'file.txt', 'hello')).resolves.toMatchObject({ sha256: sha256Hello });
+    await expect(client.writeTextFile(environmentId, 'file.txt', 'hello')).resolves.toMatchObject({
+      sha256: sha256Hello,
+    });
 
     expect(openCount).toBe(2);
     expect(
@@ -385,7 +440,7 @@ describe('FsClient', () => {
     };
     const client = new FsClient(rpc as FileSystemRpcTransport);
 
-    await expect(client.writeTextFile('session', 'file.txt', 'hello')).rejects.toBeInstanceOf(FsProtocolError);
+    await expect(client.writeTextFile(environmentId, 'file.txt', 'hello')).rejects.toBeInstanceOf(FsProtocolError);
     expect(rpc.calls.at(-1)?.method).toBe('fs_upload_abort');
     client.dispose();
   });
@@ -400,14 +455,14 @@ class FakeWatchClient {
   private readonly events = new Map<string, Set<(payload: any) => void>>();
   private readonly states = new Set<(state: RPCConnectionState) => void>();
 
-  async watch(_sessionId: string, path: string): Promise<string> {
+  async watch(_environmentId: string, path: string): Promise<string> {
     this.calls.push(`watch:${path}`);
     return `watch-${++this.watchCounter}`;
   }
-  async unwatch(_sessionId: string, watchId: string): Promise<void> {
+  async unwatch(_environmentId: string, watchId: string): Promise<void> {
     this.calls.push(`unwatch:${watchId}`);
   }
-  async list(_sessionId: string, path: string, recursive = false): Promise<FsListResult> {
+  async list(_environmentId: string, path: string, recursive = false): Promise<FsListResult> {
     this.calls.push(`list:${path}:${recursive}`);
     return { ...listing, path };
   }
@@ -438,13 +493,20 @@ class FakeWatchClient {
 describe('WatchRegistry', () => {
   it('uses non-recursive watches and preserves ordered delete/create type changes', async () => {
     const client = new FakeWatchClient();
-    const registry = new WatchRegistry(client, 'session');
+    const registry = new WatchRegistry(client, environmentId);
     const onEvents = vi.fn();
     const onError = vi.fn();
     const unsubscribe = await registry.subscribe('.', { onEvents, onError });
 
     client.emit('fs_events', {
-      session_id: 'session',
+      environment_id: 'environment-other',
+      watch_id: 'watch-1',
+      events: [{ type: 'modified', path: 'ignored.ts', entry_type: 'file' }],
+    });
+    expect(onEvents).not.toHaveBeenCalled();
+
+    client.emit('fs_events', {
+      environment_id: environmentId,
       watch_id: 'watch-1',
       events: [
         { type: 'deleted', path: 'node', entry_type: 'file' },
@@ -458,7 +520,7 @@ describe('WatchRegistry', () => {
       { type: 'created', path: 'node', entryType: 'directory' },
     ]);
     client.emit('fs_events', {
-      session_id: 'session',
+      environment_id: environmentId,
       watch_id: 'watch-1',
       events: [{ type: 'created', path: '../outside', entry_type: 'file' }],
     });
@@ -470,7 +532,7 @@ describe('WatchRegistry', () => {
 
   it('re-subscribes and relists every desired directory after reconnect', async () => {
     const client = new FakeWatchClient();
-    const registry = new WatchRegistry(client, 'session');
+    const registry = new WatchRegistry(client, environmentId);
     const onRescan = vi.fn();
     await registry.subscribe('src', { onRescan });
     client.calls.length = 0;
@@ -485,14 +547,14 @@ describe('WatchRegistry', () => {
 
   it('relists on overflow but does not reuse a terminated scan-limit watch', async () => {
     const client = new FakeWatchClient();
-    const registry = new WatchRegistry(client, 'session');
+    const registry = new WatchRegistry(client, environmentId);
     const onRescan = vi.fn();
     const onNarrowerWatchRequired = vi.fn();
     await registry.subscribe('.', { onRescan, onNarrowerWatchRequired });
     client.calls.length = 0;
 
     client.emit('fs_rescan_required', {
-      session_id: 'session',
+      environment_id: environmentId,
       watch_id: 'watch-1',
       reason: 'event_overflow',
     });
@@ -500,7 +562,7 @@ describe('WatchRegistry', () => {
     expect(onRescan).toHaveBeenLastCalledWith(expect.anything(), 'event_overflow');
 
     client.emit('fs_rescan_required', {
-      session_id: 'session',
+      environment_id: environmentId,
       watch_id: 'watch-1',
       reason: 'scan_limit_exceeded',
     });
@@ -516,7 +578,7 @@ describe('WatchRegistry', () => {
 
   it('evicts the least-recently-used directory before reaching the server watch budget', async () => {
     const client = new FakeWatchClient();
-    const registry = new WatchRegistry(client, 'session', 2);
+    const registry = new WatchRegistry(client, environmentId, 2);
     const evicted = vi.fn();
     await registry.subscribe('a', { onEvicted: evicted });
     await registry.subscribe('b', {});

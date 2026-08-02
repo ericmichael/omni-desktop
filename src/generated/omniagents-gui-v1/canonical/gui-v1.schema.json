@@ -154,6 +154,31 @@
       "type": "object",
       "x-omni-stability": "stable"
     },
+    "agentHost": {
+      "additionalProperties": false,
+      "properties": {
+        "agent_host_id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "default_environment_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "default_workspace_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "agent_host_id"
+      ],
+      "type": "object"
+    },
     "archive_session": {
       "additionalProperties": false,
       "properties": {
@@ -622,15 +647,21 @@
     "fs_download_close": {
       "additionalProperties": false,
       "properties": {
-        "session_id": {
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
           "type": "string"
         },
         "transfer_id": {
           "type": "string"
+        },
+        "workspace_id": {
+          "type": "string"
         }
       },
       "required": [
-        "session_id",
+        "environment_id",
         "transfer_id"
       ],
       "type": "object",
@@ -639,15 +670,21 @@
     "fs_download_open": {
       "additionalProperties": false,
       "properties": {
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
+          "type": "string"
+        },
         "path": {
           "type": "string"
         },
-        "session_id": {
+        "workspace_id": {
           "type": "string"
         }
       },
       "required": [
-        "session_id",
+        "environment_id",
         "path"
       ],
       "type": "object",
@@ -656,21 +693,27 @@
     "fs_download_read": {
       "additionalProperties": false,
       "properties": {
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
+          "type": "string"
+        },
         "length": {
           "type": "integer"
         },
         "offset": {
           "type": "integer"
         },
-        "session_id": {
+        "transfer_id": {
           "type": "string"
         },
-        "transfer_id": {
+        "workspace_id": {
           "type": "string"
         }
       },
       "required": [
-        "session_id",
+        "environment_id",
         "transfer_id"
       ],
       "type": "object",
@@ -679,6 +722,12 @@
     "fs_events": {
       "additionalProperties": false,
       "properties": {
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
+          "type": "string"
+        },
         "events": {
           "items": {},
           "type": "array"
@@ -686,18 +735,18 @@
         "seq": {
           "type": "integer"
         },
-        "session_id": {
-          "type": "string"
-        },
         "stream_id": {
           "type": "string"
         },
         "watch_id": {
           "type": "string"
+        },
+        "workspace_id": {
+          "type": "string"
         }
       },
       "required": [
-        "session_id",
+        "environment_id",
         "watch_id",
         "events"
       ],
@@ -707,18 +756,24 @@
     "fs_list": {
       "additionalProperties": false,
       "properties": {
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
+          "type": "string"
+        },
         "path": {
           "type": "string"
         },
         "recursive": {
           "type": "boolean"
         },
-        "session_id": {
+        "workspace_id": {
           "type": "string"
         }
       },
       "required": [
-        "session_id",
+        "environment_id",
         "path"
       ],
       "type": "object",
@@ -727,24 +782,30 @@
     "fs_rescan_required": {
       "additionalProperties": false,
       "properties": {
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
+          "type": "string"
+        },
         "reason": {
           "type": "string"
         },
         "seq": {
           "type": "integer"
         },
-        "session_id": {
-          "type": "string"
-        },
         "stream_id": {
           "type": "string"
         },
         "watch_id": {
           "type": "string"
+        },
+        "workspace_id": {
+          "type": "string"
         }
       },
       "required": [
-        "session_id",
+        "environment_id",
         "watch_id",
         "reason"
       ],
@@ -754,15 +815,21 @@
     "fs_stat": {
       "additionalProperties": false,
       "properties": {
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
+          "type": "string"
+        },
         "path": {
           "type": "string"
         },
-        "session_id": {
+        "workspace_id": {
           "type": "string"
         }
       },
       "required": [
-        "session_id",
+        "environment_id",
         "path"
       ],
       "type": "object",
@@ -774,11 +841,14 @@
         "direction": {
           "type": "string"
         },
-        "seq": {
+        "environment_generation": {
           "type": "integer"
         },
-        "session_id": {
+        "environment_id": {
           "type": "string"
+        },
+        "seq": {
+          "type": "integer"
         },
         "stream_id": {
           "type": "string"
@@ -791,10 +861,13 @@
         },
         "transferred": {
           "type": "integer"
+        },
+        "workspace_id": {
+          "type": "string"
         }
       },
       "required": [
-        "session_id",
+        "environment_id",
         "transfer_id",
         "direction",
         "transferred",
@@ -806,15 +879,21 @@
     "fs_unwatch": {
       "additionalProperties": false,
       "properties": {
-        "session_id": {
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
           "type": "string"
         },
         "watch_id": {
           "type": "string"
+        },
+        "workspace_id": {
+          "type": "string"
         }
       },
       "required": [
-        "session_id",
+        "environment_id",
         "watch_id"
       ],
       "type": "object",
@@ -823,15 +902,21 @@
     "fs_upload_abort": {
       "additionalProperties": false,
       "properties": {
-        "session_id": {
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
           "type": "string"
         },
         "transfer_id": {
           "type": "string"
+        },
+        "workspace_id": {
+          "type": "string"
         }
       },
       "required": [
-        "session_id",
+        "environment_id",
         "transfer_id"
       ],
       "type": "object",
@@ -843,18 +928,24 @@
         "data": {
           "type": "string"
         },
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
+          "type": "string"
+        },
         "offset": {
           "type": "integer"
         },
-        "session_id": {
+        "transfer_id": {
           "type": "string"
         },
-        "transfer_id": {
+        "workspace_id": {
           "type": "string"
         }
       },
       "required": [
-        "session_id",
+        "environment_id",
         "transfer_id",
         "offset",
         "data"
@@ -865,15 +956,21 @@
     "fs_upload_commit": {
       "additionalProperties": false,
       "properties": {
-        "session_id": {
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
           "type": "string"
         },
         "transfer_id": {
           "type": "string"
+        },
+        "workspace_id": {
+          "type": "string"
         }
       },
       "required": [
-        "session_id",
+        "environment_id",
         "transfer_id"
       ],
       "type": "object",
@@ -882,6 +979,12 @@
     "fs_upload_open": {
       "additionalProperties": false,
       "properties": {
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
+          "type": "string"
+        },
         "expected_sha256": {
           "pattern": "^[0-9a-fA-F]{64}$",
           "type": "string"
@@ -892,19 +995,19 @@
         "path": {
           "type": "string"
         },
-        "session_id": {
-          "type": "string"
-        },
         "sha256": {
           "pattern": "^[0-9a-fA-F]{64}$",
           "type": "string"
         },
         "size": {
           "type": "integer"
+        },
+        "workspace_id": {
+          "type": "string"
         }
       },
       "required": [
-        "session_id",
+        "environment_id",
         "path",
         "size"
       ],
@@ -914,6 +1017,12 @@
     "fs_watch": {
       "additionalProperties": false,
       "properties": {
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
+          "type": "string"
+        },
         "path": {
           "type": "string"
         },
@@ -923,12 +1032,12 @@
         "recursive": {
           "type": "boolean"
         },
-        "session_id": {
+        "workspace_id": {
           "type": "string"
         }
       },
       "required": [
-        "session_id",
+        "environment_id",
         "path"
       ],
       "type": "object",
@@ -1065,18 +1174,24 @@
         "discard_changes": {
           "type": "boolean"
         },
-        "repo": {
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
           "type": "string"
         },
-        "session_id": {
+        "repo": {
           "type": "string"
         },
         "start_point": {
           "type": "string"
+        },
+        "workspace_id": {
+          "type": "string"
         }
       },
       "required": [
-        "session_id",
+        "environment_id",
         "repo",
         "branch"
       ],
@@ -1098,18 +1213,24 @@
         "confirmation_token": {
           "type": "string"
         },
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
+          "type": "string"
+        },
         "message": {
           "type": "string"
         },
         "repo": {
           "type": "string"
         },
-        "session_id": {
+        "workspace_id": {
           "type": "string"
         }
       },
       "required": [
-        "session_id",
+        "environment_id",
         "repo",
         "message"
       ],
@@ -1119,6 +1240,12 @@
     "git_conflicts": {
       "additionalProperties": false,
       "properties": {
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
+          "type": "string"
+        },
         "paths": {
           "items": {},
           "type": "array"
@@ -1126,12 +1253,12 @@
         "repo": {
           "type": "string"
         },
-        "session_id": {
+        "workspace_id": {
           "type": "string"
         }
       },
       "required": [
-        "session_id",
+        "environment_id",
         "repo"
       ],
       "type": "object",
@@ -1142,6 +1269,12 @@
       "properties": {
         "context_lines": {
           "type": "integer"
+        },
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
+          "type": "string"
         },
         "from_rev": {
           "type": "string"
@@ -1156,15 +1289,15 @@
         "repo": {
           "type": "string"
         },
-        "session_id": {
+        "to_rev": {
           "type": "string"
         },
-        "to_rev": {
+        "workspace_id": {
           "type": "string"
         }
       },
       "required": [
-        "session_id",
+        "environment_id",
         "repo"
       ],
       "type": "object",
@@ -1179,6 +1312,12 @@
         "context_lines": {
           "type": "integer"
         },
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
+          "type": "string"
+        },
         "hunks": {
           "items": {},
           "type": "array"
@@ -1190,12 +1329,12 @@
         "repo": {
           "type": "string"
         },
-        "session_id": {
+        "workspace_id": {
           "type": "string"
         }
       },
       "required": [
-        "session_id",
+        "environment_id",
         "repo"
       ],
       "type": "object",
@@ -1204,6 +1343,12 @@
     "git_fetch": {
       "additionalProperties": false,
       "properties": {
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
+          "type": "string"
+        },
         "prune": {
           "type": "boolean"
         },
@@ -1216,12 +1361,12 @@
         "repo": {
           "type": "string"
         },
-        "session_id": {
+        "workspace_id": {
           "type": "string"
         }
       },
       "required": [
-        "session_id",
+        "environment_id",
         "repo"
       ],
       "type": "object",
@@ -1230,18 +1375,24 @@
     "git_list_branches": {
       "additionalProperties": false,
       "properties": {
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
+          "type": "string"
+        },
         "include_remote": {
           "type": "boolean"
         },
         "repo": {
           "type": "string"
         },
-        "session_id": {
+        "workspace_id": {
           "type": "string"
         }
       },
       "required": [
-        "session_id",
+        "environment_id",
         "repo"
       ],
       "type": "object",
@@ -1250,18 +1401,24 @@
     "git_list_repositories": {
       "additionalProperties": false,
       "properties": {
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
+          "type": "string"
+        },
         "max_depth": {
           "type": "integer"
         },
         "path": {
           "type": "string"
         },
-        "session_id": {
+        "workspace_id": {
           "type": "string"
         }
       },
       "required": [
-        "session_id"
+        "environment_id"
       ],
       "type": "object",
       "x-omni-stability": "experimental"
@@ -1269,15 +1426,21 @@
     "git_list_worktrees": {
       "additionalProperties": false,
       "properties": {
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
+          "type": "string"
+        },
         "repo": {
           "type": "string"
         },
-        "session_id": {
+        "workspace_id": {
           "type": "string"
         }
       },
       "required": [
-        "session_id",
+        "environment_id",
         "repo"
       ],
       "type": "object",
@@ -1286,6 +1449,12 @@
     "git_log": {
       "additionalProperties": false,
       "properties": {
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
+          "type": "string"
+        },
         "max_count": {
           "type": "integer"
         },
@@ -1299,15 +1468,15 @@
         "rev": {
           "type": "string"
         },
-        "session_id": {
-          "type": "string"
-        },
         "skip": {
           "type": "integer"
+        },
+        "workspace_id": {
+          "type": "string"
         }
       },
       "required": [
-        "session_id",
+        "environment_id",
         "repo"
       ],
       "type": "object",
@@ -1318,6 +1487,12 @@
       "properties": {
         "detail": {
           "type": "object"
+        },
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
+          "type": "string"
         },
         "operation": {
           "type": "string"
@@ -1334,15 +1509,15 @@
         "seq": {
           "type": "integer"
         },
-        "session_id": {
+        "stream_id": {
           "type": "string"
         },
-        "stream_id": {
+        "workspace_id": {
           "type": "string"
         }
       },
       "required": [
-        "session_id",
+        "environment_id",
         "operation_id",
         "repo",
         "operation",
@@ -1354,6 +1529,12 @@
     "git_pull": {
       "additionalProperties": false,
       "properties": {
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
+          "type": "string"
+        },
         "rebase": {
           "type": "boolean"
         },
@@ -1366,12 +1547,12 @@
         "repo": {
           "type": "string"
         },
-        "session_id": {
+        "workspace_id": {
           "type": "string"
         }
       },
       "required": [
-        "session_id",
+        "environment_id",
         "repo"
       ],
       "type": "object",
@@ -1381,6 +1562,12 @@
       "additionalProperties": false,
       "properties": {
         "confirmation_token": {
+          "type": "string"
+        },
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
           "type": "string"
         },
         "force": {
@@ -1398,15 +1585,15 @@
         "repo": {
           "type": "string"
         },
-        "session_id": {
-          "type": "string"
-        },
         "set_upstream": {
           "type": "boolean"
+        },
+        "workspace_id": {
+          "type": "string"
         }
       },
       "required": [
-        "session_id",
+        "environment_id",
         "repo"
       ],
       "type": "object",
@@ -1416,6 +1603,12 @@
       "additionalProperties": false,
       "properties": {
         "confirmation_token": {
+          "type": "string"
+        },
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
           "type": "string"
         },
         "mode": {
@@ -1431,12 +1624,12 @@
         "rev": {
           "type": "string"
         },
-        "session_id": {
+        "workspace_id": {
           "type": "string"
         }
       },
       "required": [
-        "session_id",
+        "environment_id",
         "repo"
       ],
       "type": "object",
@@ -1447,6 +1640,12 @@
       "properties": {
         "context_lines": {
           "type": "integer"
+        },
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
+          "type": "string"
         },
         "hunks": {
           "items": {},
@@ -1462,12 +1661,12 @@
         "repo": {
           "type": "string"
         },
-        "session_id": {
+        "workspace_id": {
           "type": "string"
         }
       },
       "required": [
-        "session_id",
+        "environment_id",
         "repo"
       ],
       "type": "object",
@@ -1476,6 +1675,12 @@
     "git_status": {
       "additionalProperties": false,
       "properties": {
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
+          "type": "string"
+        },
         "include_ignored": {
           "type": "boolean"
         },
@@ -1489,12 +1694,12 @@
         "repo": {
           "type": "string"
         },
-        "session_id": {
+        "workspace_id": {
           "type": "string"
         }
       },
       "required": [
-        "session_id",
+        "environment_id",
         "repo"
       ],
       "type": "object",
@@ -1505,6 +1710,12 @@
       "properties": {
         "context_lines": {
           "type": "integer"
+        },
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
+          "type": "string"
         },
         "hunks": {
           "items": {},
@@ -1517,12 +1728,12 @@
         "repo": {
           "type": "string"
         },
-        "session_id": {
+        "workspace_id": {
           "type": "string"
         }
       },
       "required": [
-        "session_id",
+        "environment_id",
         "repo"
       ],
       "type": "object",
@@ -1572,6 +1783,9 @@
     "initializeResult": {
       "additionalProperties": false,
       "properties": {
+        "agent_host": {
+          "$ref": "#/$defs/agentHost"
+        },
         "capabilities": {
           "$ref": "#/$defs/capabilities"
         },
@@ -1589,7 +1803,8 @@
         "protocol_version",
         "identity",
         "platform",
-        "capabilities"
+        "capabilities",
+        "agent_host"
       ],
       "type": "object"
     },
@@ -2508,10 +2723,19 @@
         "args": {
           "type": "object"
         },
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
+          "type": "string"
+        },
         "function": {
           "type": "string"
         },
         "session_id": {
+          "type": "string"
+        },
+        "workspace_id": {
           "type": "string"
         }
       },
@@ -2661,6 +2885,55 @@
         "context": {
           "type": "object"
         },
+        "environment_selection": {
+          "oneOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "mode": {
+                  "const": "inherit"
+                }
+              },
+              "required": [
+                "mode"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "mode": {
+                  "const": "none"
+                }
+              },
+              "required": [
+                "mode"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "environment_generation": {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "environment_id": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "mode": {
+                  "const": "explicit"
+                }
+              },
+              "required": [
+                "mode",
+                "environment_id"
+              ],
+              "type": "object"
+            }
+          ]
+        },
         "group_id": {
           "type": "string"
         },
@@ -2684,7 +2957,8 @@
         }
       },
       "required": [
-        "prompt"
+        "prompt",
+        "environment_selection"
       ],
       "type": "object",
       "x-omni-stability": "stable"

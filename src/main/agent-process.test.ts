@@ -150,6 +150,9 @@ const SERVE_PAYLOAD = JSON.stringify({
   sandbox_url: 'http://127.0.0.1:9000',
   ws_url: 'ws://127.0.0.1:9000/ws',
   ui_url: 'http://127.0.0.1:9000',
+  agent_host_id: 'agent-host-test',
+  workspace_id: 'workspace-test',
+  environment_id: 'environment-test',
   services: { code_server: 'http://127.0.0.1:8080', vnc: 'http://127.0.0.1:6080' },
   ports: { ui: 9000 },
   container_id: null,
@@ -330,6 +333,9 @@ describe('AgentProcess (serve mode)', () => {
     if (connecting?.type === 'connecting') {
       expect(connecting.data.uiUrl).toBe('http://127.0.0.1:9000');
       expect(connecting.data.wsUrl).toBe('ws://127.0.0.1:9000/ws');
+      expect(connecting.data.agentHostId).toBe('agent-host-test');
+      expect(connecting.data.workspaceId).toBe('workspace-test');
+      expect(connecting.data.environmentId).toBe('environment-test');
       expect(connecting.data.services).toEqual({
         code_server: 'http://127.0.0.1:8080',
         vnc: 'http://127.0.0.1:6080',
@@ -337,6 +343,35 @@ describe('AgentProcess (serve mode)', () => {
       expect(connecting.data.port).toBe(9000);
     }
   });
+
+  it('does not issue sandbox lifecycle RPCs without an execution environment', async () => {
+    const h = makeHarness();
+    const mutable = h.proc as unknown as { status: WithTimestamp<AgentProcessStatus> };
+    mutable.status = {
+      type: 'running',
+      timestamp: Date.now(),
+      data: { uiUrl: 'http://127.0.0.1:9000', wsUrl: 'ws://127.0.0.1:9000/ws' },
+    };
+
+    await expect(h.proc.pause()).resolves.toMatchObject({
+      ok: false,
+      supported: false,
+      reason: expect.stringContaining('execution environment'),
+    });
+  });
+
+  it.each(['agent_host_id', 'workspace_id', 'environment_id'])(
+    'rejects a local readiness payload without required %s',
+    async (field) => {
+      const h = makeHarness();
+      await h.proc.start({ profileName: 'host', sources: [localSource('/ws')] });
+      const payload = JSON.parse(SERVE_PAYLOAD) as Record<string, unknown>;
+      delete payload[field];
+
+      expect(() => h.child.emitStdout(`${JSON.stringify(payload)}\n`)).toThrow(`Missing ${field}`);
+      expect(h.statuses.some((status) => status.type === 'connecting')).toBe(false);
+    }
+  );
 
   it('handles split-buffer payloads (line not complete in first write)', async () => {
     const h = makeHarness();

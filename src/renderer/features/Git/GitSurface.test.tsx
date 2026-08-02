@@ -78,7 +78,7 @@ vi.mock('@/renderer/ds', async () => {
 
 const repo = workspaceRepo('.');
 const status: GitStatusResult = {
-  session_id: 'session-1',
+  environment_id: 'environment-1',
   repo,
   head: { detached: false, unborn: false, branch: 'main', oid: 'abc' },
   upstream: { name: 'origin/main', ahead: 1, behind: 0 },
@@ -106,7 +106,7 @@ const status: GitStatusResult = {
 
 function diff(mode: 'worktree' | 'staged' | 'range' = 'worktree'): GitDiffResult {
   return {
-    session_id: 'session-1',
+    environment_id: 'environment-1',
     repo,
     mode,
     context_lines: 3,
@@ -174,7 +174,7 @@ beforeEach(() => {
   mocks.rpc.serverCall.mockResolvedValue({});
   mocks.rpc.supportsExperimentalOperation.mockReturnValue(true);
   mocks.git.listRepositories.mockResolvedValue({
-    session_id: 'session-1',
+    environment_id: 'environment-1',
     path: '.',
     repositories: [
       {
@@ -200,13 +200,13 @@ beforeEach(() => {
     diff(options.mode)
   );
   mocks.git.stage.mockResolvedValue({
-    session_id: 'session-1',
+    environment_id: 'environment-1',
     repo,
     staged_paths: ['src/index.ts'],
     staged_hunks: [],
   });
   mocks.git.unstage.mockResolvedValue({
-    session_id: 'session-1',
+    environment_id: 'environment-1',
     repo,
     unstaged_paths: ['src/index.ts'],
     unstaged_hunks: [],
@@ -228,7 +228,14 @@ describe('GitSurface', () => {
   it('discovers the session repository, filters a selected diff, and opens the first changed line', async () => {
     const onOpenFile = vi.fn();
     await act(async () =>
-      root.render(<GitSurface sessionId="session-1" workspaceRoot="/workspace" onOpenFile={onOpenFile} />)
+      root.render(
+        <GitSurface
+          environmentId="environment-1"
+          sessionId="session-1"
+          workspaceRoot="/workspace"
+          onOpenFile={onOpenFile}
+        />
+      )
     );
     await settle();
     await settle();
@@ -249,7 +256,9 @@ describe('GitSurface', () => {
   });
 
   it('stages and unstages the exact file selection through explicit view buttons', async () => {
-    await act(async () => root.render(<GitSurface sessionId="session-1" workspaceRoot="/workspace" />));
+    await act(async () =>
+      root.render(<GitSurface environmentId="environment-1" sessionId="session-1" workspaceRoot="/workspace" />)
+    );
     await settle();
     await settle();
 
@@ -274,9 +283,11 @@ describe('GitSurface', () => {
     mocks.git.discard.mockResolvedValue({ kind: 'confirmation_required', confirmation });
     mocks.git.confirmDiscard.mockResolvedValue({
       kind: 'completed',
-      result: { session_id: 'session-1', repo, discarded_paths: ['src/index.ts'], discarded_hunks: [] },
+      result: { environment_id: 'environment-1', repo, discarded_paths: ['src/index.ts'], discarded_hunks: [] },
     });
-    await act(async () => root.render(<GitSurface sessionId="session-1" workspaceRoot="/workspace" />));
+    await act(async () =>
+      root.render(<GitSurface environmentId="environment-1" sessionId="session-1" workspaceRoot="/workspace" />)
+    );
     await settle();
     await settle();
 
@@ -308,7 +319,9 @@ describe('GitSurface', () => {
         },
       ],
     });
-    await act(async () => root.render(<GitSurface sessionId="session-1" workspaceRoot="/workspace" />));
+    await act(async () =>
+      root.render(<GitSurface environmentId="environment-1" sessionId="session-1" workspaceRoot="/workspace" />)
+    );
     await settle();
     await settle();
 
@@ -318,12 +331,16 @@ describe('GitSurface', () => {
     await settle();
 
     mocks.connected = false;
-    act(() => root.render(<GitSurface isGlass sessionId="session-1" workspaceRoot="/workspace" />));
+    act(() =>
+      root.render(<GitSurface environmentId="environment-1" isGlass sessionId="session-1" workspaceRoot="/workspace" />)
+    );
     expect(container.textContent).toContain('The selected repository is preserved');
     expect(container.querySelector<HTMLSelectElement>('select[aria-label="Repository"]')?.value).toBe('apps/api');
 
     mocks.connected = true;
-    act(() => root.render(<GitSurface sessionId="session-1" workspaceRoot="/workspace" />));
+    act(() =>
+      root.render(<GitSurface environmentId="environment-1" sessionId="session-1" workspaceRoot="/workspace" />)
+    );
     await settle();
     expect(container.querySelector<HTMLSelectElement>('select[aria-label="Repository"]')?.value).toBe('apps/api');
   });
@@ -337,7 +354,9 @@ describe('GitSurface', () => {
         { mount_name: 'external', kind: 'local-git', path: '/outside', repo_url: null, reason: 'not_in_workspace' },
       ],
     });
-    await act(async () => root.render(<GitSurface sessionId="session-1" workspaceRoot="/workspace" />));
+    await act(async () =>
+      root.render(<GitSurface environmentId="environment-1" sessionId="session-1" workspaceRoot="/workspace" />)
+    );
     await settle();
 
     expect(container.querySelector('[role="status"]')?.textContent).toContain(
@@ -357,7 +376,9 @@ describe('GitSurface', () => {
       ],
     };
     await act(async () =>
-      root.render(<GitSurface tabId="tab-1" sessionId="session-1" workspaceRoot="/workspace/work" />)
+      root.render(
+        <GitSurface environmentId="environment-1" tabId="tab-1" sessionId="session-1" workspaceRoot="/workspace/work" />
+      )
     );
     await settle();
     await settle();

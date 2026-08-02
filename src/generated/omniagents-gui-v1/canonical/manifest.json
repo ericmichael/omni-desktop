@@ -6,7 +6,7 @@
     "omniagents/backends/ink/tui/src/protocol/generated/gui-v1.ts",
     "omniagents/backends/web/ui/src/protocol/generated/schema-types.ts"
   ],
-  "canonical_sha256": "efc199c93a5a739e2c9d34d43aa1a8f7441312b06075d023bcf5ce20e4c2e856",
+  "canonical_sha256": "4520bdc45d801300012e4889de9a53dc29efeb21c28ce081c0ab48b539d5f56b",
   "generator": "scripts.protocol.generate_gui_protocol",
   "generator_version": "1",
   "protocol_version": "1.0.0",
@@ -16,7 +16,8 @@
       "name": "datamodel-code-generator",
       "options": [
         "--output-model-type=pydantic_v2.BaseModel",
-        "--disable-timestamp"
+        "--disable-timestamp",
+        "--use-annotated"
       ],
       "version": "0.71.0"
     },

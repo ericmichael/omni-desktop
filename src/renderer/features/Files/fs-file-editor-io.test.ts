@@ -14,6 +14,7 @@ import { OmniagentsRpcError } from '@/shared/omniagents-rpc';
 import { BinaryFileEditorError, FsFileEditorIO } from './fs-file-editor-io';
 
 const identity = { sessionId: 'session-1', path: 'source/app.ts' } as const;
+const environmentId = 'environment-1';
 
 function textResult(
   content: string,
@@ -87,7 +88,12 @@ function harness(options?: {
   const write = options?.write ?? vi.fn(async () => ({ path: identity.path, size: 17, sha256: '2'.repeat(64) }));
   const watches = options?.watches ?? new FakeWatches();
   const fsClient = { readTextFile: read, writeTextFile: write } as unknown as FsClient;
-  return { io: new FsFileEditorIO(fsClient, watches as unknown as WatchRegistry), read, write, watches };
+  return {
+    io: new FsFileEditorIO(fsClient, watches as unknown as WatchRegistry, environmentId),
+    read,
+    write,
+    watches,
+  };
 }
 
 describe('FsFileEditorIO', () => {
@@ -124,7 +130,7 @@ describe('FsFileEditorIO', () => {
       newline: 'crlf',
       trailingNewline: true,
     });
-    expect(write).toHaveBeenCalledWith('session-1', 'source/app.ts', input.content, {
+    expect(write).toHaveBeenCalledWith(environmentId, 'source/app.ts', input.content, {
       bom: true,
       expectedSha256: input.expectedVersion,
       newline: 'crlf',
@@ -132,7 +138,7 @@ describe('FsFileEditorIO', () => {
     });
 
     await io.save(saveInput({ expectedVersion: null, encoding: 'utf-8', newline: 'mixed' }));
-    expect(write).toHaveBeenLastCalledWith('session-1', 'source/app.ts', expect.any(String), {
+    expect(write).toHaveBeenLastCalledWith(environmentId, 'source/app.ts', expect.any(String), {
       bom: false,
       expectedSha256: undefined,
       newline: undefined,
@@ -154,7 +160,7 @@ describe('FsFileEditorIO', () => {
 
     const error = await io.save(saveInput()).catch((reason: unknown) => reason);
 
-    expect(read).toHaveBeenCalledWith('session-1', 'source/app.ts');
+    expect(read).toHaveBeenCalledWith(environmentId, 'source/app.ts');
     expect(error).toBeInstanceOf(FileEditorSaveConflictError);
     expect((error as FileEditorSaveConflictError).diskFile).toEqual({
       content: 'external\n',

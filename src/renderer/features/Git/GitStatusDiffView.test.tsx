@@ -16,7 +16,7 @@ vi.mock('@fluentui/react-components', () => ({
 
 const repo = workspaceRepo('apps/web');
 const status: GitStatusResult = {
-  session_id: 'session-1',
+  environment_id: 'environment-1',
   repo,
   head: { detached: false, unborn: false, branch: 'main', oid: 'abc' },
   upstream: { name: 'origin/main', ahead: 2, behind: 1 },
@@ -42,7 +42,7 @@ const status: GitStatusResult = {
   state: 'clean',
 };
 const diff: GitDiffResult = {
-  session_id: 'session-1',
+  environment_id: 'environment-1',
   repo,
   mode: 'worktree',
   context_lines: 3,

@@ -128,6 +128,7 @@ CodeErrorView.displayName = 'CodeErrorView';
 const CodeRunningView = memo(
   ({
     sandboxUrls,
+    environmentId,
     sessionId,
     onSessionChange,
     variables,
@@ -160,6 +161,7 @@ const CodeRunningView = memo(
     pendingMessages,
   }: {
     sandboxUrls: { uiUrl: string; services?: Record<string, string> };
+    environmentId?: string;
     sessionId?: string;
     onSessionChange?: (sessionId: string | undefined) => void;
     variables?: Record<string, unknown>;
@@ -220,6 +222,7 @@ const CodeRunningView = memo(
         <div className={styles.flex1Relative}>
           <CodeWorkspaceLayout
             uiSrc={uiSrc}
+            environmentId={environmentId}
             sessionId={sessionId}
             onSessionChange={onSessionChange}
             variables={variables}
@@ -478,6 +481,7 @@ export const CodeTabContent = memo(
       }
       return sandboxStatus.data;
     }, [sandboxStatus]);
+    const environmentId = sandboxUrls?.environmentId;
 
     const handleSessionChange = useCallback(
       (sessionId: string | undefined) => {
@@ -574,6 +578,7 @@ export const CodeTabContent = memo(
           <VoiceScopeContext.Provider value={tab.id}>
             <CodeRunningView
               sandboxUrls={sandboxUrls}
+              environmentId={environmentId}
               sessionId={tab.sessionId}
               onSessionChange={handleSessionChange}
               variables={clientToolVariables}

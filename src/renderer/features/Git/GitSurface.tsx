@@ -26,6 +26,7 @@ import { GitStatusDiffView } from './GitStatusDiffView';
 
 export type GitSurfaceProps = {
   tabId?: CodeTabId;
+  environmentId: string;
   sessionId?: string;
   workspaceRoot?: string;
   isGlass?: boolean;
@@ -163,13 +164,14 @@ export function sourceForRepository(sources: ProjectSource[], repository: GitRep
   return repo === '.' && sources.length === 1 ? sources[0]! : null;
 }
 
-export const GitSurface = memo(({ tabId, sessionId, workspaceRoot, isGlass, onOpenFile }: GitSurfaceProps) => {
+export const GitSurface = memo((props: GitSurfaceProps) => {
+  const { tabId, environmentId, sessionId, workspaceRoot, isGlass, onOpenFile } = props;
   const styles = useStyles();
   const store = useStore(persistedStoreApi.$atom);
   const rpc = useRPCClient();
   const connected = useRPCConnected();
-  const identityKey = sessionId && workspaceRoot ? JSON.stringify([sessionId, workspaceRoot]) : null;
-  const gitClient = useMemo(() => (sessionId ? new GitClient(rpc, sessionId) : null), [rpc, sessionId]);
+  const identityKey = sessionId && workspaceRoot ? JSON.stringify([sessionId, environmentId, workspaceRoot]) : null;
+  const gitClient = useMemo(() => new GitClient(rpc, environmentId), [environmentId, rpc]);
   const [preparedKey, setPreparedKey] = useState<string | null>(null);
   const [repositories, setRepositories] = useState<IdentitySelection<GitListRepositoriesResult> | null>(null);
   const [selectedRepository, setSelectedRepository] = useState<IdentitySelection<WorkspaceRepo> | null>(null);
@@ -225,7 +227,7 @@ export const GitSurface = memo(({ tabId, sessionId, workspaceRoot, isGlass, onOp
 
   useEffect(() => {
     let active = true;
-    if (!connected || !identityKey || !sessionId || !workspaceRoot || !gitClient) {
+    if (!connected || !identityKey || !sessionId || !workspaceRoot) {
       return () => {
         active = false;
       };
@@ -668,6 +670,7 @@ GitSurface.displayName = 'GitSurface';
 export function WorkspaceGitPortal({
   host,
   tabId,
+  environmentId,
   sessionId,
   workspaceRoot,
   isGlass,
@@ -676,6 +679,7 @@ export function WorkspaceGitPortal({
   return createPortal(
     <GitSurface
       tabId={tabId}
+      environmentId={environmentId}
       sessionId={sessionId}
       workspaceRoot={workspaceRoot}
       isGlass={isGlass}

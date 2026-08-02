@@ -87,6 +87,8 @@ type CodeWorkspaceLayoutProps = {
   filesHost: HTMLDivElement;
   /** Stable portal host for the Git surface owned by this session column. */
   gitHost: HTMLDivElement;
+  /** Execution environment whose workspace the Files and Git RPC surfaces address. */
+  environmentId?: string;
   /** Ticket bound to this column — enables the supervisor bridge actor. */
   ticketId?: TicketId;
   /** Routine bound to this column — enables the routine bridge actor. */
@@ -345,6 +347,7 @@ const AppSurfaceView = memo(
     tabId,
     filesHost,
     gitHost,
+    environmentId,
   }: {
     app: AppDescriptor;
     src?: string;
@@ -353,6 +356,7 @@ const AppSurfaceView = memo(
     tabId?: string;
     filesHost: HTMLDivElement;
     gitHost: HTMLDivElement;
+    environmentId?: string;
   }) => {
     const styles = useStyles();
     const registryProps = useMemo(() => makeRegistryProps(app, tabId), [app, tabId]);
@@ -419,7 +423,11 @@ const AppSurfaceView = memo(
           className={mergeClasses(styles.surfaceCard, isGlass && styles.surfaceCardGlass)}
         >
           <SurfaceFrame app={app} isGlass={isGlass}>
-            <SurfaceHostSlot host={filesHost} />
+            {environmentId ? (
+              <SurfaceHostSlot host={filesHost} />
+            ) : (
+              <div className={styles.unavailableState}>No execution environment is attached to this agent.</div>
+            )}
           </SurfaceFrame>
         </motion.div>
       );
@@ -435,7 +443,11 @@ const AppSurfaceView = memo(
           className={mergeClasses(styles.surfaceCard, isGlass && styles.surfaceCardGlass)}
         >
           <SurfaceFrame app={app} isGlass={isGlass}>
-            <SurfaceHostSlot host={gitHost} />
+            {environmentId ? (
+              <SurfaceHostSlot host={gitHost} />
+            ) : (
+              <div className={styles.unavailableState}>No execution environment is attached to this agent.</div>
+            )}
           </SurfaceFrame>
         </motion.div>
       );
@@ -521,6 +533,7 @@ export const CodeWorkspaceLayout = memo(
     sidecarMode,
     filesHost,
     gitHost,
+    environmentId,
     ticketId,
     routineId,
   }: CodeWorkspaceLayoutProps) => {
@@ -645,6 +658,7 @@ export const CodeWorkspaceLayout = memo(
           >
             <OmniAgentsApp
               uiUrl={uiSrc}
+              environmentId={environmentId}
               greeting={greeting}
               suggestions={suggestions}
               pendingMessages={pendingMessages}
@@ -669,11 +683,12 @@ export const CodeWorkspaceLayout = memo(
               routineId={routineId}
               workspaceDir={agentWorkspaceDir}
               providerChildren={
-                filesActivated || gitActivated ? (
+                environmentId && (filesActivated || gitActivated) ? (
                   <>
                     {filesActivated && (
                       <WorkspaceFilesPortal
                         host={filesHost}
+                        environmentId={environmentId}
                         sessionId={sessionId}
                         workspaceRoot={agentWorkspaceDir}
                         isGlass={isGlass}
@@ -683,6 +698,7 @@ export const CodeWorkspaceLayout = memo(
                       <WorkspaceGitPortal
                         host={gitHost}
                         tabId={tabId}
+                        environmentId={environmentId}
                         sessionId={sessionId}
                         workspaceRoot={agentWorkspaceDir}
                         isGlass={isGlass}
@@ -705,6 +721,7 @@ export const CodeWorkspaceLayout = memo(
                   tabId={tabId}
                   filesHost={filesHost}
                   gitHost={gitHost}
+                  environmentId={environmentId}
                 />
               )}
             </AnimatePresence>
