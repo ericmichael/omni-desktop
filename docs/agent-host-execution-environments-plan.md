@@ -117,11 +117,14 @@ Completed through the framework/runtime vertical slice:
   state reference. `omni-code` context and worker consumers now derive source
   mounts exclusively from the routed Workspace and EnvironmentLease. The
   obsolete `serve_state` module and product-side singleton tests are deleted.
+- AgentHost shutdown is now an environment-manager operation. It drains
+  provisioning already in flight, rejects new environments once shutdown
+  begins, and closes every ready environment even if one peer fails. Idle
+  watcher cancellation is part of common environment teardown, so product
+  serve no longer reaches into the startup sandbox session specially.
 
-Next: make AgentHost shutdown stop every managed environment through the
-environment manager, then remove the now-unused in-place `sandbox.switch`
-orchestration and remaining per-session serve composition before the final
-routing audit.
+Next: remove the now-unused in-place `sandbox.switch` orchestration and
+remaining per-session serve composition before the final routing audit.
 
 ## Executive decision
 
