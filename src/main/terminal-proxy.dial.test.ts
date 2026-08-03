@@ -50,7 +50,14 @@ const startFakeServe = async (): Promise<FakeServe> => {
         return;
       }
       // Minimal JSON-RPC responder for the tab RPC channel.
-      const msg = JSON.parse(text) as { id: number; params: { function: string } };
+      const msg = JSON.parse(text) as { id?: number; method: string; params: { function?: string } };
+      if (msg.method === 'initialized') {
+        return;
+      }
+      if (msg.method === 'initialize') {
+        socket.send(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { protocol_version: '1.0.0' } }));
+        return;
+      }
       const fn = msg.params.function;
       const result =
         fn === 'session.ensure'
@@ -134,6 +141,9 @@ describe('TerminalProxy dials', () => {
     // No token / terminal credentials in either dial URL.
     expect(rpcConn?.query).toBe('');
     expect(ioConn?.query).toBe('');
+
+    const rpcMessages = rpcConn?.messages.map((message) => JSON.parse(message) as { method: string }) ?? [];
+    expect(rpcMessages.slice(0, 2).map((message) => message.method)).toEqual(['initialize', 'initialized']);
 
     const createCall = rpcConn?.messages
       .map((message) => JSON.parse(message) as { params?: Record<string, unknown> })

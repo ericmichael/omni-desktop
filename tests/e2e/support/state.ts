@@ -18,6 +18,7 @@ export type SeedState =
   | 'workspace-files'
   | 'workspace-git'
   | 'pooled-workspaces'
+  | 'pooled-devboxes'
   | 'lazy-ready'
   | 'lazy-error-pending'
   | 'lazy-error-empty';
@@ -106,7 +107,7 @@ const workspaceGitSeed = (workspaceDir: string) => ({
   codeLayoutMode: 'focus',
 });
 
-const pooledWorkspacesSeed = (workspaceDir: string) => {
+const pooledWorkspacesSeed = (workspaceDir: string, profileName: 'host' | 'devbox' = 'host') => {
   const alphaDir = path.join(workspaceDir, 'alpha');
   const betaDir = path.join(workspaceDir, 'beta');
   return {
@@ -148,7 +149,7 @@ const pooledWorkspacesSeed = (workspaceDir: string) => {
         projectId: 'proj_e2e_pool_alpha',
         sessionId: 'session-e2e-pool-alpha',
         workspaceDir: alphaDir,
-        profileName: 'host',
+        profileName,
         profileNameExplicit: true,
         createdAt: seededAt,
         activatedAt: seededAt,
@@ -158,7 +159,7 @@ const pooledWorkspacesSeed = (workspaceDir: string) => {
         projectId: 'proj_e2e_pool_beta',
         sessionId: 'session-e2e-pool-beta',
         workspaceDir: betaDir,
-        profileName: 'host',
+        profileName,
         profileNameExplicit: true,
         createdAt: seededAt + 1,
         activatedAt: seededAt + 1,
@@ -292,6 +293,7 @@ function launcherConfig(seedState: SeedState, workspaceDir: string) {
     ...(seedState === 'workspace-files' ? workspaceFilesSeed(workspaceDir) : {}),
     ...(seedState === 'workspace-git' ? workspaceGitSeed(workspaceDir) : {}),
     ...(seedState === 'pooled-workspaces' ? pooledWorkspacesSeed(workspaceDir) : {}),
+    ...(seedState === 'pooled-devboxes' ? pooledWorkspacesSeed(workspaceDir, 'devbox') : {}),
   };
 }
 
@@ -320,7 +322,7 @@ export function seedServerState(state: E2eState, seedState: SeedState): void {
   if (seedState === 'workspace-git') {
     seedWorkspaceGit(state.workspaceDir);
   }
-  if (seedState === 'pooled-workspaces') {
+  if (seedState === 'pooled-workspaces' || seedState === 'pooled-devboxes') {
     seedPooledWorkspaces(state.workspaceDir);
   }
   const configDir = path.join(state.homeDir, '.config', 'Omni Code');
@@ -339,7 +341,7 @@ export function seedElectronState(state: E2eState, seedState: SeedState): void {
   if (seedState === 'workspace-git') {
     seedWorkspaceGit(state.workspaceDir);
   }
-  if (seedState === 'pooled-workspaces') {
+  if (seedState === 'pooled-workspaces' || seedState === 'pooled-devboxes') {
     seedPooledWorkspaces(state.workspaceDir);
   }
   const configDir = path.join(state.xdgConfigHome, 'Omni Code');

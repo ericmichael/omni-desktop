@@ -75,13 +75,26 @@ Completed through the framework/runtime vertical slice:
   materialize and bind a replacement before retiring the prior environment;
   closing one tab stops only its environment. Failed materialization or binding
   rolls back without orphaning the host or a newly created environment.
+- The embedded React client now receives one typed runtime connection
+  (`baseUrl` plus optional authentication) rather than the legacy UI-oriented
+  `uiUrl`/token pair. The unused Webview-era split component has been removed.
+- Permanent Electron E2E proves two unrelated host-profile Workspaces share one
+  AgentHost while retaining distinct Workspace/environment identities and Files
+  contents.
+- Permanent Electron E2E also proves two Devbox Workspaces share one AgentHost
+  while retaining distinct environment and container identities. Alpha Files
+  can edit its mounted source, Alpha Git observes that change, Alpha Terminal
+  executes at `/workspace`, and Beta Files remains isolated and unchanged.
+- Main-process Terminal RPC now completes the mandatory GUI protocol handshake
+  before session or terminal operations. This defect was found by the Devbox
+  product proof after Files and Git had already routed successfully.
 
-Next: exercise the pooled-host path against the real Electron/server product,
-including two unrelated Workspaces, independent Devbox Files/Git/Terminal
-surfaces, per-tab profile switching, and independent close/rebuild. Then remove
-the remaining legacy per-process `SwitchContext` startup/shutdown path and
-obsolete ticket/session process assumptions before broad visual proof and the
-final routing audit.
+Next: prove per-tab profile switching and independent close/rebuild against the
+real product, audit every non-renderer RPC client for the same mandatory
+initialize/initialized handshake, and exercise the pooled-host path in server
+mode. Then remove the remaining legacy per-process `SwitchContext`
+startup/shutdown path and obsolete ticket/session process assumptions before
+the final routing audit.
 
 ## Executive decision
 

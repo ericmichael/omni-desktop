@@ -134,6 +134,7 @@ async function launchElectronLocal(state: E2eState, testInfo: TestInfo, launchIn
       XDG_CONFIG_HOME: state.xdgConfigHome,
       OPENAI_BASE_URL: process.env.OPENAI_BASE_URL ?? process.env.SANDBOX_OPENAI_BASE_URL ?? 'http://127.0.0.1:9/v1',
       OPENAI_API_KEY: process.env.OPENAI_API_KEY ?? process.env.SANDBOX_OPENAI_API_KEY ?? 'test-key',
+      OMNI_SKIP_DOCKER_PRUNE: '1',
       DISPLAY: process.env.DISPLAY ?? ':0',
     },
     recordVideo: videoOptions(testInfo, launchIndex),

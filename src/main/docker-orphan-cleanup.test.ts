@@ -146,6 +146,14 @@ describe('cleanupOrphanedContainers', () => {
 // ---------------------------------------------------------------------------
 
 describe('pruneDockerResources', () => {
+  it('can be disabled for a runtime that pre-provisions digest-only images', async () => {
+    const { deps, calls } = makeDeps();
+    deps.getEnv = () => ({ PATH: '/usr/bin', OMNI_SKIP_DOCKER_PRUNE: '1' });
+
+    await expect(pruneDockerResources(deps)).resolves.toBeNull();
+    expect(calls).toEqual([]);
+  });
+
   it('returns reclaimed space string on success', async () => {
     const { deps, calls } = makeDeps(
       new Map([['system prune', { stdout: 'Deleted Images:\nfoo\nTotal reclaimed space: 1.2GB\n' }]])

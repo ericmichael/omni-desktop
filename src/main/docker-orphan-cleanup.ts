@@ -147,6 +147,12 @@ export const cleanupOrphanedContainers = async (deps?: Partial<DockerCleanupDeps
 export const pruneDockerResources = async (deps?: Partial<DockerCleanupDeps>): Promise<string | null> => {
   const { execFileFn, getEnv } = { ...defaultDeps(), ...deps };
   const env = getEnv();
+  // Permanent E2E prepares a pinned digest-only image before Electron starts.
+  // Docker classifies that image as pruneable until a container references it,
+  // so the startup sweep would delete the fixture out from under the test.
+  if (env['OMNI_SKIP_DOCKER_PRUNE'] === '1') {
+    return null;
+  }
   const opts = { encoding: 'utf8' as const, timeout: 60_000, env };
 
   try {

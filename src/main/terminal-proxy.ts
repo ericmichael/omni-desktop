@@ -1,5 +1,6 @@
 import { WebSocket } from 'ws';
 
+import type { RpcMethodMap } from '@/generated/omniagents-gui-v1/gui-v1';
 import { wsAuthOptions } from '@/lib/ws-auth';
 import type { ProcessManager } from '@/main/process-manager';
 import { classifyCloseCode, DEFAULT_LIFECYCLE_POLICY } from '@/shared/lifecycle';
@@ -83,6 +84,22 @@ type TabRpc = {
 
 /** Per-call deadline from the standard lifecycle policy (protocol.md §"Connection Lifecycle"). */
 const RPC_TIMEOUT_MS = DEFAULT_LIFECYCLE_POLICY.rpcTimeoutMs;
+const TERMINAL_INITIALIZE_PARAMS = {
+  protocol_version: '1.0.0',
+  identity: { name: 'omni-desktop-terminal-proxy', version: '1.0.0' },
+  platform: { os: process.platform, arch: process.arch },
+  capabilities: {
+    realtime: false,
+    mcp_apps: false,
+    client_functions: false,
+    approvals: false,
+    artifacts: false,
+    replay: false,
+    terminal: true,
+    experimental_operations: [],
+    disabled_notifications: [],
+  },
+} satisfies RpcMethodMap['initialize']['params'];
 
 export class TerminalProxy {
   private terminals = new Map<string, ProxiedTerminal>();
@@ -314,19 +331,24 @@ export class TerminalProxy {
     }
 
     const socket = new WebSocket(wsUrl, wsAuthOptions(authToken));
+    let resolveOpen!: () => void;
+    let rejectOpen!: (error: Error) => void;
+    const opened = new Promise<void>((resolve, reject) => {
+      resolveOpen = resolve;
+      rejectOpen = reject;
+    });
     const rpc: TabRpc = {
       socket,
       pending: new Map(),
       nextId: 1,
       sessionId: null,
       sessionReady: null,
-      ready: new Promise((resolve, reject) => {
-        socket.once('open', () => resolve());
-        socket.once('error', (err) => reject(err));
-      }),
+      ready: Promise.resolve(),
     };
 
     socket.on('message', (raw) => this.handleRpcMessage(rpc, raw));
+    socket.once('open', resolveOpen);
+    socket.once('error', rejectOpen);
     socket.on('close', (code, reason) => {
       // Classify per the shared lifecycle table: 44xx / 1002 / 1003 / 1008
       // are deterministic rejections (e.g. omni serve refusing the token) —
@@ -350,11 +372,30 @@ export class TerminalProxy {
       // cleans up state.
     });
 
+    // A transport-level open socket is not an initialized GUI RPC
+    // connection. Complete the protocol handshake before any session or
+    // terminal operation can use this channel.
+    rpc.ready = opened.then(async () => {
+      await this.rpcCall(rpc, 'initialize', TERMINAL_INITIALIZE_PARAMS);
+      await new Promise<void>((resolve, reject) => {
+        socket.send(JSON.stringify({ jsonrpc: '2.0', method: 'initialized', params: {} }), (error) => {
+          if (error) {
+            reject(error);
+          } else {
+            resolve();
+          }
+        });
+      });
+    });
+
     this.tabRpc.set(tabId, rpc);
     try {
       await rpc.ready;
     } catch (err) {
       this.tabRpc.delete(tabId);
+      if (err instanceof ConsoleError) {
+        throw err;
+      }
       throw new ConsoleError('rpc_failed', `failed to open /ws to omni serve: ${(err as Error).message ?? err}`);
     }
     return rpc;

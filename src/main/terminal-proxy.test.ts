@@ -49,8 +49,9 @@ const { FakeWs } = vi.hoisted(() => {
       return this;
     }
 
-    send(data: unknown): void {
+    send(data: unknown, callback?: (error?: Error) => void): void {
       this.sent.push(String(data));
+      callback?.();
     }
 
     close(): void {
@@ -102,10 +103,16 @@ const completeCreate = async (
   const rpcWs = FakeWs.instances[0]!;
   rpcWs.serverOpen();
   await settle();
-  const ensureFrame = JSON.parse(rpcWs.sent[0]!) as { id: number };
+  const initializeFrame = JSON.parse(rpcWs.sent[0]!) as { id: number };
+  rpcWs.emit(
+    'message',
+    JSON.stringify({ jsonrpc: '2.0', id: initializeFrame.id, result: { protocol_version: '1.0.0' } })
+  );
+  await settle();
+  const ensureFrame = JSON.parse(rpcWs.sent[2]!) as { id: number };
   rpcWs.emit('message', JSON.stringify({ jsonrpc: '2.0', id: ensureFrame.id, result: { session_id: 'sess-1' } }));
   await settle();
-  const createFrame = JSON.parse(rpcWs.sent[1]!) as { id: number };
+  const createFrame = JSON.parse(rpcWs.sent[3]!) as { id: number };
   rpcWs.emit(
     'message',
     JSON.stringify({
@@ -135,7 +142,7 @@ describe('TerminalProxy lifecycle', () => {
     const rpcWs = FakeWs.instances[0]!;
     rpcWs.serverOpen();
     await settle();
-    expect(rpcWs.sent).toHaveLength(1); // session.ensure is in flight
+    expect(rpcWs.sent).toHaveLength(1); // initialize is in flight
 
     rpcWs.emit('close', 4401, Buffer.from('token rejected'));
     await expect(createP).rejects.toMatchObject({
@@ -184,7 +191,7 @@ describe('TerminalProxy lifecycle', () => {
     const { proxy } = makeProxy();
     const { rpcWs } = await completeCreate(proxy, 'tab-1');
 
-    const createFrame = JSON.parse(rpcWs.sent[1]!) as { params: Record<string, unknown> };
+    const createFrame = JSON.parse(rpcWs.sent[3]!) as { params: Record<string, unknown> };
     expect(createFrame.params).toMatchObject({
       function: 'terminal.create',
       session_id: 'sess-1',
