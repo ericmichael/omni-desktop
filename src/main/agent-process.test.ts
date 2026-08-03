@@ -173,12 +173,7 @@ const SERVE_PAYLOAD = JSON.stringify({
   ws_url: 'ws://127.0.0.1:9000/ws',
   ui_url: 'http://127.0.0.1:9000',
   agent_host_id: 'agent-host-test',
-  workspace_id: 'workspace-test',
-  environment_id: 'environment-test',
-  services: { code_server: 'http://127.0.0.1:8080', vnc: 'http://127.0.0.1:6080' },
   ports: { ui: 9000 },
-  container_id: null,
-  container_name: 'omni-serve-unix_local',
 });
 
 // ---------------------------------------------------------------------------
@@ -216,19 +211,7 @@ describe('AgentProcess (serve mode)', () => {
     return s;
   };
 
-  // Pull the JSON descriptor strings out of an args array so tests can
-  // assert on their parsed shape rather than substring-matching.
-  const sourceDescriptors = (args: string[]): unknown[] => {
-    const out: unknown[] = [];
-    for (let i = 0; i < args.length; i++) {
-      if (args[i] === '--source' && typeof args[i + 1] === 'string') {
-        out.push(JSON.parse(args[i + 1]!));
-      }
-    }
-    return out;
-  };
-
-  it('spawns `omni serve` with a --source JSON descriptor for a local git source', async () => {
+  it('spawns a targetless AgentHost without consumer placement flags', async () => {
     const h = makeHarness();
     await h.proc.start({
       profileName: 'devbox',
@@ -239,15 +222,19 @@ describe('AgentProcess (serve mode)', () => {
     const [binary, args] = spawnCall(0);
     expect(binary).toBe('/fake/bin/omni');
     expect(args).toContain('serve');
-    expect(args).toContain('--profile');
-    expect(args).toContain('/fake/config/sandbox/devbox.yml');
     expect(args).toContain('--output');
     expect(args).toContain('json');
-    expect(args).toContain('--workspace');
-    expect(args[args.indexOf('--workspace') + 1]).toBe('/test/workspace');
-    expect(sourceDescriptors(args)).toEqual([
-      { kind: 'local-git', mountName: 'launcher', writable: true, path: '/test/workspace' },
-    ]);
+    expect(args).toContain('--snapshot-dir');
+    for (const placementFlag of [
+      '--source',
+      '--profile',
+      '--project',
+      '--session-id',
+      '--container-id',
+      '--workspace',
+    ]) {
+      expect(args).not.toContain(placementFlag);
+    }
   });
 
   it('spawns with distinct renderer and main-process control credentials', async () => {
@@ -277,12 +264,10 @@ describe('AgentProcess (serve mode)', () => {
       data: {
         uiUrl: 'http://127.0.0.1:9000',
         wsUrl: 'ws://127.0.0.1:9000/ws',
-        workspaceId: 'workspace-startup',
-        environmentId: 'environment-startup',
       },
     };
 
-    const runtime = await h.proc.configureConsumer('thread-2', 'workspace-2', arg, false);
+    const runtime = await h.proc.configureConsumer('thread-2', 'workspace-2', arg);
 
     expect(runtime).toEqual({
       workspaceId: 'workspace-2',
@@ -299,6 +284,7 @@ describe('AgentProcess (serve mode)', () => {
     expect(hoisted.controlCalls[0]!.params).toMatchObject({
       workspace_id: 'workspace-2',
       materialization_path: '/repos/second',
+      snapshot_ref: 'workspace-2',
       owner_user_id: 'token_user',
     });
     expect(hoisted.controlCalls[3]!.params).toMatchObject({
@@ -332,13 +318,11 @@ describe('AgentProcess (serve mode)', () => {
       data: {
         uiUrl: 'http://127.0.0.1:9000',
         wsUrl: 'ws://127.0.0.1:9000/ws',
-        workspaceId: 'workspace-startup',
-        environmentId: 'environment-startup',
       },
     };
     hoisted.controlFailureMethod = 'agent_host_bind_thread';
 
-    await expect(h.proc.configureConsumer('thread-2', 'workspace-2', arg, false)).rejects.toThrow(
+    await expect(h.proc.configureConsumer('thread-2', 'workspace-2', arg)).rejects.toThrow(
       'agent_host_bind_thread failed'
     );
 
@@ -348,7 +332,7 @@ describe('AgentProcess (serve mode)', () => {
     });
   });
 
-  it('emits multiple --source descriptors for a multi-source project', async () => {
+  it('registers all project sources through the consumer workspace', async () => {
     const h = makeHarness();
     await h.proc.start({
       profileName: 'host',
@@ -358,8 +342,21 @@ describe('AgentProcess (serve mode)', () => {
         remoteSource('https://github.com/me/omniagents.git', 'omniagents', 'main'),
       ],
     });
-    const [, args] = spawnCall(0);
-    expect(sourceDescriptors(args)).toEqual([
+    const mutable = h.proc as unknown as { status: WithTimestamp<AgentProcessStatus> };
+    mutable.status = {
+      type: 'running',
+      timestamp: Date.now(),
+      data: { uiUrl: 'http://127.0.0.1:9000', wsUrl: 'ws://127.0.0.1:9000/ws' },
+    };
+    await h.proc.configureConsumer('thread-1', 'workspace-1', {
+      profileName: 'host',
+      sources: [
+        localGitSource('/repos/launcher', 'launcher'),
+        localGitSource('/repos/omni-code', 'omni-code'),
+        remoteSource('https://github.com/me/omniagents.git', 'omniagents', 'main'),
+      ],
+    });
+    expect(hoisted.controlCalls[0]!.params.sources).toEqual([
       { kind: 'local-git', mountName: 'launcher', writable: true, path: '/repos/launcher' },
       { kind: 'local-git', mountName: 'omni-code', writable: true, path: '/repos/omni-code' },
       {
@@ -372,30 +369,7 @@ describe('AgentProcess (serve mode)', () => {
     ]);
   });
 
-  it('includes ref in the git-remote descriptor when set', async () => {
-    const h = makeHarness();
-    await h.proc.start({
-      profileName: 'host',
-      sources: [remoteSource('https://github.com/foo/bar.git', 'bar', 'main')],
-    });
-    expect(sourceDescriptors(spawnCall(0)[1])[0]).toEqual({
-      kind: 'git-remote',
-      mountName: 'bar',
-      writable: true,
-      repoUrl: 'https://github.com/foo/bar.git',
-      ref: 'main',
-    });
-  });
-
-  it('omits --profile for the host profile (uses omni serve bundled default)', async () => {
-    const h = makeHarness();
-    await h.proc.start({ profileName: 'host', sources: [localSource('/ws')] });
-
-    const [, args] = spawnCall(0);
-    expect(args).not.toContain('--profile');
-  });
-
-  it('forwards --project and --snapshot-dir when projectId is set', async () => {
+  it('keeps project selection off AgentHost argv', async () => {
     const h = makeHarness();
     await h.proc.start({
       profileName: 'host',
@@ -404,23 +378,19 @@ describe('AgentProcess (serve mode)', () => {
     });
 
     const [, args] = spawnCall(0);
-    expect(args).toContain('--project');
-    expect(args).toContain('proj_abc');
+    expect(args).not.toContain('--project');
+    expect(args).not.toContain('proj_abc');
     expect(args).toContain('--snapshot-dir');
     expect(args).toContain(path.join('/fake/config', 'snapshots'));
   });
 
-  it('always passes --snapshot-dir; --session-id only when caller supplies one', async () => {
+  it('always passes --snapshot-dir but keeps session identity off AgentHost argv', async () => {
     const h = makeHarness();
     await h.proc.start({ profileName: 'host', sources: [localSource('/ws')] });
     const [, args1] = spawnCall(0);
-    // --snapshot-dir is always present — omni serve auto-generates a
-    // session_id and the launcher captures it from the readiness payload.
     expect(args1).toContain('--snapshot-dir');
-    // No sessionId on this start, so --session-id is omitted (fresh start).
     expect(args1).not.toContain('--session-id');
 
-    // Subsequent start with a captured session id forwards it for resume.
     await h.proc.stop();
     hoisted.spawnCalls.length = 0;
     await h.proc.start({
@@ -429,23 +399,28 @@ describe('AgentProcess (serve mode)', () => {
       sessionId: 'sess_xyz',
     });
     const [, args2] = spawnCall(0);
-    expect(args2).toContain('--session-id');
-    expect(args2).toContain('sess_xyz');
+    expect(args2).not.toContain('--session-id');
+    expect(args2).not.toContain('sess_xyz');
   });
 
-  it('reports an error and does not spawn when the profile cannot be resolved', async () => {
+  it('resolves a consumer profile during materialization, not host startup', async () => {
     const h = makeHarness();
-    await h.proc.start({ profileName: 'missing', sources: [localSource('/ws')] });
+    const arg = { profileName: 'missing', sources: [localSource('/ws')] };
+    await h.proc.start(arg);
+    const mutable = h.proc as unknown as { status: WithTimestamp<AgentProcessStatus> };
+    mutable.status = {
+      type: 'running',
+      timestamp: Date.now(),
+      data: { uiUrl: 'http://127.0.0.1:9000', wsUrl: 'ws://127.0.0.1:9000/ws' },
+    };
 
-    expect(spawnCallCount()).toBe(0);
-    const last = h.statuses.at(-1);
-    expect(last?.type).toBe('error');
-    if (last?.type === 'error') {
-      expect(last.error.message).toMatch(/Profile "missing" not found/);
-    }
+    expect(spawnCallCount()).toBe(1);
+    await expect(h.proc.configureConsumer('thread-1', 'workspace-1', arg)).rejects.toThrow(
+      'Profile "missing" is no longer available'
+    );
   });
 
-  it('parses the JSON readiness payload into AgentProcessData (services map preserved)', async () => {
+  it('parses targetless JSON readiness without consumer runtime data', async () => {
     const h = makeHarness();
     await h.proc.start({ profileName: 'devbox', sources: [localSource('/ws')] });
     h.child.emitStdout(`${SERVE_PAYLOAD}\n`);
@@ -456,12 +431,9 @@ describe('AgentProcess (serve mode)', () => {
       expect(connecting.data.uiUrl).toBe('http://127.0.0.1:9000');
       expect(connecting.data.wsUrl).toBe('ws://127.0.0.1:9000/ws');
       expect(connecting.data.agentHostId).toBe('agent-host-test');
-      expect(connecting.data.workspaceId).toBe('workspace-test');
-      expect(connecting.data.environmentId).toBe('environment-test');
-      expect(connecting.data.services).toEqual({
-        code_server: 'http://127.0.0.1:8080',
-        vnc: 'http://127.0.0.1:6080',
-      });
+      expect(connecting.data.workspaceId).toBeUndefined();
+      expect(connecting.data.environmentId).toBeUndefined();
+      expect(connecting.data.services).toEqual({});
       expect(connecting.data.port).toBe(9000);
     }
   });
@@ -482,18 +454,15 @@ describe('AgentProcess (serve mode)', () => {
     });
   });
 
-  it.each(['agent_host_id', 'workspace_id', 'environment_id'])(
-    'rejects a local readiness payload without required %s',
-    async (field) => {
-      const h = makeHarness();
-      await h.proc.start({ profileName: 'host', sources: [localSource('/ws')] });
-      const payload = JSON.parse(SERVE_PAYLOAD) as Record<string, unknown>;
-      delete payload[field];
+  it('rejects readiness without an AgentHost identity', async () => {
+    const h = makeHarness();
+    await h.proc.start({ profileName: 'host', sources: [localSource('/ws')] });
+    const payload = JSON.parse(SERVE_PAYLOAD) as Record<string, unknown>;
+    delete payload.agent_host_id;
 
-      expect(() => h.child.emitStdout(`${JSON.stringify(payload)}\n`)).toThrow(`Missing ${field}`);
-      expect(h.statuses.some((status) => status.type === 'connecting')).toBe(false);
-    }
-  );
+    expect(() => h.child.emitStdout(`${JSON.stringify(payload)}\n`)).toThrow('Missing agent_host_id');
+    expect(h.statuses.some((status) => status.type === 'connecting')).toBe(false);
+  });
 
   it('handles split-buffer payloads (line not complete in first write)', async () => {
     const h = makeHarness();
@@ -544,10 +513,12 @@ describe('AgentProcess (serve mode)', () => {
     (utilMock.isDirectory as ReturnType<typeof vi.fn>).mockResolvedValueOnce(false).mockResolvedValueOnce(false);
 
     const h = makeHarness();
-    await h.proc.start({ profileName: 'host', sources: [localSource('/missing')] });
-    expect(spawnCallCount()).toBe(0);
-    const last = h.statuses.at(-1);
-    expect(last?.type).toBe('error');
+    const arg = { profileName: 'host', sources: [localSource('/missing')] };
+    await h.proc.start(arg);
+    await expect(h.proc.configureConsumer('thread-1', 'workspace-1', arg)).rejects.toThrow(
+      'Workspace directory not found'
+    );
+    expect(spawnCallCount()).toBe(1);
   });
 
   it('does not check workspaceDir for git-remote sources', async () => {
@@ -557,6 +528,16 @@ describe('AgentProcess (serve mode)', () => {
 
     const h = makeHarness();
     await h.proc.start({
+      profileName: 'host',
+      sources: [remoteSource('https://github.com/foo/bar.git')],
+    });
+    const mutable = h.proc as unknown as { status: WithTimestamp<AgentProcessStatus> };
+    mutable.status = {
+      type: 'running',
+      timestamp: Date.now(),
+      data: { uiUrl: 'http://127.0.0.1:9000', wsUrl: 'ws://127.0.0.1:9000/ws' },
+    };
+    await h.proc.configureConsumer('thread-1', 'workspace-1', {
       profileName: 'host',
       sources: [remoteSource('https://github.com/foo/bar.git')],
     });

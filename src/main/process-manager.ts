@@ -118,6 +118,7 @@ export class ProcessManager {
   private lastStartArgs = new Map<string, AgentProcessStartOptions>();
   private consumerRuntimes = new Map<string, AgentHostConsumerRuntime>();
   private consumerWorkspaceIds = new Map<string, string>();
+  private pendingStops = new Map<string, Promise<void>>();
   private sendToWindow: <T extends keyof IpcRendererEvents>(channel: T, ...args: IpcRendererEvents[T]) => void;
   private fetchFn: FetchFn;
   private getStoreData: () => ProcessManagerStoreData;
@@ -383,6 +384,7 @@ export class ProcessManager {
         environmentId: runtime.environmentId,
         services: runtime.services,
         containerId: runtime.containerId,
+        ...(runtime.paused !== undefined ? { paused: runtime.paused } : {}),
       },
     };
   }
@@ -758,7 +760,7 @@ export class ProcessManager {
       if (mode === 'serve') {
         const workspaceId = this.consumerWorkspaceIds.get(processId) ?? `workspace_${randomUUID().replaceAll('-', '')}`;
         this.consumerWorkspaceIds.set(processId, workspaceId);
-        const runtime = await proc.configureConsumer(processId, workspaceId, startArg, created);
+        const runtime = await proc.configureConsumer(processId, workspaceId, startArg);
         this.consumerRuntimes.set(processId, runtime);
       }
     } catch (error) {
@@ -783,25 +785,43 @@ export class ProcessManager {
   };
 
   stop = async (processId: string, opts?: AgentProcessStopOptions): Promise<void> => {
+    const pending = this.pendingStops.get(processId);
+    if (pending) {
+      return pending;
+    }
+    const operation = this.stopConsumer(processId, opts).finally(() => {
+      this.pendingStops.delete(processId);
+    });
+    this.pendingStops.set(processId, operation);
+    return operation;
+  };
+
+  private stopConsumer = async (processId: string, opts?: AgentProcessStopOptions): Promise<void> => {
     const proc = this.processes.get(processId);
     if (!proc) {
       return;
     }
     this.mirrorSources.delete(processId);
     const runtime = this.consumerRuntimes.get(processId);
-    this.consumerRuntimes.delete(processId);
-    this.consumerWorkspaceIds.delete(processId);
-    this.processes.delete(processId);
     const detached = this.agentHosts.detach(processId);
-    if (detached?.lastConsumer) {
-      await proc.stop(opts);
-    } else if (detached && runtime) {
-      await proc.stopConsumerEnvironment(runtime.environmentId);
-    }
-    const machineId = this.localSandboxKeys.get(processId);
-    if (machineId && this.hostBridge) {
-      this.localSandboxKeys.delete(processId);
-      void this.hostBridge.release(machineId, processId).catch(() => {});
+    try {
+      if (opts?.discardSnapshot && runtime) {
+        await proc.discardConsumerSnapshot(runtime.environmentId).catch(() => {});
+      }
+      if (detached?.lastConsumer) {
+        await proc.stop();
+      } else if (detached && runtime) {
+        await proc.stopConsumerEnvironment(runtime.environmentId);
+      }
+    } finally {
+      this.consumerRuntimes.delete(processId);
+      this.consumerWorkspaceIds.delete(processId);
+      this.processes.delete(processId);
+      const machineId = this.localSandboxKeys.get(processId);
+      if (machineId && this.hostBridge) {
+        this.localSandboxKeys.delete(processId);
+        void this.hostBridge.release(machineId, processId).catch(() => {});
+      }
     }
   };
 
@@ -852,7 +872,7 @@ export class ProcessManager {
         if (currentRuntime) {
           await previous.stopConsumerEnvironment(currentRuntime.environmentId);
         }
-        const runtime = await previous.configureConsumer(processId, workspaceId, startArg, false);
+        const runtime = await previous.configureConsumer(processId, workspaceId, startArg);
         this.consumerRuntimes.set(processId, runtime);
         this.lastStartArgs.set(processId, merged);
         this.trackMirrorSources(processId, startArg.sources);
@@ -981,7 +1001,13 @@ export class ProcessManager {
     if (!proc) {
       return { ok: false, supported: false, reason: 'process not found' };
     }
-    return proc.pause();
+    const runtime = this.consumerRuntimes.get(processId);
+    const result = await proc.pause(runtime?.environmentId);
+    if (runtime && result.ok && result.supported) {
+      this.consumerRuntimes.set(processId, { ...runtime, paused: result.paused ?? true });
+      this.sendToWindow('agent-process:status', processId, this.getStatus(processId));
+    }
+    return result;
   };
 
   unpause = async (processId: string): Promise<SandboxPauseResult> => {
@@ -989,7 +1015,13 @@ export class ProcessManager {
     if (!proc) {
       return { ok: false, supported: false, reason: 'process not found' };
     }
-    return proc.unpause();
+    const runtime = this.consumerRuntimes.get(processId);
+    const result = await proc.unpause(runtime?.environmentId);
+    if (runtime && result.ok && result.supported) {
+      this.consumerRuntimes.set(processId, { ...runtime, paused: result.paused ?? false });
+      this.sendToWindow('agent-process:status', processId, this.getStatus(processId));
+    }
+    return result;
   };
 
   switchSandbox = async (processId: string, profileName: string): Promise<SandboxSwitchResult> => {
@@ -1021,7 +1053,7 @@ export class ProcessManager {
     }
     try {
       const currentRuntime = this.consumerRuntimes.get(processId);
-      const runtime = await proc.configureConsumer(processId, workspaceId, nextArg, false);
+      const runtime = await proc.configureConsumer(processId, workspaceId, nextArg);
       this.consumerRuntimes.set(processId, runtime);
       if (currentRuntime && currentRuntime.environmentId !== runtime.environmentId) {
         await proc.stopConsumerEnvironment(currentRuntime.environmentId).catch((error) => {
@@ -1042,7 +1074,7 @@ export class ProcessManager {
   };
 
   notifyActivity = (processId: string): void => {
-    this.processes.get(processId)?.notifyActivity();
+    this.processes.get(processId)?.notifyActivity(this.consumerRuntimes.get(processId)?.environmentId);
   };
 
   /**
@@ -1200,12 +1232,14 @@ export class ProcessManager {
       this.mirrorTimer = null;
     }
     this.mirrorSources.clear();
+    await Promise.allSettled([...this.pendingStops.values()]);
     const exits = this.agentHosts.clear().map((p) => p.exit());
     await Promise.allSettled(exits);
     this.processes.clear();
     this.lastStartArgs.clear();
     this.consumerRuntimes.clear();
     this.consumerWorkspaceIds.clear();
+    this.pendingStops.clear();
   };
 }
 

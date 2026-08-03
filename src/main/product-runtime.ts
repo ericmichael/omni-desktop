@@ -8,7 +8,7 @@
  *   - after every successful install (`OmniInstallManager`), so a version
  *     change is picked up without restarting the launcher.
  *
- * Contract: omniagents `docs/serve-protocol.md`, protocol v1.
+ * Contract: omniagents `docs/serve-protocol.md`, protocol v2.
  */
 import { execFile } from 'child_process';
 import { promisify } from 'util';

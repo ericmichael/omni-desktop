@@ -16,18 +16,11 @@ import { AgentHostControlClient } from '@/main/agent-host-control-client';
 import { initializeMainRpcConnection } from '@/main/omniagents-rpc-handshake';
 import type { IComputeClient } from '@/main/platform-client';
 import { assertServeProtocolSupported } from '@/main/product-runtime';
-import { type ResolvedProfile, resolveProfile } from '@/main/profile-resolver';
+import { resolveProfile } from '@/main/profile-resolver';
 import { getSnapshotStore } from '@/main/snapshot-blob-store';
 import { getOmniCliPath, getOmniConfigDir, isDirectory, pathExists } from '@/main/util';
 import { downloadWorkspace } from '@/main/workspace-sync';
-import type {
-  AgentProcessData,
-  AgentProcessStatus,
-  AgentProcessStopOptions,
-  LogEntry,
-  SandboxPauseResult,
-  WithTimestamp,
-} from '@/shared/types';
+import type { AgentProcessData, AgentProcessStatus, LogEntry, SandboxPauseResult, WithTimestamp } from '@/shared/types';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -181,6 +174,7 @@ export type AgentHostConsumerRuntime = {
   environmentId: string;
   services: Record<string, string>;
   containerId?: string;
+  paused?: boolean;
 };
 
 export type FetchFn = typeof globalThis.fetch;
@@ -191,7 +185,7 @@ export type FetchFn = typeof globalThis.fetch;
 
 /**
  * JSON readiness payload printed by ``<prog> serve`` and consumed here.
- * Shape pinned by the launcher↔product serve contract (protocol v1);
+ * Shape pinned by the launcher↔product serve contract (protocol v2);
  * keep aligned with omniagents ``docs/serve-protocol.md``.
  */
 type ServeReadyPayload = {
@@ -200,17 +194,17 @@ type ServeReadyPayload = {
   ui_url: string;
   /** Stable identity of the agent host that owns runtime registries. */
   agent_host_id: string;
-  /** Stable workspace resource resolved by execution-environment routing. */
-  workspace_id: string;
-  /** Required address for filesystem, git, terminal, and other tool execution. */
-  environment_id: string;
+  /** Null/absent until a launcher consumer is materialized through control. */
+  workspace_id?: string | null;
+  /** Null/absent until a launcher consumer is materialized through control. */
+  environment_id?: string | null;
   /**
    * Bearer token WS clients must present as an ``Authorization: Bearer``
    * upgrade header (or exchange at ``POST /auth/ws-ticket``). ``ws_url``
    * is token-free — never parse credentials out of it.
    */
   auth_token?: string | null;
-  services: Record<string, string>;
+  services?: Record<string, string>;
   ports: { ui: number };
   container_id?: string | null;
   container_name?: string | null;
@@ -226,20 +220,16 @@ const servePayloadToData = (payload: ServeReadyPayload): AgentProcessData => {
     typeof payload.agent_host_id === 'string' && payload.agent_host_id.trim(),
     'Missing agent_host_id in omni serve payload'
   );
-  assert(
-    typeof payload.workspace_id === 'string' && payload.workspace_id.trim(),
-    'Missing workspace_id in omni serve payload'
-  );
-  assert(
-    typeof payload.environment_id === 'string' && payload.environment_id.trim(),
-    'Missing environment_id in omni serve payload'
-  );
   return {
     uiUrl: payload.ui_url,
     wsUrl: payload.ws_url,
     agentHostId: payload.agent_host_id,
-    workspaceId: payload.workspace_id,
-    environmentId: payload.environment_id,
+    ...(typeof payload.workspace_id === 'string' && payload.workspace_id.trim()
+      ? { workspaceId: payload.workspace_id }
+      : {}),
+    ...(typeof payload.environment_id === 'string' && payload.environment_id.trim()
+      ? { environmentId: payload.environment_id }
+      : {}),
     ...(payload.auth_token ? { authToken: payload.auth_token } : {}),
     sandboxUrl: payload.sandbox_url,
     services: payload.services ?? {},
@@ -493,12 +483,12 @@ export class AgentProcess {
   configureConsumer = async (
     threadId: string,
     workspaceId: string,
-    arg: AgentProcessStartArg,
-    useStartupEnvironment: boolean
+    arg: AgentProcessStartArg
   ): Promise<AgentHostConsumerRuntime> => {
     if (this.mode !== 'serve') {
       throw new Error('Delegated compute does not support AgentHost consumer configuration');
     }
+    await this.ensureConsumerSources(arg);
     const data = await this.waitForRunningData();
     if (!data.wsUrl || !this.agentHostControlToken) {
       throw new Error('AgentHost control channel is unavailable');
@@ -507,65 +497,53 @@ export class AgentProcess {
       this.agentHostControlClient ??
       (this.agentHostControlClient = new AgentHostControlClient(data.wsUrl, this.agentHostControlToken));
 
-    let runtime: AgentHostConsumerRuntime;
     let materializedEnvironmentId: string | undefined;
-    if (useStartupEnvironment) {
-      if (!data.workspaceId || !data.environmentId) {
-        throw new Error('Startup AgentHost environment is unavailable');
-      }
-      runtime = {
-        workspaceId: data.workspaceId,
-        environmentId: data.environmentId,
-        services: data.services ?? {},
-        ...(data.containerId ? { containerId: data.containerId } : {}),
-      };
-    } else {
-      const resolved = arg.explicitProfilePath
-        ? ({ kind: 'file', path: arg.explicitProfilePath } as const)
-        : resolveProfile(arg.profileName);
-      if (resolved.kind === 'missing') {
-        throw new Error(`Profile "${arg.profileName}" is no longer available`);
-      }
-      const definition: Record<string, unknown> =
-        resolved.kind === 'file'
-          ? { kind: 'path', path: resolved.path }
-          : {
-              kind: 'default',
-              ...(arg.projectId ? { project_id: arg.projectId } : {}),
-            };
-      const profileId = `profile_${createHash('sha256').update(JSON.stringify(definition)).digest('hex').slice(0, 24)}`;
-      await control.call('agent_host_register_workspace', {
-        workspace_id: workspaceId,
-        materialization_path: serveWorkspaceDirectory(arg),
-        sources: arg.sources.map(sourceDescriptor),
-        owner_user_id: 'token_user',
-      });
-      await control.call('agent_host_register_profile', {
-        profile_id: profileId,
-        definition,
-        owner_user_id: 'token_user',
-      });
-      const materialized = (await control.call('agent_host_materialize_environment', {
-        workspace_id: workspaceId,
-        profile_id: profileId,
-      })) as Record<string, unknown>;
-      const environmentId = String(materialized['environment_id'] ?? '').trim();
-      if (!environmentId) {
-        throw new Error('AgentHost materialization returned no environment_id');
-      }
-      materializedEnvironmentId = environmentId;
-      runtime = {
-        workspaceId,
-        environmentId,
-        services:
-          materialized['services'] && typeof materialized['services'] === 'object'
-            ? (materialized['services'] as Record<string, string>)
-            : {},
-        ...(typeof materialized['container_id'] === 'string' && materialized['container_id']
-          ? { containerId: materialized['container_id'] }
-          : {}),
-      };
+    const resolved = arg.explicitProfilePath
+      ? ({ kind: 'file', path: arg.explicitProfilePath } as const)
+      : resolveProfile(arg.profileName);
+    if (resolved.kind === 'missing') {
+      throw new Error(`Profile "${arg.profileName}" is no longer available`);
     }
+    const definition: Record<string, unknown> =
+      resolved.kind === 'file'
+        ? { kind: 'path', path: resolved.path }
+        : {
+            kind: 'default',
+            ...(arg.projectId ? { project_id: arg.projectId } : {}),
+          };
+    const profileId = `profile_${createHash('sha256').update(JSON.stringify(definition)).digest('hex').slice(0, 24)}`;
+    await control.call('agent_host_register_workspace', {
+      workspace_id: workspaceId,
+      materialization_path: serveWorkspaceDirectory(arg),
+      snapshot_ref: arg.sessionId ?? workspaceId,
+      sources: arg.sources.map(sourceDescriptor),
+      owner_user_id: 'token_user',
+    });
+    await control.call('agent_host_register_profile', {
+      profile_id: profileId,
+      definition,
+      owner_user_id: 'token_user',
+    });
+    const materialized = (await control.call('agent_host_materialize_environment', {
+      workspace_id: workspaceId,
+      profile_id: profileId,
+    })) as Record<string, unknown>;
+    const environmentId = String(materialized['environment_id'] ?? '').trim();
+    if (!environmentId) {
+      throw new Error('AgentHost materialization returned no environment_id');
+    }
+    materializedEnvironmentId = environmentId;
+    const runtime: AgentHostConsumerRuntime = {
+      workspaceId,
+      environmentId,
+      services:
+        materialized['services'] && typeof materialized['services'] === 'object'
+          ? (materialized['services'] as Record<string, string>)
+          : {},
+      ...(typeof materialized['container_id'] === 'string' && materialized['container_id']
+        ? { containerId: materialized['container_id'] }
+        : {}),
+    };
 
     try {
       await control.call('agent_host_bind_thread', {
@@ -602,6 +580,21 @@ export class AgentProcess {
     });
   };
 
+  discardConsumerSnapshot = async (environmentId: string): Promise<void> => {
+    const data = await this.waitForRunningData();
+    if (!data.wsUrl) {
+      return;
+    }
+    await oneShotServerCall(
+      data.wsUrl,
+      environmentId,
+      'sandbox.discard_snapshot',
+      {},
+      SERVER_CALL_TIMEOUT_MS,
+      data.authToken
+    );
+  };
+
   start = async (arg: AgentProcessStartArg): Promise<void> => {
     if (this.status.type === 'starting' || this.status.type === 'connecting' || this.status.type === 'running') {
       return;
@@ -618,7 +611,7 @@ export class AgentProcess {
     await this.startServeSession(arg);
   };
 
-  stop = async (opts?: AgentProcessStopOptions): Promise<void> => {
+  stop = async (): Promise<void> => {
     if (this.mode === 'compute') {
       this.updateStatus({ type: 'stopping' });
       if (this.computeSessionId && this.computeClient) {
@@ -664,20 +657,7 @@ export class AgentProcess {
       return;
     }
     // Capture the WS URL + auth before flipping status — `stopping` carries no data.
-    const data = this.status.type === 'running' || this.status.type === 'connecting' ? this.status.data : undefined;
-    const wsUrl = data?.wsUrl;
-    const environmentId = data?.environmentId;
-    const authToken = data?.authToken;
     this.updateStatus({ type: 'stopping' });
-    if (opts?.discardSnapshot && wsUrl && environmentId) {
-      // Terminal close: the caller deletes the snapshot tar right after this
-      // stop, so tell serve to skip the persist (fingerprint + full workspace
-      // tar export + scrub) in its SIGTERM teardown. Best-effort — on timeout
-      // or an older serve without the function, teardown persists as before.
-      await oneShotServerCall(wsUrl, environmentId, 'sandbox.discard_snapshot', {}, SERVER_CALL_TIMEOUT_MS, authToken);
-    } else if (opts?.discardSnapshot && wsUrl) {
-      this.ipcRawOutput('Cannot discard the sandbox snapshot: no execution environment is available.\r\n');
-    }
     this.closeAgentHostControl();
     await this.killProcess();
     this.updateStatus({ type: 'exited' });
@@ -699,11 +679,11 @@ export class AgentProcess {
    * Returns the result the omni-code server function emitted: ``ok``,
    * ``supported``, ``paused``, optional ``reason``. Callers should treat
    * ``supported: false`` as "this backend doesn't pause — fall back to
-   * stop/shutdown if you want to free resources." A successful pause flips
-   * ``AgentProcessData.paused`` to true for the renderer.
+   * stop/shutdown if you want to free resources." The ProcessManager records
+   * the returned paused state on the selected consumer runtime.
    */
-  pause = async (): Promise<SandboxPauseResult> => {
-    return this.callSandboxLifecycle('sandbox.pause', true);
+  pause = async (environmentId?: string): Promise<SandboxPauseResult> => {
+    return this.callSandboxLifecycle(environmentId, 'sandbox.pause');
   };
 
   /**
@@ -711,8 +691,8 @@ export class AgentProcess {
    * already-running container is a no-op as far as the user is concerned
    * (the server function returns supported=true, paused=false).
    */
-  unpause = async (): Promise<SandboxPauseResult> => {
-    return this.callSandboxLifecycle('sandbox.unpause', false);
+  unpause = async (environmentId?: string): Promise<SandboxPauseResult> => {
+    return this.callSandboxLifecycle(environmentId, 'sandbox.unpause');
   };
 
   /**
@@ -720,17 +700,17 @@ export class AgentProcess {
    * doesn't pause while the user is actively interacting with a client
    * surface. Throttling is the renderer's responsibility — we just relay.
    */
-  notifyActivity = (): void => {
+  notifyActivity = (environmentId?: string): void => {
     if (this.status.type !== 'running' && this.status.type !== 'connecting') {
       return;
     }
     const data = (this.status as Extract<AgentProcessStatus, { type: 'running' | 'connecting' }>).data;
-    if (!data.wsUrl || !data.environmentId) {
+    if (!data.wsUrl || !environmentId) {
       return;
     }
     void oneShotServerCall(
       data.wsUrl,
-      data.environmentId,
+      environmentId,
       'sandbox.notify_activity',
       {},
       SERVER_CALL_TIMEOUT_MS,
@@ -742,8 +722,8 @@ export class AgentProcess {
   };
 
   private callSandboxLifecycle = async (
-    fn: 'sandbox.pause' | 'sandbox.unpause',
-    intendedPaused: boolean
+    environmentId: string | undefined,
+    fn: 'sandbox.pause' | 'sandbox.unpause'
   ): Promise<SandboxPauseResult> => {
     if (this.mode === 'compute') {
       return { ok: false, supported: false, reason: 'compute mode does not implement pause yet' };
@@ -756,21 +736,11 @@ export class AgentProcess {
     if (!wsUrl) {
       return { ok: false, supported: false, reason: 'no ws_url available' };
     }
-    if (!data.environmentId) {
+    if (!environmentId) {
       return { ok: false, supported: false, reason: 'no execution environment is available' };
     }
     try {
-      const result = await oneShotServerCall(wsUrl, data.environmentId, fn, {}, SERVER_CALL_TIMEOUT_MS, data.authToken);
-      // Trust the server function's reported paused state when supported.
-      if (result.ok && result.supported) {
-        this.updateAgentProcessData({
-          paused: result.paused ?? intendedPaused,
-        });
-      } else if (!result.supported) {
-        // Backend doesn't support pause — surface that to callers but
-        // don't pretend the local state changed.
-      }
-      return result;
+      return await oneShotServerCall(wsUrl, environmentId, fn, {}, SERVER_CALL_TIMEOUT_MS, data.authToken);
     } catch (err) {
       const message = (err as Error).message ?? String(err);
       return { ok: false, supported: true, reason: message };
@@ -781,13 +751,7 @@ export class AgentProcess {
 
   // --- Serve mode ---
 
-  private startServeSession = async (arg: AgentProcessStartArg): Promise<void> => {
-    // Every local-* source must exist on disk before we shell out. Last-ditch
-    // mkdir before the existence check — `ProcessManager.ensureWorkspaceDir`
-    // already ran but may have failed silently (in which case it logged a
-    // warning). If THIS mkdir also fails, surface the underlying error in the
-    // status message so the renderer banner is debuggable, instead of the
-    // generic "directory not found".
+  private ensureConsumerSources = async (arg: AgentProcessStartArg): Promise<void> => {
     for (const s of arg.sources) {
       if (s.kind === 'local' || s.kind === 'local-git') {
         if (!(await isDirectory(s.workspaceDir))) {
@@ -795,27 +759,20 @@ export class AgentProcess {
             const { mkdir } = await import('node:fs/promises');
             await mkdir(s.workspaceDir, { recursive: true });
           } catch (mkErr) {
-            this.updateStatus({
-              type: 'error',
-              error: {
-                message:
-                  `Workspace directory not found: ${s.workspaceDir} (source ${s.mountName}) ` +
-                  `— mkdir failed: ${(mkErr as Error).message}`,
-              },
-            });
-            return;
+            throw new Error(
+              `Workspace directory not found: ${s.workspaceDir} (source ${s.mountName}) ` +
+                `— mkdir failed: ${(mkErr as Error).message}`
+            );
           }
           if (!(await isDirectory(s.workspaceDir))) {
-            this.updateStatus({
-              type: 'error',
-              error: { message: `Workspace directory not found: ${s.workspaceDir} (source ${s.mountName})` },
-            });
-            return;
+            throw new Error(`Workspace directory not found: ${s.workspaceDir} (source ${s.mountName})`);
           }
         }
       }
     }
+  };
 
+  private startServeSession = async (arg: AgentProcessStartArg): Promise<void> => {
     const omniCli = getOmniCliPath();
     if (!(await pathExists(omniCli))) {
       this.updateStatus({
@@ -826,30 +783,13 @@ export class AgentProcess {
     }
 
     // Verify the installed product speaks the serve protocol this launcher
-    // targets (omniagents docs/serve-protocol.md, v1) before spawning.
+    // targets (omniagents docs/serve-protocol.md, v2) before spawning.
     try {
       await assertServeProtocolSupported();
     } catch (protoErr) {
       this.updateStatus({
         type: 'error',
         error: { message: (protoErr as Error).message },
-      });
-      return;
-    }
-
-    // Cloud computer-as-sandbox: a per-session `host_bridge` profile written by
-    // the launcher, used verbatim. Otherwise resolve by name through the chain.
-    const resolved: ResolvedProfile = arg.explicitProfilePath
-      ? { kind: 'file', path: arg.explicitProfilePath }
-      : resolveProfile(arg.profileName);
-    if (resolved.kind === 'missing') {
-      this.updateStatus({
-        type: 'error',
-        error: {
-          message:
-            `Profile "${arg.profileName}" not found. Expected at ${resolved.expected} ` +
-            `or a launcher-bundled assets/profiles/${arg.profileName}.yml.`,
-        },
       });
       return;
     }
@@ -882,28 +822,17 @@ export class AgentProcess {
       '--agent-host-control-token',
       this.agentHostControlToken,
     ];
-    // One ``--source <json>`` per source — omni serve's argparse uses
-    // ``action="append"``, so each emits a fresh dict.
-    for (const s of arg.sources) {
-      args.push('--source', JSON.stringify(sourceDescriptor(s)));
-    }
     // One ``--credential <json>`` per linked host the project uses. Token values
     // are not here — they ride in ``gitTokenEnv`` (merged into env above) and are
     // referenced by ``tokenEnv`` name.
     for (const cred of arg.credentials ?? []) {
       args.push('--credential', JSON.stringify(cred));
     }
-    if (arg.projectId) {
-      args.push('--project', arg.projectId);
-    }
-    // Snapshot is keyed by sessionId, not projectId. Enabling --snapshot-dir
-    // unconditionally lets omni serve generate a session_id on first start
-    // (we capture it from the readiness payload) and resume from the stored
-    // tar on subsequent starts when the caller passes sessionId back.
+    // The provisioner stores each Workspace snapshot beneath this shared root;
+    // the consumer's snapshot_ref is registered later through the control plane.
     const snapshotDir = path.join(getOmniConfigDir(), 'snapshots');
     args.push('--snapshot-dir', snapshotDir);
     if (arg.sessionId) {
-      args.push('--session-id', arg.sessionId);
       // Cloud durability: launcher container disk is ephemeral, so pull a
       // prior snapshot tar from Azure Blob if one exists. No-op when
       // OMNI_AZURE_SNAPSHOT_CONTAINER isn't set (desktop, self-hosted).
@@ -917,26 +846,11 @@ export class AgentProcess {
         console.error('[snapshot-blob] pull failed:', err);
       }
     }
-    // ``--container-id`` flips omni serve to ``client.resume(state)`` for a
-    // warm reattach. The SDK silently falls back to a fresh container +
-    // snapshot rehydrate if the id is stale, so it is always safe to pass.
-    if (arg.containerId) {
-      args.push('--container-id', arg.containerId);
-    }
-    if (resolved.kind === 'file') {
-      args.push('--profile', resolved.path);
-    }
-    // `host` profile (kind === 'builtin-default') passes no --profile, so
-    // omni serve uses its bundled default.
+    // AgentHost startup is targetless. Workspace, source, profile, session,
+    // and container placement data enters only through consumer materialization.
+    const spawnCwd = getOmniConfigDir();
 
-    // cwd: prefer the first local source's workspaceDir for resolving
-    // relative paths in shell. With no local source, fall back to the
-    // launcher config dir. Same value is forwarded as --workspace so
-    // omni serve can substitute ${workspace_dir} in the resolved profile.
-    const spawnCwd = serveWorkspaceDirectory(arg);
-    args.push('--workspace', spawnCwd);
-
-    this.log.info(c.cyan(`Starting omni serve (profile: ${arg.profileName})...\r\n`));
+    this.log.info(c.cyan('Starting targetless omni serve AgentHost...\r\n'));
     const loggedArgs = args.map((value, index) =>
       args[index - 1] === '--auth-token' || args[index - 1] === '--agent-host-control-token' ? '[redacted]' : value
     );

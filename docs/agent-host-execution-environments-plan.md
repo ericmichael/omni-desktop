@@ -127,9 +127,19 @@ Completed through the framework/runtime vertical slice:
   orchestration, and startup uses the same scoped lifecycle controller as
   provisioned environments. The launcher's dead direct RPC method is removed;
   profile selection retains the existing materialize-and-rebind path.
+- Serve protocol v2 starts a targetless AgentHost with no startup Workspace,
+  profile, session, container, or execution environment. Every launcher
+  consumer, including the first, registers its Workspace/profile and
+  materializes and binds an environment through the same control-plane path.
+  Snapshot identity is Workspace data (`snapshot_ref`), not AgentHost process
+  identity. Pause, unpause, activity, and snapshot discard now name the
+  selected consumer environment explicitly, so pooled consumers cannot mutate
+  a peer's lifecycle state. Consumer stop remains pending until environment
+  teardown completes, and AgentHost cleanup drains those stops before closing
+  the shared control channel.
 
-Next: remove the remaining per-session serve composition before the final
-routing audit.
+Next: run the final routing and legacy-surface audit, then complete the broad
+product/launcher proof matrix.
 
 ## Executive decision
 

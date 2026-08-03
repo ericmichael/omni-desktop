@@ -22,6 +22,10 @@ const hoisted = vi.hoisted(() => ({
     resizePty: ReturnType<typeof vi.fn>;
     configureConsumer: ReturnType<typeof vi.fn>;
     stopConsumerEnvironment: ReturnType<typeof vi.fn>;
+    discardConsumerSnapshot: ReturnType<typeof vi.fn>;
+    pause: ReturnType<typeof vi.fn>;
+    unpause: ReturnType<typeof vi.fn>;
+    notifyActivity: ReturnType<typeof vi.fn>;
     emitStatus: (status: WithTimestamp<AgentProcessStatus>) => void;
   }>,
 }));
@@ -35,20 +39,22 @@ vi.mock('@/main/agent-process', () => ({
     rebuild = vi.fn(async () => {});
     getStatus = vi.fn(() => ({ type: 'uninitialized', timestamp: Date.now() }));
     resizePty = vi.fn();
-    configureConsumer = vi.fn(
-      async (_threadId: string, workspaceId: string, _arg: unknown, useStartupEnvironment: boolean) => {
-        if (hoisted.configureConsumerFailure) {
-          throw new Error(hoisted.configureConsumerFailure);
-        }
-        return {
-          workspaceId: useStartupEnvironment ? 'workspace-startup' : workspaceId,
-          environmentId: useStartupEnvironment ? 'environment-startup' : `environment-${workspaceId}`,
-          services: {},
-          containerId: useStartupEnvironment ? 'container-startup' : `container-${workspaceId}`,
-        };
+    configureConsumer = vi.fn(async (_threadId: string, workspaceId: string, _arg: unknown) => {
+      if (hoisted.configureConsumerFailure) {
+        throw new Error(hoisted.configureConsumerFailure);
       }
-    );
+      return {
+        workspaceId,
+        environmentId: `environment-${workspaceId}`,
+        services: {},
+        containerId: `container-${workspaceId}`,
+      };
+    });
     stopConsumerEnvironment = vi.fn(async () => {});
+    discardConsumerSnapshot = vi.fn(async () => {});
+    pause = vi.fn(async () => ({ ok: true, supported: true, paused: true }));
+    unpause = vi.fn(async () => ({ ok: true, supported: true, paused: false }));
+    notifyActivity = vi.fn();
     emitStatus: (status: WithTimestamp<AgentProcessStatus>) => void;
 
     constructor(opts: { mode: string; onStatusChange: (status: WithTimestamp<AgentProcessStatus>) => void }) {
@@ -299,8 +305,8 @@ describe('ProcessManager', () => {
         ...mockStatus,
         data: {
           ...mockStatus.data,
-          workspaceId: 'workspace-startup',
-          environmentId: 'environment-startup',
+          workspaceId: expect.stringMatching(/^workspace_/),
+          environmentId: expect.stringMatching(/^environment-workspace_/),
         },
       });
     });
@@ -457,9 +463,10 @@ describe('ProcessManager', () => {
         type: 'running',
         data: { workspaceId: 'workspace-b', environmentId: 'environment-b' },
       });
-      expect(pm.getProcessContainerId('tab-a')).toBe('container-startup');
+      const tabAWorkspaceId = host.configureConsumer.mock.calls[0]![1] as string;
+      expect(pm.getProcessContainerId('tab-a')).toBe(`container-${tabAWorkspaceId}`);
       expect(pm.getProcessContainerId('tab-b')).toBeNull();
-      expect(pm.getContainerOwners()).toEqual([{ processId: 'tab-a', containerId: 'container-startup' }]);
+      expect(pm.getContainerOwners()).toEqual([{ processId: 'tab-a', containerId: `container-${tabAWorkspaceId}` }]);
     });
 
     it('stopping one compatible tab leaves the shared host running', async () => {
@@ -472,10 +479,10 @@ describe('ProcessManager', () => {
         timestamp: Date.now(),
       } satisfies WithTimestamp<AgentProcessStatus>);
       await pm.start('tab-b', { workspaceDir: '/tmp/ws', projectId: 'project-1' });
-
+      const tabAWorkspaceId = host.configureConsumer.mock.calls[0]![1] as string;
       await pm.stop('tab-a');
       expect(host.stop).not.toHaveBeenCalled();
-      expect(host.stopConsumerEnvironment).toHaveBeenCalledWith('environment-startup');
+      expect(host.stopConsumerEnvironment).toHaveBeenCalledWith(`environment-${tabAWorkspaceId}`);
       expect(pm.getStatus('tab-a').type).toBe('uninitialized');
       expect(pm.getStatus('tab-b').type).toBe('running');
 
@@ -483,10 +490,44 @@ describe('ProcessManager', () => {
       expect(host.stop).toHaveBeenCalledTimes(1);
     });
 
+    it('keeps a consumer bound until environment stop completes and cleanup drains it', async () => {
+      const { pm } = makePm();
+      await pm.start('tab-a', { workspaceDir: '/tmp/a' });
+      const host = hoisted.agentProcessInstances[0]!;
+      host.getStatus.mockReturnValue({
+        type: 'running',
+        data: { wsUrl: 'ws://localhost:9000/ws', uiUrl: 'http://localhost:9000' },
+        timestamp: Date.now(),
+      } satisfies WithTimestamp<AgentProcessStatus>);
+      await pm.start('tab-b', { workspaceDir: '/tmp/b' });
+
+      let finishStop!: () => void;
+      host.stopConsumerEnvironment.mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            finishStop = resolve;
+          })
+      );
+      const stopping = pm.stop('tab-a');
+      await vi.waitFor(() => expect(host.stopConsumerEnvironment).toHaveBeenCalledTimes(1));
+      expect(pm.getStatus('tab-a').type).toBe('running');
+
+      const cleanup = pm.cleanup();
+      await Promise.resolve();
+      expect(host.exit).not.toHaveBeenCalled();
+      finishStop();
+      await stopping;
+      await cleanup;
+
+      expect(pm.getStatus('tab-a').type).toBe('uninitialized');
+      expect(host.exit).toHaveBeenCalledTimes(1);
+    });
+
     it('rebuilds one tab environment without restarting its shared host', async () => {
       const { pm } = makePm();
       await pm.start('tab-a', { workspaceDir: '/tmp/a' });
       const host = hoisted.agentProcessInstances[0]!;
+      const tabAWorkspaceId = host.configureConsumer.mock.calls[0]![1] as string;
       host.getStatus.mockReturnValue({
         type: 'running',
         data: { wsUrl: 'ws://localhost:9000/ws', uiUrl: 'http://localhost:9000' },
@@ -507,7 +548,9 @@ describe('ProcessManager', () => {
           })
       );
       const rebuilding = pm.rebuild('tab-a', { workspaceDir: '/tmp/a' });
-      await vi.waitFor(() => expect(host.stopConsumerEnvironment).toHaveBeenCalledWith('environment-startup'));
+      await vi.waitFor(() =>
+        expect(host.stopConsumerEnvironment).toHaveBeenCalledWith(`environment-${tabAWorkspaceId}`)
+      );
       expect(pm.getStatus('tab-a')).toMatchObject({ type: 'starting' });
       expect(pm.getStatus('tab-a')).not.toHaveProperty('data');
       expect(pm.getStatus('tab-b')).toMatchObject({
@@ -523,12 +566,11 @@ describe('ProcessManager', () => {
       await rebuilding;
 
       expect(host.rebuild).not.toHaveBeenCalled();
-      expect(host.stopConsumerEnvironment).toHaveBeenCalledWith('environment-startup');
+      expect(host.stopConsumerEnvironment).toHaveBeenCalledWith(`environment-${tabAWorkspaceId}`);
       expect(host.configureConsumer).toHaveBeenLastCalledWith(
         'tab-a',
         expect.stringMatching(/^workspace_/),
-        expect.objectContaining({ workspaceDir: '/tmp/a' }),
-        false
+        expect.objectContaining({ workspaceDir: '/tmp/a' })
       );
       expect(host.stopConsumerEnvironment.mock.invocationCallOrder.at(-1)).toBeLessThan(
         host.configureConsumer.mock.invocationCallOrder.at(-1)!
@@ -545,15 +587,46 @@ describe('ProcessManager', () => {
         timestamp: Date.now(),
       } satisfies WithTimestamp<AgentProcessStatus>);
       await pm.start('tab-b', { workspaceDir: '/tmp/ws', projectId: 'project-1' });
+      const tabAWorkspaceId = host.configureConsumer.mock.calls[0]![1] as string;
+      host.configureConsumer.mockImplementationOnce(async () => ({
+        workspaceId: tabAWorkspaceId,
+        environmentId: 'environment-rebound',
+        services: {},
+      }));
 
       await expect(pm.switchSandbox('tab-a', 'devbox')).resolves.toMatchObject({ ok: true, profile: 'devbox' });
       expect(host.configureConsumer).toHaveBeenCalledWith(
         'tab-a',
         expect.stringMatching(/^workspace_/),
-        expect.objectContaining({ profileName: 'devbox' }),
-        false
+        expect.objectContaining({ profileName: 'devbox' })
       );
-      expect(host.stopConsumerEnvironment).toHaveBeenCalledWith('environment-startup');
+      expect(host.stopConsumerEnvironment).toHaveBeenCalledWith(`environment-${tabAWorkspaceId}`);
+    });
+
+    it('routes lifecycle calls and snapshot discard to the selected consumer environment', async () => {
+      const { pm } = makePm();
+      await pm.start('tab-a', { workspaceDir: '/tmp/ws' });
+      const host = hoisted.agentProcessInstances[0]!;
+      const workspaceId = host.configureConsumer.mock.calls[0]![1] as string;
+      const environmentId = `environment-${workspaceId}`;
+      host.getStatus.mockReturnValue({
+        type: 'running',
+        data: { wsUrl: 'ws://localhost:9000/ws', uiUrl: 'http://localhost:9000' },
+        timestamp: Date.now(),
+      } satisfies WithTimestamp<AgentProcessStatus>);
+
+      await expect(pm.pause('tab-a')).resolves.toMatchObject({ ok: true, paused: true });
+      expect(host.pause).toHaveBeenCalledWith(environmentId);
+      expect(pm.getStatus('tab-a')).toMatchObject({ data: { paused: true } });
+
+      await expect(pm.unpause('tab-a')).resolves.toMatchObject({ ok: true, paused: false });
+      expect(host.unpause).toHaveBeenCalledWith(environmentId);
+      pm.notifyActivity('tab-a');
+      expect(host.notifyActivity).toHaveBeenCalledWith(environmentId);
+
+      await pm.stop('tab-a', { discardSnapshot: true });
+      expect(host.discardConsumerSnapshot).toHaveBeenCalledWith(environmentId);
+      expect(host.stop).toHaveBeenCalledTimes(1);
     });
 
     it('keeps an exclusively attached host after a profile rebind', async () => {
@@ -577,8 +650,7 @@ describe('ProcessManager', () => {
       expect(host.configureConsumer).toHaveBeenCalledWith(
         'tab-a',
         expect.stringMatching(/^workspace_/),
-        expect.objectContaining({ profileName: 'devbox' }),
-        false
+        expect.objectContaining({ profileName: 'devbox' })
       );
       expect(host.start).toHaveBeenCalledTimes(1);
     });

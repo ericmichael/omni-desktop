@@ -11,7 +11,7 @@
  *
  *   2. `ProductRuntimeInfo` — runtime facts reported by the installed
  *      product itself via `<prog> describe --json` (see omniagents
- *      `docs/serve-protocol.md`, protocol v1): slug, config dir, label,
+ *      `docs/serve-protocol.md`, protocol v2): slug, config dir, label,
  *      version, env prefix, serve protocol. Cached per process
  *      (`setCachedProductRuntimeInfo`, refreshed after installs by
  *      `src/main/product-runtime.ts`).
@@ -50,7 +50,7 @@ export const getActiveProduct = (): ProductDefinition => BUNDLED_PRODUCT;
  * Serve-protocol version this launcher targets. Contract: omniagents
  * `docs/serve-protocol.md` (`omniagents.product_serve.SERVE_PROTOCOL_VERSION`).
  */
-export const SUPPORTED_SERVE_PROTOCOL = 1;
+export const SUPPORTED_SERVE_PROTOCOL = 2;
 
 /** Runtime facts reported by `<prog> describe --json` from the installed venv. */
 export type ProductRuntimeInfo = {

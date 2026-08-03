@@ -19,7 +19,7 @@ import {
 
 /**
  * Verbatim payload emitted by `omni describe --json` (omniagents
- * docs/serve-protocol.md, protocol v1) for the pinned omni-code version.
+ * docs/serve-protocol.md, protocol v2) for the pinned omni-code version.
  */
 const OMNI_CODE_DESCRIBE = {
   name: 'omni-code',
@@ -33,7 +33,7 @@ const OMNI_CODE_DESCRIBE = {
     index_url: 'https://pypi.fury.io/ericmichael/omni-code/',
     command_hint: 'omni update',
   },
-  serve_protocol: 1,
+  serve_protocol: 2,
 };
 
 afterEach(() => {
@@ -76,7 +76,7 @@ describe('describe --json payload parsing', () => {
         indexUrl: 'https://pypi.fury.io/ericmichael/omni-code/',
         commandHint: 'omni update',
       },
-      serveProtocol: 1,
+      serveProtocol: 2,
     });
     expect(info.serveProtocol).toBe(SUPPORTED_SERVE_PROTOCOL);
   });
@@ -110,12 +110,12 @@ describe('describe --json payload parsing', () => {
 });
 
 describe('serve protocol assertion', () => {
-  it('accepts protocol v1', () => {
+  it('accepts protocol v2', () => {
     expect(() => assertProductServeProtocol(parseProductDescribePayload(OMNI_CODE_DESCRIBE))).not.toThrow();
   });
 
   it('throws a clear error on mismatch', () => {
-    const info = parseProductDescribePayload({ ...OMNI_CODE_DESCRIBE, serve_protocol: 2 });
-    expect(() => assertProductServeProtocol(info)).toThrow(/speaks serve protocol v2, but this launcher requires v1/);
+    const info = parseProductDescribePayload({ ...OMNI_CODE_DESCRIBE, serve_protocol: 1 });
+    expect(() => assertProductServeProtocol(info)).toThrow(/speaks serve protocol v1, but this launcher requires v2/);
   });
 });
