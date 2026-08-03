@@ -71,7 +71,6 @@ const LOG_TAIL_LINES = 500;
 
 const OWNER_KIND_LABELS: Record<SandboxContainerSummary['ownerKind'], string> = {
   process: 'live session',
-  'warm-reattach': 'warm reattach',
   orphan: 'orphan',
 };
 

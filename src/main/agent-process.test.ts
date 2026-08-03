@@ -10,6 +10,8 @@ const hoisted = vi.hoisted(() => ({
   spawnCalls: [] as unknown[][],
   controlCalls: [] as Array<{ method: string; params: Record<string, unknown> }>,
   controlFailureMethod: null as string | null,
+  snapshotPull: vi.fn(async () => false),
+  snapshotPush: vi.fn(async () => {}),
 }));
 
 vi.mock('node:child_process', async () => {
@@ -70,6 +72,13 @@ vi.mock('@/lib/pty-utils', () => ({ DEFAULT_ENV: {} }));
 vi.mock('@/main/workspace-sync', () => ({
   uploadWorkspace: vi.fn(async () => {}),
   downloadWorkspace: vi.fn(async () => {}),
+}));
+vi.mock('@/main/snapshot-blob-store', () => ({
+  getSnapshotStore: () => ({
+    pull: hoisted.snapshotPull,
+    push: hoisted.snapshotPush,
+    remove: vi.fn(async () => {}),
+  }),
 }));
 vi.mock('@/lib/simple-logger', () => ({
   SimpleLogger: class {
@@ -186,6 +195,8 @@ describe('AgentProcess (serve mode)', () => {
     hoisted.spawnCalls.length = 0;
     hoisted.controlCalls.length = 0;
     hoisted.controlFailureMethod = null;
+    hoisted.snapshotPull.mockClear();
+    hoisted.snapshotPush.mockClear();
   });
 
   afterEach(() => {
@@ -302,6 +313,48 @@ describe('AgentProcess (serve mode)', () => {
       method: 'agent_host_stop_environment',
       params: { environment_id: 'environment-materialized' },
     });
+  });
+
+  it('restores and persists snapshots for each consumer Workspace', async () => {
+    const h = makeHarness();
+    await h.proc.start({ profileName: 'host', sources: [localSource('/ws')] });
+    const mutable = h.proc as unknown as { status: WithTimestamp<AgentProcessStatus> };
+    mutable.status = {
+      type: 'running',
+      timestamp: Date.now(),
+      data: { uiUrl: 'http://127.0.0.1:9000', wsUrl: 'ws://127.0.0.1:9000/ws' },
+    };
+
+    const runtime = await h.proc.configureConsumer('thread-2', 'workspace-2', {
+      profileName: 'host',
+      sources: [localSource('/repos/second', 'second')],
+      sessionId: 'snapshot-thread-2',
+    });
+
+    expect(hoisted.snapshotPull).toHaveBeenCalledWith('snapshot-thread-2', path.join('/fake/config', 'snapshots'));
+    expect(hoisted.snapshotPush).not.toHaveBeenCalled();
+    await h.proc.stopConsumerEnvironment(runtime.environmentId);
+    expect(hoisted.snapshotPush).toHaveBeenCalledWith('snapshot-thread-2', path.join('/fake/config', 'snapshots'));
+  });
+
+  it('persists every active consumer snapshot when its AgentHost stops', async () => {
+    const h = makeHarness();
+    await h.proc.start({ profileName: 'host', sources: [localSource('/ws')] });
+    const mutable = h.proc as unknown as { status: WithTimestamp<AgentProcessStatus> };
+    mutable.status = {
+      type: 'running',
+      timestamp: Date.now(),
+      data: { uiUrl: 'http://127.0.0.1:9000', wsUrl: 'ws://127.0.0.1:9000/ws' },
+    };
+    await h.proc.configureConsumer('thread-1', 'workspace-1', {
+      profileName: 'host',
+      sources: [localSource('/ws')],
+      sessionId: 'snapshot-thread-1',
+    });
+
+    await h.proc.stop();
+
+    expect(hoisted.snapshotPush).toHaveBeenCalledWith('snapshot-thread-1', path.join('/fake/config', 'snapshots'));
   });
 
   it('stops a newly materialized environment when thread binding fails', async () => {

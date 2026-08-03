@@ -29,16 +29,16 @@ import type { AgentProcessData, AgentProcessStatus, LogEntry, SandboxPauseResult
 /**
  * Two paths exist after the v22 cut:
  *
- *   - ``serve``   — spawn ``omni serve --profile <path>``; the resolved
- *                   profile drives the SandboxSession (unix_local / docker
- *                   / e2b / …) and any long-running services in it.
+ *   - ``serve``   — spawn one targetless ``omni serve`` AgentHost; consumer
+ *                   Workspaces and profiles materialize independent execution
+ *                   environments through its control plane.
  *   - ``compute`` — delegate the sandbox lifecycle to an {@link IComputeClient}
  *                   instead of spawning ``omni serve`` here. Two impls exist:
  *                   ``PlatformClient`` (omni-platform delegation) and
  *                   ``RemoteElectronComputeClient`` (computer-as-sandbox: the
  *                   sandbox runs on a laptop the user owns, driven over the
  *                   cloud↔laptop reverse-RPC WS). Both connect to a remote
- *                   ``omni serve`` rather than a local child process.
+ *                   AgentHost rather than a local child process.
  */
 export type AgentProcessMode = 'serve' | 'compute';
 
@@ -89,32 +89,20 @@ export type AgentProcessStartArg = {
   /** Profile name to resolve (``host``, ``devbox``, custom user profile, …). */
   profileName: string;
   /**
-   * Sources to seed into the sandbox workspace. Each one is passed as a
-   * separate ``--source`` JSON descriptor to ``omni serve`` and ends up
-   * mounted at ``/workspace/<mountName>``. Empty array = no seeding.
+   * Sources registered on the consumer Workspace. The selected environment
+   * materializes them at ``/workspace/<mountName>``. Empty array = no seeding.
    */
   sources: AgentProcessSource[];
   /**
-   * Forwarded to ``omni serve --project`` so the per-project profile
-   * layer applies. (Snapshot keying is driven by ``sessionId``, not this.)
+   * Selects the per-project default profile definition when the consumer is
+   * registered. Snapshot keying is driven by ``sessionId``, not this.
    */
   projectId?: string;
   /**
-   * Stable id for this resumable workspace. Forwarded as ``--session-id``
-   * to ``omni serve`` so the snapshot tar is keyed by it. If absent on
-   * first start, omni serve auto-generates one and emits it in the
-   * readiness payload; the launcher captures it via ``AgentProcessData``
-   * and persists it on the owning record (ticket / chat tab / etc.).
+   * Stable snapshot reference for this consumer Workspace. It is registered
+   * through the AgentHost control plane and never becomes host-process state.
    */
   sessionId?: string;
-  /**
-   * Docker container id captured from a previous run. Forwarded as
-   * ``--container-id`` so omni serve can attempt a warm reattach via
-   * ``client.resume(state)`` instead of always creating a fresh container.
-   * Safe to pass a stale id — the SDK falls back to a fresh container +
-   * snapshot rehydrate if the original is gone.
-   */
-  containerId?: string;
   /**
    * Used in serve mode as the spawn ``cwd`` for resolving relative
    * paths in source-path. For git-remote sources, the launcher passes
@@ -208,8 +196,6 @@ type ServeReadyPayload = {
   ports: { ui: number };
   container_id?: string | null;
   container_name?: string | null;
-  /** Which resume tier the SDK ended up taking. See ``AgentProcessData.resume``. */
-  resume?: 'reused' | 'rehydrated' | 'fresh' | null;
   _debug?: Record<string, unknown>;
 };
 
@@ -236,7 +222,6 @@ const servePayloadToData = (payload: ServeReadyPayload): AgentProcessData => {
     containerId: payload.container_id ?? undefined,
     containerName: payload.container_name ?? undefined,
     port: payload.ports.ui,
-    ...(payload.resume ? { resume: payload.resume } : {}),
   };
 };
 
@@ -436,6 +421,8 @@ export class AgentProcess {
   private getExtraEnv?: () => Record<string, string> | Promise<Record<string, string>>;
   private agentHostControlToken: string | null = null;
   private agentHostControlClient: AgentHostControlClient | null = null;
+  /** Environment id -> durable Workspace snapshot reference. */
+  private consumerSnapshotRefs = new Map<string, string>();
   /**
    * Children we deliberately killed via {@link killProcess} (SIGTERM → SIGKILL).
    * Their late `close` events should NOT flip status to `error("signal SIGKILL")`
@@ -496,6 +483,20 @@ export class AgentProcess {
     const control =
       this.agentHostControlClient ??
       (this.agentHostControlClient = new AgentHostControlClient(data.wsUrl, this.agentHostControlToken));
+    const snapshotRef = arg.sessionId ?? workspaceId;
+    const snapshotDir = path.join(getOmniConfigDir(), 'snapshots');
+
+    // Blob durability follows the Workspace being materialized, not whichever
+    // consumer happened to start this shared AgentHost process first.
+    try {
+      const pulled = await getSnapshotStore().pull(snapshotRef, snapshotDir);
+      if (pulled) {
+        this.log.info(c.cyan(`Restored snapshot from blob for workspace ${snapshotRef}\r\n`));
+      }
+    } catch (error) {
+      // Best-effort: the provisioner can still materialize a fresh workspace.
+      console.error(`[snapshot-blob] pull failed for ${snapshotRef}:`, error);
+    }
 
     let materializedEnvironmentId: string | undefined;
     const resolved = arg.explicitProfilePath
@@ -515,7 +516,7 @@ export class AgentProcess {
     await control.call('agent_host_register_workspace', {
       workspace_id: workspaceId,
       materialization_path: serveWorkspaceDirectory(arg),
-      snapshot_ref: arg.sessionId ?? workspaceId,
+      snapshot_ref: snapshotRef,
       sources: arg.sources.map(sourceDescriptor),
       owner_user_id: 'token_user',
     });
@@ -568,6 +569,7 @@ export class AgentProcess {
       }
       throw error;
     }
+    this.consumerSnapshotRefs.set(runtime.environmentId, snapshotRef);
     return runtime;
   };
 
@@ -578,6 +580,7 @@ export class AgentProcess {
     await this.agentHostControlClient.call('agent_host_stop_environment', {
       environment_id: environmentId,
     });
+    await this.pushConsumerSnapshot(environmentId);
   };
 
   discardConsumerSnapshot = async (environmentId: string): Promise<void> => {
@@ -660,6 +663,7 @@ export class AgentProcess {
     this.updateStatus({ type: 'stopping' });
     this.closeAgentHostControl();
     await this.killProcess();
+    await this.pushAllConsumerSnapshots();
     this.updateStatus({ type: 'exited' });
   };
 
@@ -832,20 +836,6 @@ export class AgentProcess {
     // the consumer's snapshot_ref is registered later through the control plane.
     const snapshotDir = path.join(getOmniConfigDir(), 'snapshots');
     args.push('--snapshot-dir', snapshotDir);
-    if (arg.sessionId) {
-      // Cloud durability: launcher container disk is ephemeral, so pull a
-      // prior snapshot tar from Azure Blob if one exists. No-op when
-      // OMNI_AZURE_SNAPSHOT_CONTAINER isn't set (desktop, self-hosted).
-      try {
-        const pulled = await getSnapshotStore().pull(arg.sessionId, snapshotDir);
-        if (pulled) {
-          this.log.info(c.cyan(`Restored snapshot from blob for session ${arg.sessionId}\r\n`));
-        }
-      } catch (err) {
-        // Best-effort — omni serve will start fresh if the pull fails.
-        console.error('[snapshot-blob] pull failed:', err);
-      }
-    }
     // AgentHost startup is targetless. Workspace, source, profile, session,
     // and container placement data enters only through consumer materialization.
     const spawnCwd = getOmniConfigDir();
@@ -898,25 +888,15 @@ export class AgentProcess {
             this.childProcess = null;
           }
           // Don't touch status: stop()/exit() already set it to 'exited' or
-          // the caller transitioned to 'starting' for the replacement.
-          // Still push snapshot to blob for durability of the killed session.
-          if (arg.sessionId) {
-            void getSnapshotStore()
-              .push(arg.sessionId, snapshotDir)
-              .catch((err) => console.error('[snapshot-blob] push failed:', err));
-          }
+          // the caller transitioned to 'starting' for the replacement. The
+          // lifecycle caller pushes every consumer snapshot after shutdown.
           return;
         }
         this.closeAgentHostControl();
         this.childProcess = null;
-        // Push the snapshot tar to blob durability before reporting status.
-        // No-op when not configured or when sessionId is unset. Fire-and-
-        // forget — the renderer's exit handling shouldn't wait on Azure I/O.
-        if (arg.sessionId) {
-          void getSnapshotStore()
-            .push(arg.sessionId, snapshotDir)
-            .catch((err) => console.error('[snapshot-blob] push failed:', err));
-        }
+        // An unexpected host exit shuts down every environment. Persist all
+        // Workspace snapshots; there is no distinguished "startup session".
+        void this.pushAllConsumerSnapshots();
         if (this.status.type === 'exiting' || this.status.type === 'stopping') {
           this.updateStatus({ type: 'exited' });
           return;
@@ -1093,6 +1073,25 @@ export class AgentProcess {
     this.agentHostControlClient?.close();
     this.agentHostControlClient = null;
     this.agentHostControlToken = null;
+  };
+
+  private pushConsumerSnapshot = async (environmentId: string): Promise<void> => {
+    const snapshotRef = this.consumerSnapshotRefs.get(environmentId);
+    if (!snapshotRef) {
+      return;
+    }
+    this.consumerSnapshotRefs.delete(environmentId);
+    const snapshotDir = path.join(getOmniConfigDir(), 'snapshots');
+    try {
+      await getSnapshotStore().push(snapshotRef, snapshotDir);
+    } catch (error) {
+      console.error(`[snapshot-blob] push failed for ${snapshotRef}:`, error);
+    }
+  };
+
+  private pushAllConsumerSnapshots = async (): Promise<void> => {
+    const environmentIds = [...this.consumerSnapshotRefs.keys()];
+    await Promise.all(environmentIds.map((environmentId) => this.pushConsumerSnapshot(environmentId)));
   };
 
   /** Patch fields on the embedded ``AgentProcessData`` without changing the

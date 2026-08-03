@@ -9,8 +9,8 @@ export type { AutoLaunchPhase };
 
 /**
  * Per-tab auto-launch hook. Thin wrapper over useAutoLaunch with phase/error
- * sync to nanostore maps for non-React consumers. The Code tab owns the one
- * sandbox per ticket now — there's no separate supervisor sandbox to avoid.
+ * sync to nanostore maps for non-React consumers. Each Code tab selects one
+ * consumer environment inside a compatible shared AgentHost.
  *
  * *projectId* is forwarded so ProcessManager picks up per-project profile
  * overrides; *profileNameOverride* is the pre-launch picker selection
@@ -23,7 +23,6 @@ export const useCodeAutoLaunch = (
     projectId?: string;
     profileNameOverride?: string;
     sessionId?: string;
-    containerId?: string;
   }
 ) => {
   const { phase, retry, launch, actor } = useAutoLaunch({
@@ -32,7 +31,6 @@ export const useCodeAutoLaunch = (
     ...(opts?.projectId ? { projectId: opts.projectId } : {}),
     ...(opts?.profileNameOverride ? { profileNameOverride: opts.profileNameOverride } : {}),
     ...(opts?.sessionId ? { sessionId: opts.sessionId } : {}),
-    ...(opts?.containerId ? { containerId: opts.containerId } : {}),
     logLabel: 'autoLaunch:code',
   });
 

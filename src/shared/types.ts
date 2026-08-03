@@ -84,7 +84,7 @@ export type ProfileSummary = {
 /**
  * One Docker container carrying the omni-code label, as shown in the
  * Sandboxes → Running pane. Ownership is joined main-side against live
- * agent processes and warm-reattach claims (`codeTabs[].containerId`).
+ * AgentHost consumer environments.
  */
 export type SandboxContainerSummary = {
   id: string;
@@ -92,7 +92,7 @@ export type SandboxContainerSummary = {
   image: string;
   createdAt: string;
   state: string;
-  ownerKind: 'process' | 'warm-reattach' | 'orphan';
+  ownerKind: 'process' | 'orphan';
   /** Human label for the owner (session/tab title); null for orphans. */
   ownerLabel: string | null;
 };
@@ -1074,7 +1074,6 @@ export const schema: Schema<StoreData> = {
         routineSchedule: { type: 'string' },
         workspaceDir: { type: 'string' },
         profileName: { type: 'string' },
-        containerId: { type: 'string' },
         createdAt: { type: 'number' },
         activatedAt: { type: 'number' },
       },
@@ -1604,19 +1603,6 @@ export type AgentProcessData = {
   /** Host port the agent's WS/HTTP server is bound to. */
   port?: number;
   /**
-   * Which fallback tier the SDK's resume path took for this start. Only
-   * meaningful when the launcher passed a previous container id back:
-   *   - ``'reused'``    — warm reattach succeeded (everything survived)
-   *   - ``'rehydrated'`` — old container gone; fresh container + snapshot tar
-   *                       (workspace files survived, runtime state didn't)
-   *   - ``'fresh'``     — both gone; manifest-only seed
-   *   - ``undefined``   — no resume was requested (first launch / non-docker)
-   *
-   * The renderer toasts on ``'rehydrated'`` so the user understands why their
-   * running dev server / shell session went away.
-   */
-  resume?: 'reused' | 'rehydrated' | 'fresh';
-  /**
    * True when the sandbox container is currently frozen via docker pause
    * (cgroup freezer). RAM is held; CPU is zero; tool calls into the
    * container hang until unpause. The renderer uses this to show a
@@ -1662,9 +1648,8 @@ export type AgentProcessStatus =
 export type AgentProcessStartOptions = {
   workspaceDir: string;
   /**
-   * Project id, when this agent process belongs to a project. Forwarded to
-   * `omni serve --project <id>` so the per-project profile layer
-   * (`<config>/projects/<id>/sandbox.yml`) is resolved.
+   * Project id, when this consumer belongs to a project. AgentHost uses it
+   * while registering the consumer's default profile definition.
    */
   projectId?: string;
   /**
@@ -1673,8 +1658,8 @@ export type AgentProcessStartOptions = {
    * collisions numerically suffixed and git credentials resolved per
    * source. Mutually exclusive with `projectId` in practice — a start
    * with `projectIds` deliberately does NOT set `projectId`, so
-   * per-project lookups (`--project` profile layer, PR container
-   * matching) skip these processes. Source-less projects contribute no
+   * single-project profile lookup and PR container matching skip these
+   * consumers. Source-less projects contribute no
    * mounts.
    */
   projectIds?: string[];
@@ -1696,15 +1681,6 @@ export type AgentProcessStartOptions = {
    * server uses the same id for its session.
    */
   sessionId?: string;
-  /**
-   * Docker container id from a previous launch. Passed to omni serve as
-   * ``--container-id`` so the SDK can attempt a warm reattach via
-   * ``client.resume(state)`` instead of always creating a fresh container.
-   * If the container is no longer alive, the SDK silently falls back to
-   * fresh container + snapshot rehydrate — a stale id is never an error,
-   * just a missed opportunity for warm reattach.
-   */
-  containerId?: string;
   /**
    * Additional host directories to mount alongside the resolved project
    * sources (resident agents mount their private home as `home` next to
@@ -1772,13 +1748,6 @@ export type CodeTab = {
    */
   profileName?: string;
   profileNameExplicit?: boolean;
-  /**
-   * Docker container id captured from the last successful launch of this tab.
-   * Sent back on the next start so omni-code can ``client.resume(state)`` for
-   * warm reattach. Stale ids are safe — the SDK falls back to fresh container
-   * + snapshot rehydrate. Cleared whenever ``profileName`` changes.
-   */
-  containerId?: string;
   createdAt: number;
   /**
    * When the user first expressed intent in this column (first message sent

@@ -447,27 +447,11 @@ export const CodeTabContent = memo(
       ...(tab.projectId ? { projectId: tab.projectId } : {}),
       profileNameOverride: profileName,
       ...(tab.sessionId ? { sessionId: tab.sessionId } : {}),
-      ...(tab.containerId ? { containerId: tab.containerId } : {}),
     });
     useSandboxActivityPing(tab.id);
 
     const allStatuses = useStore($codeTabStatuses);
     const sandboxStatus = allStatuses[tab.id];
-
-    // Capture the readiness payload's container_id whenever this tab's omni
-    // serve reports running. May differ from what we sent on this launch if
-    // the SDK ended up creating a fresh container (rehydrate / fresh tiers),
-    // which is exactly what we want to persist for the next start.
-    useEffect(() => {
-      if (sandboxStatus?.type !== 'running') {
-        return;
-      }
-      const next = sandboxStatus.data.containerId;
-      if ((tab.containerId ?? undefined) === next) {
-        return;
-      }
-      void codeApi.setTabContainerId(tab.id, next);
-    }, [sandboxStatus, tab.id, tab.containerId]);
 
     // Only mount the iframe on ``running``. ``connecting`` arrives the
     // moment omni-serve emits its JSON readiness line — that's before

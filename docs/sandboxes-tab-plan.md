@@ -18,7 +18,7 @@ And several real concerns have **no** UI at all:
   `docker` status `ok`/`missing`/`daemon-down` (`WslBackendStatus.docker`)?
 - What profiles exist and what each actually is — users must hand-edit
   `~/.config/omni_code/sandbox/*.yml` to see or change one
-- Snapshot/warm-reattach state (`snapshot-manager.ts`, `codeTabs[].containerId`)
+- Durable Workspace snapshot state (`snapshot-manager.ts`)
 
 A Sandboxes tab gives this a home. It is a management surface, not an
 attention surface — expect no badges (attention-centric IA: badges are for
@@ -59,8 +59,8 @@ work that wants you; substrate health only badges on `error`).
 7. **Container actions are conservative.** v1 actions: stop+remove a
    container, and "Sweep orphans now" (the existing cleanup logic, made
    visible). Removal refuses containers in the protected set
-   (`getProtectedContainerIds`: live agent processes + `codeTabs[].containerId`
-   warm-reattach claims) — the UI shows _why_ a container is protected
+   (`getProtectedContainerIds`: live consumer environments) — the UI shows
+   _why_ a container is protected
    (owning session/tab) instead of a disabled mystery button.
 8. **Works in both shells.** Everything main-side lands where both Electron
    and server mode can reach it. Docker enumeration runs on the backend
@@ -109,13 +109,13 @@ Electron-free, else per-shell registration like `wsl:*`):
   `<config>/sandbox/<name>.yml` and returns the new path. Refuse if an
   override already exists.
 - `sandbox:list-containers` → `SandboxContainerSummary[]`:
-  `{ id, name, image, createdAt, state, ownerKind: 'process' | 'warm-reattach' | 'orphan',
+  `{ id, name, image, createdAt, state, ownerKind: 'process' | 'orphan',
 ownerLabel: string | null }`. Implementation reuses
   `docker-orphan-cleanup.ts`'s exec plumbing (`docker ps -a
 --filter label=com.omni.omni-code --format json`) and its
-  protected-id sources to compute ownership: live `ProcessManager`
-  processes → `ownerKind: 'process'` with the session/tab title;
-  `codeTabs[].containerId` → `'warm-reattach'`; neither → `'orphan'`.
+  protected-id source to compute ownership: live `ProcessManager` consumer
+  environments → `ownerKind: 'process'` with the session/tab title; anything
+  else → `'orphan'`.
 - `sandbox:remove-container` (id) → guards against protected ids (throw
   with the owner label), then `docker rm -f`.
 - `sandbox:sweep-orphans` → runs the existing cleanup pass on demand,
@@ -172,9 +172,7 @@ Electron imports, so registration should be shared, not duplicated.
 ## Explicitly out of scope (v2+)
 
 - In-app YAML editing (needs a real editor primitive first — Decision 4).
-- Snapshot browser (list/delete warm-reattach snapshots) — add once
-  `snapshot-manager` grows a list API; the Running pane's warm-reattach
-  rows are the v1 nod to it.
+- Snapshot browser (list/delete durable Workspace snapshots).
 - "Install docker-ce in this distro" bootstrap button on the Health pane —
   natural sibling of the in-app `wsl --install` work; needs the same
   real-Windows validation pass first.

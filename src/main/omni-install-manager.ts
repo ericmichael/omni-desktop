@@ -508,10 +508,9 @@ export class OmniInstallManager {
     options: { cwd: string; env: Record<string, string> },
     repair?: boolean
   ): Promise<'success' | 'canceled' | 'error'> => {
-    // Dev mode: install omni-code editable from a local checkout so workspace
-    // edits are picked up live without reinstalling. Set OMNI_CODE_EDITABLE_PATH
-    // to the repo root in .env. Transitive deps (omniagents, etc.) still come
-    // from the index.
+    // Development installs use an editable checkout when one was selected by
+    // configureDevelopmentEditablePaths (or explicitly supplied by the
+    // caller). Packaged builds continue to install the pinned release.
     const product = getActiveProduct();
     const editablePath = options.env.OMNI_CODE_EDITABLE_PATH || process.env.OMNI_CODE_EDITABLE_PATH;
     const target: string[] = editablePath
@@ -611,6 +610,38 @@ export class OmniInstallManager {
       },
     });
     return 'error';
+  };
+
+  /**
+   * A source launcher and its sibling Python repositories are one development
+   * workspace. Select those checkouts automatically when Electron is running
+   * unpackaged so a fresh dev/E2E runtime cannot silently combine the current
+   * launcher with stale released protocol implementations.
+   *
+   * Explicit environment variables remain authoritative for non-standard
+   * layouts. Packaged applications never inspect neighboring directories.
+   */
+  private configureDevelopmentEditablePaths = async (env: Record<string, string>): Promise<void> => {
+    if (app.isPackaged) {
+      return;
+    }
+
+    const appPath = app.getAppPath();
+    const candidates = [
+      ['OMNI_CODE_EDITABLE_PATH', 'omni-code'],
+      ['OMNIAGENTS_EDITABLE_PATH', 'omniagents'],
+    ] as const;
+
+    for (const [envKey, siblingDir] of candidates) {
+      if (env[envKey] || process.env[envKey]) {
+        continue;
+      }
+      const candidate = path.resolve(appPath, '..', siblingDir);
+      if (await pathExists(path.join(candidate, 'pyproject.toml'))) {
+        env[envKey] = candidate;
+        this.log.info(c.gray(`Development workspace: using editable ${siblingDir} from ${candidate}\r\n`));
+      }
+    }
   };
 
   startInstall = async (repair?: boolean) => {
@@ -748,6 +779,7 @@ export class OmniInstallManager {
         env: { ...process.env, ...DEFAULT_ENV, ...inheritedShellEnv } as Record<string, string>,
         cwd: getOmniRuntimeDir(),
       };
+      await this.configureDevelopmentEditablePaths(runProcessOptions.env);
 
       // Probe uv before committing to the install. If SmartScreen or antivirus
       // is blocking the unsigned binary, this gives us a distinctive error up

@@ -15,7 +15,7 @@ npm run test:e2e:headed
 npm run test:e2e:ui
 ```
 
-Server mode expects `npm run build:server` before `playwright test --project=server-local`; the npm scripts handle that. Electron mode launches `npm run dev` and connects over CDP.
+Server mode expects `npm run build:server` before `playwright test --project=server-local`; the npm scripts handle that. Electron mode launches the built app through Playwright's Electron driver. In an unpackaged source workspace, runtime installation automatically selects sibling `../omni-code` and `../omniagents` checkouts when they exist; set `OMNI_CODE_EDITABLE_PATH` and `OMNIAGENTS_EDITABLE_PATH` explicitly for another layout.
 
 Proof mode sets `VISUAL_PROOF=1` and runs the same specs with screenshots, 1920×1080 video, action overlays, and traces retained for review. It does not require duplicate proof-only specs. Proof runs default to `VISUAL_PROOF_SLOW_MO_MS=120`; override that value to speed up or slow down action playback.
 

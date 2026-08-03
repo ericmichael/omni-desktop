@@ -139,38 +139,6 @@ describe('code tab sandbox profile resolution', () => {
     expect(store.codeTabs[0]).toMatchObject({ projectId: 'project-1', profileName: 'aci', profileNameExplicit: true });
   });
 
-  it('clears stale container id when selecting a project changes the profile', async () => {
-    resetStore({
-      defaultProfileName: 'host',
-      projects: [project('project-1', 'devbox')],
-      codeTabs: [tab({ containerId: 'old-container' })],
-    });
-    const { codeApi } = await import('./state');
-
-    await codeApi.setTabProject('tab-1', 'project-1');
-
-    expect(store.codeTabs[0]?.containerId).toBeUndefined();
-  });
-
-  it('clears stale container id when session id changes', async () => {
-    resetStore({ codeTabs: [tab({ sessionId: 'session-1', containerId: 'old-container' })] });
-    const { codeApi } = await import('./state');
-
-    await codeApi.setTabSessionId('tab-1', 'session-2');
-
-    expect(store.codeTabs[0]).toMatchObject({ sessionId: 'session-2' });
-    expect(store.codeTabs[0]?.containerId).toBeUndefined();
-  });
-
-  it('preserves container id when session id is unchanged', async () => {
-    resetStore({ codeTabs: [tab({ sessionId: 'session-1', containerId: 'container-1' })] });
-    const { codeApi } = await import('./state');
-
-    await codeApi.setTabSessionId('tab-1', 'session-1');
-
-    expect(store.codeTabs[0]).toMatchObject({ sessionId: 'session-1', containerId: 'container-1' });
-  });
-
   it('sets created projects on the setup tab without replacing a one-off sandbox', async () => {
     resetStore({
       defaultProfileName: 'host',

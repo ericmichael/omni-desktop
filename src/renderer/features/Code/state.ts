@@ -200,9 +200,7 @@ export const codeApi = {
       if (profileName === t.profileName) {
         return { ...t, projectId, profileName, ...activated };
       }
-      const { containerId: _drop, ...rest } = t;
-      void _drop;
-      return { ...rest, projectId, profileName, ...activated };
+      return { ...t, projectId, profileName, ...activated };
     });
     await persistedStoreApi.setKey('codeTabs', tabs);
   },
@@ -283,11 +281,8 @@ export const codeApi = {
     const existingTabs = persistedStoreApi.getKey('codeTabs') ?? [];
     const existing = existingTabs.find((t) => t.ticketId === ticketId);
     if (existing) {
-      const { containerId: _drop, ...existingWithoutContainer } = existing;
-      void _drop;
-      const baseExisting = opts?.profileName ? existingWithoutContainer : existing;
       const nextExisting = {
-        ...baseExisting,
+        ...existing,
         ...(opts?.workspaceDir ? { workspaceDir: opts.workspaceDir } : {}),
         ...(opts?.profileName ? { profileName: opts.profileName } : {}),
       };
@@ -343,46 +338,24 @@ export const codeApi = {
       if ((t.sessionId ?? undefined) === sessionId) {
         return { ...t, sessionId };
       }
-      const { containerId: _drop, ...rest } = t;
-      void _drop;
       if (isChatColumn(t)) {
         // A fresh conversation returns the chat column to the lazy state —
         // greeting up, no sandbox until the first message.
-        const { activatedAt: _reset, ...lazy } = rest;
+        const { activatedAt: _reset, ...lazy } = t;
         void _reset;
         return { ...lazy, sessionId };
       }
-      return { ...rest, sessionId };
+      return { ...t, sessionId };
     });
     await persistedStoreApi.setKey('codeTabs', tabs);
   },
 
   setTabProfile: async (tabId: CodeTabId, profileName: string) => {
-    // Profile change = different image. The persisted containerId is
-    // profile-specific so we drop it here — the SDK would silently fall back
-    // anyway, but not sending a definitely-stale id is cleaner.
     const tabs = (persistedStoreApi.getKey('codeTabs') ?? []).map((t) => {
       if (t.id !== tabId) {
         return t;
       }
-      const { containerId: _drop, ...rest } = t;
-      void _drop;
-      return { ...rest, profileName, profileNameExplicit: true };
-    });
-    await persistedStoreApi.setKey('codeTabs', tabs);
-  },
-
-  setTabContainerId: async (tabId: CodeTabId, containerId: string | undefined) => {
-    const tabs = (persistedStoreApi.getKey('codeTabs') ?? []).map((t) => {
-      if (t.id !== tabId) {
-        return t;
-      }
-      if (containerId === undefined) {
-        const { containerId: _drop, ...rest } = t;
-        void _drop;
-        return rest;
-      }
-      return { ...t, containerId };
+      return { ...t, profileName, profileNameExplicit: true };
     });
     await persistedStoreApi.setKey('codeTabs', tabs);
   },

@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const hoisted = vi.hoisted(() => ({
   commandRunnerResults: [] as Array<{ exitCode: number; signal?: number }>,
+  commandRunnerCalls: [] as Array<{ command: string; args: string[]; env?: Record<string, string> }>,
   commandRunnerCallIndex: 0,
   commandRunnerIsRunning: false,
   networkReachable: true,
@@ -29,6 +30,8 @@ const hoisted = vi.hoisted(() => ({
 
 vi.mock('electron', () => ({
   app: {
+    isPackaged: false,
+    getAppPath: vi.fn(() => '/workspace/launcher'),
     getPath: vi.fn((name: string) => {
       if (name === 'userData') {
         return '/tmp/test-userdata';
@@ -77,8 +80,14 @@ vi.mock('@/lib/pty-utils', () => ({
 vi.mock('@/lib/command-runner', () => ({
   CommandRunner: class MockCommandRunner {
     private running = false;
-    async runCommand(_cmd: string, _args: string[], _opts?: unknown, callbacks?: { onData?: (data: string) => void }) {
+    async runCommand(
+      command: string,
+      args: string[],
+      opts?: { env?: Record<string, string> },
+      callbacks?: { onData?: (data: string) => void }
+    ) {
       this.running = true;
+      hoisted.commandRunnerCalls.push({ command, args, env: opts?.env });
       const result = hoisted.commandRunnerResults[hoisted.commandRunnerCallIndex] ?? { exitCode: 0 };
       hoisted.commandRunnerCallIndex++;
       callbacks?.onData?.('mock output\r\n');
@@ -203,6 +212,7 @@ import { OmniInstallManager } from '@/main/omni-install-manager';
 
 function makeMgr() {
   hoisted.commandRunnerResults = [];
+  hoisted.commandRunnerCalls = [];
   hoisted.commandRunnerCallIndex = 0;
   hoisted.commandRunnerIsRunning = false;
   hoisted.networkReachable = true;
@@ -260,6 +270,21 @@ describe('OmniInstallManager', () => {
       expect(types).toContain('installing');
       expect(types).toContain('completed');
       expect(mgr.getStatus().type).toBe('completed');
+    });
+
+    it('uses sibling editable products for an unpackaged development workspace', async () => {
+      const { mgr } = makeMgr();
+      hoisted.fsFiles.set('/workspace/omni-code/pyproject.toml', '');
+      hoisted.fsFiles.set('/workspace/omniagents/pyproject.toml', '');
+
+      await mgr.startInstall();
+
+      const pipCalls = hoisted.commandRunnerCalls.filter(({ args }) => args[0] === 'pip' && args[1] === 'install');
+      expect(pipCalls).toHaveLength(2);
+      expect(pipCalls[0]!.args).toContain('/workspace/omni-code');
+      expect(pipCalls[1]!.args).toContain('/workspace/omniagents[all]');
+      expect(pipCalls[0]!.env?.OMNI_CODE_EDITABLE_PATH).toBe('/workspace/omni-code');
+      expect(pipCalls[0]!.env?.OMNIAGENTS_EDITABLE_PATH).toBe('/workspace/omniagents');
     });
 
     it('transitions to error when uv executable is missing', async () => {

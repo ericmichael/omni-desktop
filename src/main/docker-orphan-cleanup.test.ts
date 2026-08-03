@@ -160,7 +160,7 @@ describe('pruneDockerResources', () => {
     );
     const result = await pruneDockerResources(deps);
     expect(result).toBe('1.2GB');
-    // Omni containers must be excluded — stopped ones are warm-reattach targets
+    // Omni containers are owned and removed by the dedicated orphan sweep.
     const pruneCall = calls.find((c) => c.args.includes('prune'));
     expect(pruneCall!.args).toContain('label!=com.omni.omni-code');
   });

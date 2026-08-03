@@ -5,14 +5,11 @@
  *   1. User-edited override at `<omniConfigDir>/sandbox/<name>.yml`
  *   2. Launcher-bundled profile under `assets/profiles/<name>.yml`
  *
- * Returns `null` when the launcher relies on omni-code's built-in default
- * (currently only the `host` profile — omni serve's bundled default already
- * is unix_local with the workspace as the manifest root, so passing
- * `--profile` would be redundant).
+ * Returns `builtin-default` when the launcher relies on omni-code's built-in
+ * default (currently only the `host` profile).
  *
- * For any other name, returns the resolved path; the caller passes it as
- * `omni serve --profile <path>`. Returns `null` and the caller surfaces a
- * structured error when a non-host profile has no file.
+ * For any other name, returns the resolved path; the caller registers it with
+ * AgentHost. A missing non-host profile is returned as a structured result.
  */
 
 import { existsSync } from 'node:fs';

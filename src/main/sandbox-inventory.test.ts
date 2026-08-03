@@ -20,7 +20,6 @@ import {
   removeContainer,
   type SandboxInventoryDeps,
   sweepOrphans,
-  warmReattachOwnersFromTabs,
 } from '@/main/sandbox-inventory';
 import type { CodeTab } from '@/shared/types';
 
@@ -50,7 +49,6 @@ function makeDeps(responses: Map<string, { stdout: string; stderr?: string } | E
       execFileFn,
       getEnv: () => ({ PATH: '/usr/bin' }),
       getProcessOwners: () => [],
-      getWarmReattachIds: () => [],
     },
     calls,
   };
@@ -99,25 +97,14 @@ describe('listContainers', () => {
     warn.mockRestore();
   });
 
-  it('joins ownership with process > warm-reattach precedence, matching short vs full ids', async () => {
+  it('joins live ownership by short or full container id', async () => {
     const { deps } = makeDeps(
-      new Map([
-        [
-          'label=com.omni.omni-code',
-          { stdout: `${psLine('0af06484b591')}\n${psLine('bbb222')}\n${psLine('ccc333')}\n` },
-        ],
-      ])
+      new Map([['label=com.omni.omni-code', { stdout: `${psLine('0af06484b591')}\n${psLine('ccc333')}\n` }]])
     );
     deps.getProcessOwners = () => [{ containerId: FULL_ID, label: 'Fix the login bug' }];
-    deps.getWarmReattachIds = () => [
-      // Also claims the live container — the process owner must win.
-      { containerId: FULL_ID, label: 'stale tab claim' },
-      { containerId: 'bbb222', label: 'Nightly build routine' },
-    ];
     const result = await listContainers(deps);
     expect(result[0]).toMatchObject({ ownerKind: 'process', ownerLabel: 'Fix the login bug' });
-    expect(result[1]).toMatchObject({ ownerKind: 'warm-reattach', ownerLabel: 'Nightly build routine' });
-    expect(result[2]).toMatchObject({ ownerKind: 'orphan', ownerLabel: null });
+    expect(result[1]).toMatchObject({ ownerKind: 'orphan', ownerLabel: null });
   });
 });
 
@@ -136,14 +123,6 @@ describe('removeContainer', () => {
     );
     expect(calls).toHaveLength(0);
   });
-
-  it('throws with the owner label for a warm-reattach claim', async () => {
-    const { deps } = makeDeps();
-    deps.getWarmReattachIds = () => [{ containerId: 'abc123', label: 'Nightly build routine' }];
-    await expect(removeContainer(deps, 'abc123')).rejects.toThrow(
-      'Container is in use by a resumable session: Nightly build routine'
-    );
-  });
 });
 
 describe('sweepOrphans', () => {
@@ -152,11 +131,13 @@ describe('sweepOrphans', () => {
       new Map([['label=com.omni.omni-code', { stdout: '0af06484b591\nbbb222\nccc333\n' }]])
     );
     deps.getProcessOwners = () => [{ containerId: FULL_ID, label: 'live session' }];
-    deps.getWarmReattachIds = () => [{ containerId: 'bbb222', label: 'tab' }];
     const result = await sweepOrphans(deps);
-    expect(result).toEqual({ removed: ['ccc333'] });
+    expect(result).toEqual({ removed: ['bbb222', 'ccc333'] });
     const rmCalls = calls.filter((c) => c.args[0] === 'rm');
-    expect(rmCalls).toEqual([{ cmd: 'docker', args: ['rm', '-f', 'ccc333'] }]);
+    expect(rmCalls).toEqual([
+      { cmd: 'docker', args: ['rm', '-f', 'bbb222'] },
+      { cmd: 'docker', args: ['rm', '-f', 'ccc333'] },
+    ]);
   });
 
   it('reports an empty list when Docker is unavailable', async () => {
@@ -335,11 +316,5 @@ describe('ownership label helpers', () => {
       { containerId: 'c2', label: 'Scout' },
       { containerId: 'c3', label: 'mystery' },
     ]);
-  });
-
-  it('warmReattachOwnersFromTabs keeps only tabs with container ids', () => {
-    expect(
-      warmReattachOwnersFromTabs([tab({ id: 'a', containerId: 'c1', routineName: 'Nightly' }), tab({ id: 'b' })])
-    ).toEqual([{ containerId: 'c1', label: 'Nightly' }]);
   });
 });

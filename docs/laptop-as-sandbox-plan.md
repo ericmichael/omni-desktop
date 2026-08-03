@@ -1,5 +1,9 @@
 # Laptop-as-Sandbox: Corrected Implementation Plan
 
+> Historical implementation plan. Per-session serve-launch details are
+> superseded by `docs/agent-host-execution-environments-plan.md`; the laptop
+> remains an environment backend selected by a targetless AgentHost consumer.
+
 Supersedes `docs/computer-as-sandbox-plan.md`, which is built on the wrong
 layer (it relocates `omni serve` onto the laptop). This is the decision-complete
 spec, grounded in the actual lifecycle code (citations inline). The agent stays

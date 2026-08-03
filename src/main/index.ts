@@ -63,7 +63,6 @@ import {
   defaultSandboxInventoryDeps,
   processOwnersFromState,
   registerSandboxInventoryHandlers,
-  warmReattachOwnersFromTabs,
 } from '@/main/sandbox-inventory';
 import { registerScheduledTaskHandlers, ScheduledTaskManager } from '@/main/scheduled-task-manager';
 import { LocalSecretStore } from '@/main/secret-store';
@@ -379,7 +378,6 @@ registerSandboxInventoryHandlers(main.ipc, {
       store.get('codeTabs') ?? [],
       residentAgentManager.getDurableSnapshot().residentAgents
     ),
-  getWarmReattachIds: () => warmReattachOwnersFromTabs(store.get('codeTabs') ?? []),
 });
 
 // Startup snapshot GC. Code tabs cascade-delete on remove; this sweep
@@ -760,14 +758,10 @@ app.on('ready', () => {
   void (async () => {
     const { cleanupOrphanedContainers, pruneDockerResources } = await import('@/main/docker-orphan-cleanup');
     const cleaned = await cleanupOrphanedContainers({
-      // Warm-reattach targets persisted per tab, plus containers of agent
-      // processes already started this session — auto-launch resumes these
-      // concurrently with this sweep, so they must never be treated as
-      // orphans.
-      getProtectedContainerIds: () => [
-        ...store.get('codeTabs').map((tab) => tab.containerId ?? ''),
-        ...processManager.getAllContainerIds(),
-      ],
+      // Environments already materialized by this launcher may overlap the
+      // startup sweep, so resolve the live protected set immediately before
+      // each removal pass.
+      getProtectedContainerIds: () => processManager.getAllContainerIds(),
     });
     if (cleaned && cleaned.length > 0) {
       main.sendToWindow('toast:show', {

@@ -60,7 +60,6 @@ import {
   defaultSandboxInventoryDeps,
   processOwnersFromState,
   registerSandboxInventoryHandlers,
-  warmReattachOwnersFromTabs,
 } from '@/main/sandbox-inventory';
 import { registerScheduledTaskHandlers, ScheduledTaskManager } from '@/main/scheduled-task-manager';
 import {
@@ -1226,7 +1225,7 @@ export const wireGlobalHandlers = async (arg: {
   });
 
   // Sandboxes tab (docs/sandboxes-tab-plan.md Phase 2). Profile discovery
-  // uses the same dirs as `omni serve --profile` resolution: the launcher's
+  // uses the same dirs as AgentHost profile registration: the launcher's
   // bundled assets/profiles (resolved relative to out/server → repo checkout,
   // exactly like agent-process's resolveProfile) plus the shared
   // <config>/sandbox dir (where writeAciProfile lands in cloud). The
@@ -1253,8 +1252,6 @@ export const wireGlobalHandlers = async (arg: {
           t.residentAgentManager.getDurableSnapshot().residentAgents
         )
       ),
-    getWarmReattachIds: () =>
-      [...tenants.values()].flatMap((t) => warmReattachOwnersFromTabs(t.settings.get('codeTabs') ?? [])),
   });
 
   // GitHub / Azure DevOps discovery + GitHub status/unlink. All resolve their

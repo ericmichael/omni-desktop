@@ -1,5 +1,9 @@
 # Plan: Move Launcher Terminal Into the SandboxSession
 
+> Historical implementation plan. Process/session ownership details are
+> superseded by `docs/agent-host-execution-environments-plan.md`; terminals now
+> resolve an immutable environment lease through AgentHost routing.
+
 ## North star
 
 Every launcher terminal — whether it lands on a host shell (unix_local) or

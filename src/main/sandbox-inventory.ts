@@ -6,8 +6,7 @@
  * Built on the same exec plumbing as `docker-orphan-cleanup.ts` (shared label
  * const + login-shell env resolution), so enumeration runs wherever dockerd
  * is in every topology. Electron-free and dependency-injected: ownership is
- * joined against providers the registration sites supply (live agent
- * processes with labels, warm-reattach claims from `codeTabs[].containerId`).
+ * joined against live AgentHost consumer environments supplied by each shell.
  */
 
 import { parseResidentPrincipal } from '@/lib/resident-agent';
@@ -33,8 +32,6 @@ export type SandboxInventoryDeps = {
   getEnv: () => Record<string, string>;
   /** Containers of live agent processes, with a human label (session/tab title). */
   getProcessOwners: () => ContainerOwner[];
-  /** Warm-reattach claims from `codeTabs[].containerId`, with tab labels. */
-  getWarmReattachIds: () => ContainerOwner[];
 };
 
 export const defaultSandboxInventoryDeps = (): Pick<SandboxInventoryDeps, 'execFileFn' | 'getEnv'> =>
@@ -75,15 +72,6 @@ export const processOwnersFromState = (
     return { containerId, label: resident?.name ?? processId };
   });
 
-/** Warm-reattach claims: every persisted tab containerId, labeled by its tab. */
-export const warmReattachOwnersFromTabs = (codeTabs: CodeTab[]): ContainerOwner[] =>
-  codeTabs
-    .filter((t): t is CodeTab & { containerId: string } => !!t.containerId)
-    .map((t) => ({
-      containerId: t.containerId,
-      label: codeTabLabel(t),
-    }));
-
 // ---------------------------------------------------------------------------
 // Inventory
 // ---------------------------------------------------------------------------
@@ -97,17 +85,11 @@ const idsMatch = (a: string, b: string): boolean => !!a && !!b && (a.startsWith(
 
 const findOwner = (
   containerId: string,
-  deps: Pick<SandboxInventoryDeps, 'getProcessOwners' | 'getWarmReattachIds'>
+  deps: Pick<SandboxInventoryDeps, 'getProcessOwners'>
 ): { ownerKind: SandboxContainerSummary['ownerKind']; ownerLabel: string | null } => {
-  // Precedence: live process > warm-reattach claim > orphan. A container both
-  // live and persisted on a tab shows as the live session's.
   const processOwner = deps.getProcessOwners().find((o) => idsMatch(o.containerId, containerId));
   if (processOwner) {
     return { ownerKind: 'process', ownerLabel: processOwner.label };
-  }
-  const warmOwner = deps.getWarmReattachIds().find((o) => idsMatch(o.containerId, containerId));
-  if (warmOwner) {
-    return { ownerKind: 'warm-reattach', ownerLabel: warmOwner.label };
   }
   return { ownerKind: 'orphan', ownerLabel: null };
 };
@@ -152,26 +134,24 @@ export const listContainers = async (deps: SandboxInventoryDeps): Promise<Sandbo
 
 /**
  * Force-remove a container. Throws (with the owner label) when the id is
- * still claimed by a live process or a warm-reattach tab — the UI surfaces
- * the reason instead of a disabled mystery button.
+ * still claimed by a live consumer environment — the UI surfaces the reason
+ * instead of a disabled mystery button.
  */
 export const removeContainer = async (deps: SandboxInventoryDeps, id: string): Promise<void> => {
   const { ownerKind, ownerLabel } = findOwner(id, deps);
   if (ownerKind !== 'orphan') {
-    const claim = ownerKind === 'process' ? 'a running session' : 'a resumable session';
-    throw new Error(`Container is in use by ${claim}: ${ownerLabel ?? id}`);
+    throw new Error(`Container is in use by a running session: ${ownerLabel ?? id}`);
   }
   const opts = { ...EXEC_OPTS_BASE, timeout: 15_000, env: deps.getEnv() };
   await deps.execFileFn('docker', ['rm', '-f', id], opts);
 };
 
-/** Run the orphan cleanup pass on demand; protected set = both owner lists. */
+/** Run the orphan cleanup pass on demand; live environments are protected. */
 export const sweepOrphans = async (deps: SandboxInventoryDeps): Promise<{ removed: string[] }> => {
   const removed = await cleanupOrphanedContainers({
     execFileFn: deps.execFileFn,
     getEnv: deps.getEnv,
-    getProtectedContainerIds: () =>
-      [...deps.getProcessOwners(), ...deps.getWarmReattachIds()].map((o) => o.containerId),
+    getProtectedContainerIds: () => deps.getProcessOwners().map((o) => o.containerId),
   });
   return { removed: removed ?? [] };
 };

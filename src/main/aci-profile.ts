@@ -5,8 +5,8 @@
  * are deployment-specific and can't ship in a bundled profile, and omni-code
  * only interpolates `${workspace_dir}` in profiles — so when Azure is
  * configured the launcher writes `<config>/sandbox/aci.yml` from its own env at
- * boot. `omni serve --profile` then drives the omniagents AzureContainerSandbox
- * (`client.type: aci`), provisioning a serverless ACI container per session.
+ * boot. AgentHost registers the generated path as an environment profile,
+ * provisioning a serverless ACI container per consumer Workspace.
  *
  * The file is JSON, which is valid YAML — avoids a serializer dependency and
  * quotes the storage key safely.

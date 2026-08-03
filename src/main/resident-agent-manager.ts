@@ -453,8 +453,6 @@ type AgentRuntime = {
   watcher: ResidentWatcher | null;
   deliverTimer: ReturnType<typeof setTimeout> | null;
   parkTimer: ReturnType<typeof setTimeout> | null;
-  /** Serve-level resume handles captured from the last running status. */
-  containerId: string | null;
   /** Serialize deliver/reflect/park per agent. */
   chain: Promise<void>;
 };
@@ -958,9 +956,8 @@ export class ResidentAgentManager {
     this.data.agents = next;
     this.enqueuePersist(() => this.repo.upsertResident(residentAgentToRow(updated)));
     this.refreshIdentity(agentId);
-    // A different project scope or sandbox means different mounts/backend:
-    // park so the next wakeup starts fresh, and drop the warm-reattach
-    // handle — the old container was built for the old configuration.
+    // A different project scope or sandbox means different mounts/backend;
+    // park so the next wakeup materializes a fresh environment.
     const sameScope = (a: string[] | undefined, b: string[] | undefined): boolean => {
       const setA = new Set(a ?? []);
       const setB = new Set(b ?? []);
@@ -969,9 +966,6 @@ export class ResidentAgentManager {
     const reconfigured =
       (patch.projectIds !== undefined && !sameScope(patch.projectIds, existing.projectIds)) ||
       (patch.profileName !== undefined && patch.profileName !== existing.profileName);
-    if (reconfigured) {
-      this.runtime(agentId).containerId = null;
-    }
     if (patch.enabled === false || reconfigured) {
       this.enqueueChain(agentId, () => this.park(agentId, { skipReflection: true }));
     }
@@ -1992,14 +1986,12 @@ export class ResidentAgentManager {
             }
           : {}),
         ...(agent.profileName ? { profileNameOverride: agent.profileName } : {}),
-        ...(rt.containerId ? { containerId: rt.containerId } : {}),
       });
     }
     const deadline = this.now() + START_TIMEOUT_MS;
     for (;;) {
       const status = this.processManager.getStatus(pid);
       if (status.type === 'running' && status.data.wsUrl) {
-        rt.containerId = status.data.containerId ?? null;
         return {
           wsUrl: status.data.wsUrl,
           ...(status.data.authToken ? { authToken: status.data.authToken } : {}),
@@ -2150,7 +2142,6 @@ export class ResidentAgentManager {
         watcher: null,
         deliverTimer: null,
         parkTimer: null,
-        containerId: null,
         chain: Promise.resolve(),
       };
       this.runtimes.set(agentId, rt);

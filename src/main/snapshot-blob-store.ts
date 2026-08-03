@@ -1,21 +1,19 @@
 /**
  * Snapshot pull/push backend.
  *
- * ``omni serve`` writes per-session sandbox-state tars to a local
+ * AgentHost environments write per-Workspace sandbox-state tars to a shared
  * ``--snapshot-dir``. On the launcher's host that's
- * ``<omni-config>/snapshots/<sessionId>.tar``. In the deployed cloud the
+ * ``<omni-config>/snapshots/<snapshotRef>.tar``. In the deployed cloud the
  * launcher container's disk is ephemeral — without an external sync those
  * tars are lost on every App Service container recycle.
  *
  * This module is a small lifecycle layer the launcher invokes around each
- * ``omni serve`` spawn:
+ * consumer environment:
  *
- *   * Before spawn: ``pull(sessionId, snapshotDir)`` — if the local tar is
- *     missing but a copy exists in blob, download it so omni serve can
- *     rehydrate from disk as usual.
- *   * After exit: ``push(sessionId, snapshotDir)`` — if a tar exists at the
- *     local path, upload it so it survives the launcher container being
- *     recycled.
+ *   * Before materialization: ``pull(snapshotRef, snapshotDir)`` — if the
+ *     local tar is missing but a copy exists in blob, download it.
+ *   * After environment stop: ``push(snapshotRef, snapshotDir)`` — if a tar
+ *     exists at the local path, upload it so it survives host recycling.
  *   * Cascade delete: ``remove(sessionId)`` — called from the snapshot
  *     manager so blob copies don't outlive the renderer-side tab deletion.
  *

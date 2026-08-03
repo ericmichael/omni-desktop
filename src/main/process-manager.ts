@@ -107,9 +107,9 @@ export type AgentAdoptResult =
  *   - A CodeTabId for code-tab processes
  *
  * Profile resolution: per-project override > user-default. The `"platform"`
- * profile and any `local:<machineId>` profile route to `compute` mode (an
- * `IComputeClient` drives the lifecycle); everything else spawns
- * ``omni serve --profile <resolved>``.
+ * profile routes to `compute` mode (an `IComputeClient` drives lifecycle);
+ * everything else shares a compatible targetless ``omni serve`` AgentHost and
+ * materializes its profile per consumer.
  */
 export class ProcessManager {
   /** Consumer id -> compatible long-lived AgentHost connection. */
@@ -118,6 +118,7 @@ export class ProcessManager {
   private lastStartArgs = new Map<string, AgentProcessStartOptions>();
   private consumerRuntimes = new Map<string, AgentHostConsumerRuntime>();
   private consumerWorkspaceIds = new Map<string, string>();
+  private consumerWorkspaceIdentities = new Map<string, string>();
   private pendingStops = new Map<string, Promise<void>>();
   private sendToWindow: <T extends keyof IpcRendererEvents>(channel: T, ...args: IpcRendererEvents[T]) => void;
   private fetchFn: FetchFn;
@@ -408,9 +409,6 @@ export class ProcessManager {
     }
     if (opts.sessionId) {
       startArg.sessionId = opts.sessionId;
-    }
-    if (opts.containerId) {
-      startArg.containerId = opts.containerId;
     }
     const gitRepo = this.resolvePlatformGitRepo(profileName, opts.workspaceDir, opts.projectId);
     if (gitRepo) {
@@ -705,10 +703,8 @@ export class ProcessManager {
 
   /**
    * The fields that decide whether two `start` calls mean "the same sandbox".
-   * `containerId` is a warm-reattach hint rather than identity (the renderer
-   * persists whatever id the last readiness payload reported, so it drifts
-   * across launches), and `extraSources` follows the project scope already
-   * captured by `projectId`/`projectIds`.
+   * `extraSources` follows the project scope already captured by
+   * `projectId`/`projectIds`.
    */
   private static launchIdentity(opts: AgentProcessStartOptions): string {
     return JSON.stringify([
@@ -718,6 +714,20 @@ export class ProcessManager {
       opts.sessionId ?? null,
       opts.profileNameOverride ?? null,
     ]);
+  }
+
+  /**
+   * Definition fields owned by a framework Workspace registration. A changed
+   * snapshot reference, source set, or materialization directory is a new
+   * Workspace; reusing its id would ask AgentHost to mutate an existing
+   * catalog entry and is correctly rejected by the framework.
+   */
+  private static workspaceIdentity(arg: AgentProcessStartArg): string {
+    return JSON.stringify({
+      workspaceDir: arg.workspaceDir ?? null,
+      snapshotRef: arg.sessionId ?? null,
+      sources: arg.sources,
+    });
   }
 
   start = async (processId: string, opts: AgentProcessStartOptions): Promise<void> => {
@@ -741,7 +751,9 @@ export class ProcessManager {
         return;
       }
     }
-    this.lastStartArgs.set(processId, opts);
+    const previousRuntime = this.consumerRuntimes.get(processId);
+    const previousWorkspaceId = this.consumerWorkspaceIds.get(processId);
+    const previousWorkspaceIdentity = this.consumerWorkspaceIdentities.get(processId);
     const startArg = await this.buildStartArg(opts);
     const profilePath = await this.prepareHostBridge(processId, startArg.profileName, opts.workspaceDir);
     if (profilePath) {
@@ -751,22 +763,42 @@ export class ProcessManager {
     const client = this.resolveComputeClient(startArg.profileName);
     const compatibilityKey = this.agentHostCompatibilityKey(processId, mode, startArg);
     const { proc, created } = this.getOrCreate(processId, compatibilityKey, mode, client);
-    this.trackMirrorSources(processId, startArg.sources);
+    const preservedAttachment = live === proc;
     try {
       const statusType = proc.getStatus().type;
       if (created || !['starting', 'connecting', 'running'].includes(statusType)) {
         await proc.start(startArg);
       }
       if (mode === 'serve') {
-        const workspaceId = this.consumerWorkspaceIds.get(processId) ?? `workspace_${randomUUID().replaceAll('-', '')}`;
-        this.consumerWorkspaceIds.set(processId, workspaceId);
+        const workspaceIdentity = ProcessManager.workspaceIdentity(startArg);
+        const workspaceId =
+          previousWorkspaceId && previousWorkspaceIdentity === workspaceIdentity
+            ? previousWorkspaceId
+            : `workspace_${randomUUID().replaceAll('-', '')}`;
         const runtime = await proc.configureConsumer(processId, workspaceId, startArg);
+        this.consumerWorkspaceIds.set(processId, workspaceId);
+        this.consumerWorkspaceIdentities.set(processId, workspaceIdentity);
         this.consumerRuntimes.set(processId, runtime);
+        if (previousRuntime && previousRuntime.environmentId !== runtime.environmentId) {
+          await proc.stopConsumerEnvironment(previousRuntime.environmentId).catch((error) => {
+            console.warn(`[process-manager] old environment cleanup failed: ${(error as Error).message}`);
+          });
+        }
       }
+      this.lastStartArgs.set(processId, opts);
+      this.trackMirrorSources(processId, startArg.sources);
     } catch (error) {
+      if (preservedAttachment) {
+        // Rebinding is transactional from the consumer's perspective. The
+        // AgentHost cleans a newly materialized environment when binding
+        // fails; keep the prior Workspace/runtime and launch identity live.
+        throw error;
+      }
       this.mirrorSources.delete(processId);
       this.consumerRuntimes.delete(processId);
       this.consumerWorkspaceIds.delete(processId);
+      this.consumerWorkspaceIdentities.delete(processId);
+      this.lastStartArgs.delete(processId);
       this.processes.delete(processId);
       const detached = this.agentHosts.detach(processId);
       if (detached?.lastConsumer) {
@@ -816,6 +848,7 @@ export class ProcessManager {
     } finally {
       this.consumerRuntimes.delete(processId);
       this.consumerWorkspaceIds.delete(processId);
+      this.consumerWorkspaceIdentities.delete(processId);
       this.processes.delete(processId);
       const machineId = this.localSandboxKeys.get(processId);
       if (machineId && this.hostBridge) {
@@ -839,9 +872,6 @@ export class ProcessManager {
       ...((opts.sessionId ?? lastOpts?.sessionId)
         ? { sessionId: (opts.sessionId ?? lastOpts?.sessionId) as string }
         : {}),
-      ...((opts.containerId ?? lastOpts?.containerId)
-        ? { containerId: (opts.containerId ?? lastOpts?.containerId) as string }
-        : {}),
       ...((opts.extraSources ?? lastOpts?.extraSources)
         ? { extraSources: opts.extraSources ?? lastOpts?.extraSources }
         : {}),
@@ -859,8 +889,13 @@ export class ProcessManager {
       const previousStartArg = await this.buildStartArg(lastOpts);
       const previousMode = this.resolveMode(previousStartArg.profileName);
       const previousKey = this.agentHostCompatibilityKey(processId, previousMode, previousStartArg);
-      const workspaceId = this.consumerWorkspaceIds.get(processId);
-      if (compatibilityKey === previousKey && workspaceId) {
+      const currentWorkspaceId = this.consumerWorkspaceIds.get(processId);
+      if (compatibilityKey === previousKey && currentWorkspaceId) {
+        const workspaceIdentity = ProcessManager.workspaceIdentity(startArg);
+        const workspaceId =
+          this.consumerWorkspaceIdentities.get(processId) === workspaceIdentity
+            ? currentWorkspaceId
+            : `workspace_${randomUUID().replaceAll('-', '')}`;
         const currentRuntime = this.consumerRuntimes.get(processId);
         // Automatic environments are intentionally reused for the same
         // Workspace/Profile pair while they remain ready. Rebuild must first
@@ -874,6 +909,8 @@ export class ProcessManager {
         }
         const runtime = await previous.configureConsumer(processId, workspaceId, startArg);
         this.consumerRuntimes.set(processId, runtime);
+        this.consumerWorkspaceIds.set(processId, workspaceId);
+        this.consumerWorkspaceIdentities.set(processId, workspaceIdentity);
         this.lastStartArgs.set(processId, merged);
         this.trackMirrorSources(processId, startArg.sources);
         this.sendToWindow('agent-process:status', processId, this.getStatus(processId));
@@ -1239,6 +1276,7 @@ export class ProcessManager {
     this.lastStartArgs.clear();
     this.consumerRuntimes.clear();
     this.consumerWorkspaceIds.clear();
+    this.consumerWorkspaceIdentities.clear();
     this.pendingStops.clear();
   };
 }

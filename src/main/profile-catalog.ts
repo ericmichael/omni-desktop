@@ -208,7 +208,7 @@ export const createOverride = (deps: ProfileCatalogDeps, name: string): { path: 
  * reads the edited file), as do the implicit host profile and unknown names.
  *
  * The YAML is parse-validated (mapping with a `client.type` string — the shape
- * the catalog parser and `omni serve --profile` expect) BEFORE any disk write;
+ * the catalog parser and AgentHost provisioner expect) BEFORE any disk write;
  * invalid input throws with the file untouched. The write itself is atomic
  * (tmp + rename) so `omni serve` can never read a torn YAML mid-write.
  */

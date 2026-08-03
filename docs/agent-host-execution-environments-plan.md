@@ -10,7 +10,7 @@ out of scope.
 The implementation remains staged into reviewable commits to control
 engineering risk, but the finished product contains only the new architecture.
 
-### Implementation checkpoint — 2026-08-02
+### Implementation checkpoint — 2026-08-03
 
 Completed through the framework/runtime vertical slice:
 
@@ -137,9 +137,28 @@ Completed through the framework/runtime vertical slice:
   a peer's lifecycle state. Consumer stop remains pending until environment
   teardown completes, and AgentHost cleanup drains those stops before closing
   the shared control channel.
+- Framework audit gates now cover the complete typed RPC catalog, every
+  built-in server function, dynamic extension metadata forwarding, and the
+  authorization classification inventory. Execution-sensitive operations
+  cannot be added without explicitly declaring their resource scope and
+  requirements at the framework boundary.
+- Launcher Workspace identity now follows the registered definition: changing
+  the materialization directory, source set, or snapshot reference allocates a
+  new Workspace id. Same-host rebinding materializes and binds the replacement
+  before retiring the previous environment; a failed replacement preserves the
+  prior runtime and launch record.
+- External snapshot durability is consumer/environment scoped. Each Workspace
+  snapshot is pulled before its own materialization and pushed after its own
+  environment stops; shared-host shutdown persists every remaining consumer.
+  The first consumer that spawned the AgentHost has no special snapshot role.
+- The obsolete container warm-reattach compatibility surface is deleted.
+  Container ids are no longer stored on tabs, sent as launch hints, treated as
+  resumable owners, or protected from orphan cleanup. Container identity is a
+  live environment observation used only for inventory and direct container
+  operations; durable recovery is Workspace snapshot materialization.
 
-Next: run the final routing and legacy-surface audit, then complete the broad
-product/launcher proof matrix.
+Next: complete the broad product/launcher proof matrix and land the final
+architectural audit commit.
 
 ## Executive decision
 

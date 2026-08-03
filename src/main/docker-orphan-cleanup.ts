@@ -24,13 +24,8 @@ export type DockerCleanupDeps = {
   execFileFn: DockerExecFn;
   getEnv: () => Record<string, string>;
   /**
-   * Container ids this launcher instance still has a claim on: warm-reattach
-   * targets persisted on `codeTabs[].containerId` plus containers of live
-   * agent processes. These are never swept — auto-launched sessions resume
-   * them concurrently with the startup sweep, and removing one mid-resume
-   * surfaces as a Docker 409 (`marked for removal` / `is not running`).
-   * Called right before removal so sessions that come up mid-sweep are
-   * still protected.
+   * Container ids owned by live consumer environments. Called right before
+   * removal so environments materialized mid-sweep are still protected.
    */
   getProtectedContainerIds: () => string[];
 };
@@ -61,8 +56,8 @@ const defaultDeps = (): DockerCleanupDeps => ({
  * On startup we check for any still-running containers with that label and stop/remove them,
  * since the managing process (the previous launcher instance) is gone.
  *
- * Containers reported by `getProtectedContainerIds` are NOT orphans — they are
- * resume targets or live sessions of this launcher instance — and are skipped.
+ * Containers reported by `getProtectedContainerIds` are live environments of
+ * this launcher instance and are skipped.
  *
  * Returns the ids of the containers removed, or null if Docker is unavailable.
  * Runs at startup (both shells) and on demand via `sandbox:sweep-orphans`.
@@ -139,9 +134,8 @@ export const cleanupOrphanedContainers = async (deps?: Partial<DockerCleanupDeps
  * Prune unused Docker resources (stopped containers, dangling images, unused networks, build cache).
  *
  * Runs `docker system prune -f` which only removes resources not associated with any running container.
- * Omni Code containers are excluded via `label!=` — stopped ones are warm-reattach targets that
- * `omni serve --container-id` restarts on the next launch; pruning one mid-resume is the same
- * 409 race as the orphan sweep. True omni orphans are handled by `cleanupOrphanedContainers`.
+ * Omni Code containers are excluded via `label!=`; their ownership and
+ * removal are handled deterministically by `cleanupOrphanedContainers`.
  * Returns the reclaimed space string (e.g. "1.2GB"), or null if Docker is unavailable or prune fails.
  */
 export const pruneDockerResources = async (deps?: Partial<DockerCleanupDeps>): Promise<string | null> => {

@@ -381,6 +381,7 @@ describe('ProcessManager', () => {
       const { pm } = makePm();
       await pm.start('proc-1', { workspaceDir: '/tmp/ws' });
       const host = hoisted.agentProcessInstances[0]!;
+      const firstWorkspaceId = host.configureConsumer.mock.calls[0]![1] as string;
       host.getStatus.mockReturnValue({
         type: 'running',
         data: { wsUrl: 'ws://localhost:9000/ws', uiUrl: 'http://localhost:9000' },
@@ -392,6 +393,33 @@ describe('ProcessManager', () => {
       expect(host.exit).not.toHaveBeenCalled();
       expect(host.start).toHaveBeenCalledTimes(1);
       expect(host.configureConsumer).toHaveBeenCalledTimes(2);
+      const secondWorkspaceId = host.configureConsumer.mock.calls[1]![1] as string;
+      expect(secondWorkspaceId).not.toBe(firstWorkspaceId);
+      expect(host.stopConsumerEnvironment).toHaveBeenCalledWith(`environment-${firstWorkspaceId}`);
+      expect(pm.getProcessWorkspaceDir('proc-1')).toBe('/tmp/ws2');
+    });
+
+    it('preserves the prior Workspace binding when a same-host rebind fails', async () => {
+      const { pm } = makePm();
+      await pm.start('proc-1', { workspaceDir: '/tmp/ws' });
+      const host = hoisted.agentProcessInstances[0]!;
+      const firstWorkspaceId = host.configureConsumer.mock.calls[0]![1] as string;
+      host.getStatus.mockReturnValue({
+        type: 'running',
+        data: { wsUrl: 'ws://localhost:9000/ws', uiUrl: 'http://localhost:9000' },
+        timestamp: Date.now(),
+      } satisfies WithTimestamp<AgentProcessStatus>);
+      hoisted.configureConsumerFailure = 'new workspace failed';
+
+      await expect(pm.start('proc-1', { workspaceDir: '/tmp/ws2' })).rejects.toThrow('new workspace failed');
+
+      expect(pm.getStatus('proc-1')).toMatchObject({
+        type: 'running',
+        data: { workspaceId: firstWorkspaceId, environmentId: `environment-${firstWorkspaceId}` },
+      });
+      expect(pm.getProcessWorkspaceDir('proc-1')).toBe('/tmp/ws');
+      expect(host.stopConsumerEnvironment).not.toHaveBeenCalled();
+      expect(host.stop).not.toHaveBeenCalled();
     });
 
     it('compatible tabs attach to one running agent host', async () => {
@@ -711,6 +739,10 @@ describe('ProcessManager', () => {
       await pm.start('proc-1', { workspaceDir: '/tmp/ws', sessionId: 's2' });
 
       expect(proc.start).toHaveBeenCalledTimes(1);
+      expect(proc.configureConsumer.mock.calls[1]![1]).not.toBe(proc.configureConsumer.mock.calls[0]![1]);
+      expect(proc.stopConsumerEnvironment).toHaveBeenCalledWith(
+        `environment-${String(proc.configureConsumer.mock.calls[0]![1])}`
+      );
     });
 
     it('stop removes process from map', async () => {
