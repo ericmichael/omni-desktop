@@ -470,7 +470,7 @@ export class AgentProcess {
 
   /** Register and bind one launcher consumer inside this long-lived AgentHost. */
   configureConsumer = async (
-    threadId: string,
+    consumerId: string,
     workspaceId: string,
     arg: AgentProcessStartArg
   ): Promise<AgentHostConsumerRuntime> => {
@@ -515,22 +515,39 @@ export class AgentProcess {
             ...(arg.projectId ? { project_id: arg.projectId } : {}),
           };
     const profileId = `profile_${createHash('sha256').update(JSON.stringify(definition)).digest('hex').slice(0, 24)}`;
-    await control.call('agent_host_register_workspace', {
-      workspace_id: workspaceId,
-      materialization_path: serveWorkspaceDirectory(arg),
-      snapshot_ref: snapshotRef,
-      sources: arg.sources.map(sourceDescriptor),
-      owner_user_id: 'token_user',
-    });
-    await control.call('agent_host_register_profile', {
-      profile_id: profileId,
-      definition,
-      owner_user_id: 'token_user',
-    });
-    const materialized = (await control.call('agent_host_materialize_environment', {
-      workspace_id: workspaceId,
-      profile_id: profileId,
-    })) as Record<string, unknown>;
+    // AgentHost's Thread identity is the conversation Session identity. The
+    // launcher consumer is a UI/process attachment and may outlive or switch
+    // conversations, so it must never become the RPC resource identifier.
+    const threadId = arg.sessionId ?? consumerId;
+    const controlContext = { consumerId, profileName: arg.profileName };
+    await control.call(
+      'agent_host_register_workspace',
+      {
+        workspace_id: workspaceId,
+        materialization_path: serveWorkspaceDirectory(arg),
+        snapshot_ref: snapshotRef,
+        sources: arg.sources.map(sourceDescriptor),
+        owner_user_id: 'token_user',
+      },
+      controlContext
+    );
+    await control.call(
+      'agent_host_register_profile',
+      {
+        profile_id: profileId,
+        definition,
+        owner_user_id: 'token_user',
+      },
+      controlContext
+    );
+    const materialized = (await control.call(
+      'agent_host_materialize_environment',
+      {
+        workspace_id: workspaceId,
+        profile_id: profileId,
+      },
+      controlContext
+    )) as Record<string, unknown>;
     const environmentId = String(materialized['environment_id'] ?? '').trim();
     if (!environmentId) {
       throw new Error('AgentHost materialization returned no environment_id');
@@ -549,16 +566,20 @@ export class AgentProcess {
     };
 
     try {
-      await control.call('agent_host_bind_thread', {
-        thread_id: threadId,
-        binding: {
-          workspace_id: runtime.workspaceId,
-          environment_selection: {
-            mode: 'existing',
-            environment_id: runtime.environmentId,
+      await control.call(
+        'agent_host_bind_thread',
+        {
+          thread_id: threadId,
+          binding: {
+            workspace_id: runtime.workspaceId,
+            environment_selection: {
+              mode: 'existing',
+              environment_id: runtime.environmentId,
+            },
           },
         },
-      });
+        controlContext
+      );
     } catch (error) {
       if (materializedEnvironmentId) {
         try {

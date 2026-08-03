@@ -12,6 +12,7 @@ const silentActors = {
   checkRuntime: fromCallback<AutoLaunchEvent>(() => () => {}),
   watchInstallStatus: fromCallback<AutoLaunchEvent>(() => () => {}),
   checkConfigAndStart: fromCallback<AutoLaunchEvent>(() => () => {}),
+  startProcess: fromCallback<AutoLaunchEvent>(() => () => {}),
   watchProcessStatus: fromCallback<AutoLaunchEvent>(() => () => {}),
 };
 

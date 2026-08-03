@@ -315,6 +315,28 @@ describe('AgentProcess (serve mode)', () => {
     });
   });
 
+  it('binds the conversation session rather than the launcher consumer', async () => {
+    const h = makeHarness();
+    const arg: AgentProcessStartArg = {
+      profileName: 'host',
+      sources: [localSource('/repos/second', 'second')],
+      sessionId: 'conversation-session',
+    };
+    await h.proc.start(arg);
+    const mutable = h.proc as unknown as { status: WithTimestamp<AgentProcessStatus> };
+    mutable.status = {
+      type: 'running',
+      timestamp: Date.now(),
+      data: { uiUrl: 'http://127.0.0.1:9000', wsUrl: 'ws://127.0.0.1:9000/ws' },
+    };
+
+    await h.proc.configureConsumer('ui-tab-consumer', 'workspace-2', arg);
+
+    expect(hoisted.controlCalls.find((call) => call.method === 'agent_host_bind_thread')?.params).toMatchObject({
+      thread_id: 'conversation-session',
+    });
+  });
+
   it('restores and persists snapshots for each consumer Workspace', async () => {
     const h = makeHarness();
     await h.proc.start({ profileName: 'host', sources: [localSource('/ws')] });

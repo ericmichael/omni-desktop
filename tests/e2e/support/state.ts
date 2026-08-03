@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -20,6 +20,8 @@ export type SeedState =
   | 'pooled-workspaces'
   | 'pooled-devboxes'
   | 'lazy-ready'
+  | 'lazy-host-first-message'
+  | 'lazy-devbox-first-message'
   | 'lazy-error-pending'
   | 'lazy-error-empty';
 
@@ -36,6 +38,14 @@ const modelsConfig = {
     },
   },
 };
+
+function e2eModelsConfig() {
+  const externalPath = process.env.E2E_REAL_MODELS_FILE;
+  if (!externalPath) {
+    return modelsConfig;
+  }
+  return JSON.parse(readFileSync(externalPath, 'utf-8')) as typeof modelsConfig;
+}
 
 const seededAt = 1_700_000_000_000;
 
@@ -263,30 +273,51 @@ const planningSeed = {
 
 function launcherConfig(seedState: SeedState, workspaceDir: string) {
   const errorProfile = 'missing-e2e-profile';
-  const lazyState = ['no-workspace', 'lazy-ready', 'lazy-error-pending', 'lazy-error-empty'].includes(seedState);
+  const lazyState = [
+    'no-workspace',
+    'lazy-ready',
+    'lazy-host-first-message',
+    'lazy-devbox-first-message',
+    'lazy-error-pending',
+    'lazy-error-empty',
+  ].includes(seedState);
   const errorWithoutPending = seedState === 'lazy-error-empty';
+  const hostFirstMessage = seedState === 'lazy-host-first-message';
+  const devboxFirstMessage = seedState === 'lazy-devbox-first-message';
+  const firstMessage = hostFirstMessage || devboxFirstMessage;
+  const firstMessageTabId = hostFirstMessage ? 'chat-e2e-host-first-message' : 'chat-e2e-devbox-first-message';
+  const isolatedRunId = path.basename(path.dirname(workspaceDir));
   return {
     schemaVersion: 28,
     onboardingComplete: true,
-    defaultProfileName: seedState.startsWith('lazy-error') ? errorProfile : 'host',
-    modelsConfig,
+    defaultProfileName: seedState.startsWith('lazy-error') ? errorProfile : firstMessage ? 'devbox' : 'host',
+    modelsConfig: e2eModelsConfig(),
     envVars: '',
     ...(seedState !== 'no-workspace'
-      ? { workspaceDir: seedState === 'workspace-files' || seedState === 'workspace-git' ? workspaceDir : '/tmp' }
+      ? {
+          workspaceDir:
+            seedState === 'workspace-files' || seedState === 'workspace-git' || firstMessage ? workspaceDir : '/tmp',
+        }
       : {}),
     ...(lazyState
       ? {
           codeTabs: [
             {
-              id: 'chat-e2e-lazy',
+              id: firstMessage ? firstMessageTabId : 'chat-e2e-lazy',
               projectId: null,
-              profileName: seedState.startsWith('lazy-error') ? errorProfile : 'host',
-              profileNameExplicit: seedState.startsWith('lazy-error'),
+              profileName: seedState.startsWith('lazy-error') ? errorProfile : firstMessage ? 'devbox' : 'host',
+              profileNameExplicit: seedState.startsWith('lazy-error') || devboxFirstMessage,
               createdAt: seededAt,
+              ...(firstMessage
+                ? {
+                    sessionId: `session-${isolatedRunId}`,
+                    snapshotRef: `snapshot-${isolatedRunId}`,
+                  }
+                : {}),
               ...(errorWithoutPending ? { sessionId: 'session-e2e-lazy-error', activatedAt: seededAt } : {}),
             },
           ],
-          activeCodeTabId: 'chat-e2e-lazy',
+          activeCodeTabId: firstMessage ? firstMessageTabId : 'chat-e2e-lazy',
         }
       : {}),
     ...(seedState === 'planning' ? planningSeed : {}),
@@ -351,4 +382,12 @@ export function seedElectronState(state: E2eState, seedState: SeedState): void {
     `${JSON.stringify(launcherConfig(seedState, state.workspaceDir), null, 2)}\n`,
     'utf-8'
   );
+  const codexPath = process.env.E2E_REAL_CODEX_FILE;
+  if (codexPath) {
+    const productConfigDir = path.join(state.xdgConfigHome, 'omni_code');
+    mkdirSync(productConfigDir, { recursive: true });
+    const destination = path.join(productConfigDir, 'codex.json');
+    copyFileSync(codexPath, destination);
+    chmodSync(destination, 0o600);
+  }
 }

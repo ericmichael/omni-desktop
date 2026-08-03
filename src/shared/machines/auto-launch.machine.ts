@@ -63,10 +63,12 @@ export const autoLaunchMachine = setup({
     }),
     /** Watch external install status until completed/failed/cancelled. */
     watchInstallStatus: fromCallback<AutoLaunchEvent>(() => () => {}),
-    /** Check config (models.json) and start the sandbox/process. */
+    /** Check whether the launcher has enough configuration to start. */
     checkConfigAndStart: fromCallback<AutoLaunchEvent>(({ sendBack }) => {
       sendBack({ type: 'CONFIG_MISSING' });
     }),
+    /** Start the sandbox/process while the machine is in `starting`. */
+    startProcess: fromCallback<AutoLaunchEvent>(() => () => {}),
     /** Watch external process status for state changes. */
     watchProcessStatus: fromCallback<AutoLaunchEvent>(() => () => {}),
   },
@@ -156,7 +158,7 @@ export const autoLaunchMachine = setup({
     },
 
     starting: {
-      invoke: { src: 'watchProcessStatus' },
+      invoke: [{ src: 'watchProcessStatus' }, { src: 'startProcess' }],
       on: {
         SANDBOX_RUNNING: 'running',
         SANDBOX_ERROR: {

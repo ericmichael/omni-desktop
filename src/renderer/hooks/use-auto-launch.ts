@@ -155,15 +155,36 @@ export const useAutoLaunch = (opts: UseAutoLaunchOptions) => {
           // current value, so a leftover `exited` would bounce the machine
           // straight back to idle the moment `starting` is entered.
           clearStatus(processIdRef.current);
-          agentProcessApi.start(processIdRef.current, {
+          sendBack({ type: 'CONFIG_OK' });
+        })();
+        return () => {
+          cancelled = true;
+        };
+      }),
+
+      startProcess: fromCallback<AutoLaunchEvent>(({ sendBack }) => {
+        const wd = workspaceDirRef.current;
+        if (!wd) {
+          sendBack({ type: 'SANDBOX_ERROR', error: 'Workspace is unavailable' });
+          return;
+        }
+        let cancelled = false;
+        void agentProcessApi
+          .start(processIdRef.current, {
             workspaceDir: wd,
             ...(projectIdRef.current ? { projectId: projectIdRef.current } : {}),
             ...(profileNameOverrideRef.current ? { profileNameOverride: profileNameOverrideRef.current } : {}),
             ...(sessionIdRef.current ? { sessionId: sessionIdRef.current } : {}),
             ...(snapshotRefRef.current ? { snapshotRef: snapshotRefRef.current } : {}),
+          })
+          .catch((error: unknown) => {
+            if (!cancelled) {
+              sendBack({
+                type: 'SANDBOX_ERROR',
+                error: error instanceof Error ? error.message : String(error),
+              });
+            }
           });
-          sendBack({ type: 'CONFIG_OK' });
-        })();
         return () => {
           cancelled = true;
         };
@@ -213,9 +234,12 @@ export const useAutoLaunch = (opts: UseAutoLaunchOptions) => {
   const inspect = useMemo(
     () =>
       createMachineLogger(logLabel ?? `autoLaunch:${processId}`, {
-        tags: { sandbox: store.defaultProfileName ?? 'none' },
+        tags: {
+          tab: processId,
+          sandbox: opts.profileNameOverride ?? store.defaultProfileName ?? 'none',
+        },
       }),
-    [processId, logLabel, store.defaultProfileName]
+    [processId, logLabel, opts.profileNameOverride, store.defaultProfileName]
   );
 
   const machine = useMemo(() => autoLaunchMachine.provide({ actors }), [actors]);

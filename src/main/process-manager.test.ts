@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const hoisted = vi.hoisted(() => ({
   configureConsumerFailure: null as string | null,
+  configureConsumerGate: null as Promise<void> | null,
   agentProcessInstances: [] as Array<{
     mode: string;
     start: ReturnType<typeof vi.fn>;
@@ -40,6 +41,7 @@ vi.mock('@/main/agent-process', () => ({
     getStatus = vi.fn(() => ({ type: 'uninitialized', timestamp: Date.now() }));
     resizePty = vi.fn();
     configureConsumer = vi.fn(async (_threadId: string, workspaceId: string, _arg: unknown) => {
+      await hoisted.configureConsumerGate;
       if (hoisted.configureConsumerFailure) {
         throw new Error(hoisted.configureConsumerFailure);
       }
@@ -143,6 +145,7 @@ describe('ProcessManager', () => {
   beforeEach(() => {
     hoisted.agentProcessInstances = [];
     hoisted.configureConsumerFailure = null;
+    hoisted.configureConsumerGate = null;
   });
 
   afterEach(() => {
@@ -354,6 +357,33 @@ describe('ProcessManager', () => {
   });
 
   describe('lifecycle', () => {
+    it('shares one in-flight start transaction for duplicate first intent', async () => {
+      const { pm } = makePm({ storeData: { defaultProfileName: 'devbox' } });
+      let release!: () => void;
+      hoisted.configureConsumerGate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const opts = {
+        workspaceDir: '/tmp/ws',
+        profileNameOverride: 'host',
+        sessionId: 'session-1',
+        snapshotRef: 'snapshot-1',
+      };
+
+      const first = pm.start('proc-1', opts);
+      const duplicate = pm.start('proc-1', { ...opts });
+
+      expect(duplicate).toBe(first);
+      await vi.waitFor(() => expect(hoisted.agentProcessInstances).toHaveLength(1));
+      const host = hoisted.agentProcessInstances[0]!;
+      await vi.waitFor(() => expect(host.configureConsumer).toHaveBeenCalledTimes(1));
+      expect(host.start).toHaveBeenCalledTimes(1);
+
+      release();
+      await Promise.all([first, duplicate]);
+      expect(host.configureConsumer).toHaveBeenCalledTimes(1);
+    });
+
     it('start creates an AgentProcess and calls start', async () => {
       const { pm } = makePm();
       await pm.start('proc-1', { workspaceDir: '/tmp/ws' });

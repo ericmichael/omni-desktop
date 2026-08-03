@@ -12,12 +12,14 @@ import { useAutoLaunch } from './use-auto-launch';
 
 const invoke = vi.hoisted(() => vi.fn());
 const setKey = vi.hoisted(() => vi.fn());
+const clearStatus = vi.hoisted(() => vi.fn());
 const start = vi.hoisted(() => vi.fn());
 const stop = vi.hoisted(() => vi.fn());
 const switchSandbox = vi.hoisted(() => vi.fn());
 const successToast = vi.hoisted(() => vi.fn());
 const errorToast = vi.hoisted(() => vi.fn());
 const warningToast = vi.hoisted(() => vi.fn());
+const createMachineLogger = vi.hoisted(() => vi.fn(() => () => {}));
 
 vi.mock('@/renderer/services/ipc', () => ({
   emitter: { invoke },
@@ -53,6 +55,7 @@ vi.mock('@/renderer/services/agent-process', async () => {
       stop,
       switchSandbox,
     },
+    clearStatus,
   };
 });
 
@@ -69,7 +72,7 @@ vi.mock('@/renderer/features/Toast/state', () => ({
 }));
 
 vi.mock('@/shared/machines/machine-logger', () => ({
-  createMachineLogger: () => () => {},
+  createMachineLogger,
 }));
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -125,6 +128,7 @@ beforeEach(() => {
   });
   switchSandbox.mockResolvedValue({ ok: true });
   stop.mockResolvedValue(undefined);
+  start.mockResolvedValue(undefined);
 });
 
 afterEach(() => {
@@ -136,6 +140,42 @@ afterEach(() => {
 });
 
 describe('useAutoLaunch sandbox profile override switching', () => {
+  it('labels lifecycle logs with the tab-selected profile instead of the global default', async () => {
+    (persistedStoreApi.$atom as unknown as { set: (value: Partial<StoreData>) => void }).set({
+      defaultProfileName: 'devbox',
+    });
+
+    await renderHook({
+      processId: 'code-tab-1',
+      workspaceDir: null,
+      profileNameOverride: 'host',
+    });
+
+    expect(createMachineLogger).toHaveBeenCalledWith('autoLaunch:code-tab-1', {
+      tags: { tab: 'code-tab-1', sandbox: 'host' },
+    });
+  });
+
+  it('surfaces a rejected process start through the launch state machine', async () => {
+    start.mockRejectedValueOnce(new Error('provisioning failed'));
+
+    function ErrorHarness(props: HookProps) {
+      const result = useAutoLaunch(props);
+      return <output data-phase={result.phase}>{result.error}</output>;
+    }
+
+    await act(async () => {
+      root.render(<ErrorHarness processId="code-tab-1" workspaceDir="/workspace/project" />);
+      await flushEffects();
+      await flushEffects();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    const output = container.querySelector('output');
+    expect(output?.dataset['phase']).toBe('error');
+    expect(output?.textContent).toBe('provisioning failed');
+  });
+
   it('does not switch sandboxes when the profile override changes before launch', async () => {
     await renderHook({
       processId: 'code-tab-1',

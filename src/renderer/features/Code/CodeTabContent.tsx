@@ -159,6 +159,7 @@ const CodeRunningView = memo(
     greeting,
     suggestions,
     pendingMessages,
+    onPendingMessagesFlushed,
   }: {
     sandboxUrls: { uiUrl: string; authToken?: string; services?: Record<string, string> };
     environmentId?: string;
@@ -195,6 +196,7 @@ const CodeRunningView = memo(
     suggestions?: ReadonlyArray<{ label: string; prompt: string }>;
     /** Messages queued pre-launch; flushed by the app once its RPC connects. */
     pendingMessages?: PendingMessage[];
+    onPendingMessagesFlushed?: () => void;
   }) => {
     const styles = useStyles();
     const store = useStore(persistedStoreApi.$atom);
@@ -255,6 +257,7 @@ const CodeRunningView = memo(
             greeting={greeting}
             suggestions={suggestions}
             pendingMessages={pendingMessages}
+            onPendingMessagesFlushed={onPendingMessagesFlushed}
           />
         </div>
         {switching && (
@@ -427,6 +430,7 @@ export const CodeTabContent = memo(
     // column (which triggers the launch); OmniAgentsApp flushes the queue the
     // moment its RPC connects, so nothing typed during boot is lost.
     const [pendingMessages, setPendingMessages] = useState<PendingMessage[]>([]);
+    const handlePendingMessagesFlushed = useCallback(() => setPendingMessages([]), []);
     // A conversation switch (new chat / resume) must not leak the previous
     // conversation's queued messages into the new session.
     useEffect(() => {
@@ -473,6 +477,13 @@ export const CodeTabContent = memo(
       }
       return sandboxStatus.data;
     }, [sandboxStatus]);
+    useEffect(() => {
+      if (pendingMessages.length > 0) {
+        console.info(
+          `[pending-intent] owner tab=${tab.id} session=${tab.sessionId ?? 'none'} count=${pendingMessages.length} runtime=${sandboxUrls ? 'running' : 'waiting'}`
+        );
+      }
+    }, [pendingMessages, sandboxUrls, tab.id, tab.sessionId]);
     const environmentId = sandboxUrls?.environmentId;
 
     const handleSessionChange = useCallback(
@@ -601,6 +612,7 @@ export const CodeTabContent = memo(
               greeting={chatMode ? greeting : undefined}
               suggestions={chatMode ? CHAT_SUGGESTIONS : COLUMN_SUGGESTIONS}
               pendingMessages={chatMode ? pendingMessages : undefined}
+              onPendingMessagesFlushed={chatMode ? handlePendingMessagesFlushed : undefined}
             />
           </VoiceScopeContext.Provider>
         ) : chatMode ? (

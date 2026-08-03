@@ -69,9 +69,9 @@ export const teardownTerminal = (processId: string): void => {
 };
 
 export const agentProcessApi = {
-  start: (processId: string, arg: AgentProcessStartOptions) => {
+  start: (processId: string, arg: AgentProcessStartOptions): Promise<void> => {
     initializeTerminal(processId);
-    emitter.invoke('agent-process:start', processId, arg);
+    return emitter.invoke('agent-process:start', processId, arg);
   },
 
   stop: async (processId: string, opts?: AgentProcessStopOptions) => {

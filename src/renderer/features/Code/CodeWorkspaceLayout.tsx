@@ -58,6 +58,8 @@ type CodeWorkspaceLayoutProps = {
   suggestions?: ReadonlyArray<{ label: string; prompt: string }>;
   /** Messages queued pre-launch; the app flushes them once its RPC connects. */
   pendingMessages?: PendingMessage[];
+  /** Releases the launch-owned preview once the embedded chat claims it. */
+  onPendingMessagesFlushed?: () => void;
   isGlass?: boolean;
   /**
    * When provided, this layout hosts a column-scoped workspace and all its
@@ -527,6 +529,7 @@ export const CodeWorkspaceLayout = memo(
     greeting,
     suggestions,
     pendingMessages,
+    onPendingMessagesFlushed,
     isGlass,
     tabId,
     agentWorkspaceDir,
@@ -662,6 +665,7 @@ export const CodeWorkspaceLayout = memo(
               greeting={greeting}
               suggestions={suggestions}
               pendingMessages={pendingMessages}
+              onPendingMessagesFlushed={onPendingMessagesFlushed}
               sessionId={sessionId}
               onSessionChange={onSessionChange}
               variables={variables}

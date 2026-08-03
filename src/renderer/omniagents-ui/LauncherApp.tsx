@@ -28,6 +28,7 @@ type OmniAgentsAppProps = {
   headerActionsTargetId?: string;
   headerActionsCompact?: boolean;
   pendingMessages?: PendingMessage[];
+  onPendingMessagesFlushed?: () => void;
   sandboxLabel?: string;
   /** Options shown in the in-composer sandbox picker. Omit to render a read-only chip. */
   sandboxOptions?: { value: string; label: string }[];
@@ -83,6 +84,7 @@ export const OmniAgentsApp = ({
   headerActionsTargetId,
   headerActionsCompact,
   pendingMessages,
+  onPendingMessagesFlushed,
   sandboxLabel,
   sandboxOptions,
   currentSandboxProfile,
@@ -122,6 +124,7 @@ export const OmniAgentsApp = ({
             headerActionsTargetId={headerActionsTargetId}
             headerActionsCompact={headerActionsCompact}
             pendingMessages={pendingMessages}
+            onPendingMessagesFlushed={onPendingMessagesFlushed}
             sandboxLabel={sandboxLabel}
             sandboxOptions={sandboxOptions}
             currentSandboxProfile={currentSandboxProfile}

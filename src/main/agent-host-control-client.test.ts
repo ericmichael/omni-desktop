@@ -4,7 +4,7 @@ import type { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
 import { WebSocketServer } from 'ws';
 
-import { AgentHostControlClient } from '@/main/agent-host-control-client';
+import { AgentHostControlClient, agentHostControlTimeoutMs } from '@/main/agent-host-control-client';
 import type { OmniagentsRpcError } from '@/shared/omniagents-rpc';
 
 describe('AgentHostControlClient', () => {
@@ -19,6 +19,13 @@ describe('AgentHostControlClient', () => {
     }
     await new Promise<void>((resolve) => server!.close(() => resolve()));
     server = undefined;
+  });
+
+  it('uses lifecycle-specific deadlines for provisioning calls', () => {
+    expect(agentHostControlTimeoutMs('agent_host_register_workspace')).toBe(30_000);
+    expect(agentHostControlTimeoutMs('agent_host_materialize_environment')).toBe(15 * 60_000);
+    expect(agentHostControlTimeoutMs('agent_host_stop_environment')).toBe(2 * 60_000);
+    expect(agentHostControlTimeoutMs('agent_host_materialize_environment', 25)).toBe(25);
   });
 
   it('uses the private bearer credential and multiplexes typed calls', async () => {

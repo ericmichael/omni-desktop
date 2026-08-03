@@ -119,6 +119,7 @@ export class ProcessManager {
   private consumerRuntimes = new Map<string, AgentHostConsumerRuntime>();
   private consumerWorkspaceIds = new Map<string, string>();
   private consumerWorkspaceIdentities = new Map<string, string>();
+  private pendingStarts = new Map<string, { identity: string; promise: Promise<void> }>();
   private pendingStops = new Map<string, Promise<void>>();
   private sendToWindow: <T extends keyof IpcRendererEvents>(channel: T, ...args: IpcRendererEvents[T]) => void;
   private fetchFn: FetchFn;
@@ -734,7 +735,32 @@ export class ProcessManager {
     });
   }
 
-  start = async (processId: string, opts: AgentProcessStartOptions): Promise<void> => {
+  start = (processId: string, opts: AgentProcessStartOptions): Promise<void> => {
+    const identity = ProcessManager.launchIdentity(opts);
+    const pending = this.pendingStarts.get(processId);
+    if (pending) {
+      if (pending.identity === identity) {
+        return pending.promise;
+      }
+      // A tab can change its desired binding while its first launch is still
+      // provisioning (picker changes, HMR, renderer reconnection). Preserve a
+      // single mutator for that consumer and apply the newer intent only after
+      // the current transaction settles.
+      return pending.promise.catch(() => undefined).then(() => this.start(processId, opts));
+    }
+
+    const operation = this.startConsumer(processId, opts);
+    this.pendingStarts.set(processId, { identity, promise: operation });
+    const clear = (): void => {
+      if (this.pendingStarts.get(processId)?.promise === operation) {
+        this.pendingStarts.delete(processId);
+      }
+    };
+    void operation.then(clear, clear);
+    return operation;
+  };
+
+  private startConsumer = async (processId: string, opts: AgentProcessStartOptions): Promise<void> => {
     // Adopt an already-live process rather than restarting it. A renderer that
     // just (re)connected has an empty status map — its auto-launch guard reads
     // that map *before* `watchProcessStatus` seeds it — so a browser reload or
@@ -1284,6 +1310,7 @@ export class ProcessManager {
     this.consumerRuntimes.clear();
     this.consumerWorkspaceIds.clear();
     this.consumerWorkspaceIdentities.clear();
+    this.pendingStarts.clear();
     this.pendingStops.clear();
   };
 }

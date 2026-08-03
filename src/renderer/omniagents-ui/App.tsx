@@ -62,6 +62,7 @@ export function App({
   headerActionsTargetId,
   headerActionsCompact,
   pendingMessages,
+  onPendingMessagesFlushed,
   sandboxLabel: sandboxLabelProp,
   sandboxOptions,
   currentSandboxProfile,
@@ -89,6 +90,8 @@ export function App({
   headerActionsTargetId?: string;
   headerActionsCompact?: boolean;
   pendingMessages?: PendingMessage[];
+  /** Called once this chat claims the pre-launch intent queue. */
+  onPendingMessagesFlushed?: () => void;
   sandboxLabel?: string;
   sandboxOptions?: { value: string; label: string }[];
   currentSandboxProfile?: string;
@@ -1544,6 +1547,11 @@ export function App({
   // Flush messages queued from ChatShell before the backend was ready
   const pendingFlushedRef = useRef(false);
   useEffect(() => {
+    if (pendingMessages && pendingMessages.length > 0) {
+      console.info(
+        `[pending-intent] receiver session=${sessionIdProp ?? 'none'} count=${pendingMessages.length} connected=${connected} ui=${ui}`
+      );
+    }
     if (pendingFlushedRef.current) {
       return;
     }
@@ -1554,10 +1562,17 @@ export function App({
       return;
     }
     pendingFlushedRef.current = true;
-    for (const msg of pendingMessages) {
-      handleSubmit(msg.text, msg.files);
-    }
-  }, [connected, ui, pendingMessages, handleSubmit]);
+    const claimedMessages = pendingMessages;
+    // Ownership moves from the launch shell to this mounted chat before any
+    // asynchronous submission begins. If the RPC provider remounts during a
+    // run, the old preview cannot be claimed and submitted a second time.
+    onPendingMessagesFlushed?.();
+    void (async () => {
+      for (const msg of claimedMessages) {
+        await handleSubmit(msg.text, msg.files);
+      }
+    })();
+  }, [connected, ui, pendingMessages, handleSubmit, onPendingMessagesFlushed]);
 
   const handleApprovalDecision = useCallback(
     async (request_id: string, value: 'yes' | 'always' | 'no', kind: 'function' | 'mcp' = 'function') => {

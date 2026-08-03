@@ -9,7 +9,9 @@ import {
   type TestInfo,
 } from '@playwright/test';
 import electronExecutablePath from 'electron';
+import path from 'node:path';
 import type { ManagedProcess } from 'tests/e2e/support/process';
+import { startDeterministicModelServer } from 'tests/e2e/support/model-server';
 import { killTcpPort, startProcess, waitForHttpOk } from 'tests/e2e/support/process';
 import { attachProofVideo, visualProofEnabled } from 'tests/e2e/support/proof';
 import {
@@ -120,12 +122,27 @@ async function launchServerLocal(
   };
 }
 
-async function launchElectronLocal(state: E2eState, testInfo: TestInfo, launchIndex: number): Promise<LaunchedApp> {
+async function launchElectronLocal(
+  state: E2eState,
+  testInfo: TestInfo,
+  launchIndex: number,
+  seedState: SeedState
+): Promise<LaunchedApp> {
   // When the suite is launched from another Electron host (for example Codex
   // Desktop), do not inherit that host's renderer URL. electron-vite uses this
   // variable to select a dev renderer, which would make the child Electron
   // window display the host application instead of this built test app.
   const { ELECTRON_RENDERER_URL: _hostRendererUrl, ...electronEnv } = process.env;
+  const firstMessageResponse =
+    seedState === 'lazy-host-first-message'
+      ? 'HOST_FIRST_MESSAGE_READY'
+      : seedState === 'lazy-devbox-first-message'
+        ? 'DEVBOX_FIRST_MESSAGE_READY'
+        : null;
+  const modelServer =
+    firstMessageResponse && !process.env.E2E_REAL_MODELS_FILE
+      ? await startDeterministicModelServer(firstMessageResponse)
+      : null;
   const electronApp: ElectronApplication = await electron.launch({
     executablePath: electronExecutablePath,
     args: ['.'],
@@ -133,7 +150,12 @@ async function launchElectronLocal(state: E2eState, testInfo: TestInfo, launchIn
     env: {
       ...electronEnv,
       XDG_CONFIG_HOME: state.xdgConfigHome,
-      OPENAI_BASE_URL: process.env.OPENAI_BASE_URL ?? process.env.SANDBOX_OPENAI_BASE_URL ?? 'http://127.0.0.1:9/v1',
+      OMNIAGENTS_HOME: path.join(state.rootDir, 'omniagents'),
+      OPENAI_BASE_URL:
+        modelServer?.baseUrl ??
+        process.env.OPENAI_BASE_URL ??
+        process.env.SANDBOX_OPENAI_BASE_URL ??
+        'http://127.0.0.1:9/v1',
       OPENAI_API_KEY: process.env.OPENAI_API_KEY ?? process.env.SANDBOX_OPENAI_API_KEY ?? 'test-key',
       OMNI_SKIP_DOCKER_PRUNE: '1',
       DISPLAY: process.env.DISPLAY ?? ':0',
@@ -163,6 +185,7 @@ async function launchElectronLocal(state: E2eState, testInfo: TestInfo, launchIn
     close: async () => {
       await electronApp.close().catch(() => undefined);
       await attachPageVideo(page, testInfo, `electron-local video ${launchIndex}`);
+      await modelServer?.close().catch(() => undefined);
     },
   };
 }
@@ -188,7 +211,7 @@ export const test = base.extend<E2eFixtures>({
       const currentLaunch = launchIndex;
       return launchMode === 'server-local'
         ? launchServerLocal(browser, state, testInfo, currentLaunch)
-        : launchElectronLocal(state, testInfo, currentLaunch);
+        : launchElectronLocal(state, testInfo, currentLaunch, seedState);
     };
 
     let launched = await launch();
