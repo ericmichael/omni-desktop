@@ -111,10 +111,17 @@ Completed through the framework/runtime vertical slice:
   the same pooled-host ownership, environment replacement, status isolation,
   and independent close behavior as Electron; visual proof is retained for the
   server surface as well.
+- The final process-global sandbox lifecycle slot has been removed. Product
+  startup constructs environment-owned lifecycle state and registers it only
+  behind that environment's controller; shutdown retains the same explicit
+  state reference. `omni-code` context and worker consumers now derive source
+  mounts exclusively from the routed Workspace and EnvironmentLease. The
+  obsolete `serve_state` module and product-side singleton tests are deleted.
 
-Next: remove the remaining legacy per-process `SwitchContext`
-startup/shutdown path and obsolete ticket/session process assumptions before
-the final routing audit.
+Next: make AgentHost shutdown stop every managed environment through the
+environment manager, then remove the now-unused in-place `sandbox.switch`
+orchestration and remaining per-session serve composition before the final
+routing audit.
 
 ## Executive decision
 
