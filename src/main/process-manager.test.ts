@@ -19,6 +19,8 @@ const hoisted = vi.hoisted(() => ({
     rebuild: ReturnType<typeof vi.fn>;
     getStatus: ReturnType<typeof vi.fn>;
     resizePty: ReturnType<typeof vi.fn>;
+    switchSandbox: ReturnType<typeof vi.fn>;
+    emitStatus: (status: WithTimestamp<AgentProcessStatus>) => void;
   }>,
 }));
 
@@ -31,9 +33,12 @@ vi.mock('@/main/agent-process', () => ({
     rebuild = vi.fn(async () => {});
     getStatus = vi.fn(() => ({ type: 'uninitialized', timestamp: Date.now() }));
     resizePty = vi.fn();
+    switchSandbox = vi.fn(async () => ({ ok: true }));
+    emitStatus: (status: WithTimestamp<AgentProcessStatus>) => void;
 
-    constructor(opts: { mode: string }) {
+    constructor(opts: { mode: string; onStatusChange: (status: WithTimestamp<AgentProcessStatus>) => void }) {
       this.mode = opts.mode;
+      this.emitStatus = opts.onStatusChange;
       hoisted.agentProcessInstances.push(this);
     }
   },
@@ -330,13 +335,98 @@ describe('ProcessManager', () => {
       );
     });
 
-    it('start reuses existing process on same mode', async () => {
+    it('start moves a consumer to a new host when its workspace changes', async () => {
       const { pm } = makePm();
       await pm.start('proc-1', { workspaceDir: '/tmp/ws' });
       await pm.start('proc-1', { workspaceDir: '/tmp/ws2' });
 
+      expect(hoisted.agentProcessInstances).toHaveLength(2);
+      expect(hoisted.agentProcessInstances[0]!.exit).toHaveBeenCalled();
+      expect(hoisted.agentProcessInstances[1]!.start).toHaveBeenCalledTimes(1);
+    });
+
+    it('compatible tabs attach to one running agent host', async () => {
+      const { pm, sendCalls } = makePm();
+      await pm.start('tab-a', { workspaceDir: '/tmp/ws', projectId: 'project-1', sessionId: 'thread-a' });
+      const host = hoisted.agentProcessInstances[0]!;
+      host.getStatus.mockReturnValue({
+        type: 'running',
+        data: { wsUrl: 'ws://localhost:9000/ws', uiUrl: 'http://localhost:9000' },
+        timestamp: Date.now(),
+      } satisfies WithTimestamp<AgentProcessStatus>);
+
+      await pm.start('tab-b', { workspaceDir: '/tmp/ws', projectId: 'project-1', sessionId: 'thread-b' });
+
       expect(hoisted.agentProcessInstances).toHaveLength(1);
-      expect(hoisted.agentProcessInstances[0]!.start).toHaveBeenCalledTimes(2);
+      expect(host.start).toHaveBeenCalledTimes(1);
+      expect(pm.getStatus('tab-b')).toMatchObject({ type: 'running' });
+
+      const updated = {
+        ...host.getStatus(),
+        timestamp: Date.now() + 1,
+      } as WithTimestamp<AgentProcessStatus>;
+      host.emitStatus(updated);
+      const recipients = sendCalls
+        .filter((call) => call.channel === 'agent-process:status' && call.args[1] === updated)
+        .map((call) => call.args[0]);
+      expect(recipients).toEqual(['tab-a', 'tab-b']);
+    });
+
+    it('stopping one compatible tab leaves the shared host running', async () => {
+      const { pm } = makePm();
+      await pm.start('tab-a', { workspaceDir: '/tmp/ws', projectId: 'project-1' });
+      const host = hoisted.agentProcessInstances[0]!;
+      host.getStatus.mockReturnValue({
+        type: 'running',
+        data: { wsUrl: 'ws://localhost:9000/ws', uiUrl: 'http://localhost:9000' },
+        timestamp: Date.now(),
+      } satisfies WithTimestamp<AgentProcessStatus>);
+      await pm.start('tab-b', { workspaceDir: '/tmp/ws', projectId: 'project-1' });
+
+      await pm.stop('tab-a');
+      expect(host.stop).not.toHaveBeenCalled();
+      expect(pm.getStatus('tab-a').type).toBe('uninitialized');
+      expect(pm.getStatus('tab-b').type).toBe('running');
+
+      await pm.stop('tab-b');
+      expect(host.stop).toHaveBeenCalledTimes(1);
+    });
+
+    it('requests a relaunch instead of switching a host shared by two tabs', async () => {
+      const { pm } = makePm();
+      await pm.start('tab-a', { workspaceDir: '/tmp/ws', projectId: 'project-1' });
+      const host = hoisted.agentProcessInstances[0]!;
+      host.getStatus.mockReturnValue({
+        type: 'running',
+        data: { wsUrl: 'ws://localhost:9000/ws', uiUrl: 'http://localhost:9000' },
+        timestamp: Date.now(),
+      } satisfies WithTimestamp<AgentProcessStatus>);
+      await pm.start('tab-b', { workspaceDir: '/tmp/ws', projectId: 'project-1' });
+
+      await expect(pm.switchSandbox('tab-a', 'devbox')).resolves.toMatchObject({ ok: false, fallback: true });
+      expect(host.switchSandbox).not.toHaveBeenCalled();
+    });
+
+    it('rekeys an exclusively attached host after an in-place profile switch', async () => {
+      const { pm } = makePm();
+      await pm.start('tab-a', { workspaceDir: '/tmp/ws', projectId: 'project-1' });
+      const host = hoisted.agentProcessInstances[0]!;
+      host.getStatus.mockReturnValue({
+        type: 'running',
+        data: { wsUrl: 'ws://localhost:9000/ws', uiUrl: 'http://localhost:9000' },
+        timestamp: Date.now(),
+      } satisfies WithTimestamp<AgentProcessStatus>);
+
+      await expect(pm.switchSandbox('tab-a', 'devbox')).resolves.toMatchObject({ ok: true });
+      await pm.start('tab-b', {
+        workspaceDir: '/tmp/ws',
+        projectId: 'project-1',
+        profileNameOverride: 'devbox',
+      });
+
+      expect(hoisted.agentProcessInstances).toHaveLength(1);
+      expect(host.switchSandbox).toHaveBeenCalledWith('devbox');
+      expect(host.start).toHaveBeenCalledTimes(1);
     });
 
     it('start creates new process when mode changes', async () => {
@@ -381,7 +471,7 @@ describe('ProcessManager', () => {
       expect(sendCalls.filter((c) => c.channel === 'agent-process:status')).toHaveLength(1);
     });
 
-    it('start restarts a live process when the launch identity differs', async () => {
+    it('a different thread on the same workspace keeps the compatible live host', async () => {
       const { pm } = makePm();
       await pm.start('proc-1', { workspaceDir: '/tmp/ws', sessionId: 's1' });
 
@@ -394,7 +484,7 @@ describe('ProcessManager', () => {
 
       await pm.start('proc-1', { workspaceDir: '/tmp/ws', sessionId: 's2' });
 
-      expect(proc.start).toHaveBeenCalledTimes(2);
+      expect(proc.start).toHaveBeenCalledTimes(1);
     });
 
     it('stop removes process from map', async () => {

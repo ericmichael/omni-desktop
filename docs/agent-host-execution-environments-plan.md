@@ -29,11 +29,40 @@ Completed through the framework/runtime vertical slice:
   inherited workspace context and fail closed for workspace/process tools.
 - Launcher and standalone Web/Ink RPC clients migrated from session-scoped
   Files/Git requests to environment-scoped requests.
+- SDK sandbox sessions and `run_as` identity owned by immutable environment
+  leases. Agent construction now derives a Run-scoped adapter spec, including
+  concurrent Runs on different environments and generation-safe replacement;
+  product startup and profile switching no longer mutate the shared AgentSpec.
+- Terminal shell/cwd/user defaults owned by environment leases. The AgentHost
+  keeps one terminal registry for socket authorization and lifecycle, while
+  each terminal selects its backend and defaults from its captured environment
+  instead of a mutable process-wide profile manager.
+- Worker source isolation derives paths from the current Run's Workspace and
+  EnvironmentLease. Worker specifications inherit declarative project context,
+  never a sandbox session copied from an orchestrator AgentSpec.
+- Skill roots derive from the current Run, and environment-owned skill files
+  are read through the leased Workspace adapter. Devbox paths such as
+  `/workspace` are never probed on the AgentHost filesystem.
+- Agent-facing sandbox observation resolves the environment lifecycle
+  controller from the Run lease. Filesystem, source, project, AgentSpec,
+  sandbox-session, and discard-snapshot process globals have been deleted;
+  utility-agent helpers no longer fall back to serve-global placement.
+- Launcher main-process ownership now has a compatibility-keyed
+  `AgentHostManager`. Compatible local project tabs attach to one live host,
+  receive fan-out status/output events, and detach independently; the host is
+  stopped only after its final consumer leaves. Delegated compute and resident
+  principals remain deliberately isolated. Exclusive in-place profile switches
+  re-key the host, while a shared host forces the changing tab through its
+  detach/relaunch path instead of mutating other tabs' runtime.
 
-In progress: removing the remaining `omni serve` composition globals and
-shared AgentSpec sandbox-session mutation. Pending after that: the pooled
-launcher AgentHostManager cutover, deletion of per-tab AgentProcess ownership,
-and broad Electron/server visual proof.
+Next: add AgentHost-side Workspace/Environment provisioning and implement the
+currently rejected `AutomaticEnvironment` selection. Until that exists, the
+launcher pool can reuse compatible hosts but cannot materialize unrelated
+profiles/workspaces inside one process. A temporary
+`SwitchContext` reference remains only in the legacy per-process serve startup
+and shutdown path; lifecycle RPCs and tools cannot access it globally. It is
+deleted with per-tab AgentProcess ownership, followed by broad Electron/server
+visual proof.
 
 ## Executive decision
 

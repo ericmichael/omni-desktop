@@ -6,6 +6,7 @@ import { ipcMain } from 'electron';
 
 import { mirrorContainerChangesToHost } from '@/lib/container-sync';
 import { isResidentProcessId } from '@/lib/resident-agent';
+import { AgentHostManager } from '@/main/agent-host-manager';
 import {
   AgentProcess,
   type AgentProcessMode,
@@ -109,7 +110,9 @@ export type AgentAdoptResult =
  * ``omni serve --profile <resolved>``.
  */
 export class ProcessManager {
+  /** Consumer id -> compatible long-lived AgentHost connection. */
   private processes = new Map<string, AgentProcess>();
+  private agentHosts = new AgentHostManager<AgentProcess>();
   private lastStartArgs = new Map<string, AgentProcessStartOptions>();
   private sendToWindow: <T extends keyof IpcRendererEvents>(channel: T, ...args: IpcRendererEvents[T]) => void;
   private fetchFn: FetchFn;
@@ -299,36 +302,75 @@ export class ProcessManager {
     }
   }
 
-  private getOrCreate(processId: string, mode: AgentProcessMode, computeClient?: IComputeClient | null): AgentProcess {
-    const existing = this.processes.get(processId);
-    if (existing && existing.mode === mode) {
-      return existing;
-    }
-    if (existing) {
-      void existing.exit();
-    }
-    const proc = new AgentProcess({
-      mode,
-      ipcRawOutput: (data) => {
-        this.sendToWindow('agent-process:raw-output', processId, data);
-      },
-      onStatusChange: (status) => {
-        this.sendToWindow('agent-process:status', processId, status);
-      },
-      fetchFn: this.fetchFn,
-      computeClient: computeClient ?? this.platformClient ?? undefined,
-      // Resident processes act as themselves against the omni-projects MCP
-      // server: locally the stdio cli reads OMNI_PROJECTS_PRINCIPAL from the
-      // serve env (a resident's process id IS its principal id); in cloud the
-      // provider-minted runtime token carries the claim instead (and this
-      // extra key is unused).
-      getExtraEnv: async () => {
-        const base = (await this.getExtraEnv?.(processId)) ?? {};
-        return isResidentProcessId(processId) ? { ...base, OMNI_PROJECTS_PRINCIPAL: processId } : base;
-      },
+  private getOrCreate(
+    processId: string,
+    compatibilityKey: string,
+    mode: AgentProcessMode,
+    computeClient?: IComputeClient | null
+  ): { proc: AgentProcess; created: boolean } {
+    let proc!: AgentProcess;
+    const attachment = this.agentHosts.attach(processId, compatibilityKey, () => {
+      proc = new AgentProcess({
+        mode,
+        ipcRawOutput: (data) => {
+          for (const consumerId of this.agentHosts.consumersForHost(proc)) {
+            this.sendToWindow('agent-process:raw-output', consumerId, data);
+          }
+        },
+        onStatusChange: (status) => {
+          for (const consumerId of this.agentHosts.consumersForHost(proc)) {
+            this.sendToWindow('agent-process:status', consumerId, status);
+          }
+        },
+        fetchFn: this.fetchFn,
+        computeClient: computeClient ?? this.platformClient ?? undefined,
+        // Resident agents have distinct principal credentials and therefore
+        // never share a compatibility key with interactive tabs or each other.
+        getExtraEnv: async () => {
+          const base = (await this.getExtraEnv?.(processId)) ?? {};
+          return isResidentProcessId(processId) ? { ...base, OMNI_PROJECTS_PRINCIPAL: processId } : base;
+        },
+      });
+      return proc;
     });
-    this.processes.set(processId, proc);
-    return proc;
+    this.processes.set(processId, attachment.host);
+    if (attachment.released) {
+      void attachment.released.exit();
+    }
+    return { proc: attachment.host, created: attachment.created };
+  }
+
+  private agentHostCompatibilityKey(processId: string, mode: AgentProcessMode, arg: AgentProcessStartArg): string {
+    // Delegated compute providers have not adopted the multi-environment host
+    // contract yet, so keep those sessions isolated during this first cut.
+    if (mode === 'compute') {
+      return JSON.stringify(['compute', processId, arg.sessionId ?? null]);
+    }
+    const principalScope = isResidentProcessId(processId) ? processId : 'interactive';
+    return JSON.stringify({
+      mode,
+      principalScope,
+      profileName: arg.profileName,
+      explicitProfilePath: arg.explicitProfilePath ?? null,
+      projectId: arg.projectId ?? null,
+      workspaceDir: arg.workspaceDir ?? null,
+      sources: arg.sources.map((source) => {
+        const common = {
+          kind: source.kind,
+          mountName: source.mountName,
+          writable: source.writable ?? true,
+        };
+        if (source.kind === 'local' || source.kind === 'local-git') {
+          return {
+            ...common,
+            workspaceDir: source.workspaceDir,
+            ...('ref' in source ? { ref: source.ref ?? null } : {}),
+          };
+        }
+        return { ...common, repoUrl: source.repoUrl, ref: source.ref ?? null, auth: source.auth ?? null };
+      }),
+      credentials: arg.credentials ?? [],
+    });
   }
 
   private async buildStartArg(opts: AgentProcessStartOptions): Promise<AgentProcessStartArg> {
@@ -691,9 +733,17 @@ export class ProcessManager {
     }
     const mode = this.resolveMode(startArg.profileName);
     const client = this.resolveComputeClient(startArg.profileName);
-    const proc = this.getOrCreate(processId, mode, client);
+    const compatibilityKey = this.agentHostCompatibilityKey(processId, mode, startArg);
+    const { proc, created } = this.getOrCreate(processId, compatibilityKey, mode, client);
     this.trackMirrorSources(processId, startArg.sources);
-    proc.start(startArg);
+    const statusType = proc.getStatus().type;
+    if (created || !['starting', 'connecting', 'running'].includes(statusType)) {
+      proc.start(startArg);
+    } else {
+      // A newly attached consumer needs the already-live host state even
+      // though no child process was started for it.
+      this.sendToWindow('agent-process:status', processId, this.getStatus(processId));
+    }
   };
 
   stop = async (processId: string, opts?: AgentProcessStopOptions): Promise<void> => {
@@ -702,8 +752,11 @@ export class ProcessManager {
       return;
     }
     this.mirrorSources.delete(processId);
-    await proc.stop(opts);
     this.processes.delete(processId);
+    const detached = this.agentHosts.detach(processId);
+    if (detached?.lastConsumer) {
+      await proc.stop(opts);
+    }
     const machineId = this.localSandboxKeys.get(processId);
     if (machineId && this.hostBridge) {
       this.localSandboxKeys.delete(processId);
@@ -739,8 +792,19 @@ export class ProcessManager {
     }
     const mode = this.resolveMode(startArg.profileName);
     const client = this.resolveComputeClient(startArg.profileName);
-    const proc = this.getOrCreate(processId, mode, client);
+    const previous = this.processes.get(processId);
+    const compatibilityKey = this.agentHostCompatibilityKey(processId, mode, startArg);
+    const { proc, created } = this.getOrCreate(processId, compatibilityKey, mode, client);
     this.trackMirrorSources(processId, startArg.sources);
+    if (created || proc !== previous) {
+      const statusType = proc.getStatus().type;
+      if (!['starting', 'connecting', 'running'].includes(statusType)) {
+        proc.start(startArg);
+      } else {
+        this.sendToWindow('agent-process:status', processId, this.getStatus(processId));
+      }
+      return;
+    }
     await proc.rebuild(startArg);
   };
 
@@ -862,7 +926,27 @@ export class ProcessManager {
     if (!proc) {
       return { ok: false, reason: 'process not found' };
     }
-    return proc.switchSandbox(profileName);
+    const previousOpts = this.lastStartArgs.get(processId);
+    if (!previousOpts) {
+      return { ok: false, fallback: true, reason: 'launch binding not found' };
+    }
+    const nextOpts = { ...previousOpts, profileNameOverride: profileName };
+    const nextArg = await this.buildStartArg(nextOpts);
+    const nextMode = this.resolveMode(nextArg.profileName);
+    const nextKey = this.agentHostCompatibilityKey(processId, nextMode, nextArg);
+    if (!this.agentHosts.canRekey(processId, nextKey)) {
+      return {
+        ok: false,
+        fallback: true,
+        reason: 'profile change requires rebinding this tab from its shared agent host',
+      };
+    }
+    const result = await proc.switchSandbox(profileName);
+    if (result.ok) {
+      this.agentHosts.rekey(processId, nextKey);
+      this.lastStartArgs.set(processId, nextOpts);
+    }
+    return result;
   };
 
   notifyActivity = (processId: string): void => {
@@ -1036,7 +1120,7 @@ export class ProcessManager {
       this.mirrorTimer = null;
     }
     this.mirrorSources.clear();
-    const exits = Array.from(this.processes.values()).map((p) => p.exit());
+    const exits = this.agentHosts.clear().map((p) => p.exit());
     await Promise.allSettled(exits);
     this.processes.clear();
     this.lastStartArgs.clear();
