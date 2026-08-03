@@ -104,6 +104,7 @@ export const codeApi = {
       id: nanoid(),
       projectId: null,
       sessionId: uuidv4(),
+      snapshotRef: uuidv4(),
       profileName: resolveCodeTabProfileName(null),
       profileNameExplicit: false,
       createdAt: Date.now(),
@@ -160,11 +161,11 @@ export const codeApi = {
       delete errors[tabId];
       $codeTabErrors.set(errors);
 
-      // Cascade: delete the tab's workspace snapshot — no closed tab is a
+      // Cascade: delete the tab's Workspace snapshot — no closed tab is a
       // rehydrate target (archived chat resumes fresh; code tabs are gone
       // for good), so the tar is dead weight.
-      if (tab?.sessionId) {
-        void emitter.invoke('snapshot:delete', tab.sessionId);
+      if (tab?.snapshotRef) {
+        void emitter.invoke('snapshot:delete', tab.snapshotRef);
       }
     }
   },
@@ -197,10 +198,11 @@ export const codeApi = {
         : resolveCodeTabProfileName(projectId);
       // Attaching a project is intent — it activates a lazy chat column.
       const activated = { activatedAt: t.activatedAt ?? Date.now() };
+      const workspaceIdentity = { snapshotRef: uuidv4() };
       if (profileName === t.profileName) {
-        return { ...t, projectId, profileName, ...activated };
+        return { ...t, projectId, profileName, ...activated, ...workspaceIdentity };
       }
-      return { ...t, projectId, profileName, ...activated };
+      return { ...t, projectId, profileName, ...activated, ...workspaceIdentity };
     });
     await persistedStoreApi.setKey('codeTabs', tabs);
   },
@@ -234,6 +236,7 @@ export const codeApi = {
       id: nanoid(),
       projectId: null,
       sessionId: conversation.sessionId,
+      snapshotRef: uuidv4(),
       profileName: conversation.profileName ?? resolveCodeTabProfileName(null),
       profileNameExplicit: Boolean(conversation.profileName),
       createdAt: Date.now(),
@@ -248,29 +251,20 @@ export const codeApi = {
     return tab;
   },
 
-  /**
-   * Upsert a conversation-history entry (newest-first, capped). Pruned
-   * entries' snapshots are deleted so disk usage stays bounded.
-   */
+  /** Upsert a conversation-history entry (newest-first, capped). */
   recordConversation: async (sessionId: string, patch?: Partial<ChatConversation>) => {
     const list = persistedStoreApi.getKey('chatConversations') ?? [];
-    const { kept, pruned } = pruneConversations(
-      upsertConversation(list, { sessionId, lastActiveAt: Date.now(), ...patch })
-    );
+    const { kept } = pruneConversations(upsertConversation(list, { sessionId, lastActiveAt: Date.now(), ...patch }));
     await persistedStoreApi.setKey('chatConversations', kept);
-    for (const entry of pruned) {
-      void emitter.invoke('snapshot:delete', entry.sessionId);
-    }
   },
 
-  /** Permanently delete an archived conversation (entry + snapshot). */
+  /** Permanently delete an archived conversation entry. */
   deleteConversation: async (sessionId: string) => {
     const list = persistedStoreApi.getKey('chatConversations') ?? [];
     await persistedStoreApi.setKey(
       'chatConversations',
       list.filter((c) => c.sessionId !== sessionId)
     );
-    void emitter.invoke('snapshot:delete', sessionId);
   },
 
   addTabForTicket: async (
@@ -285,6 +279,7 @@ export const codeApi = {
         ...existing,
         ...(opts?.workspaceDir ? { workspaceDir: opts.workspaceDir } : {}),
         ...(opts?.profileName ? { profileName: opts.profileName } : {}),
+        ...(opts?.workspaceDir && opts.workspaceDir !== existing.workspaceDir ? { snapshotRef: uuidv4() } : {}),
       };
       if (nextExisting.workspaceDir !== existing.workspaceDir || nextExisting.profileName !== existing.profileName) {
         const updated = existingTabs.map((t) => (t.id === existing.id ? nextExisting : t));
@@ -298,6 +293,7 @@ export const codeApi = {
       projectId,
       ticketId,
       sessionId: uuidv4(),
+      snapshotRef: uuidv4(),
       ticketTitle: opts?.ticketTitle,
       workspaceDir: opts?.workspaceDir,
       profileName: opts?.profileName ?? resolveCodeTabProfileName(projectId),
@@ -315,6 +311,7 @@ export const codeApi = {
       id: nanoid(),
       projectId: null,
       sessionId: uuidv4(),
+      snapshotRef: uuidv4(),
       customAppId,
       profileName: resolveCodeTabProfileName(null),
       profileNameExplicit: false,
@@ -343,10 +340,15 @@ export const codeApi = {
         // greeting up, no sandbox until the first message.
         const { activatedAt: _reset, ...lazy } = t;
         void _reset;
-        return { ...lazy, sessionId };
+        return { ...lazy, sessionId, snapshotRef: uuidv4() };
       }
       return { ...t, sessionId };
     });
+    await persistedStoreApi.setKey('codeTabs', tabs);
+  },
+
+  setTabSnapshotRef: async (tabId: CodeTabId, snapshotRef: string) => {
+    const tabs = (persistedStoreApi.getKey('codeTabs') ?? []).map((t) => (t.id === tabId ? { ...t, snapshotRef } : t));
     await persistedStoreApi.setKey('codeTabs', tabs);
   },
 

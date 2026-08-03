@@ -341,14 +341,21 @@ export const CodeTabContent = memo(
         cancelled = true;
       };
     }, [tab.projectId, linkedWorkspaceDir]);
-    // Chat: mint the conversation/session id on the record if absent (it is
-    // the snapshot key AND the scratch-dir key). Normal columns get theirs
-    // from addTab/addTabForTicket.
+    // Chat: mint the conversation id on the record if absent. It keys chat
+    // history and the scratch directory, never the Workspace snapshot.
     useEffect(() => {
       if (chatMode && !tab.sessionId) {
         void codeApi.setTabSessionId(tab.id, uuidv4());
       }
     }, [chatMode, tab.sessionId, tab.id]);
+
+    // Older local state predates explicit Workspace snapshot identity. Mint it
+    // independently instead of reusing the conversation id.
+    useEffect(() => {
+      if (!tab.snapshotRef) {
+        void codeApi.setTabSnapshotRef(tab.id, uuidv4());
+      }
+    }, [tab.id, tab.snapshotRef]);
 
     // Chat is an ambient surface, not a project — each conversation gets an
     // isolated `<workspaceDir>/Sessions/<sessionId>` scratch dir. Switching
@@ -443,10 +450,11 @@ export const CodeTabContent = memo(
       [store.workspaceDir, tab.activatedAt, tab.sessionId, tab.id]
     );
 
-    const { phase, retry } = useCodeAutoLaunch(tab.id, workspaceDir, {
+    const { phase, retry } = useCodeAutoLaunch(tab.id, tab.snapshotRef ? workspaceDir : null, {
       ...(tab.projectId ? { projectId: tab.projectId } : {}),
       profileNameOverride: profileName,
       ...(tab.sessionId ? { sessionId: tab.sessionId } : {}),
+      ...(tab.snapshotRef ? { snapshotRef: tab.snapshotRef } : {}),
     });
     useSandboxActivityPing(tab.id);
 

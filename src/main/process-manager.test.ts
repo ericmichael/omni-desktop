@@ -725,7 +725,7 @@ describe('ProcessManager', () => {
       expect(sendCalls.filter((c) => c.channel === 'agent-process:status')).toHaveLength(2);
     });
 
-    it('a different thread on the same workspace keeps the compatible live host', async () => {
+    it('a different conversation on the same Workspace retains its Workspace identity', async () => {
       const { pm } = makePm();
       await pm.start('proc-1', { workspaceDir: '/tmp/ws', sessionId: 's1' });
 
@@ -739,10 +739,8 @@ describe('ProcessManager', () => {
       await pm.start('proc-1', { workspaceDir: '/tmp/ws', sessionId: 's2' });
 
       expect(proc.start).toHaveBeenCalledTimes(1);
-      expect(proc.configureConsumer.mock.calls[1]![1]).not.toBe(proc.configureConsumer.mock.calls[0]![1]);
-      expect(proc.stopConsumerEnvironment).toHaveBeenCalledWith(
-        `environment-${String(proc.configureConsumer.mock.calls[0]![1])}`
-      );
+      expect(proc.configureConsumer.mock.calls[1]![1]).toBe(proc.configureConsumer.mock.calls[0]![1]);
+      expect(proc.stopConsumerEnvironment).not.toHaveBeenCalled();
     });
 
     it('stop removes process from map', async () => {

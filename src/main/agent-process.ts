@@ -95,14 +95,16 @@ export type AgentProcessStartArg = {
   sources: AgentProcessSource[];
   /**
    * Selects the per-project default profile definition when the consumer is
-   * registered. Snapshot keying is driven by ``sessionId``, not this.
+   * registered.
    */
   projectId?: string;
   /**
-   * Stable snapshot reference for this consumer Workspace. It is registered
-   * through the AgentHost control plane and never becomes host-process state.
+   * Delegated-compute session identity. Local AgentHost Workspace identity is
+   * deliberately independent.
    */
   sessionId?: string;
+  /** Stable snapshot reference registered with the consumer Workspace. */
+  snapshotRef?: string;
   /**
    * Used in serve mode as the spawn ``cwd`` for resolving relative
    * paths in source-path. For git-remote sources, the launcher passes
@@ -483,7 +485,7 @@ export class AgentProcess {
     const control =
       this.agentHostControlClient ??
       (this.agentHostControlClient = new AgentHostControlClient(data.wsUrl, this.agentHostControlToken));
-    const snapshotRef = arg.sessionId ?? workspaceId;
+    const snapshotRef = arg.snapshotRef ?? workspaceId;
     const snapshotDir = path.join(getOmniConfigDir(), 'snapshots');
 
     // Blob durability follows the Workspace being materialized, not whichever

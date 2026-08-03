@@ -204,7 +204,7 @@ describe('AgentProcess dial auth (serve mode)', () => {
     expect(serve.connections[0]!.query).toBe('');
 
     // One-shot server_call dials (pause) carry the same header.
-    const result = await proc.pause();
+    const result = await proc.pause('environment-authenticated');
     expect(result.ok).toBe(true);
     const callConn = serve.connections.find((c) => c.calls.includes('sandbox.pause'));
     expect(callConn?.authorization).toBe('Bearer serve-token-1');

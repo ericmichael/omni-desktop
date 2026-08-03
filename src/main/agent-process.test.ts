@@ -328,7 +328,8 @@ describe('AgentProcess (serve mode)', () => {
     const runtime = await h.proc.configureConsumer('thread-2', 'workspace-2', {
       profileName: 'host',
       sources: [localSource('/repos/second', 'second')],
-      sessionId: 'snapshot-thread-2',
+      sessionId: 'conversation-thread-2',
+      snapshotRef: 'snapshot-thread-2',
     });
 
     expect(hoisted.snapshotPull).toHaveBeenCalledWith('snapshot-thread-2', path.join('/fake/config', 'snapshots'));
@@ -349,7 +350,8 @@ describe('AgentProcess (serve mode)', () => {
     await h.proc.configureConsumer('thread-1', 'workspace-1', {
       profileName: 'host',
       sources: [localSource('/ws')],
-      sessionId: 'snapshot-thread-1',
+      sessionId: 'conversation-thread-1',
+      snapshotRef: 'snapshot-thread-1',
     });
 
     await h.proc.stop();

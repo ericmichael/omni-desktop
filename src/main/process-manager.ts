@@ -410,6 +410,9 @@ export class ProcessManager {
     if (opts.sessionId) {
       startArg.sessionId = opts.sessionId;
     }
+    if (opts.snapshotRef) {
+      startArg.snapshotRef = opts.snapshotRef;
+    }
     const gitRepo = this.resolvePlatformGitRepo(profileName, opts.workspaceDir, opts.projectId);
     if (gitRepo) {
       startArg.gitRepo = gitRepo;
@@ -712,6 +715,7 @@ export class ProcessManager {
       opts.projectId ?? null,
       opts.projectIds ?? null,
       opts.sessionId ?? null,
+      opts.snapshotRef ?? null,
       opts.profileNameOverride ?? null,
     ]);
   }
@@ -725,7 +729,7 @@ export class ProcessManager {
   private static workspaceIdentity(arg: AgentProcessStartArg): string {
     return JSON.stringify({
       workspaceDir: arg.workspaceDir ?? null,
-      snapshotRef: arg.sessionId ?? null,
+      snapshotRef: arg.snapshotRef ?? null,
       sources: arg.sources,
     });
   }
@@ -871,6 +875,9 @@ export class ProcessManager {
         : {}),
       ...((opts.sessionId ?? lastOpts?.sessionId)
         ? { sessionId: (opts.sessionId ?? lastOpts?.sessionId) as string }
+        : {}),
+      ...((opts.snapshotRef ?? lastOpts?.snapshotRef)
+        ? { snapshotRef: (opts.snapshotRef ?? lastOpts?.snapshotRef) as string }
         : {}),
       ...((opts.extraSources ?? lastOpts?.extraSources)
         ? { extraSources: opts.extraSources ?? lastOpts?.extraSources }

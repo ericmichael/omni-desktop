@@ -80,7 +80,7 @@ export const SnapshotsPane = memo(() => {
   }, [pendingDeleteId]);
 
   const totalBytes = snapshots.reduce((sum, snapshot) => sum + snapshot.sizeBytes, 0);
-  const pendingSnapshot = snapshots.find((s) => s.sessionId === pendingDeleteId) ?? null;
+  const pendingSnapshot = snapshots.find((s) => s.snapshotRef === pendingDeleteId) ?? null;
 
   return (
     <div className={styles.root}>
@@ -99,30 +99,26 @@ export const SnapshotsPane = memo(() => {
         <div className={styles.list}>
           {snapshots.length === 0 && <Caption1 className={styles.summary}>No workspace snapshots.</Caption1>}
           {snapshots.map((snapshot) => (
-            <div key={snapshot.sessionId} className={styles.row}>
+            <div key={snapshot.snapshotRef} className={styles.row}>
               <div className={styles.main}>
-                <Body1 className={styles.truncated}>{snapshot.label ?? middleTruncate(snapshot.sessionId)}</Body1>
+                <Body1 className={styles.truncated}>{snapshot.label ?? middleTruncate(snapshot.snapshotRef)}</Body1>
                 <Caption1 className={`${styles.summary} ${styles.truncated}`}>
                   {`${formatBytes(snapshot.sizeBytes)} · modified ${formatRelativeTime(new Date(snapshot.modifiedAt))}`}
                 </Caption1>
                 {snapshot.label !== null && (
                   <Caption1 className={`${styles.summary} ${styles.mono} ${styles.truncated}`}>
-                    {middleTruncate(snapshot.sessionId)}
+                    {middleTruncate(snapshot.snapshotRef)}
                   </Caption1>
                 )}
               </div>
               <div className={styles.chips}>{snapshot.inUse && <Badge color="blue">in use</Badge>}</div>
               <IconButton
-                aria-label={
-                  snapshot.inUse ? 'In use — a tab or conversation can still resume this session' : 'Delete snapshot'
-                }
+                aria-label={snapshot.inUse ? 'In use — an open tab owns this Workspace snapshot' : 'Delete snapshot'}
                 icon={<Delete16Regular />}
                 size="sm"
                 isDisabled={snapshot.inUse}
-                tooltip={
-                  snapshot.inUse ? 'In use — a tab or conversation can still resume this session' : 'Delete snapshot'
-                }
-                onClick={() => setPendingDeleteId(snapshot.sessionId)}
+                tooltip={snapshot.inUse ? 'In use — an open tab owns this Workspace snapshot' : 'Delete snapshot'}
+                onClick={() => setPendingDeleteId(snapshot.snapshotRef)}
               />
             </div>
           ))}
@@ -136,7 +132,7 @@ export const SnapshotsPane = memo(() => {
         onClose={closeConfirm}
         onConfirm={onConfirmDelete}
         title="Delete snapshot?"
-        description={`Delete the workspace snapshot for ${pendingSnapshot?.label ?? middleTruncate(pendingSnapshot?.sessionId ?? '')}. The session can no longer be rehydrated from it.`}
+        description={`Delete the Workspace snapshot for ${pendingSnapshot?.label ?? middleTruncate(pendingSnapshot?.snapshotRef ?? '')}. Future environments can no longer hydrate from it.`}
         confirmLabel="Delete"
         destructive
       />

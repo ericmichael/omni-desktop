@@ -49,6 +49,7 @@ const tab = (patch: Partial<CodeTab> = {}): CodeTab => ({
   id: 'tab-1',
   projectId: null,
   sessionId: 'session-1',
+  snapshotRef: 'snapshot-1',
   profileName: 'host',
   profileNameExplicit: false,
   createdAt: 1,
@@ -200,7 +201,9 @@ describe('chat columns and conversation archival', () => {
 
   it('removeTab archives an activated chat column (transcript only) and deletes its snapshot', async () => {
     resetStore({
-      codeTabs: [tab({ id: 'chat-tab', projectId: null, sessionId: 'sess-1', activatedAt: 5 })],
+      codeTabs: [
+        tab({ id: 'chat-tab', projectId: null, sessionId: 'sess-1', snapshotRef: 'snapshot-chat', activatedAt: 5 }),
+      ],
       chatConversations: [{ sessionId: 'sess-1', title: 'Plan my week', lastActiveAt: 1 }],
     });
     const { codeApi } = await import('./state');
@@ -210,7 +213,7 @@ describe('chat columns and conversation archival', () => {
     expect(store.codeTabs).toHaveLength(0);
     // Close is terminal for the sandbox — chat and code alike. Only the
     // transcript entry survives in Recent.
-    expect(invoke).toHaveBeenCalledWith('snapshot:delete', 'sess-1');
+    expect(invoke).toHaveBeenCalledWith('snapshot:delete', 'snapshot-chat');
     expect(store.chatConversations[0]).toMatchObject({
       sessionId: 'sess-1',
       title: 'Plan my week',
@@ -221,8 +224,8 @@ describe('chat columns and conversation archival', () => {
   it('removeTab deletes the snapshot of an un-activated chat column and of project tabs', async () => {
     resetStore({
       codeTabs: [
-        tab({ id: 'fresh-chat', projectId: null, sessionId: 'sess-fresh' }),
-        tab({ id: 'proj-tab', projectId: 'p1', sessionId: 'sess-proj' }),
+        tab({ id: 'fresh-chat', projectId: null, sessionId: 'sess-fresh', snapshotRef: 'snapshot-fresh' }),
+        tab({ id: 'proj-tab', projectId: 'p1', sessionId: 'sess-proj', snapshotRef: 'snapshot-proj' }),
       ],
     });
     const { codeApi } = await import('./state');
@@ -230,8 +233,8 @@ describe('chat columns and conversation archival', () => {
     await codeApi.removeTab('fresh-chat');
     await codeApi.removeTab('proj-tab');
 
-    expect(invoke).toHaveBeenCalledWith('snapshot:delete', 'sess-fresh');
-    expect(invoke).toHaveBeenCalledWith('snapshot:delete', 'sess-proj');
+    expect(invoke).toHaveBeenCalledWith('snapshot:delete', 'snapshot-fresh');
+    expect(invoke).toHaveBeenCalledWith('snapshot:delete', 'snapshot-proj');
     expect(store.chatConversations).toHaveLength(0);
   });
 
@@ -245,12 +248,17 @@ describe('chat columns and conversation archival', () => {
   });
 
   it('setTabSessionId resets a chat column to the lazy state on a fresh conversation', async () => {
-    resetStore({ codeTabs: [tab({ id: 'chat-tab', projectId: null, sessionId: 'old', activatedAt: 5 })] });
+    resetStore({
+      codeTabs: [
+        tab({ id: 'chat-tab', projectId: null, sessionId: 'old', snapshotRef: 'old-snapshot', activatedAt: 5 }),
+      ],
+    });
     const { codeApi } = await import('./state');
 
     await codeApi.setTabSessionId('chat-tab', 'new');
 
     expect(store.codeTabs[0]).toMatchObject({ sessionId: 'new' });
+    expect(store.codeTabs[0]?.snapshotRef).not.toBe('old-snapshot');
     expect(store.codeTabs[0]?.activatedAt).toBeUndefined();
   });
 
@@ -284,14 +292,14 @@ describe('chat columns and conversation archival', () => {
     expect(opened.activatedAt).toBeTypeOf('number');
   });
 
-  it('deleteConversation removes the entry and its snapshot', async () => {
+  it('deleteConversation removes only the archived conversation entry', async () => {
     resetStore({ chatConversations: [{ sessionId: 'sess-1', title: 'x', lastActiveAt: 1 }] });
     const { codeApi } = await import('./state');
 
     await codeApi.deleteConversation('sess-1');
 
     expect(store.chatConversations).toHaveLength(0);
-    expect(invoke).toHaveBeenCalledWith('snapshot:delete', 'sess-1');
+    expect(invoke).not.toHaveBeenCalledWith('snapshot:delete', 'sess-1');
   });
 
   it('reorderTabs preserves records missing from a filtered input list', async () => {

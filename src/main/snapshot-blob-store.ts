@@ -14,7 +14,7 @@
  *     local tar is missing but a copy exists in blob, download it.
  *   * After environment stop: ``push(snapshotRef, snapshotDir)`` — if a tar
  *     exists at the local path, upload it so it survives host recycling.
- *   * Cascade delete: ``remove(sessionId)`` — called from the snapshot
+ *   * Cascade delete: ``remove(snapshotRef)`` — called from the snapshot
  *     manager so blob copies don't outlive the renderer-side tab deletion.
  *
  * Selection happens at construction:
@@ -32,13 +32,13 @@ import { join } from 'node:path';
 
 const SNAPSHOT_SUFFIX = '.tar';
 
-const blobName = (sessionId: string): string => `${sessionId}${SNAPSHOT_SUFFIX}`;
-const localPath = (snapshotDir: string, sessionId: string): string => join(snapshotDir, blobName(sessionId));
+const blobName = (snapshotRef: string): string => `${snapshotRef}${SNAPSHOT_SUFFIX}`;
+const localPath = (snapshotDir: string, snapshotRef: string): string => join(snapshotDir, blobName(snapshotRef));
 
 export interface SnapshotStore {
-  pull(sessionId: string, snapshotDir: string): Promise<boolean>;
-  push(sessionId: string, snapshotDir: string): Promise<void>;
-  remove(sessionId: string): Promise<void>;
+  pull(snapshotRef: string, snapshotDir: string): Promise<boolean>;
+  push(snapshotRef: string, snapshotDir: string): Promise<void>;
+  remove(snapshotRef: string): Promise<void>;
 }
 
 class NullSnapshotStore implements SnapshotStore {
@@ -98,11 +98,11 @@ export class AzureBlobSnapshotStore implements SnapshotStore {
     return container;
   }
 
-  async pull(sessionId: string, snapshotDir: string): Promise<boolean> {
-    if (!sessionId) {
+  async pull(snapshotRef: string, snapshotDir: string): Promise<boolean> {
+    if (!snapshotRef) {
       return false;
     }
-    const dest = localPath(snapshotDir, sessionId);
+    const dest = localPath(snapshotDir, snapshotRef);
     // If a local copy already exists, trust it — the launcher writes locally
     // on snapshot-end and the local path is the canonical input to omni
     // serve. Re-downloading would race with omni serve's own writes.
@@ -110,7 +110,7 @@ export class AzureBlobSnapshotStore implements SnapshotStore {
       return false;
     }
     try {
-      const client = (await this.container()).getBlockBlobClient(blobName(sessionId));
+      const client = (await this.container()).getBlockBlobClient(blobName(snapshotRef));
       if (!(await client.exists())) {
         return false;
       }
@@ -118,16 +118,16 @@ export class AzureBlobSnapshotStore implements SnapshotStore {
       await writeFile(dest, buf);
       return true;
     } catch (err) {
-      console.error(`[snapshot-blob] pull failed for ${sessionId}:`, err);
+      console.error(`[snapshot-blob] pull failed for ${snapshotRef}:`, err);
       return false;
     }
   }
 
-  async push(sessionId: string, snapshotDir: string): Promise<void> {
-    if (!sessionId) {
+  async push(snapshotRef: string, snapshotDir: string): Promise<void> {
+    if (!snapshotRef) {
       return;
     }
-    const src = localPath(snapshotDir, sessionId);
+    const src = localPath(snapshotDir, snapshotRef);
     if (!existsSync(src)) {
       return;
     }
@@ -143,22 +143,22 @@ export class AzureBlobSnapshotStore implements SnapshotStore {
     }
     try {
       const buf = await readFile(src);
-      const client = (await this.container()).getBlockBlobClient(blobName(sessionId));
+      const client = (await this.container()).getBlockBlobClient(blobName(snapshotRef));
       await client.uploadData(buf);
     } catch (err) {
-      console.error(`[snapshot-blob] push failed for ${sessionId}:`, err);
+      console.error(`[snapshot-blob] push failed for ${snapshotRef}:`, err);
     }
   }
 
-  async remove(sessionId: string): Promise<void> {
-    if (!sessionId) {
+  async remove(snapshotRef: string): Promise<void> {
+    if (!snapshotRef) {
       return;
     }
     try {
-      const client = (await this.container()).getBlockBlobClient(blobName(sessionId));
+      const client = (await this.container()).getBlockBlobClient(blobName(snapshotRef));
       await client.deleteIfExists();
     } catch (err) {
-      console.error(`[snapshot-blob] remove failed for ${sessionId}:`, err);
+      console.error(`[snapshot-blob] remove failed for ${snapshotRef}:`, err);
     }
   }
 }

@@ -23,6 +23,7 @@ export const useCodeAutoLaunch = (
     projectId?: string;
     profileNameOverride?: string;
     sessionId?: string;
+    snapshotRef?: string;
   }
 ) => {
   const { phase, retry, launch, actor } = useAutoLaunch({
@@ -31,6 +32,7 @@ export const useCodeAutoLaunch = (
     ...(opts?.projectId ? { projectId: opts.projectId } : {}),
     ...(opts?.profileNameOverride ? { profileNameOverride: opts.profileNameOverride } : {}),
     ...(opts?.sessionId ? { sessionId: opts.sessionId } : {}),
+    ...(opts?.snapshotRef ? { snapshotRef: opts.snapshotRef } : {}),
     logLabel: 'autoLaunch:code',
   });
 

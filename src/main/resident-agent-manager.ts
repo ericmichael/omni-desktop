@@ -1969,9 +1969,8 @@ export class ResidentAgentManager {
       this.broadcastStatus();
       await this.processManager.start(pid, {
         workspaceDir: this.agentHome(agentId),
-        // Stable serve session id = the agent's workspace/snapshot identity.
-        // Day chat sessions are created on top via session.ensure.
-        sessionId: `resident-${agentId}`,
+        // Resident Workspace durability is independent of day-chat sessions.
+        snapshotRef: `resident-${agentId}`,
         // Scoped agents launch INTO their projects: the union of every
         // scoped project's sources mounts (credentials resolve per source
         // exactly like a project launch). The private home rides along as

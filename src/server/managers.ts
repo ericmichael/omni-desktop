@@ -62,11 +62,7 @@ import {
   registerSandboxInventoryHandlers,
 } from '@/main/sandbox-inventory';
 import { registerScheduledTaskHandlers, ScheduledTaskManager } from '@/main/scheduled-task-manager';
-import {
-  archivedLabelsFromConversations,
-  protectedSessionsFromTabs,
-  registerSnapshotHandlers,
-} from '@/main/snapshot-manager';
+import { protectedSnapshotsFromTabs, registerSnapshotHandlers } from '@/main/snapshot-manager';
 import { registerSupervisorHandlers } from '@/main/supervisor-handlers';
 import { getOmniConfigDir } from '@/main/util';
 import { WorkspaceSyncManager } from '@/main/workspace-sync-manager';
@@ -1218,10 +1214,8 @@ export const wireGlobalHandlers = async (arg: {
   // below — the protected set and labels aggregate across EVERY tenant: one
   // tenant's open session must never be deletable through another's client.
   registerSnapshotHandlers(ipc, {
-    getProtectedSessions: () =>
-      [...tenants.values()].flatMap((t) => protectedSessionsFromTabs(t.settings.get('codeTabs') ?? [])),
-    getArchivedLabels: () =>
-      [...tenants.values()].flatMap((t) => archivedLabelsFromConversations(t.settings.get('chatConversations') ?? [])),
+    getProtectedSnapshots: () =>
+      [...tenants.values()].flatMap((t) => protectedSnapshotsFromTabs(t.settings.get('codeTabs') ?? [])),
   });
 
   // Sandboxes tab (docs/sandboxes-tab-plan.md Phase 2). Profile discovery

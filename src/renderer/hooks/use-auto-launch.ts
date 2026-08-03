@@ -31,13 +31,10 @@ type UseAutoLaunchOptions = {
    * resolution in ProcessManager. Set by the pre-launch SandboxPicker.
    */
   profileNameOverride?: string;
-  /**
-   * Conversation session id — used both as the snapshot key (per-session
-   * workspace persistence) and the agent server's session id (chat history,
-   * WS ``serverCall`` scoping). Caller is responsible for ensuring this is
-   * non-null when launching (pre-mint upstream).
-   */
+  /** Conversation identity used by delegated-compute backends. */
   sessionId?: string;
+  /** Durable Workspace snapshot identity, independent of the conversation. */
+  snapshotRef?: string;
   /** Logger tag. */
   logLabel?: string;
 };
@@ -64,6 +61,8 @@ export const useAutoLaunch = (opts: UseAutoLaunchOptions) => {
   profileNameOverrideRef.current = opts.profileNameOverride;
   const sessionIdRef = useRef(opts.sessionId);
   sessionIdRef.current = opts.sessionId;
+  const snapshotRefRef = useRef(opts.snapshotRef);
+  snapshotRefRef.current = opts.snapshotRef;
   const storeRef = useRef(store);
   storeRef.current = store;
 
@@ -161,6 +160,7 @@ export const useAutoLaunch = (opts: UseAutoLaunchOptions) => {
             ...(projectIdRef.current ? { projectId: projectIdRef.current } : {}),
             ...(profileNameOverrideRef.current ? { profileNameOverride: profileNameOverrideRef.current } : {}),
             ...(sessionIdRef.current ? { sessionId: sessionIdRef.current } : {}),
+            ...(snapshotRefRef.current ? { snapshotRef: snapshotRefRef.current } : {}),
           });
           sendBack({ type: 'CONFIG_OK' });
         })();

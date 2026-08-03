@@ -1,5 +1,11 @@
 # Computer-as-Sandbox: Implementation Plan
 
+> Historical implementation record. Its per-session `omni serve`,
+> `sandbox.switch`, `uiUrl`, and container-resume assumptions were superseded
+> by [AgentHost and Execution Environments](./agent-host-execution-environments-plan.md).
+> Retain this document only for the host-bridge/product history; do not use its
+> runtime topology as current architecture.
+
 Decision-complete implementation plan for adding "computer-as-sandbox" to the
 cloud-linked Electron mode. The user picks, per session, between cloud-ACI
 compute and "my laptop" compute. The cloud server stays the source of truth

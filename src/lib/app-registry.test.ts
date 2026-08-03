@@ -30,7 +30,7 @@ describe('buildAppRegistry', () => {
     ];
     const registry = buildAppRegistry(custom);
     const ids = registry.map((a) => a.id);
-    expect(ids).toEqual(['chat', 'app-b', 'code', 'app-a', 'desktop', 'browser', 'terminal']);
+    expect(ids).toEqual(['chat', 'app-b', 'code', 'app-a', 'desktop', 'browser', 'files', 'git', 'terminal']);
   });
 
   it('preserves stable order for equal-order items', () => {

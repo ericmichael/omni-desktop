@@ -156,9 +156,15 @@ Completed through the framework/runtime vertical slice:
   resumable owners, or protected from orphan cleanup. Container identity is a
   live environment observation used only for inventory and direct container
   operations; durable recovery is Workspace snapshot materialization.
+- Conversation and Workspace snapshot identity are now distinct launcher
+  resources. Code tabs persist a dedicated `snapshotRef`; AgentHost Workspace
+  registration, external blob durability, inventory, deletion guards, and GC
+  consume that reference. Changing or restoring a conversation never reuses
+  its `sessionId` as execution-placement state.
 
-Next: complete the broad product/launcher proof matrix and land the final
-architectural audit commit.
+Next: publish a protocol-v2 Omni Code package, update the launcher's packaged
+runtime pin, and run the packaged-install smoke proof. The source/editable
+architecture is otherwise at the final broad-proof and audit-commit boundary.
 
 ## Executive decision
 

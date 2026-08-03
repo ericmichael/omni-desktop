@@ -11,9 +11,8 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
-  archivedLabelsFromConversations,
   listSnapshots,
-  protectedSessionsFromTabs,
+  protectedSnapshotsFromTabs,
   registerSnapshotHandlers,
   type SnapshotHandlerDeps,
 } from '@/main/snapshot-manager';
@@ -37,8 +36,7 @@ const writeTar = (sessionId: string, bytes: number, mtimeSec: number): void => {
 };
 
 const makeDeps = (over: Partial<SnapshotHandlerDeps> = {}): SnapshotHandlerDeps => ({
-  getProtectedSessions: () => [],
-  getArchivedLabels: () => [],
+  getProtectedSnapshots: () => [],
   dir,
   ...over,
 });
@@ -58,8 +56,8 @@ describe('listSnapshots', () => {
     writeFileSync(path.join(dir, 'not-a-snapshot.txt'), 'x');
     const result = await listSnapshots(makeDeps());
     expect(result).toEqual([
-      { sessionId: 'sess-new', sizeBytes: 20, modifiedAt: 2_000_000, inUse: false, label: null },
-      { sessionId: 'sess-old', sizeBytes: 10, modifiedAt: 1_000_000, inUse: false, label: null },
+      { snapshotRef: 'sess-new', sizeBytes: 20, modifiedAt: 2_000_000, inUse: false, label: null },
+      { snapshotRef: 'sess-old', sizeBytes: 10, modifiedAt: 1_000_000, inUse: false, label: null },
     ]);
   });
 
@@ -67,20 +65,19 @@ describe('listSnapshots', () => {
     await expect(listSnapshots(makeDeps({ dir: path.join(dir, 'missing') }))).resolves.toEqual([]);
   });
 
-  it('marks protected sessions inUse with the tab label; archived titles label without protecting', async () => {
+  it('marks protected Workspace snapshots inUse with the tab label', async () => {
     writeTar('sess-open', 1, 3_000);
     writeTar('sess-archived', 1, 2_000);
     writeTar('sess-stray', 1, 1_000);
     const result = await listSnapshots(
       makeDeps({
-        getProtectedSessions: () => [{ sessionId: 'sess-open', label: 'Fix the login bug' }],
-        getArchivedLabels: () => [{ sessionId: 'sess-archived', label: 'How do I center a div' }],
+        getProtectedSnapshots: () => [{ snapshotRef: 'sess-open', label: 'Fix the login bug' }],
       })
     );
-    expect(result.map(({ sessionId, inUse, label }) => ({ sessionId, inUse, label }))).toEqual([
-      { sessionId: 'sess-open', inUse: true, label: 'Fix the login bug' },
-      { sessionId: 'sess-archived', inUse: false, label: 'How do I center a div' },
-      { sessionId: 'sess-stray', inUse: false, label: null },
+    expect(result.map(({ snapshotRef, inUse, label }) => ({ snapshotRef, inUse, label }))).toEqual([
+      { snapshotRef: 'sess-open', inUse: true, label: 'Fix the login bug' },
+      { snapshotRef: 'sess-archived', inUse: false, label: null },
+      { snapshotRef: 'sess-stray', inUse: false, label: null },
     ]);
   });
 });
@@ -88,28 +85,16 @@ describe('listSnapshots', () => {
 describe('claim helpers', () => {
   const tab = (over: Partial<CodeTab>): CodeTab => ({ id: 'tab-1', projectId: null, createdAt: 0, ...over });
 
-  it('protectedSessionsFromTabs mirrors the gc keep set: every tab sessionId, labeled', () => {
+  it('protectedSnapshotsFromTabs mirrors the GC keep set', () => {
     expect(
-      protectedSessionsFromTabs([
-        tab({ id: 'a', sessionId: 'sess-1', ticketTitle: 'Fix bug' }),
-        tab({ id: 'b' }), // no sessionId → no claim
-        tab({ id: 'c', sessionId: 'sess-2' }),
+      protectedSnapshotsFromTabs([
+        tab({ id: 'a', sessionId: 'conversation-1', snapshotRef: 'snapshot-1', ticketTitle: 'Fix bug' }),
+        tab({ id: 'b', sessionId: 'conversation-2' }),
+        tab({ id: 'c', snapshotRef: 'snapshot-2' }),
       ])
     ).toEqual([
-      { sessionId: 'sess-1', label: 'Fix bug' },
-      { sessionId: 'sess-2', label: 'Chat' },
-    ]);
-  });
-
-  it('archivedLabelsFromConversations maps titles, nulling empty ones', () => {
-    expect(
-      archivedLabelsFromConversations([
-        { sessionId: 'sess-1', title: 'A chat', lastActiveAt: 0 },
-        { sessionId: 'sess-2', title: '', lastActiveAt: 0 },
-      ])
-    ).toEqual([
-      { sessionId: 'sess-1', label: 'A chat' },
-      { sessionId: 'sess-2', label: null },
+      { snapshotRef: 'snapshot-1', label: 'Fix bug' },
+      { snapshotRef: 'snapshot-2', label: 'Chat' },
     ]);
   });
 });
@@ -118,10 +103,10 @@ describe('snapshot:delete guard', () => {
   it('refuses a protected session, naming the owner, leaving the tar in place', async () => {
     writeTar('sess-open', 1, 1_000);
     const handlers = captureHandlers(
-      makeDeps({ getProtectedSessions: () => [{ sessionId: 'sess-open', label: 'Fix the login bug' }] })
+      makeDeps({ getProtectedSnapshots: () => [{ snapshotRef: 'sess-open', label: 'Fix the login bug' }] })
     );
     await expect(handlers.get('snapshot:delete')!(null, 'sess-open')).rejects.toThrow(
-      'Snapshot is in use by an open session: Fix the login bug'
+      'Snapshot is in use by an open tab: Fix the login bug'
     );
     expect(existsSync(path.join(dir, 'sess-open.tar'))).toBe(true);
   });
@@ -129,7 +114,7 @@ describe('snapshot:delete guard', () => {
   it('falls back to the session id when the protected claim has no label', async () => {
     writeTar('sess-open', 1, 1_000);
     const handlers = captureHandlers(
-      makeDeps({ getProtectedSessions: () => [{ sessionId: 'sess-open', label: null }] })
+      makeDeps({ getProtectedSnapshots: () => [{ snapshotRef: 'sess-open', label: null }] })
     );
     await expect(handlers.get('snapshot:delete')!(null, 'sess-open')).rejects.toThrow(/sess-open/);
   });
@@ -139,7 +124,7 @@ describe('snapshot:delete guard', () => {
     // delete, so the closed tab's session is no longer in the protected set.
     writeTar('sess-closed', 1, 1_000);
     const handlers = captureHandlers(
-      makeDeps({ getProtectedSessions: () => [{ sessionId: 'sess-other', label: 'Still open' }] })
+      makeDeps({ getProtectedSnapshots: () => [{ snapshotRef: 'sess-other', label: 'Still open' }] })
     );
     await handlers.get('snapshot:delete')!(null, 'sess-closed');
     expect(existsSync(path.join(dir, 'sess-closed.tar'))).toBe(false);
@@ -149,7 +134,7 @@ describe('snapshot:delete guard', () => {
     writeTar('sess-1', 5, 1_000);
     const handlers = captureHandlers(makeDeps());
     await expect(handlers.get('sandbox:list-snapshots')!(null)).resolves.toEqual([
-      { sessionId: 'sess-1', sizeBytes: 5, modifiedAt: 1_000_000, inUse: false, label: null },
+      { snapshotRef: 'sess-1', sizeBytes: 5, modifiedAt: 1_000_000, inUse: false, label: null },
     ]);
   });
 });

@@ -458,8 +458,8 @@ export type StoreData = {
   /**
    * Closed chat conversations (projectless session columns), newest-first.
    * Each entry is fully resumable: ``sessionId`` deterministically keys the
-   * scratch workspace dir, the snapshot, and the agent server session.
-   * Capped by the pruning helper — pruned entries' snapshots are deleted.
+   * scratch workspace directory and the agent-server conversation.
+   * Capped by the pruning helper.
    */
   chatConversations: ChatConversation[];
   activeCodeTabId: CodeTabId | null;
@@ -1671,16 +1671,12 @@ export type AgentProcessStartOptions = {
    */
   profileNameOverride?: string;
   /**
-   * Conversation session id — the SAME id used to scope chat history and
-   * WebSocket ``serverCall`` traffic in the omniagents server. Used as
-   * the snapshot key, so each conversation gets its own workspace state.
-   *
-   * Caller eagerly generates this when starting a fresh conversation
-   * (uuid) and persists on the owning ``CodeTab.sessionId``, then passes it
-   * both here AND as the ``sessionId`` prop to OmniAgentsApp so the agent
-   * server uses the same id for its session.
+   * Conversation session id used for delegated-compute session ownership.
+   * Local AgentHost Workspace identity is deliberately independent.
    */
   sessionId?: string;
+  /** Durable Workspace snapshot reference, independent of conversation id. */
+  snapshotRef?: string;
   /**
    * Additional host directories to mount alongside the resolved project
    * sources (resident agents mount their private home as `home` next to
@@ -1733,6 +1729,8 @@ export type CodeTab = {
   projectId: ProjectId | null;
   ticketId?: TicketId;
   sessionId?: string;
+  /** Durable Workspace snapshot identity; never used for chat/RPC routing. */
+  snapshotRef?: string;
   ticketTitle?: string;
   routineId?: string;
   routineName?: string;
@@ -1770,7 +1768,7 @@ export const isChatColumn = (tab: Pick<CodeTab, 'projectId' | 'routineId' | 'cus
 
 /** A closed chat conversation, resumable from the Focus sidebar's Recent list. */
 export type ChatConversation = {
-  /** Scratch-dir key and agent server session id — all one id. */
+  /** Scratch-directory key and agent-server conversation id. */
   sessionId: string;
   /** First user message (truncated) — display label in Recent. */
   title: string;
@@ -2543,12 +2541,12 @@ type SnapshotIpcEvents = Namespaced<
   'snapshot',
   {
     /**
-     * Cascade-delete the snapshot tar for *sessionId*. Called by the
+     * Cascade-delete the snapshot tar for *snapshotRef*. Called by the
      * renderer when a code tab is removed — the tab is gone for good,
      * its workspace pickle is dead weight. Idempotent (missing file is
      * not an error).
      */
-    delete: (sessionId: string) => void;
+    delete: (snapshotRef: string) => void;
   }
 >;
 
@@ -3901,15 +3899,12 @@ type SandboxIpcEvents = Namespaced<
 
 /** One workspace snapshot tar under `<config>/snapshots/`. */
 export type SandboxSnapshotSummary = {
-  /** Session id — the tar's filename stem. */
-  sessionId: string;
+  /** Workspace snapshot reference — the tar's filename stem. */
+  snapshotRef: string;
   sizeBytes: number;
   /** mtime, epoch ms. */
   modifiedAt: number;
-  /** True when an OPEN code tab (chat columns included) still claims the
-   *  session — the same set the snapshot GC protects — and deletion is
-   *  refused. Archived conversations do NOT protect: closing a chat column
-   *  deliberately drops its snapshot (archived chats resume fresh). */
+  /** True when an open code tab still claims this Workspace snapshot. */
   inUse: boolean;
   /** Human label when the owning tab (or an archived conversation's title)
    *  is known; else null. */

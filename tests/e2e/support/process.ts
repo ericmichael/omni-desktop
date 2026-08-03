@@ -34,6 +34,7 @@ export function startProcess(input: {
   args: string[];
   cwd: string;
   env?: NodeJS.ProcessEnv;
+  forwardOutput?: boolean;
 }): ManagedProcess {
   const child = spawn(input.command, input.args, {
     cwd: input.cwd,
@@ -46,9 +47,15 @@ export function startProcess(input: {
 
   child.stdout.on('data', (chunk: Buffer) => {
     output += chunk.toString('utf-8');
+    if (input.forwardOutput) {
+      process.stdout.write(chunk);
+    }
   });
   child.stderr.on('data', (chunk: Buffer) => {
     output += chunk.toString('utf-8');
+    if (input.forwardOutput) {
+      process.stderr.write(chunk);
+    }
   });
 
   return {

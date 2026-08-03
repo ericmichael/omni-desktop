@@ -67,10 +67,9 @@ import {
 import { registerScheduledTaskHandlers, ScheduledTaskManager } from '@/main/scheduled-task-manager';
 import { LocalSecretStore } from '@/main/secret-store';
 import {
-  archivedLabelsFromConversations,
   DEFAULT_CHAT_SNAPSHOT_TTL_MS,
   gcStaleSnapshots,
-  protectedSessionsFromTabs,
+  protectedSnapshotsFromTabs,
   registerSnapshotHandlers,
 } from '@/main/snapshot-manager';
 import { getStore } from '@/main/store';
@@ -354,12 +353,11 @@ const [, cleanupConsole] = createConsoleManager({
   processManager,
 });
 
-// Protected set = the SAME open-tab sessions as the gc keep set below; the
+// Protected set = the same open-tab snapshots as the GC keep set below; the
 // tab-close cascade persists the pruned codeTabs before its snapshot:delete,
-// so the guard only ever blocks deletes of sessions still open in the UI.
+// so the guard only ever blocks deletes of snapshots still open in the UI.
 registerSnapshotHandlers(main.ipc, {
-  getProtectedSessions: () => protectedSessionsFromTabs(store.get('codeTabs') ?? []),
-  getArchivedLabels: () => archivedLabelsFromConversations(store.get('chatConversations') ?? []),
+  getProtectedSnapshots: () => protectedSnapshotsFromTabs(store.get('codeTabs') ?? []),
 });
 
 // Sandboxes tab (docs/sandboxes-tab-plan.md Phase 2): profile discovery +
@@ -383,15 +381,14 @@ registerSandboxInventoryHandlers(main.ipc, {
 // Startup snapshot GC. Code tabs cascade-delete on remove; this sweep
 // catches stale conversation snapshots older than 14 days (and any tar
 // orphaned by a crashed cascade). Protected set = every code tab's
-// sessionId — the reserved chat record included, so the active chat
-// conversation is covered with no special case. Best-effort; failures
+// snapshotRef. Best-effort; failures
 // don't block boot.
 void (async () => {
   try {
     const keep = new Set<string>();
     for (const tab of store.get('codeTabs') ?? []) {
-      if (tab.sessionId) {
-        keep.add(tab.sessionId);
+      if (tab.snapshotRef) {
+        keep.add(tab.snapshotRef);
       }
     }
     const deleted = await gcStaleSnapshots({ keep, ttlMs: DEFAULT_CHAT_SNAPSHOT_TTL_MS });
