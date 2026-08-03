@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build (and optionally push) the launcher server image with the omni-code
-# version sourced from src/lib/omni-version.ts — the single pin location.
+# version sourced from src/lib/product.ts — the single pin location.
 #
 # Usage:
 #   scripts/build-launcher-image.sh <image-ref> [--push]
@@ -17,7 +17,7 @@ ROOT="$(cd "$HERE/.." && pwd)"
 OMNI_PIP_INDEX="${OMNI_PIP_INDEX:-https://pypi.fury.io/ericmichael/}"
 
 OMNI_CODE_VERSION="$(node "$HERE/omni-code-version.mjs")"
-echo "Building $IMAGE with omni-code==$OMNI_CODE_VERSION (from src/lib/omni-version.ts)"
+echo "Building $IMAGE with omni-code==$OMNI_CODE_VERSION (from src/lib/product.ts)"
 
 docker build \
   -t "$IMAGE" \

@@ -66,7 +66,8 @@ RUN apt-get update \
 # omniagents' `[all]` extra in a future release to drop this inject.)
 ARG INSTALL_OMNI_CODE=true
 ARG OMNI_PIP_INDEX="https://pypi.fury.io/ericmichael/"
-# Single source of truth for the omni-code version is src/lib/omni-version.ts.
+# Single source of truth for the omni-code version is BUNDLED_PRODUCT in
+# src/lib/product.ts.
 # The build MUST pass it (scripts/build-launcher-image.sh reads it from there):
 # there is deliberately NO default, so a missing arg fails loudly instead of
 # silently baking a stale version. omniagents is NOT pinned here — it comes
