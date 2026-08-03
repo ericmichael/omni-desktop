@@ -31,6 +31,7 @@ import { EnvironmentDock } from './EnvironmentDock';
 
 type CodeWorkspaceLayoutProps = {
   uiSrc: string;
+  authToken?: string;
   sessionId?: string;
   onSessionChange?: (sessionId: string | undefined) => void;
   variables?: Record<string, unknown>;
@@ -503,6 +504,7 @@ AppSurfaceView.displayName = 'AppSurfaceView';
 export const CodeWorkspaceLayout = memo(
   ({
     uiSrc,
+    authToken,
     sessionId,
     onSessionChange,
     variables,
@@ -658,6 +660,7 @@ export const CodeWorkspaceLayout = memo(
           >
             <OmniAgentsApp
               uiUrl={uiSrc}
+              authToken={authToken}
               environmentId={environmentId}
               greeting={greeting}
               suggestions={suggestions}

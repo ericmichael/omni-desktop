@@ -139,6 +139,10 @@ async function launchElectronLocal(state: E2eState, testInfo: TestInfo, launchIn
     recordVideo: videoOptions(testInfo, launchIndex),
     slowMo: visualProofEnabled ? proofSlowMo : undefined,
   });
+  if (process.env.E2E_FORWARD_ELECTRON_LOGS === '1') {
+    electronApp.process().stdout?.pipe(process.stdout);
+    electronApp.process().stderr?.pipe(process.stderr);
+  }
   const page = await electronApp.firstWindow({ timeout: 120_000 });
   // The first BrowserWindow begins on the lightweight splash document and
   // then navigates to the renderer. Wait for stable product UI before taking

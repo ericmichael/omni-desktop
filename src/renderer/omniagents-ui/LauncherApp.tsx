@@ -14,6 +14,9 @@ import { UiConfigProvider, useUiConfig } from './ui-config';
 
 type OmniAgentsAppProps = {
   uiUrl: string;
+  /** Bearer credential from the launcher process status. Never inferred from
+   *  the token-free AgentHost WebSocket URL. */
+  authToken?: string;
   sessionId?: string;
   /** Execution environment used by workspace, process, and terminal RPCs. */
   environmentId?: string;
@@ -71,6 +74,7 @@ const ThemeSync = ({ children }: { children: ReactNode }) => {
 
 export const OmniAgentsApp = ({
   uiUrl,
+  authToken,
   sessionId,
   environmentId,
   onSessionChange,
@@ -103,7 +107,7 @@ export const OmniAgentsApp = ({
   const normalizedUrl = useMemo(() => new URL(uiUrl, serverOrigin()).toString(), [uiUrl]);
 
   return (
-    <UiConfigProvider uiUrl={normalizedUrl}>
+    <UiConfigProvider uiUrl={normalizedUrl} authToken={authToken}>
       <RPCClientProvider>
         <ThemeSync>
           <OmniAgentsCore

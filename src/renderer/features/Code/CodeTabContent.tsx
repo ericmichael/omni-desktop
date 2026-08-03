@@ -160,7 +160,7 @@ const CodeRunningView = memo(
     suggestions,
     pendingMessages,
   }: {
-    sandboxUrls: { uiUrl: string; services?: Record<string, string> };
+    sandboxUrls: { uiUrl: string; authToken?: string; services?: Record<string, string> };
     environmentId?: string;
     sessionId?: string;
     onSessionChange?: (sessionId: string | undefined) => void;
@@ -222,6 +222,7 @@ const CodeRunningView = memo(
         <div className={styles.flex1Relative}>
           <CodeWorkspaceLayout
             uiSrc={uiSrc}
+            authToken={sandboxUrls.authToken}
             environmentId={environmentId}
             sessionId={sessionId}
             onSessionChange={onSessionChange}

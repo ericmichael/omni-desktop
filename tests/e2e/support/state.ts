@@ -17,6 +17,7 @@ export type SeedState =
   | 'no-workspace'
   | 'workspace-files'
   | 'workspace-git'
+  | 'pooled-workspaces'
   | 'lazy-ready'
   | 'lazy-error-pending'
   | 'lazy-error-empty';
@@ -105,6 +106,69 @@ const workspaceGitSeed = (workspaceDir: string) => ({
   codeLayoutMode: 'focus',
 });
 
+const pooledWorkspacesSeed = (workspaceDir: string) => {
+  const alphaDir = path.join(workspaceDir, 'alpha');
+  const betaDir = path.join(workspaceDir, 'beta');
+  return {
+    projects: [
+      {
+        id: 'proj_e2e_pool_alpha',
+        label: 'Pool Alpha',
+        slug: 'pool-alpha',
+        sources: [
+          {
+            id: 'src_e2e_pool_alpha',
+            mountName: 'pool-alpha',
+            kind: 'local',
+            workspaceDir: alphaDir,
+            gitDetected: false,
+          },
+        ],
+        createdAt: seededAt,
+      },
+      {
+        id: 'proj_e2e_pool_beta',
+        label: 'Pool Beta',
+        slug: 'pool-beta',
+        sources: [
+          {
+            id: 'src_e2e_pool_beta',
+            mountName: 'pool-beta',
+            kind: 'local',
+            workspaceDir: betaDir,
+            gitDetected: false,
+          },
+        ],
+        createdAt: seededAt + 1,
+      },
+    ],
+    codeTabs: [
+      {
+        id: 'code-e2e-pool-alpha',
+        projectId: 'proj_e2e_pool_alpha',
+        sessionId: 'session-e2e-pool-alpha',
+        workspaceDir: alphaDir,
+        profileName: 'host',
+        profileNameExplicit: true,
+        createdAt: seededAt,
+        activatedAt: seededAt,
+      },
+      {
+        id: 'code-e2e-pool-beta',
+        projectId: 'proj_e2e_pool_beta',
+        sessionId: 'session-e2e-pool-beta',
+        workspaceDir: betaDir,
+        profileName: 'host',
+        profileNameExplicit: true,
+        createdAt: seededAt + 1,
+        activatedAt: seededAt + 1,
+      },
+    ],
+    activeCodeTabId: 'code-e2e-pool-alpha',
+    codeLayoutMode: 'focus',
+  };
+};
+
 function seedWorkspaceFiles(workspaceDir: string): void {
   const sourceDir = path.join(workspaceDir, 'src');
   mkdirSync(sourceDir, { recursive: true });
@@ -139,6 +203,15 @@ function seedWorkspaceGit(workspaceDir: string): void {
     "export const greeting = 'hello';\nexport const target = 'after';\nconsole.log(greeting);\n",
     'utf-8'
   );
+}
+
+function seedPooledWorkspaces(workspaceDir: string): void {
+  const alphaDir = path.join(workspaceDir, 'alpha');
+  const betaDir = path.join(workspaceDir, 'beta');
+  mkdirSync(alphaDir, { recursive: true });
+  mkdirSync(betaDir, { recursive: true });
+  writeFileSync(path.join(alphaDir, 'identity.txt'), 'alpha workspace\n', 'utf-8');
+  writeFileSync(path.join(betaDir, 'identity.txt'), 'beta workspace\n', 'utf-8');
 }
 
 const planningSeed = {
@@ -218,6 +291,7 @@ function launcherConfig(seedState: SeedState, workspaceDir: string) {
     ...(seedState === 'planning' ? planningSeed : {}),
     ...(seedState === 'workspace-files' ? workspaceFilesSeed(workspaceDir) : {}),
     ...(seedState === 'workspace-git' ? workspaceGitSeed(workspaceDir) : {}),
+    ...(seedState === 'pooled-workspaces' ? pooledWorkspacesSeed(workspaceDir) : {}),
   };
 }
 
@@ -246,6 +320,9 @@ export function seedServerState(state: E2eState, seedState: SeedState): void {
   if (seedState === 'workspace-git') {
     seedWorkspaceGit(state.workspaceDir);
   }
+  if (seedState === 'pooled-workspaces') {
+    seedPooledWorkspaces(state.workspaceDir);
+  }
   const configDir = path.join(state.homeDir, '.config', 'Omni Code');
   mkdirSync(configDir, { recursive: true });
   writeFileSync(
@@ -261,6 +338,9 @@ export function seedElectronState(state: E2eState, seedState: SeedState): void {
   }
   if (seedState === 'workspace-git') {
     seedWorkspaceGit(state.workspaceDir);
+  }
+  if (seedState === 'pooled-workspaces') {
+    seedPooledWorkspaces(state.workspaceDir);
   }
   const configDir = path.join(state.xdgConfigHome, 'Omni Code');
   mkdirSync(configDir, { recursive: true });

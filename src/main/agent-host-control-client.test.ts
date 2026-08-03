@@ -31,11 +31,14 @@ describe('AgentHostControlClient', () => {
       socket.on('message', (raw) => {
         const message = JSON.parse(String(raw)) as Record<string, unknown>;
         calls.push(message);
+        if (message['method'] === 'initialized') {
+          return;
+        }
         socket.send(
           JSON.stringify({
             jsonrpc: '2.0',
             id: message['id'],
-            result: { agent_host_id: 'host-1' },
+            result: message['method'] === 'initialize' ? { protocol_version: '1.0.0' } : { agent_host_id: 'host-1' },
           })
         );
       });
@@ -51,8 +54,16 @@ describe('AgentHostControlClient', () => {
     expect(first).toEqual({ agent_host_id: 'host-1' });
     expect(second).toEqual({ agent_host_id: 'host-1' });
     expect(authorization).toBe('Bearer control-secret');
-    expect(calls).toHaveLength(2);
-    expect(new Set(calls.map((call) => call['id'])).size).toBe(2);
+    expect(calls.map((call) => call['method'])).toEqual([
+      'initialize',
+      'initialized',
+      'agent_host_list_resources',
+      'agent_host_list_resources',
+    ]);
+    expect((calls[0]!['params'] as Record<string, unknown>)['capabilities']).toMatchObject({
+      experimental_operations: expect.arrayContaining(['agent_host_list_resources']),
+    });
+    expect(new Set(calls.slice(2).map((call) => call['id'])).size).toBe(2);
     client.close();
   });
 
@@ -62,6 +73,13 @@ describe('AgentHostControlClient', () => {
     server.on('connection', (socket) => {
       socket.on('message', (raw) => {
         const message = JSON.parse(String(raw)) as Record<string, unknown>;
+        if (message['method'] === 'initialize') {
+          socket.send(JSON.stringify({ jsonrpc: '2.0', id: message['id'], result: { protocol_version: '1.0.0' } }));
+          return;
+        }
+        if (message['method'] === 'initialized') {
+          return;
+        }
         socket.send(
           JSON.stringify({
             jsonrpc: '2.0',

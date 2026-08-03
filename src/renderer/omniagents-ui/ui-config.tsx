@@ -50,7 +50,15 @@ const buildWsUrl = (url: URL, path: string): string => {
   return `${proto}//${url.host}${path}`;
 };
 
-export const UiConfigProvider = ({ uiUrl, children }: { uiUrl: string; children: ReactNode }) => {
+export const UiConfigProvider = ({
+  uiUrl,
+  authToken,
+  children,
+}: {
+  uiUrl: string;
+  authToken?: string;
+  children: ReactNode;
+}) => {
   const value = useMemo<UiConfig>(() => {
     // Anchor against the launcher's actual origin — same-origin in browser
     // server mode, cloud baseUrl in cloud-linked Electron. Downstream
@@ -59,7 +67,10 @@ export const UiConfigProvider = ({ uiUrl, children }: { uiUrl: string; children:
     // rpc/client.ts, rpc/realtime.ts, TerminalPanel get URLs from us.
     const url = new URL(uiUrl, serverOrigin());
     const searchParams = url.searchParams;
-    const token = searchParams.get('token') || undefined;
+    // Launcher-owned runtimes pass credentials as typed process data. Keep
+    // query-token parsing only for standalone/browser entry points that still
+    // receive an authenticated UI handoff URL.
+    const token = authToken ?? searchParams.get('token') ?? undefined;
     const theme = searchParams.get('theme') || undefined;
     const debug = /^(1|true|yes)$/i.test(String(searchParams.get('debug') || ''));
     const minimal = searchParams.get('minimal') === 'true';
@@ -91,7 +102,7 @@ export const UiConfigProvider = ({ uiUrl, children }: { uiUrl: string; children:
       proxyPrefix,
       resolvePath,
     };
-  }, [uiUrl]);
+  }, [authToken, uiUrl]);
 
   return <UiConfigContext.Provider value={value}>{children}</UiConfigContext.Provider>;
 };

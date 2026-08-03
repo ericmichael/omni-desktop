@@ -5,6 +5,30 @@ import { wsAuthOptions } from '@/lib/ws-auth';
 import { OmniagentsRpcError } from '@/shared/omniagents-rpc';
 
 const DEFAULT_TIMEOUT_MS = 30_000;
+const CONTROL_OPERATIONS = [
+  'agent_host_register_workspace',
+  'agent_host_register_profile',
+  'agent_host_bind_thread',
+  'agent_host_list_resources',
+  'agent_host_materialize_environment',
+  'agent_host_stop_environment',
+] as const;
+const CONTROL_INITIALIZE_PARAMS = {
+  protocol_version: '1.0.0',
+  identity: { name: 'omni-desktop-agent-host-control', version: '1.0.0' },
+  platform: { os: process.platform, arch: process.arch },
+  capabilities: {
+    realtime: false,
+    mcp_apps: false,
+    client_functions: false,
+    approvals: false,
+    artifacts: false,
+    replay: false,
+    terminal: false,
+    experimental_operations: [...CONTROL_OPERATIONS],
+    disabled_notifications: [],
+  },
+} satisfies RpcMethodMap['initialize']['params'];
 
 type PendingCall = {
   resolve: (value: unknown) => void;
@@ -37,6 +61,14 @@ export class AgentHostControlClient {
     params: RpcMethodMap[Method]['params']
   ): Promise<RpcMethodMap[Method]['result']> {
     const socket = await this.ensureConnected();
+    return this.sendRequest(socket, method, params);
+  }
+
+  private sendRequest<Method extends keyof RpcMethodMap>(
+    socket: WebSocket,
+    method: Method,
+    params: RpcMethodMap[Method]['params']
+  ): Promise<RpcMethodMap[Method]['result']> {
     const id = this.nextId++;
     return new Promise<RpcMethodMap[Method]['result']>((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -74,14 +106,15 @@ export class AgentHostControlClient {
   }
 
   private ensureConnected(): Promise<WebSocket> {
-    if (this.socket?.readyState === WebSocket.OPEN) {
-      return Promise.resolve(this.socket);
-    }
     if (this.connecting) {
       return this.connecting;
     }
+    if (this.socket?.readyState === WebSocket.OPEN) {
+      return Promise.resolve(this.socket);
+    }
     this.connecting = new Promise<WebSocket>((resolve, reject) => {
       const socket = new WebSocket(this.wsUrl, wsAuthOptions(this.controlToken));
+      this.socket = socket;
       let opened = false;
       const failConnect = (error: Error): void => {
         if (opened) {
@@ -90,14 +123,35 @@ export class AgentHostControlClient {
         this.connecting = null;
         reject(error);
       };
-      socket.once('open', () => {
+      socket.once('open', async () => {
         opened = true;
-        socket.off('error', failConnect);
-        this.socket = socket;
-        this.connecting = null;
-        resolve(socket);
+        try {
+          await this.sendRequest(socket, 'initialize', CONTROL_INITIALIZE_PARAMS);
+          await new Promise<void>((resolveSend, rejectSend) => {
+            socket.send(JSON.stringify({ jsonrpc: '2.0', method: 'initialized', params: {} }), (error) => {
+              if (error) {
+                rejectSend(error);
+              } else {
+                resolveSend();
+              }
+            });
+          });
+          this.connecting = null;
+          resolve(socket);
+        } catch (error) {
+          this.socket = null;
+          this.connecting = null;
+          socket.close();
+          reject(error as Error);
+        }
       });
-      socket.once('error', failConnect);
+      socket.on('error', (error) => {
+        if (!opened) {
+          failConnect(error);
+          return;
+        }
+        this.rejectPending(error);
+      });
       socket.on('message', (raw) => this.handleMessage(raw));
       socket.on('close', () => {
         failConnect(new Error('AgentHost control connection closed before it opened'));
