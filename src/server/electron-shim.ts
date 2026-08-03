@@ -14,6 +14,10 @@ export const ipcMain = {
 
 // Stub app
 export const app = {
+  // Electron resolves this to the application directory. Server mode is
+  // launched from the application root, with an explicit override available
+  // for embedders that use a different working directory.
+  getAppPath: (): string => process.env.OMNI_LAUNCHER_APP_PATH || process.cwd(),
   getPath: (name: string): string => {
     switch (name) {
       case 'home':
