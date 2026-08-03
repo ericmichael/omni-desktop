@@ -1,5 +1,6 @@
 import type { ChildProcess } from 'node:child_process';
 import { spawn } from 'node:child_process';
+import { createHash, randomBytes } from 'node:crypto';
 import path from 'node:path';
 
 import c from 'ansi-colors';
@@ -11,6 +12,7 @@ import { getProductSlug } from '@/lib/product';
 import { DEFAULT_ENV } from '@/lib/pty-utils';
 import { SimpleLogger } from '@/lib/simple-logger';
 import { wsAuthOptions } from '@/lib/ws-auth';
+import { AgentHostControlClient } from '@/main/agent-host-control-client';
 import type { IComputeClient } from '@/main/platform-client';
 import { assertServeProtocolSupported } from '@/main/product-runtime';
 import { type ResolvedProfile, resolveProfile } from '@/main/profile-resolver';
@@ -174,6 +176,13 @@ export type AgentProcessStartArg = {
   explicitProfilePath?: string;
 };
 
+export type AgentHostConsumerRuntime = {
+  workspaceId: string;
+  environmentId: string;
+  services: Record<string, string>;
+  containerId?: string;
+};
+
 export type FetchFn = typeof globalThis.fetch;
 
 // ---------------------------------------------------------------------------
@@ -248,6 +257,34 @@ const servePayloadToData = (payload: ServeReadyPayload): AgentProcessData => {
  * launcher must consume it, never display it.
  */
 const redactAuthTokens = (chunk: string): string => chunk.replace(/("auth_token"\s*:\s*")[^"]*(")/g, '$1[redacted]$2');
+
+const sourceDescriptor = (source: AgentProcessSource): Record<string, unknown> => {
+  const descriptor: Record<string, unknown> = {
+    kind: source.kind,
+    mountName: source.mountName,
+    writable: source.writable ?? true,
+  };
+  if (source.kind === 'local' || source.kind === 'local-git') {
+    descriptor.path = source.workspaceDir;
+  }
+  if (source.kind === 'git-remote') {
+    descriptor.repoUrl = source.repoUrl;
+    if (source.auth) {
+      descriptor.auth = source.auth;
+    }
+  }
+  if ((source.kind === 'local-git' || source.kind === 'git-remote') && source.ref) {
+    descriptor.ref = source.ref;
+  }
+  return descriptor;
+};
+
+const serveWorkspaceDirectory = (arg: AgentProcessStartArg): string => {
+  const firstLocal = arg.sources.find((source) => source.kind === 'local' || source.kind === 'local-git');
+  return firstLocal && (firstLocal.kind === 'local' || firstLocal.kind === 'local-git')
+    ? firstLocal.workspaceDir
+    : getOmniConfigDir();
+};
 
 const SERVER_CALL_TIMEOUT_MS = 8_000;
 
@@ -384,6 +421,8 @@ export class AgentProcess {
   private computeClient: IComputeClient | null = null;
   private computeSessionId: string | null = null;
   private getExtraEnv?: () => Record<string, string> | Promise<Record<string, string>>;
+  private agentHostControlToken: string | null = null;
+  private agentHostControlClient: AgentHostControlClient | null = null;
   /**
    * Children we deliberately killed via {@link killProcess} (SIGTERM → SIGKILL).
    * Their late `close` events should NOT flip status to `error("signal SIGKILL")`
@@ -426,6 +465,119 @@ export class AgentProcess {
   // --- Public API ---
 
   getStatus = (): WithTimestamp<AgentProcessStatus> => this.status;
+
+  /** Register and bind one launcher consumer inside this long-lived AgentHost. */
+  configureConsumer = async (
+    threadId: string,
+    workspaceId: string,
+    arg: AgentProcessStartArg,
+    useStartupEnvironment: boolean
+  ): Promise<AgentHostConsumerRuntime> => {
+    if (this.mode !== 'serve') {
+      throw new Error('Delegated compute does not support AgentHost consumer configuration');
+    }
+    const data = await this.waitForRunningData();
+    if (!data.wsUrl || !this.agentHostControlToken) {
+      throw new Error('AgentHost control channel is unavailable');
+    }
+    const control =
+      this.agentHostControlClient ??
+      (this.agentHostControlClient = new AgentHostControlClient(data.wsUrl, this.agentHostControlToken));
+
+    let runtime: AgentHostConsumerRuntime;
+    let materializedEnvironmentId: string | undefined;
+    if (useStartupEnvironment) {
+      if (!data.workspaceId || !data.environmentId) {
+        throw new Error('Startup AgentHost environment is unavailable');
+      }
+      runtime = {
+        workspaceId: data.workspaceId,
+        environmentId: data.environmentId,
+        services: data.services ?? {},
+        ...(data.containerId ? { containerId: data.containerId } : {}),
+      };
+    } else {
+      const resolved = arg.explicitProfilePath
+        ? ({ kind: 'file', path: arg.explicitProfilePath } as const)
+        : resolveProfile(arg.profileName);
+      if (resolved.kind === 'missing') {
+        throw new Error(`Profile "${arg.profileName}" is no longer available`);
+      }
+      const definition: Record<string, unknown> =
+        resolved.kind === 'file'
+          ? { kind: 'path', path: resolved.path }
+          : {
+              kind: 'default',
+              ...(arg.projectId ? { project_id: arg.projectId } : {}),
+            };
+      const profileId = `profile_${createHash('sha256').update(JSON.stringify(definition)).digest('hex').slice(0, 24)}`;
+      await control.call('agent_host_register_workspace', {
+        workspace_id: workspaceId,
+        materialization_path: serveWorkspaceDirectory(arg),
+        sources: arg.sources.map(sourceDescriptor),
+        owner_user_id: 'token_user',
+      });
+      await control.call('agent_host_register_profile', {
+        profile_id: profileId,
+        definition,
+        owner_user_id: 'token_user',
+      });
+      const materialized = (await control.call('agent_host_materialize_environment', {
+        workspace_id: workspaceId,
+        profile_id: profileId,
+      })) as Record<string, unknown>;
+      const environmentId = String(materialized['environment_id'] ?? '').trim();
+      if (!environmentId) {
+        throw new Error('AgentHost materialization returned no environment_id');
+      }
+      materializedEnvironmentId = environmentId;
+      runtime = {
+        workspaceId,
+        environmentId,
+        services:
+          materialized['services'] && typeof materialized['services'] === 'object'
+            ? (materialized['services'] as Record<string, string>)
+            : {},
+        ...(typeof materialized['container_id'] === 'string' && materialized['container_id']
+          ? { containerId: materialized['container_id'] }
+          : {}),
+      };
+    }
+
+    try {
+      await control.call('agent_host_bind_thread', {
+        thread_id: threadId,
+        binding: {
+          workspace_id: runtime.workspaceId,
+          environment_selection: {
+            mode: 'existing',
+            environment_id: runtime.environmentId,
+          },
+        },
+      });
+    } catch (error) {
+      if (materializedEnvironmentId) {
+        try {
+          await control.call('agent_host_stop_environment', {
+            environment_id: materializedEnvironmentId,
+          });
+        } catch {
+          // Preserve the binding error; environment cleanup is best-effort.
+        }
+      }
+      throw error;
+    }
+    return runtime;
+  };
+
+  stopConsumerEnvironment = async (environmentId: string): Promise<void> => {
+    if (!this.agentHostControlClient) {
+      return;
+    }
+    await this.agentHostControlClient.call('agent_host_stop_environment', {
+      environment_id: environmentId,
+    });
+  };
 
   start = async (arg: AgentProcessStartArg): Promise<void> => {
     if (this.status.type === 'starting' || this.status.type === 'connecting' || this.status.type === 'running') {
@@ -485,6 +637,7 @@ export class AgentProcess {
     // just kill the child and let it run the session.stop()/aclose() and
     // service cleanup in its own finally block.
     if (!this.childProcess) {
+      this.closeAgentHostControl();
       return;
     }
     // Capture the WS URL + auth before flipping status — `stopping` carries no data.
@@ -502,6 +655,7 @@ export class AgentProcess {
     } else if (opts?.discardSnapshot && wsUrl) {
       this.ipcRawOutput('Cannot discard the sandbox snapshot: no execution environment is available.\r\n');
     }
+    this.closeAgentHostControl();
     await this.killProcess();
     this.updateStatus({ type: 'exited' });
   };
@@ -770,31 +924,21 @@ export class AgentProcess {
       // never be shadowed by ambient/extra env.
       ...(arg.gitTokenEnv ?? {}),
     } as Record<string, string>;
-    const args: string[] = ['serve', '--output', 'json'];
+    const clientAuthToken = randomBytes(32).toString('hex');
+    this.agentHostControlToken = randomBytes(32).toString('hex');
+    const args: string[] = [
+      'serve',
+      '--output',
+      'json',
+      '--auth-token',
+      clientAuthToken,
+      '--agent-host-control-token',
+      this.agentHostControlToken,
+    ];
     // One ``--source <json>`` per source — omni serve's argparse uses
     // ``action="append"``, so each emits a fresh dict.
     for (const s of arg.sources) {
-      const desc: Record<string, unknown> = {
-        kind: s.kind,
-        mountName: s.mountName,
-        // Older callers predate source-level policy and remain writable.
-        writable: s.writable ?? true,
-      };
-      if (s.kind === 'local' || s.kind === 'local-git') {
-        desc.path = s.workspaceDir;
-      }
-      if (s.kind === 'git-remote') {
-        desc.repoUrl = s.repoUrl;
-        if (s.auth) {
-          desc.auth = s.auth;
-        }
-      }
-      if (s.kind === 'local-git' || s.kind === 'git-remote') {
-        if (s.ref) {
-          desc.ref = s.ref;
-        }
-      }
-      args.push('--source', JSON.stringify(desc));
+      args.push('--source', JSON.stringify(sourceDescriptor(s)));
     }
     // One ``--credential <json>`` per linked host the project uses. Token values
     // are not here — they ride in ``gitTokenEnv`` (merged into env above) and are
@@ -842,15 +986,14 @@ export class AgentProcess {
     // relative paths in shell. With no local source, fall back to the
     // launcher config dir. Same value is forwarded as --workspace so
     // omni serve can substitute ${workspace_dir} in the resolved profile.
-    const firstLocal = arg.sources.find((s) => s.kind === 'local' || s.kind === 'local-git');
-    const spawnCwd =
-      firstLocal && (firstLocal.kind === 'local' || firstLocal.kind === 'local-git')
-        ? firstLocal.workspaceDir
-        : getOmniConfigDir();
+    const spawnCwd = serveWorkspaceDirectory(arg);
     args.push('--workspace', spawnCwd);
 
     this.log.info(c.cyan(`Starting omni serve (profile: ${arg.profileName})...\r\n`));
-    this.log.info(`> ${omniCli} ${args.join(' ')}\r\n`);
+    const loggedArgs = args.map((value, index) =>
+      args[index - 1] === '--auth-token' || args[index - 1] === '--agent-host-control-token' ? '[redacted]' : value
+    );
+    this.log.info(`> ${omniCli} ${loggedArgs.join(' ')}\r\n`);
 
     try {
       const child = spawn(omniCli, args, {
@@ -870,6 +1013,7 @@ export class AgentProcess {
         if (this.intentionallyKilled.has(child)) {
           return;
         }
+        this.closeAgentHostControl();
         this.childProcess = null;
         this.updateStatus({ type: 'error', error: { message: error.message } });
       });
@@ -902,6 +1046,7 @@ export class AgentProcess {
           }
           return;
         }
+        this.closeAgentHostControl();
         this.childProcess = null;
         // Push the snapshot tar to blob durability before reporting status.
         // No-op when not configured or when sessionId is unset. Fire-and-
@@ -1062,6 +1207,31 @@ export class AgentProcess {
   private updateStatus = (status: AgentProcessStatus): void => {
     this.status = { ...status, timestamp: Date.now() };
     this.onStatusChange(this.status);
+  };
+
+  private waitForRunningData = async (): Promise<AgentProcessData> => {
+    const deadline = Date.now() + 120_000;
+    while (Date.now() < deadline) {
+      if (this.status.type === 'running') {
+        return this.status.data;
+      }
+      if (this.status.type === 'error') {
+        throw new Error(this.status.error.message);
+      }
+      if (this.status.type === 'exited' || this.status.type === 'exiting') {
+        throw new Error('AgentHost exited before it became ready');
+      }
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 25);
+      });
+    }
+    throw new Error('Timed out waiting for AgentHost readiness');
+  };
+
+  private closeAgentHostControl = (): void => {
+    this.agentHostControlClient?.close();
+    this.agentHostControlClient = null;
+    this.agentHostControlToken = null;
   };
 
   /** Patch fields on the embedded ``AgentProcessData`` without changing the

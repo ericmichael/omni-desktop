@@ -179,6 +179,204 @@
       ],
       "type": "object"
     },
+    "agent_host_bind_thread": {
+      "additionalProperties": false,
+      "properties": {
+        "binding": {
+          "additionalProperties": false,
+          "properties": {
+            "environment_selection": {
+              "oneOf": [
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "mode": {
+                      "const": "none"
+                    }
+                  },
+                  "required": [
+                    "mode"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "mode": {
+                      "const": "automatic"
+                    },
+                    "profile_id": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "mode",
+                    "profile_id"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "environment_id": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "mode": {
+                      "const": "existing"
+                    }
+                  },
+                  "required": [
+                    "mode",
+                    "environment_id"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            "workspace_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "workspace_id",
+            "environment_selection"
+          ],
+          "type": "object"
+        },
+        "thread_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "thread_id",
+        "binding"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "agent_host_list_resources": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "agent_host_materialize_environment": {
+      "additionalProperties": false,
+      "properties": {
+        "profile_id": {
+          "type": "string"
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "workspace_id",
+        "profile_id"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "agent_host_register_profile": {
+      "additionalProperties": false,
+      "properties": {
+        "definition": {
+          "oneOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "const": "default"
+                },
+                "project_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "const": "path"
+                },
+                "path": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "path"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "owner_user_id": {
+          "type": "string"
+        },
+        "profile_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "profile_id",
+        "definition"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "agent_host_register_workspace": {
+      "additionalProperties": false,
+      "properties": {
+        "materialization_path": {
+          "type": "string"
+        },
+        "owner_user_id": {
+          "type": "string"
+        },
+        "snapshot_ref": {
+          "type": "string"
+        },
+        "sources": {
+          "items": {
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "workspace_id",
+        "materialization_path"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "agent_host_stop_environment": {
+      "additionalProperties": false,
+      "properties": {
+        "environment_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "environment_id"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
     "archive_session": {
       "additionalProperties": false,
       "properties": {
@@ -3438,6 +3636,24 @@
     },
     {
       "$ref": "#/$defs/get_item"
+    },
+    {
+      "$ref": "#/$defs/agent_host_register_workspace"
+    },
+    {
+      "$ref": "#/$defs/agent_host_register_profile"
+    },
+    {
+      "$ref": "#/$defs/agent_host_bind_thread"
+    },
+    {
+      "$ref": "#/$defs/agent_host_list_resources"
+    },
+    {
+      "$ref": "#/$defs/agent_host_materialize_environment"
+    },
+    {
+      "$ref": "#/$defs/agent_host_stop_environment"
     },
     {
       "$ref": "#/$defs/fork_session"

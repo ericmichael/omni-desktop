@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 
@@ -8,6 +9,7 @@ import { mirrorContainerChangesToHost } from '@/lib/container-sync';
 import { isResidentProcessId } from '@/lib/resident-agent';
 import { AgentHostManager } from '@/main/agent-host-manager';
 import {
+  type AgentHostConsumerRuntime,
   AgentProcess,
   type AgentProcessMode,
   type AgentProcessSource,
@@ -114,6 +116,8 @@ export class ProcessManager {
   private processes = new Map<string, AgentProcess>();
   private agentHosts = new AgentHostManager<AgentProcess>();
   private lastStartArgs = new Map<string, AgentProcessStartOptions>();
+  private consumerRuntimes = new Map<string, AgentHostConsumerRuntime>();
+  private consumerWorkspaceIds = new Map<string, string>();
   private sendToWindow: <T extends keyof IpcRendererEvents>(channel: T, ...args: IpcRendererEvents[T]) => void;
   private fetchFn: FetchFn;
   private getStoreData: () => ProcessManagerStoreData;
@@ -319,7 +323,10 @@ export class ProcessManager {
         },
         onStatusChange: (status) => {
           for (const consumerId of this.agentHosts.consumersForHost(proc)) {
-            this.sendToWindow('agent-process:status', consumerId, status);
+            const tailored = this.statusForConsumer(consumerId, proc, status);
+            if (tailored) {
+              this.sendToWindow('agent-process:status', consumerId, tailored);
+            }
           }
         },
         fetchFn: this.fetchFn,
@@ -347,30 +354,39 @@ export class ProcessManager {
       return JSON.stringify(['compute', processId, arg.sessionId ?? null]);
     }
     const principalScope = isResidentProcessId(processId) ? processId : 'interactive';
+    const credentialScope =
+      (arg.credentials?.length ?? 0) > 0 || Object.keys(arg.gitTokenEnv ?? {}).length > 0 ? processId : 'shared';
     return JSON.stringify({
       mode,
       principalScope,
-      profileName: arg.profileName,
-      explicitProfilePath: arg.explicitProfilePath ?? null,
-      projectId: arg.projectId ?? null,
-      workspaceDir: arg.workspaceDir ?? null,
-      sources: arg.sources.map((source) => {
-        const common = {
-          kind: source.kind,
-          mountName: source.mountName,
-          writable: source.writable ?? true,
-        };
-        if (source.kind === 'local' || source.kind === 'local-git') {
-          return {
-            ...common,
-            workspaceDir: source.workspaceDir,
-            ...('ref' in source ? { ref: source.ref ?? null } : {}),
-          };
-        }
-        return { ...common, repoUrl: source.repoUrl, ref: source.ref ?? null, auth: source.auth ?? null };
-      }),
-      credentials: arg.credentials ?? [],
+      credentialScope,
+      hostBridgeMachine: parseLocalProfile(arg.profileName),
     });
+  }
+
+  private statusForConsumer(
+    consumerId: string,
+    host: AgentProcess,
+    status: WithTimestamp<AgentProcessStatus>
+  ): WithTimestamp<AgentProcessStatus> | null {
+    if (status.type !== 'running' && status.type !== 'connecting') {
+      return status;
+    }
+    const runtime = this.consumerRuntimes.get(consumerId);
+    if (!runtime) {
+      const firstConsumer = this.agentHosts.consumersForHost(host)[0];
+      return firstConsumer === consumerId ? status : null;
+    }
+    return {
+      ...status,
+      data: {
+        ...status.data,
+        workspaceId: runtime.workspaceId,
+        environmentId: runtime.environmentId,
+        services: runtime.services,
+        containerId: runtime.containerId,
+      },
+    };
   }
 
   private async buildStartArg(opts: AgentProcessStartOptions): Promise<AgentProcessStartArg> {
@@ -736,14 +752,36 @@ export class ProcessManager {
     const compatibilityKey = this.agentHostCompatibilityKey(processId, mode, startArg);
     const { proc, created } = this.getOrCreate(processId, compatibilityKey, mode, client);
     this.trackMirrorSources(processId, startArg.sources);
-    const statusType = proc.getStatus().type;
-    if (created || !['starting', 'connecting', 'running'].includes(statusType)) {
-      proc.start(startArg);
-    } else {
-      // A newly attached consumer needs the already-live host state even
-      // though no child process was started for it.
-      this.sendToWindow('agent-process:status', processId, this.getStatus(processId));
+    try {
+      const statusType = proc.getStatus().type;
+      if (created || !['starting', 'connecting', 'running'].includes(statusType)) {
+        await proc.start(startArg);
+      }
+      if (mode === 'serve') {
+        const workspaceId = this.consumerWorkspaceIds.get(processId) ?? `workspace_${randomUUID().replaceAll('-', '')}`;
+        this.consumerWorkspaceIds.set(processId, workspaceId);
+        const runtime = await proc.configureConsumer(processId, workspaceId, startArg, created);
+        this.consumerRuntimes.set(processId, runtime);
+      }
+    } catch (error) {
+      this.mirrorSources.delete(processId);
+      this.consumerRuntimes.delete(processId);
+      this.consumerWorkspaceIds.delete(processId);
+      this.processes.delete(processId);
+      const detached = this.agentHosts.detach(processId);
+      if (detached?.lastConsumer) {
+        await proc.stop().catch(() => {});
+      }
+      const machineId = this.localSandboxKeys.get(processId);
+      if (machineId && this.hostBridge) {
+        this.localSandboxKeys.delete(processId);
+        void this.hostBridge.release(machineId, processId).catch(() => {});
+      }
+      throw error;
     }
+    // A newly attached consumer needs its tailored live host state even though
+    // no child process was started for it.
+    this.sendToWindow('agent-process:status', processId, this.getStatus(processId));
   };
 
   stop = async (processId: string, opts?: AgentProcessStopOptions): Promise<void> => {
@@ -752,10 +790,15 @@ export class ProcessManager {
       return;
     }
     this.mirrorSources.delete(processId);
+    const runtime = this.consumerRuntimes.get(processId);
+    this.consumerRuntimes.delete(processId);
+    this.consumerWorkspaceIds.delete(processId);
     this.processes.delete(processId);
     const detached = this.agentHosts.detach(processId);
     if (detached?.lastConsumer) {
       await proc.stop(opts);
+    } else if (detached && runtime) {
+      await proc.stopConsumerEnvironment(runtime.environmentId);
     }
     const machineId = this.localSandboxKeys.get(processId);
     if (machineId && this.hostBridge) {
@@ -794,6 +837,26 @@ export class ProcessManager {
     const client = this.resolveComputeClient(startArg.profileName);
     const previous = this.processes.get(processId);
     const compatibilityKey = this.agentHostCompatibilityKey(processId, mode, startArg);
+    if (previous && mode === 'serve' && lastOpts) {
+      const previousStartArg = await this.buildStartArg(lastOpts);
+      const previousMode = this.resolveMode(previousStartArg.profileName);
+      const previousKey = this.agentHostCompatibilityKey(processId, previousMode, previousStartArg);
+      const workspaceId = this.consumerWorkspaceIds.get(processId);
+      if (compatibilityKey === previousKey && workspaceId) {
+        const currentRuntime = this.consumerRuntimes.get(processId);
+        const runtime = await previous.configureConsumer(processId, workspaceId, startArg, false);
+        this.consumerRuntimes.set(processId, runtime);
+        if (currentRuntime && currentRuntime.environmentId !== runtime.environmentId) {
+          await previous.stopConsumerEnvironment(currentRuntime.environmentId).catch((error) => {
+            console.warn(`[process-manager] old environment cleanup failed: ${(error as Error).message}`);
+          });
+        }
+        this.lastStartArgs.set(processId, merged);
+        this.trackMirrorSources(processId, startArg.sources);
+        this.sendToWindow('agent-process:status', processId, this.getStatus(processId));
+        return;
+      }
+    }
     const { proc, created } = this.getOrCreate(processId, compatibilityKey, mode, client);
     this.trackMirrorSources(processId, startArg.sources);
     if (created || proc !== previous) {
@@ -810,7 +873,8 @@ export class ProcessManager {
 
   getStatus = (processId: string): WithTimestamp<AgentProcessStatus> => {
     const proc = this.processes.get(processId);
-    const status = proc ? proc.getStatus() : { type: 'uninitialized' as const, timestamp: Date.now() };
+    const baseStatus = proc ? proc.getStatus() : { type: 'uninitialized' as const, timestamp: Date.now() };
+    const status = proc ? (this.statusForConsumer(processId, proc, baseStatus) ?? baseStatus) : baseStatus;
     return this.withHostOfflineOverlay(processId, status);
   };
 
@@ -931,22 +995,43 @@ export class ProcessManager {
       return { ok: false, fallback: true, reason: 'launch binding not found' };
     }
     const nextOpts = { ...previousOpts, profileNameOverride: profileName };
+    const previousArg = await this.buildStartArg(previousOpts);
     const nextArg = await this.buildStartArg(nextOpts);
     const nextMode = this.resolveMode(nextArg.profileName);
+    const previousMode = this.resolveMode(previousArg.profileName);
+    const previousKey = this.agentHostCompatibilityKey(processId, previousMode, previousArg);
     const nextKey = this.agentHostCompatibilityKey(processId, nextMode, nextArg);
-    if (!this.agentHosts.canRekey(processId, nextKey)) {
+    if (nextMode !== 'serve' || nextKey !== previousKey) {
       return {
         ok: false,
         fallback: true,
-        reason: 'profile change requires rebinding this tab from its shared agent host',
+        reason: 'profile change crosses an AgentHost security boundary',
       };
     }
-    const result = await proc.switchSandbox(profileName);
-    if (result.ok) {
-      this.agentHosts.rekey(processId, nextKey);
-      this.lastStartArgs.set(processId, nextOpts);
+    const workspaceId = this.consumerWorkspaceIds.get(processId);
+    if (!workspaceId) {
+      return { ok: false, fallback: true, reason: 'workspace binding not found' };
     }
-    return result;
+    try {
+      const currentRuntime = this.consumerRuntimes.get(processId);
+      const runtime = await proc.configureConsumer(processId, workspaceId, nextArg, false);
+      this.consumerRuntimes.set(processId, runtime);
+      if (currentRuntime && currentRuntime.environmentId !== runtime.environmentId) {
+        await proc.stopConsumerEnvironment(currentRuntime.environmentId).catch((error) => {
+          console.warn(`[process-manager] old environment cleanup failed: ${(error as Error).message}`);
+        });
+      }
+      this.lastStartArgs.set(processId, nextOpts);
+      this.sendToWindow('agent-process:status', processId, this.getStatus(processId));
+      return {
+        ok: true,
+        profile: profileName,
+        containerId: runtime.containerId,
+        services: runtime.services,
+      };
+    } catch (error) {
+      return { ok: false, reason: (error as Error).message };
+    }
   };
 
   notifyActivity = (processId: string): void => {
@@ -1124,6 +1209,8 @@ export class ProcessManager {
     await Promise.allSettled(exits);
     this.processes.clear();
     this.lastStartArgs.clear();
+    this.consumerRuntimes.clear();
+    this.consumerWorkspaceIds.clear();
   };
 }
 

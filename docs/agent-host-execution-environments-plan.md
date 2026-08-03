@@ -47,13 +47,12 @@ Completed through the framework/runtime vertical slice:
   controller from the Run lease. Filesystem, source, project, AgentSpec,
   sandbox-session, and discard-snapshot process globals have been deleted;
   utility-agent helpers no longer fall back to serve-global placement.
-- Launcher main-process ownership now has a compatibility-keyed
-  `AgentHostManager`. Compatible local project tabs attach to one live host,
-  receive fan-out status/output events, and detach independently; the host is
-  stopped only after its final consumer leaves. Delegated compute and resident
-  principals remain deliberately isolated. Exclusive in-place profile switches
-  re-key the host, while a shared host forces the changing tab through its
-  detach/relaunch path instead of mutating other tabs' runtime.
+- Launcher main-process ownership now has a compatibility/security-keyed
+  `AgentHostManager`. Interactive tabs with unrelated Workspaces and profiles
+  attach to one live host, receive environment-tailored status plus fan-out
+  output events, and detach independently; the host is stopped only after its
+  final consumer leaves. Delegated compute, resident principals, host-bridge
+  machines, and credential-bearing launches remain deliberately isolated.
 - `AutomaticEnvironment(profile_id)` now resolves through an AgentHost-owned
   provisioner. Request preparation resolves the durable Workspace without side
   effects so authorization happens first; the authorized Run then materializes
@@ -66,16 +65,23 @@ Completed through the framework/runtime vertical slice:
   capabilities, services, and lifecycle state as one owned environment.
   Environment stop releases its sandbox session and services before publishing
   the stopped state.
+- Typed AgentHost control-plane RPCs register owner-scoped Workspaces and
+  profile definitions, materialize and stop environments, bind Threads, and
+  list resources. Host-path registration is admin-only and uses a distinct
+  launcher control credential that is never exposed in readiness or renderer
+  state.
+- The launcher uses a persistent typed main-process control channel to bind
+  each tab to its own Workspace/environment. Profile switches and rebuilds
+  materialize and bind a replacement before retiring the prior environment;
+  closing one tab stops only its environment. Failed materialization or binding
+  rolls back without orphaning the host or a newly created environment.
 
-Next: expose typed AgentHost control-plane RPCs for registering Workspaces and
-profile definitions, atomically binding Threads, and listing/selecting the
-resulting environments. Wire the product composition root to those registries,
-then remove Workspace/profile identity from the launcher host key so compatible
-tabs can attach unrelated Workspaces to one process. A temporary
-`SwitchContext` reference remains only in the legacy per-process serve startup
-and shutdown path; lifecycle RPCs and tools cannot access it globally. It is
-deleted with per-tab AgentProcess ownership, followed by broad Electron/server
-visual proof.
+Next: exercise the pooled-host path against the real Electron/server product,
+including two unrelated Workspaces, independent Devbox Files/Git/Terminal
+surfaces, per-tab profile switching, and independent close/rebuild. Then remove
+the remaining legacy per-process `SwitchContext` startup/shutdown path and
+obsolete ticket/session process assumptions before broad visual proof and the
+final routing audit.
 
 ## Executive decision
 
@@ -677,17 +683,17 @@ global sandbox session, or an implicit HostWorkspace.
 
 Move every remaining global into the resource that owns it:
 
-| Existing state | New owner |
-| --- | --- |
-| Manifest/product definition | AgentDefinition |
-| Sources and snapshot | Workspace |
-| Sandbox session and profile | ExecutionEnvironment |
-| Sandbox switch lock | ExecutionEnvironment |
-| Terminal manager | Environment-scoped terminal registry |
-| Job manager | Environment-scoped job registry |
-| Active run state | RunCoordinator |
-| Conversation history | ThreadManager |
-| Credentials | AgentHost principal scope or explicit environment scope |
+| Existing state              | New owner                                               |
+| --------------------------- | ------------------------------------------------------- |
+| Manifest/product definition | AgentDefinition                                         |
+| Sources and snapshot        | Workspace                                               |
+| Sandbox session and profile | ExecutionEnvironment                                    |
+| Sandbox switch lock         | ExecutionEnvironment                                    |
+| Terminal manager            | Environment-scoped terminal registry                    |
+| Job manager                 | Environment-scoped job registry                         |
+| Active run state            | RunCoordinator                                          |
+| Conversation history        | ThreadManager                                           |
+| Credentials                 | AgentHost principal scope or explicit environment scope |
 
 Implement and prove:
 
@@ -764,15 +770,15 @@ Execution Environments.
 
 With four available slots, including the primary agent:
 
-| Wave | Primary agent | Parallel agent 1 | Parallel agent 2 | Parallel agent 3 |
-| --- | --- | --- | --- | --- |
-| 0 | ADR/contracts/integration | RPC inventory | global-state inventory | isolation-test design |
-| 1 | interfaces/integration | environment adapters | workspace registry | foundation tests |
-| 2 | operation-router integration | typed RPC metadata | server-function metadata | vertical-slice tests |
-| 3 | lifecycle/integration | Files and Git | terminals and jobs | runs and tools |
-| 4 | AgentHost integration | global-state removal | sandbox lifecycle | concurrency tests |
-| 5 | launcher integration | AgentHostManager | UI runtime bindings | launcher E2E |
-| 6 | final integration | backend deletion | launcher deletion | docs and final tests |
+| Wave | Primary agent                | Parallel agent 1     | Parallel agent 2         | Parallel agent 3      |
+| ---- | ---------------------------- | -------------------- | ------------------------ | --------------------- |
+| 0    | ADR/contracts/integration    | RPC inventory        | global-state inventory   | isolation-test design |
+| 1    | interfaces/integration       | environment adapters | workspace registry       | foundation tests      |
+| 2    | operation-router integration | typed RPC metadata   | server-function metadata | vertical-slice tests  |
+| 3    | lifecycle/integration        | Files and Git        | terminals and jobs       | runs and tools        |
+| 4    | AgentHost integration        | global-state removal | sandbox lifecycle        | concurrency tests     |
+| 5    | launcher integration         | AgentHostManager     | UI runtime bindings      | launcher E2E          |
+| 6    | final integration            | backend deletion     | launcher deletion        | docs and final tests  |
 
 Shared interfaces are frozen before Wave 3. Parallel agents do not independently
 change resource identity, RequestContext, EnvironmentLease, or operation

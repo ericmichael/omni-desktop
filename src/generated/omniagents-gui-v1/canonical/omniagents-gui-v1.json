@@ -4287,6 +4287,344 @@
         },
         {
           "$ref": "#/components/errors/InitializationRequired"
+        }
+      ],
+      "name": "agent_host_register_workspace",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "workspace_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/agent_host_register_workspace/properties/workspace_id"
+          }
+        },
+        {
+          "name": "materialization_path",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/agent_host_register_workspace/properties/materialization_path"
+          }
+        },
+        {
+          "name": "snapshot_ref",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/agent_host_register_workspace/properties/snapshot_ref"
+          }
+        },
+        {
+          "name": "sources",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/agent_host_register_workspace/properties/sources"
+          }
+        },
+        {
+          "name": "owner_user_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/agent_host_register_workspace/properties/owner_user_id"
+          }
+        }
+      ],
+      "result": {
+        "name": "agent_host_register_workspace_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation agent_host_register_workspace",
+      "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/agent_host_register_workspace"
+      },
+      "x-omni-resource-scope": "agent_host",
+      "x-omni-stability": "experimental"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        }
+      ],
+      "name": "agent_host_register_profile",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "profile_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/agent_host_register_profile/properties/profile_id"
+          }
+        },
+        {
+          "name": "definition",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/agent_host_register_profile/properties/definition"
+          }
+        },
+        {
+          "name": "owner_user_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/agent_host_register_profile/properties/owner_user_id"
+          }
+        }
+      ],
+      "result": {
+        "name": "agent_host_register_profile_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation agent_host_register_profile",
+      "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/agent_host_register_profile"
+      },
+      "x-omni-resource-scope": "agent_host",
+      "x-omni-stability": "experimental"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        }
+      ],
+      "name": "agent_host_bind_thread",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "thread_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/agent_host_bind_thread/properties/thread_id"
+          }
+        },
+        {
+          "name": "binding",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/agent_host_bind_thread/properties/binding"
+          }
+        }
+      ],
+      "result": {
+        "name": "agent_host_bind_thread_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation agent_host_bind_thread",
+      "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/agent_host_bind_thread"
+      },
+      "x-omni-resource-scope": "thread",
+      "x-omni-stability": "experimental"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        }
+      ],
+      "name": "agent_host_list_resources",
+      "paramStructure": "by-name",
+      "params": [],
+      "result": {
+        "name": "agent_host_list_resources_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation agent_host_list_resources",
+      "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/agent_host_list_resources"
+      },
+      "x-omni-resource-scope": "agent_host",
+      "x-omni-stability": "experimental"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        }
+      ],
+      "name": "agent_host_materialize_environment",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "workspace_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/agent_host_materialize_environment/properties/workspace_id"
+          }
+        },
+        {
+          "name": "profile_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/agent_host_materialize_environment/properties/profile_id"
+          }
+        }
+      ],
+      "result": {
+        "name": "agent_host_materialize_environment_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation agent_host_materialize_environment",
+      "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/agent_host_materialize_environment"
+      },
+      "x-omni-resource-scope": "workspace",
+      "x-omni-stability": "experimental"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        }
+      ],
+      "name": "agent_host_stop_environment",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "environment_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/agent_host_stop_environment/properties/environment_id"
+          }
+        }
+      ],
+      "result": {
+        "name": "agent_host_stop_environment_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation agent_host_stop_environment",
+      "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [
+        "environment_lifecycle"
+      ],
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/agent_host_stop_environment"
+      },
+      "x-omni-resource-scope": "environment",
+      "x-omni-stability": "experimental"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
         },
         {
           "$ref": "#/components/errors/ThreadNotFound"

@@ -8,6 +8,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const hoisted = vi.hoisted(() => ({
   nextChild: null as unknown,
   spawnCalls: [] as unknown[][],
+  controlCalls: [] as Array<{ method: string; params: Record<string, unknown> }>,
+  controlFailureMethod: null as string | null,
 }));
 
 vi.mock('node:child_process', async () => {
@@ -41,6 +43,26 @@ vi.mock('@/main/profile-resolver', () => ({
     }
     return { kind: 'file', path: `/fake/config/sandbox/${name}.yml` };
   }),
+}));
+
+vi.mock('@/main/agent-host-control-client', () => ({
+  AgentHostControlClient: class {
+    async call(method: string, params: Record<string, unknown>): Promise<Record<string, unknown>> {
+      hoisted.controlCalls.push({ method, params });
+      if (method === hoisted.controlFailureMethod) {
+        throw new Error(`${method} failed`);
+      }
+      if (method === 'agent_host_materialize_environment') {
+        return {
+          environment_id: 'environment-materialized',
+          services: { code_server: 'http://service' },
+          container_id: 'container-materialized',
+        };
+      }
+      return {};
+    }
+    close(): void {}
+  },
 }));
 
 vi.mock('shell-env', () => ({ shellEnvSync: () => ({}) }));
@@ -167,6 +189,8 @@ describe('AgentProcess (serve mode)', () => {
   beforeEach(() => {
     hoisted.nextChild = null;
     hoisted.spawnCalls.length = 0;
+    hoisted.controlCalls.length = 0;
+    hoisted.controlFailureMethod = null;
   });
 
   afterEach(() => {
@@ -224,6 +248,104 @@ describe('AgentProcess (serve mode)', () => {
     expect(sourceDescriptors(args)).toEqual([
       { kind: 'local-git', mountName: 'launcher', writable: true, path: '/test/workspace' },
     ]);
+  });
+
+  it('spawns with distinct renderer and main-process control credentials', async () => {
+    const h = makeHarness();
+    await h.proc.start({ profileName: 'host', sources: [localSource('/ws')] });
+
+    const [, args] = spawnCall(0);
+    const clientToken = args[args.indexOf('--auth-token') + 1];
+    const controlToken = args[args.indexOf('--agent-host-control-token') + 1];
+    expect(clientToken).toMatch(/^[0-9a-f]{64}$/);
+    expect(controlToken).toMatch(/^[0-9a-f]{64}$/);
+    expect(controlToken).not.toBe(clientToken);
+  });
+
+  it('registers, materializes, and binds a second consumer through the control plane', async () => {
+    const h = makeHarness();
+    const arg: AgentProcessStartArg = {
+      profileName: 'devbox',
+      sources: [localGitSource('/repos/second', 'second')],
+      projectId: 'project-2',
+    };
+    await h.proc.start(arg);
+    const mutable = h.proc as unknown as { status: WithTimestamp<AgentProcessStatus> };
+    mutable.status = {
+      type: 'running',
+      timestamp: Date.now(),
+      data: {
+        uiUrl: 'http://127.0.0.1:9000',
+        wsUrl: 'ws://127.0.0.1:9000/ws',
+        workspaceId: 'workspace-startup',
+        environmentId: 'environment-startup',
+      },
+    };
+
+    const runtime = await h.proc.configureConsumer('thread-2', 'workspace-2', arg, false);
+
+    expect(runtime).toEqual({
+      workspaceId: 'workspace-2',
+      environmentId: 'environment-materialized',
+      services: { code_server: 'http://service' },
+      containerId: 'container-materialized',
+    });
+    expect(hoisted.controlCalls.map((call) => call.method)).toEqual([
+      'agent_host_register_workspace',
+      'agent_host_register_profile',
+      'agent_host_materialize_environment',
+      'agent_host_bind_thread',
+    ]);
+    expect(hoisted.controlCalls[0]!.params).toMatchObject({
+      workspace_id: 'workspace-2',
+      materialization_path: '/repos/second',
+      owner_user_id: 'token_user',
+    });
+    expect(hoisted.controlCalls[3]!.params).toMatchObject({
+      thread_id: 'thread-2',
+      binding: {
+        workspace_id: 'workspace-2',
+        environment_selection: {
+          mode: 'existing',
+          environment_id: 'environment-materialized',
+        },
+      },
+    });
+    await h.proc.stopConsumerEnvironment(runtime.environmentId);
+    expect(hoisted.controlCalls.at(-1)).toEqual({
+      method: 'agent_host_stop_environment',
+      params: { environment_id: 'environment-materialized' },
+    });
+  });
+
+  it('stops a newly materialized environment when thread binding fails', async () => {
+    const h = makeHarness();
+    const arg: AgentProcessStartArg = {
+      profileName: 'devbox',
+      sources: [localGitSource('/repos/second', 'second')],
+    };
+    await h.proc.start(arg);
+    const mutable = h.proc as unknown as { status: WithTimestamp<AgentProcessStatus> };
+    mutable.status = {
+      type: 'running',
+      timestamp: Date.now(),
+      data: {
+        uiUrl: 'http://127.0.0.1:9000',
+        wsUrl: 'ws://127.0.0.1:9000/ws',
+        workspaceId: 'workspace-startup',
+        environmentId: 'environment-startup',
+      },
+    };
+    hoisted.controlFailureMethod = 'agent_host_bind_thread';
+
+    await expect(h.proc.configureConsumer('thread-2', 'workspace-2', arg, false)).rejects.toThrow(
+      'agent_host_bind_thread failed'
+    );
+
+    expect(hoisted.controlCalls.at(-1)).toEqual({
+      method: 'agent_host_stop_environment',
+      params: { environment_id: 'environment-materialized' },
+    });
   });
 
   it('emits multiple --source descriptors for a multi-source project', async () => {
