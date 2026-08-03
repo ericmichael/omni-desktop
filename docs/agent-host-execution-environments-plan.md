@@ -54,11 +54,24 @@ Completed through the framework/runtime vertical slice:
   principals remain deliberately isolated. Exclusive in-place profile switches
   re-key the host, while a shared host forces the changing tab through its
   detach/relaunch path instead of mutating other tabs' runtime.
+- `AutomaticEnvironment(profile_id)` now resolves through an AgentHost-owned
+  provisioner. Request preparation resolves the durable Workspace without side
+  effects so authorization happens first; the authorized Run then materializes
+  and captures an immutable environment lease. Concurrent selections for the
+  same Workspace/profile single-flight one environment, while separate
+  Workspaces remain isolated and stopped environments reprovision cleanly.
+- The product runtime now has a multi-environment provisioning adapter that
+  consumes explicit Workspace/profile resolvers, creates host or sandbox
+  Workspace adapters, and publishes sandbox runtime, terminal defaults,
+  capabilities, services, and lifecycle state as one owned environment.
+  Environment stop releases its sandbox session and services before publishing
+  the stopped state.
 
-Next: add AgentHost-side Workspace/Environment provisioning and implement the
-currently rejected `AutomaticEnvironment` selection. Until that exists, the
-launcher pool can reuse compatible hosts but cannot materialize unrelated
-profiles/workspaces inside one process. A temporary
+Next: expose typed AgentHost control-plane RPCs for registering Workspaces and
+profile definitions, atomically binding Threads, and listing/selecting the
+resulting environments. Wire the product composition root to those registries,
+then remove Workspace/profile identity from the launcher host key so compatible
+tabs can attach unrelated Workspaces to one process. A temporary
 `SwitchContext` reference remains only in the legacy per-process serve startup
 and shutdown path; lifecycle RPCs and tools cannot access it globally. It is
 deleted with per-tab AgentProcess ownership, followed by broad Electron/server
