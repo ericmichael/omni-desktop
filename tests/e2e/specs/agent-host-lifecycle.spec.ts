@@ -2,6 +2,7 @@ import path from 'node:path';
 
 import type { Page } from '@playwright/test';
 import { expect, test } from 'tests/e2e/fixtures/test';
+import { invokeApp } from 'tests/e2e/support/invoke';
 import { attachProofScreenshot } from 'tests/e2e/support/proof';
 
 type RuntimeStatus = {
@@ -17,21 +18,19 @@ type RuntimeStatus = {
 test.use({ seedState: 'pooled-workspaces' });
 
 async function status(page: Page, processId: string): Promise<RuntimeStatus> {
-  return page.evaluate(async (id) => {
-    const current = await window.electron.ipcRenderer.invoke('agent-process:get-status', id);
-    if (current?.type !== 'running') {
-      return { type: current?.type ?? 'uninitialized' };
-    }
-    return {
-      type: current.type,
-      data: {
-        agentHostId: current.data.agentHostId,
-        workspaceId: current.data.workspaceId,
-        environmentId: current.data.environmentId,
-        containerId: current.data.containerId,
-      },
-    };
-  }, processId);
+  const current = await invokeApp<RuntimeStatus>(page, 'agent-process:get-status', processId);
+  if (current?.type !== 'running') {
+    return { type: current?.type ?? 'uninitialized' };
+  }
+  return {
+    type: current.type,
+    data: {
+      agentHostId: current.data?.agentHostId,
+      workspaceId: current.data?.workspaceId,
+      environmentId: current.data?.environmentId,
+      containerId: current.data?.containerId,
+    },
+  };
 }
 
 async function openSession(page: Page, name: string, processId: string): Promise<RuntimeStatus> {
@@ -82,10 +81,7 @@ test.describe('AgentHost consumer lifecycle', () => {
     expect(alphaDevbox.data?.environmentId).not.toBe(beta.data?.environmentId);
     await expectRuntimeUnchanged(page, betaId, beta);
 
-    await page.evaluate(
-      async ({ id, workspaceDir }) => window.electron.ipcRenderer.invoke('agent-process:rebuild', id, { workspaceDir }),
-      { id: alphaId, workspaceDir: path.join(app.workspaceDir, 'alpha') }
-    );
+    await invokeApp(page, 'agent-process:rebuild', alphaId, { workspaceDir: path.join(app.workspaceDir, 'alpha') });
     await expect
       .poll(
         async () => {

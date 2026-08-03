@@ -106,10 +106,15 @@ Completed through the framework/runtime vertical slice:
   Alpha receives new environment/container identities at each required
   boundary, while Beta retains its exact host, Workspace, environment, and
   container identity and remains usable after Alpha closes.
+- The same permanent lifecycle story now runs through browser/server mode's
+  authenticated WebSocket transport. Its per-tenant ProcessManager exhibits
+  the same pooled-host ownership, environment replacement, status isolation,
+  and independent close behavior as Electron; visual proof is retained for the
+  server surface as well.
 
-Next: exercise the pooled-host path in server mode. Then remove the remaining
-legacy per-process `SwitchContext` startup/shutdown path and obsolete
-ticket/session process assumptions before the final routing audit.
+Next: remove the remaining legacy per-process `SwitchContext`
+startup/shutdown path and obsolete ticket/session process assumptions before
+the final routing audit.
 
 ## Executive decision
 
