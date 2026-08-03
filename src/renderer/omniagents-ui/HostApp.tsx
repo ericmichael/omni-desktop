@@ -107,7 +107,7 @@ export const OmniAgentsHostApp = memo(
         {isReady && (
           <div className="absolute inset-0 z-10">
             <OmniAgentsApp
-              uiUrl={state.uiUrl}
+              connection={{ baseUrl: state.uiUrl }}
               variables={variables}
               greeting={greeting}
               sessionId={sessionId}

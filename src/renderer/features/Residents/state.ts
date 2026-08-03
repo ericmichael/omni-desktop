@@ -4,6 +4,7 @@ import { toast } from '@/renderer/features/Toast/state';
 import { emitter, ipc, wsEmitter } from '@/renderer/services/ipc';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type {
+  AgentRuntimeConnection,
   ResidentAgent,
   ResidentAgentInput,
   ResidentAgentRuntime,
@@ -169,7 +170,7 @@ export const residentApi = {
     emitter.invoke('resident:set-channel-members', channelId, members),
   wake: (agentId: string): Promise<void> => emitter.invoke('resident:wake', agentId),
   getStatus: (): Promise<Record<string, ResidentAgentRuntime>> => emitter.invoke('resident:get-status'),
-  ensureSession: (agentId: string): Promise<{ sessionId: string; uiUrl: string }> =>
+  ensureSession: (agentId: string): Promise<{ sessionId: string; connection: AgentRuntimeConnection }> =>
     emitter.invoke('resident:ensure-session', agentId),
   setMemories: (agentId: string, memories: ResidentMemoryEntry[]): Promise<void> =>
     emitter.invoke('resident:set-memories', agentId, memories),

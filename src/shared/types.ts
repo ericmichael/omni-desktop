@@ -1553,6 +1553,13 @@ export type OmniInstallProcessStatus = Status<
   'uninitialized' | 'starting' | 'installing' | 'canceling' | 'exiting' | 'completed' | 'canceled'
 >;
 
+/** Connection metadata for an embedded OmniAgents client. The base URL names
+ *  the RPC server origin; it is not a document or iframe source. */
+export type AgentRuntimeConnection = {
+  baseUrl: string;
+  authToken?: string;
+};
+
 // Unified agent process data — emitted by `omni serve` and the platform path.
 export type AgentProcessData = {
   /** Base URL the renderer parses for WS + HTTP endpoints. */
@@ -2390,10 +2397,10 @@ type ResidentIpcEvents = Namespaced<
     /**
      * Wake the agent's process (if parked) and return the handles the
      * renderer needs to mount the REAL session UI (OmniAgentsApp) on it:
-     * the current day-session id and the serve uiUrl. Main attaches its
+     * the current day-session id and runtime connection. Main attaches its
      * watcher first, so thinking-state tracking covers user-driven runs.
      */
-    'ensure-session': (agentId: string) => { sessionId: string; uiUrl: string };
+    'ensure-session': (agentId: string) => { sessionId: string; connection: AgentRuntimeConnection };
     /** Replace an agent's durable memory list (UI edits/removals). */
     'set-memories': (agentId: string, memories: ResidentMemoryEntry[]) => void;
     /** Shared team handbook (rendered into every agent's identity on wake). */

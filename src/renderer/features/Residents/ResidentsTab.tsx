@@ -88,7 +88,13 @@ import { persistedStoreApi } from '@/renderer/services/store';
 import { isLocalVoiceCapable } from '@/renderer/services/voice-client';
 import { VoiceScopeContext } from '@/renderer/services/voice-recording';
 import { $glassEnabled } from '@/renderer/theme/use-glass';
-import type { Project, ResidentAgent, ResidentAgentRuntime, ResidentChannelMessage } from '@/shared/types';
+import type {
+  AgentRuntimeConnection,
+  Project,
+  ResidentAgent,
+  ResidentAgentRuntime,
+  ResidentChannelMessage,
+} from '@/shared/types';
 
 import type { AgentPresence } from './agent-avatar';
 import { AgentAvatar, AgentAvatarGroup, participantPresence, PRESENCE_LABEL, presenceStatus } from './agent-avatar';
@@ -1353,15 +1359,18 @@ function ResidentHostedVoice({
   onClose: () => void;
   onError: (message: string) => void;
 }): React.JSX.Element | null {
-  const [uiUrl, setUiUrl] = useState<string | null>(null);
+  const [connection, setConnection] = useState<AgentRuntimeConnection | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     residentApi
       .ensureSession(agentId)
-      .then(({ uiUrl: url }) => {
+      .then(({ connection: nextConnection }) => {
         if (!cancelled) {
-          setUiUrl(new URL(url, serverOrigin()).toString());
+          setConnection({
+            ...nextConnection,
+            baseUrl: new URL(nextConnection.baseUrl, serverOrigin()).toString(),
+          });
         }
       })
       .catch((err: Error) => {
@@ -1375,11 +1384,11 @@ function ResidentHostedVoice({
     };
   }, [agentId, onClose, onError]);
 
-  if (!uiUrl) {
+  if (!connection) {
     return null; // waking the agent; the modal appears once its serve is up
   }
   return (
-    <UiConfigProvider uiUrl={uiUrl}>
+    <UiConfigProvider connection={connection}>
       <VoiceModal isOpen onClose={onClose} />
     </UiConfigProvider>
   );
@@ -1396,7 +1405,7 @@ function ResidentSessionView({ agent }: { agent: ResidentAgent }): React.JSX.Ele
   const storeData = useStore(persistedStoreApi.$atom);
   const [boot, setBoot] = useState<
     | { phase: 'booting' }
-    | { phase: 'ready'; uiUrl: string; sessionId: string }
+    | { phase: 'ready'; connection: AgentRuntimeConnection; sessionId: string }
     | { phase: 'parked' }
     | { phase: 'error'; message: string }
   >({ phase: 'booting' });
@@ -1416,7 +1425,7 @@ function ResidentSessionView({ agent }: { agent: ResidentAgent }): React.JSX.Ele
     setBoot({ phase: 'booting' });
     residentApi
       .ensureSession(agent.id)
-      .then(({ sessionId, uiUrl }) => setBoot({ phase: 'ready', uiUrl, sessionId }))
+      .then(({ sessionId, connection }) => setBoot({ phase: 'ready', connection, sessionId }))
       .catch((err: Error) => setBoot({ phase: 'error', message: err.message }));
   }, [agent.id]);
 
@@ -1426,7 +1435,7 @@ function ResidentSessionView({ agent }: { agent: ResidentAgent }): React.JSX.Ele
 
   // Idle-park can fire while this view is mounted (the park timer re-arms on
   // every run end): the process stops and the mounted App's WS dies. Swap the
-  // dead iframe for an explicit parked state instead of leaving a corpse —
+  // dead embedded client for an explicit parked state instead of leaving a corpse —
   // auto-relaunching here would keep the agent awake forever, defeating parking.
   useEffect(() => {
     if (boot.phase === 'ready' && runtimeState === 'parked') {
@@ -1434,17 +1443,17 @@ function ResidentSessionView({ agent }: { agent: ResidentAgent }): React.JSX.Ele
     }
   }, [boot.phase, runtimeState]);
 
-  const themedUrl = useMemo(() => {
+  const themedConnection = useMemo(() => {
     if (boot.phase !== 'ready') {
       return null;
     }
-    const url = new URL(boot.uiUrl, serverOrigin());
+    const url = new URL(boot.connection.baseUrl, serverOrigin());
     const theme = storeData.theme ?? 'teams-light';
     if (theme !== 'default') {
       url.searchParams.set('theme', theme);
     }
     url.searchParams.set('minimal', 'true');
-    return url.toString();
+    return { ...boot.connection, baseUrl: url.toString() };
   }, [boot, storeData.theme]);
 
   if (boot.phase === 'error') {
@@ -1467,7 +1476,7 @@ function ResidentSessionView({ agent }: { agent: ResidentAgent }): React.JSX.Ele
       </div>
     );
   }
-  if (boot.phase !== 'ready' || !themedUrl) {
+  if (boot.phase !== 'ready' || !themedConnection) {
     return (
       <div className={styles.sessionCenter}>
         <Spinner size="small" />
@@ -1477,7 +1486,7 @@ function ResidentSessionView({ agent }: { agent: ResidentAgent }): React.JSX.Ele
   }
   return (
     <div className={styles.sessionHost}>
-      <OmniAgentsApp uiUrl={themedUrl} sessionId={boot.sessionId} onClientToolCall={swallowToolCall} />
+      <OmniAgentsApp connection={themedConnection} sessionId={boot.sessionId} onClientToolCall={swallowToolCall} />
     </div>
   );
 }

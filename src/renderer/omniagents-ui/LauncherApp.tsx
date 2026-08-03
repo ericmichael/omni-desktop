@@ -4,7 +4,7 @@ import { useEffect, useMemo } from 'react';
 import { serverOrigin } from '@/renderer/services/ipc';
 import type { SessionController } from '@/renderer/services/session-control';
 import type { PlanItem } from '@/shared/chat-types';
-import type { TicketId } from '@/shared/types';
+import type { AgentRuntimeConnection, TicketId } from '@/shared/types';
 
 import type { ClientToolCallHandler } from './App';
 import { App as OmniAgentsCore } from './App';
@@ -13,10 +13,8 @@ import { RPCClientProvider } from './rpc-context';
 import { UiConfigProvider, useUiConfig } from './ui-config';
 
 type OmniAgentsAppProps = {
-  uiUrl: string;
-  /** Bearer credential from the launcher process status. Never inferred from
-   *  the token-free AgentHost WebSocket URL. */
-  authToken?: string;
+  /** RPC server connection for the directly embedded React client. */
+  connection: AgentRuntimeConnection;
   sessionId?: string;
   /** Execution environment used by workspace, process, and terminal RPCs. */
   environmentId?: string;
@@ -73,8 +71,7 @@ const ThemeSync = ({ children }: { children: ReactNode }) => {
 };
 
 export const OmniAgentsApp = ({
-  uiUrl,
-  authToken,
+  connection,
   sessionId,
   environmentId,
   onSessionChange,
@@ -103,11 +100,14 @@ export const OmniAgentsApp = ({
 }: OmniAgentsAppProps) => {
   // Resolve relative ``/proxy/...`` payloads against the launcher's actual
   // origin — same-origin in browser server mode, cloud baseUrl in
-  // cloud-linked Electron. If uiUrl is already absolute, the base is ignored.
-  const normalizedUrl = useMemo(() => new URL(uiUrl, serverOrigin()).toString(), [uiUrl]);
+  // cloud-linked Electron. An absolute connection base ignores the fallback.
+  const normalizedConnection = useMemo<AgentRuntimeConnection>(
+    () => ({ ...connection, baseUrl: new URL(connection.baseUrl, serverOrigin()).toString() }),
+    [connection.authToken, connection.baseUrl]
+  );
 
   return (
-    <UiConfigProvider uiUrl={normalizedUrl} authToken={authToken}>
+    <UiConfigProvider connection={normalizedConnection}>
       <RPCClientProvider>
         <ThemeSync>
           <OmniAgentsCore

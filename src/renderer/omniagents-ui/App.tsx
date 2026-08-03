@@ -213,7 +213,7 @@ export function App({
   }, [onSessionChange]);
   useEffect(() => {
     readyRef.current = false;
-  }, [uiConfig.uiUrl]);
+  }, [uiConfig.runtimeBaseUrl]);
 
   // Chat session state machine — manages items, sessionId, runId, thinking,
   // status, preamble, tool status, and approval state.
@@ -961,9 +961,7 @@ export function App({
             } else {
               await client.startRun(
                 text,
-                environmentId
-                  ? { mode: 'explicit', environment_id: environmentId }
-                  : { mode: 'none' },
+                environmentId ? { mode: 'explicit', environment_id: environmentId } : { mode: 'none' },
                 sessionId
               );
             }
@@ -1152,9 +1150,7 @@ export function App({
 
         const startResult = await client.startRun(
           agentPrompt,
-          environmentId
-            ? { mode: 'explicit', environment_id: environmentId }
-            : { mode: 'none' },
+          environmentId ? { mode: 'explicit', environment_id: environmentId } : { mode: 'none' },
           liveSessionId,
           variables,
           content

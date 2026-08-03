@@ -80,6 +80,7 @@ import { getDefaultWorkspaceDir } from '@/main/util';
 import type { IIpcListener } from '@/shared/ipc-listener';
 import { OmniagentsRpcError } from '@/shared/omniagents-rpc';
 import type {
+  AgentRuntimeConnection,
   IpcRendererEvents,
   ResidentAgent,
   ResidentAgentInput,
@@ -1167,13 +1168,13 @@ export class ResidentAgentManager {
 
   /**
    * Wake the process (if parked) and hand the renderer what it needs to
-   * mount the real session UI: the current day-session id + serve uiUrl.
+   * mount the real session UI: the current day-session id + runtime connection.
    * Main ensures the session and attaches its watcher FIRST so thinking
    * state and park re-arming cover the user's direct runs, and so the
    * session exists with a workspace_root before the renderer app boots.
    * Serialized on the agent's chain so it can't race a park/reflect.
    */
-  ensureSession = (agentId: string): Promise<{ sessionId: string; uiUrl: string }> => {
+  ensureSession = (agentId: string): Promise<{ sessionId: string; connection: AgentRuntimeConnection }> => {
     // Fast path: the agent is MID-RUN. The delivery task holds the chain for
     // the whole run, so queuing behind it would block the session view until
     // the run ends — exactly when the user most wants to watch. A thinking
@@ -1188,7 +1189,13 @@ export class ResidentAgentManager {
           clearTimeout(running.parkTimer);
           running.parkTimer = null;
         }
-        return Promise.resolve({ sessionId: daySessionId(agentId, running.day), uiUrl: status.data.uiUrl });
+        return Promise.resolve({
+          sessionId: daySessionId(agentId, running.day),
+          connection: {
+            baseUrl: status.data.uiUrl,
+            ...(status.data.authToken ? { authToken: status.data.authToken } : {}),
+          },
+        });
       }
     }
     return this.chained(agentId, async () => {
@@ -1215,7 +1222,13 @@ export class ResidentAgentManager {
       if (status.type !== 'running' || !status.data.uiUrl) {
         throw new Error('agent process has no uiUrl');
       }
-      return { sessionId, uiUrl: status.data.uiUrl };
+      return {
+        sessionId,
+        connection: {
+          baseUrl: status.data.uiUrl,
+          ...(status.data.authToken ? { authToken: status.data.authToken } : {}),
+        },
+      };
     });
   };
 

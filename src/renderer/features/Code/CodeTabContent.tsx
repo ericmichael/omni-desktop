@@ -201,7 +201,7 @@ const CodeRunningView = memo(
     const theme = store.theme ?? 'teams-light';
     const pendingPlan = useStore($pendingPlan);
 
-    const uiSrc = useMemo(() => {
+    const runtimeConnection = useMemo(() => {
       // serverOrigin() returns the cloud baseUrl in cloud-linked Electron;
       // resolving the agent's relative /proxy/... against window.location
       // would (wrongly) anchor to localhost:5173 / file:// in that mode.
@@ -212,8 +212,8 @@ const CodeRunningView = memo(
       if (uiMinimal) {
         url.searchParams.set('minimal', 'true');
       }
-      return url.toString();
-    }, [sandboxUrls.uiUrl, theme, uiMinimal]);
+      return { baseUrl: url.toString(), authToken: sandboxUrls.authToken };
+    }, [sandboxUrls.authToken, sandboxUrls.uiUrl, theme, uiMinimal]);
     const codeServerSrc = sandboxUrls.services?.['code_server'];
     const vncSrc = sandboxUrls.services?.['vnc'];
 
@@ -221,8 +221,7 @@ const CodeRunningView = memo(
       <div className={styles.flexColFullRelative}>
         <div className={styles.flex1Relative}>
           <CodeWorkspaceLayout
-            uiSrc={uiSrc}
-            authToken={sandboxUrls.authToken}
+            connection={runtimeConnection}
             environmentId={environmentId}
             sessionId={sessionId}
             onSessionChange={onSessionChange}

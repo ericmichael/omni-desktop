@@ -2,9 +2,10 @@ import type { ReactNode } from 'react';
 import { createContext, useContext, useMemo } from 'react';
 
 import { serverOrigin } from '@/renderer/services/ipc';
+import type { AgentRuntimeConnection } from '@/shared/types';
 
 type UiConfig = {
-  uiUrl: string;
+  runtimeBaseUrl: string;
   url: URL;
   searchParams: URLSearchParams;
   token?: string;
@@ -51,12 +52,10 @@ const buildWsUrl = (url: URL, path: string): string => {
 };
 
 export const UiConfigProvider = ({
-  uiUrl,
-  authToken,
+  connection,
   children,
 }: {
-  uiUrl: string;
-  authToken?: string;
+  connection: AgentRuntimeConnection;
   children: ReactNode;
 }) => {
   const value = useMemo<UiConfig>(() => {
@@ -65,12 +64,12 @@ export const UiConfigProvider = ({
     // (wsBaseUrl, wsRealtimeUrl, httpBaseUrl, proxyPrefix) all derive from
     // url.host, so fixing this seam cascades everywhere consumers like
     // rpc/client.ts, rpc/realtime.ts, TerminalPanel get URLs from us.
-    const url = new URL(uiUrl, serverOrigin());
+    const url = new URL(connection.baseUrl, serverOrigin());
     const searchParams = url.searchParams;
     // Launcher-owned runtimes pass credentials as typed process data. Keep
     // query-token parsing only for standalone/browser entry points that still
     // receive an authenticated UI handoff URL.
-    const token = authToken ?? searchParams.get('token') ?? undefined;
+    const token = connection.authToken ?? searchParams.get('token') ?? undefined;
     const theme = searchParams.get('theme') || undefined;
     const debug = /^(1|true|yes)$/i.test(String(searchParams.get('debug') || ''));
     const minimal = searchParams.get('minimal') === 'true';
@@ -87,7 +86,7 @@ export const UiConfigProvider = ({
     const wsBaseUrl = `${wsOrigin}${resolvePath('/ws')}`;
     const wsRealtimeUrl = `${wsOrigin}${resolvePath('/ws/realtime')}`;
     return {
-      uiUrl,
+      runtimeBaseUrl: connection.baseUrl,
       url,
       searchParams,
       token,
@@ -102,7 +101,7 @@ export const UiConfigProvider = ({
       proxyPrefix,
       resolvePath,
     };
-  }, [authToken, uiUrl]);
+  }, [connection.authToken, connection.baseUrl]);
 
   return <UiConfigContext.Provider value={value}>{children}</UiConfigContext.Provider>;
 };

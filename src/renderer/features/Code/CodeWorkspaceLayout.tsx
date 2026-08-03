@@ -24,14 +24,13 @@ import { persistedStoreApi } from '@/renderer/services/store';
 import { makeAppHandleId } from '@/shared/app-control-types';
 import type { AppDescriptor, AppId } from '@/shared/app-registry';
 import { buildAppRegistry } from '@/shared/app-registry';
-import type { TicketId } from '@/shared/types';
+import type { AgentRuntimeConnection, TicketId } from '@/shared/types';
 
 import { AppIcon } from './AppIcon';
 import { EnvironmentDock } from './EnvironmentDock';
 
 type CodeWorkspaceLayoutProps = {
-  uiSrc: string;
-  authToken?: string;
+  connection: AgentRuntimeConnection;
   sessionId?: string;
   onSessionChange?: (sessionId: string | undefined) => void;
   variables?: Record<string, unknown>;
@@ -503,8 +502,7 @@ AppSurfaceView.displayName = 'AppSurfaceView';
 
 export const CodeWorkspaceLayout = memo(
   ({
-    uiSrc,
-    authToken,
+    connection,
     sessionId,
     onSessionChange,
     variables,
@@ -659,8 +657,7 @@ export const CodeWorkspaceLayout = memo(
             )}
           >
             <OmniAgentsApp
-              uiUrl={uiSrc}
-              authToken={authToken}
+              connection={connection}
               environmentId={environmentId}
               greeting={greeting}
               suggestions={suggestions}
