@@ -1626,10 +1626,7 @@ export type AgentProcessData = {
    */
   paused?: boolean;
   /**
-   * True while an in-place sandbox switch is running (`sandbox.switch`): the
-   * process and WS stay up, but the sandbox is being torn down + rebuilt. The
-   * renderer overlays a "Switching to <profile>…" scrim over the (still-mounted)
-   * conversation and reloads the service panes when it clears.
+   * Transitional UI state while a profile replacement is being prepared.
    */
   switching?: boolean;
   /**
@@ -2534,13 +2531,9 @@ type AgentProcessIpcEvents = Namespaced<
      */
     'notify-activity': (processId: string) => void;
     /**
-     * Switch a running agent's sandbox to a different profile **in place** —
-     * the `omni serve` process and its WebSocket stay up, so the conversation
-     * never drops. Calls the `sandbox.switch` server function; on success the
-     * main process updates this agent's `services`/`containerId` (the in-sandbox
-     * service panes reload to the new URLs). Returns `{ok:false}` for profiles
-     * that can't switch in place (e.g. `host` / a missing profile file), so the
-     * caller can fall back to a stop+relaunch.
+     * Materialize the selected profile as an environment and atomically rebind
+     * this tab. The shared AgentHost and conversation remain alive when the
+     * profile stays within the same security domain.
      */
     'switch-sandbox': (processId: string, profileName: string) => SandboxSwitchResult;
   }
@@ -2557,7 +2550,7 @@ export type SandboxPauseResult = {
   data?: Record<string, unknown>;
 };
 
-/** Result of an in-place `sandbox.switch`. */
+/** Result of an AgentHost environment profile rebind. */
 export type SandboxSwitchResult = {
   ok: boolean;
   /** New profile name once switched (display label). */
@@ -2571,17 +2564,10 @@ export type SandboxSwitchResult = {
   /** Failure detail; present when `ok` is false. */
   reason?: string;
   /**
-   * When `ok` is false: whether the caller should fall back to a full
-   * stop+relaunch. True for "can't switch in place" (host/missing profile) and
-   * for a `lost` sandbox; false when omni-code rolled back to the previous
-   * profile (the session is still alive — relaunching would be wrong).
+   * When `ok` is false: whether the selected profile crosses an AgentHost
+   * security boundary and therefore requires a full stop+relaunch.
    */
   fallback?: boolean;
-  /**
-   * How a failed switch ended on the omni-code side: `rolled_back` (previous
-   * profile restored, session live) or `lost` (sandbox gone, must relaunch).
-   */
-  recovered?: 'rolled_back' | 'lost';
 };
 
 type SnapshotIpcEvents = Namespaced<

@@ -289,14 +289,10 @@ export const useAutoLaunch = (opts: UseAutoLaunchOptions) => {
   }, [initialized, opts.workspaceDir, actor]);
 
   // React to a per-launch sandbox profile override change (written by the
-  // SandboxPicker). Prefer an **in-place switch** over the live `omni serve`:
-  // `sandbox.switch` snapshots the workspace, brings up the new backend, and
-  // re-attaches it without restarting the process — so the WebSocket and the
-  // conversation stay up; only the in-sandbox service panes reload. Fall back
-  // to the old stop → RESET → LAUNCH only when an in-place switch isn't
-  // possible (no live session yet, or `host`/missing profile, or the switch
-  // failed). The general auto-launch effect above won't re-trigger on its own
-  // (no dep changes on RESET), so we drive the relaunch from here.
+  // SandboxPicker). The main process materializes the selected profile as a
+  // separate environment and atomically rebinds this tab while the shared
+  // AgentHost and conversation stay alive. A security-boundary change that
+  // requires another AgentHost falls back to stop → RESET → LAUNCH.
   const previousProfileOverrideRef = useRef(opts.profileNameOverride);
   useEffect(() => {
     const previous = previousProfileOverrideRef.current;
@@ -321,28 +317,18 @@ export const useAutoLaunch = (opts: UseAutoLaunchOptions) => {
         }
         const label = getProfileMenuLabel(nextProfile);
         if (res.ok) {
-          // Switched in place; the new services/containerId arrived via the
-          // AgentProcessData status update — no relaunch, conversation intact.
+          // The new binding and environment status arrived atomically.
           toast.success(`Now running on ${label}`);
           return;
         }
         if (!res.fallback) {
-          // omni-code rolled back — the previous sandbox is still live, so
-          // don't relaunch; just tell the user the switch didn't take.
-          toast.error(
-            `Couldn't switch to ${label}`,
-            res.recovered === 'rolled_back' ? 'Restored the previous sandbox.' : res.reason
-          );
+          // Materialization/rebind failed before replacing the prior binding.
+          toast.error(`Couldn't switch to ${label}`, res.reason);
           return;
         }
-        if (res.recovered === 'lost') {
-          toast.warning(`Sandbox was lost during the switch — restarting on ${label}…`);
-        }
-        // else: an unsupported in-place target (host/missing) — a normal
-        // stop+relaunch, no toast needed.
       }
-      // Fallback: tear down + relaunch on the new profile (idle/pre-launch,
-      // host/missing profile, or a lost sandbox).
+      // Fallback: the selected profile requires another AgentHost security
+      // boundary, so tear down this attachment and relaunch there.
       await agentProcessApi.stop(processIdRef.current);
       if (cancelled) {
         return;

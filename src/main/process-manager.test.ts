@@ -20,7 +20,6 @@ const hoisted = vi.hoisted(() => ({
     rebuild: ReturnType<typeof vi.fn>;
     getStatus: ReturnType<typeof vi.fn>;
     resizePty: ReturnType<typeof vi.fn>;
-    switchSandbox: ReturnType<typeof vi.fn>;
     configureConsumer: ReturnType<typeof vi.fn>;
     stopConsumerEnvironment: ReturnType<typeof vi.fn>;
     emitStatus: (status: WithTimestamp<AgentProcessStatus>) => void;
@@ -36,7 +35,6 @@ vi.mock('@/main/agent-process', () => ({
     rebuild = vi.fn(async () => {});
     getStatus = vi.fn(() => ({ type: 'uninitialized', timestamp: Date.now() }));
     resizePty = vi.fn();
-    switchSandbox = vi.fn(async () => ({ ok: true }));
     configureConsumer = vi.fn(
       async (_threadId: string, workspaceId: string, _arg: unknown, useStartupEnvironment: boolean) => {
         if (hoisted.configureConsumerFailure) {
@@ -549,7 +547,6 @@ describe('ProcessManager', () => {
       await pm.start('tab-b', { workspaceDir: '/tmp/ws', projectId: 'project-1' });
 
       await expect(pm.switchSandbox('tab-a', 'devbox')).resolves.toMatchObject({ ok: true, profile: 'devbox' });
-      expect(host.switchSandbox).not.toHaveBeenCalled();
       expect(host.configureConsumer).toHaveBeenCalledWith(
         'tab-a',
         expect.stringMatching(/^workspace_/),
@@ -577,7 +574,6 @@ describe('ProcessManager', () => {
       });
 
       expect(hoisted.agentProcessInstances).toHaveLength(1);
-      expect(host.switchSandbox).not.toHaveBeenCalled();
       expect(host.configureConsumer).toHaveBeenCalledWith(
         'tab-a',
         expect.stringMatching(/^workspace_/),

@@ -26,7 +26,6 @@ import type {
   AgentProcessStopOptions,
   LogEntry,
   SandboxPauseResult,
-  SandboxSwitchResult,
   WithTimestamp,
 } from '@/shared/types';
 
@@ -288,15 +287,6 @@ const serveWorkspaceDirectory = (arg: AgentProcessStartArg): string => {
 };
 
 const SERVER_CALL_TIMEOUT_MS = 8_000;
-
-/**
- * ``sandbox.switch`` runs a full teardown + bring-up serially (workspace tar
- * export, container stop, container create, rehydrate, init, services — and
- * possibly an image pull), so it gets minutes, not the default seconds. A
- * timeout below the real switch duration is worse than useless: the caller
- * falls back to a cold stop+relaunch that races the still-running switch.
- */
-const SANDBOX_SWITCH_TIMEOUT_MS = 5 * 60_000;
 
 /**
  * Open a one-shot JSON-RPC WebSocket to omni serve, send one
@@ -723,82 +713,6 @@ export class AgentProcess {
    */
   unpause = async (): Promise<SandboxPauseResult> => {
     return this.callSandboxLifecycle('sandbox.unpause', false);
-  };
-
-  /**
-   * Switch this running agent's sandbox to *profileName* in place via the
-   * ``sandbox.switch`` server function — no process restart, the WS stays up,
-   * the conversation never drops. On success, patch the running status'
-   * ``services``/``containerId`` so the renderer's in-sandbox panes (code-
-   * server / VNC) reload to the new URLs; ``uiUrl``/``wsUrl`` are unchanged
-   * (same serve process). Returns ``ok:false`` for profiles that can't switch
-   * in place (``host`` / a missing file) so the caller can fall back to a
-   * stop+relaunch.
-   */
-  switchSandbox = async (profileName: string): Promise<SandboxSwitchResult> => {
-    if (this.mode === 'compute') {
-      return { ok: false, fallback: true, reason: 'compute mode does not support in-place sandbox switch' };
-    }
-    if (this.status.type !== 'running' && this.status.type !== 'connecting') {
-      return { ok: false, fallback: true, reason: 'sandbox is not running' };
-    }
-    const resolved = resolveProfile(profileName);
-    if (resolved.kind !== 'file') {
-      // ``host`` (builtin-default) and missing profiles have no --profile path
-      // to switch to; the caller falls back to a full stop+relaunch.
-      return {
-        ok: false,
-        fallback: true,
-        reason: `profile "${profileName}" cannot switch in place (${resolved.kind})`,
-      };
-    }
-    const data = (this.status as Extract<AgentProcessStatus, { type: 'running' | 'connecting' }>).data;
-    const wsUrl = data.wsUrl;
-    if (!wsUrl) {
-      return { ok: false, fallback: true, reason: 'no ws_url available' };
-    }
-    if (!data.environmentId) {
-      return { ok: false, fallback: true, reason: 'no execution environment is available' };
-    }
-    // Flag the transition so the renderer can overlay a scrim over the (still
-    // mounted) conversation. Cleared in `finally` regardless of outcome.
-    this.updateAgentProcessData({ switching: true });
-    try {
-      const res = await oneShotServerCall(
-        wsUrl,
-        data.environmentId,
-        'sandbox.switch',
-        { profile: resolved.path },
-        SANDBOX_SWITCH_TIMEOUT_MS,
-        data.authToken
-      );
-      const raw = res.data ?? {};
-      if (!res.ok) {
-        const recovered = raw.recovered === 'lost' || raw.recovered === 'rolled_back' ? raw.recovered : undefined;
-        // Rolled back → the old session is alive; don't relaunch. Lost (or no
-        // recovery info) → the sandbox is gone; relaunch to recover.
-        return {
-          ok: false,
-          fallback: recovered !== 'rolled_back',
-          ...(recovered ? { recovered } : {}),
-          reason: res.reason ?? 'switch failed',
-        };
-      }
-      const services =
-        raw.services && typeof raw.services === 'object' ? (raw.services as Record<string, string>) : undefined;
-      const containerId = typeof raw.container_id === 'string' ? raw.container_id : undefined;
-      const backend = typeof raw.backend === 'string' ? raw.backend : undefined;
-      const profile = typeof raw.profile === 'string' ? raw.profile : profileName;
-      // uiUrl/wsUrl stay put (same omni serve) — only the service panes reload.
-      this.updateAgentProcessData({ ...(services ? { services } : {}), containerId });
-      // Keep a future cold relaunch aligned with the now-active profile.
-      if (this.lastStartArg) {
-        this.lastStartArg = { ...this.lastStartArg, profileName };
-      }
-      return { ok: true, profile, backend, containerId, services };
-    } finally {
-      this.updateAgentProcessData({ switching: false });
-    }
   };
 
   /**

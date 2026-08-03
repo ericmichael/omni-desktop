@@ -122,9 +122,14 @@ Completed through the framework/runtime vertical slice:
   begins, and closes every ready environment even if one peer fails. Idle
   watcher cancellation is part of common environment teardown, so product
   serve no longer reaches into the startup sandbox session specially.
+- In-place `sandbox.switch` has been deleted end to end. The framework no
+  longer exposes a live-environment mutation operation or switch/rollback
+  orchestration, and startup uses the same scoped lifecycle controller as
+  provisioned environments. The launcher's dead direct RPC method is removed;
+  profile selection retains the existing materialize-and-rebind path.
 
-Next: remove the now-unused in-place `sandbox.switch` orchestration and
-remaining per-session serve composition before the final routing audit.
+Next: remove the remaining per-session serve composition before the final
+routing audit.
 
 ## Executive decision
 
