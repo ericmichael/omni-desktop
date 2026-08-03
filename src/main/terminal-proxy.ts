@@ -1,7 +1,7 @@
 import { WebSocket } from 'ws';
 
-import type { RpcMethodMap } from '@/generated/omniagents-gui-v1/gui-v1';
 import { wsAuthOptions } from '@/lib/ws-auth';
+import { initializeMainRpcConnection } from '@/main/omniagents-rpc-handshake';
 import type { ProcessManager } from '@/main/process-manager';
 import { classifyCloseCode, DEFAULT_LIFECYCLE_POLICY } from '@/shared/lifecycle';
 import type { IpcRendererEvents } from '@/shared/types';
@@ -84,22 +84,6 @@ type TabRpc = {
 
 /** Per-call deadline from the standard lifecycle policy (protocol.md §"Connection Lifecycle"). */
 const RPC_TIMEOUT_MS = DEFAULT_LIFECYCLE_POLICY.rpcTimeoutMs;
-const TERMINAL_INITIALIZE_PARAMS = {
-  protocol_version: '1.0.0',
-  identity: { name: 'omni-desktop-terminal-proxy', version: '1.0.0' },
-  platform: { os: process.platform, arch: process.arch },
-  capabilities: {
-    realtime: false,
-    mcp_apps: false,
-    client_functions: false,
-    approvals: false,
-    artifacts: false,
-    replay: false,
-    terminal: true,
-    experimental_operations: [],
-    disabled_notifications: [],
-  },
-} satisfies RpcMethodMap['initialize']['params'];
 
 export class TerminalProxy {
   private terminals = new Map<string, ProxiedTerminal>();
@@ -376,15 +360,20 @@ export class TerminalProxy {
     // connection. Complete the protocol handshake before any session or
     // terminal operation can use this channel.
     rpc.ready = opened.then(async () => {
-      await this.rpcCall(rpc, 'initialize', TERMINAL_INITIALIZE_PARAMS);
-      await new Promise<void>((resolve, reject) => {
-        socket.send(JSON.stringify({ jsonrpc: '2.0', method: 'initialized', params: {} }), (error) => {
-          if (error) {
-            reject(error);
-          } else {
-            resolve();
-          }
-        });
+      await initializeMainRpcConnection({
+        name: 'omni-desktop-terminal-proxy',
+        capabilities: { terminal: true },
+        request: (_method, params) => this.rpcCall(rpc, 'initialize', params),
+        notify: (_method, params) =>
+          new Promise<void>((resolve, reject) => {
+            socket.send(JSON.stringify({ jsonrpc: '2.0', method: 'initialized', params }), (error) => {
+              if (error) {
+                reject(error);
+              } else {
+                resolve();
+              }
+            });
+          }),
       });
     });
 
@@ -426,7 +415,7 @@ export class TerminalProxy {
     return rpc.sessionReady;
   }
 
-  private rpcCall(rpc: TabRpc, method: string, params: Record<string, unknown>): Promise<unknown> {
+  private rpcCall(rpc: TabRpc, method: string, params: object): Promise<unknown> {
     const id = rpc.nextId++;
     const payload = JSON.stringify({ jsonrpc: '2.0', id, method, params });
     return new Promise<unknown>((resolve, reject) => {

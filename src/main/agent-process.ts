@@ -13,6 +13,7 @@ import { DEFAULT_ENV } from '@/lib/pty-utils';
 import { SimpleLogger } from '@/lib/simple-logger';
 import { wsAuthOptions } from '@/lib/ws-auth';
 import { AgentHostControlClient } from '@/main/agent-host-control-client';
+import { initializeMainRpcConnection } from '@/main/omniagents-rpc-handshake';
 import type { IComputeClient } from '@/main/platform-client';
 import { assertServeProtocolSupported } from '@/main/product-runtime';
 import { type ResolvedProfile, resolveProfile } from '@/main/profile-resolver';
@@ -314,11 +315,18 @@ async function oneShotServerCall(
 ): Promise<SandboxPauseResult> {
   return new Promise<SandboxPauseResult>((resolve) => {
     let settled = false;
+    let nextId = 1;
+    const pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
     const finish = (result: SandboxPauseResult) => {
       if (settled) {
         return;
       }
       settled = true;
+      clearTimeout(timer);
+      for (const call of pending.values()) {
+        call.reject(new Error(`${fn} connection closed`));
+      }
+      pending.clear();
       try {
         socket.close();
       } catch {
@@ -330,18 +338,50 @@ async function oneShotServerCall(
     const socket = new WsWebSocket(wsUrl, wsAuthOptions(authToken));
     const timer = setTimeout(() => finish({ ok: false, supported: false, reason: `${fn} timed out` }), timeoutMs);
 
-    socket.once('open', () => {
+    const request = (method: string, params: object): Promise<unknown> => {
+      const id = nextId++;
+      return new Promise((resolveRequest, rejectRequest) => {
+        pending.set(id, { resolve: resolveRequest, reject: rejectRequest });
+        socket.send(JSON.stringify({ jsonrpc: '2.0', id, method, params }), (error) => {
+          if (!error) {
+            return;
+          }
+          pending.delete(id);
+          rejectRequest(error);
+        });
+      });
+    };
+
+    socket.once('open', async () => {
       try {
-        socket.send(
-          JSON.stringify({
-            jsonrpc: '2.0',
-            id: 1,
-            method: 'server_call',
-            params: { function: fn, args, environment_id: environmentId },
-          })
-        );
+        await initializeMainRpcConnection({
+          name: 'omni-desktop-lifecycle',
+          request: (method, params) => request(method, params),
+          notify: (method, params) =>
+            new Promise<void>((resolveSend, rejectSend) => {
+              socket.send(JSON.stringify({ jsonrpc: '2.0', method, params }), (error) => {
+                if (error) {
+                  rejectSend(error);
+                } else {
+                  resolveSend();
+                }
+              });
+            }),
+        });
+        const result = await request('server_call', { function: fn, args, environment_id: environmentId });
+        if (typeof result !== 'object' || result === null) {
+          finish({ ok: false, supported: false, reason: `${fn} returned no result` });
+          return;
+        }
+        const r = result as Record<string, unknown>;
+        finish({
+          ok: r.ok === true,
+          supported: r.supported !== false,
+          data: r,
+          ...(typeof r.paused === 'boolean' ? { paused: r.paused } : {}),
+          ...(typeof r.reason === 'string' ? { reason: r.reason } : {}),
+        });
       } catch (err) {
-        clearTimeout(timer);
         finish({
           ok: false,
           supported: false,
@@ -351,41 +391,34 @@ async function oneShotServerCall(
     });
 
     socket.on('message', (raw) => {
-      clearTimeout(timer);
       let msg: unknown;
       try {
         msg = JSON.parse(String(raw));
       } catch {
-        finish({ ok: false, supported: false, reason: `${fn} returned unparseable payload` });
         return;
       }
       if (typeof msg !== 'object' || msg === null) {
-        finish({ ok: false, supported: false, reason: `${fn} returned non-object payload` });
         return;
       }
       const obj = msg as Record<string, unknown>;
+      const id = obj.id;
+      if (typeof id !== 'number') {
+        return;
+      }
+      const call = pending.get(id);
+      if (!call) {
+        return;
+      }
+      pending.delete(id);
       if ('error' in obj && obj.error && typeof obj.error === 'object') {
         const errMsg = String((obj.error as Record<string, unknown>).message ?? `${fn} rpc error`);
-        finish({ ok: false, supported: false, reason: errMsg });
+        call.reject(new Error(errMsg));
         return;
       }
-      const result = obj.result;
-      if (typeof result !== 'object' || result === null) {
-        finish({ ok: false, supported: false, reason: `${fn} returned no result` });
-        return;
-      }
-      const r = result as Record<string, unknown>;
-      finish({
-        ok: r.ok === true,
-        supported: r.supported !== false,
-        data: r,
-        ...(typeof r.paused === 'boolean' ? { paused: r.paused } : {}),
-        ...(typeof r.reason === 'string' ? { reason: r.reason } : {}),
-      });
+      call.resolve(obj.result);
     });
 
     socket.on('error', (err) => {
-      clearTimeout(timer);
       finish({
         ok: false,
         supported: false,

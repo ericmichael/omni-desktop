@@ -2,6 +2,7 @@ import { WebSocket } from 'ws';
 
 import type { JsonRpcError, RpcMethodMap } from '@/generated/omniagents-gui-v1/gui-v1';
 import { wsAuthOptions } from '@/lib/ws-auth';
+import { initializeMainRpcConnection } from '@/main/omniagents-rpc-handshake';
 import { OmniagentsRpcError } from '@/shared/omniagents-rpc';
 
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -13,23 +14,6 @@ const CONTROL_OPERATIONS = [
   'agent_host_materialize_environment',
   'agent_host_stop_environment',
 ] as const;
-const CONTROL_INITIALIZE_PARAMS = {
-  protocol_version: '1.0.0',
-  identity: { name: 'omni-desktop-agent-host-control', version: '1.0.0' },
-  platform: { os: process.platform, arch: process.arch },
-  capabilities: {
-    realtime: false,
-    mcp_apps: false,
-    client_functions: false,
-    approvals: false,
-    artifacts: false,
-    replay: false,
-    terminal: false,
-    experimental_operations: [...CONTROL_OPERATIONS],
-    disabled_notifications: [],
-  },
-} satisfies RpcMethodMap['initialize']['params'];
-
 type PendingCall = {
   resolve: (value: unknown) => void;
   reject: (error: Error) => void;
@@ -126,15 +110,20 @@ export class AgentHostControlClient {
       socket.once('open', async () => {
         opened = true;
         try {
-          await this.sendRequest(socket, 'initialize', CONTROL_INITIALIZE_PARAMS);
-          await new Promise<void>((resolveSend, rejectSend) => {
-            socket.send(JSON.stringify({ jsonrpc: '2.0', method: 'initialized', params: {} }), (error) => {
-              if (error) {
-                rejectSend(error);
-              } else {
-                resolveSend();
-              }
-            });
+          await initializeMainRpcConnection({
+            name: 'omni-desktop-agent-host-control',
+            capabilities: { experimental_operations: [...CONTROL_OPERATIONS] },
+            request: (method, params) => this.sendRequest(socket, method, params),
+            notify: (method, params) =>
+              new Promise<void>((resolveSend, rejectSend) => {
+                socket.send(JSON.stringify({ jsonrpc: '2.0', method, params }), (error) => {
+                  if (error) {
+                    rejectSend(error);
+                  } else {
+                    resolveSend();
+                  }
+                });
+              }),
           });
           this.connecting = null;
           resolve(socket);

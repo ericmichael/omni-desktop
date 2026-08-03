@@ -82,6 +82,7 @@ type ServeConn = {
   path: string;
   query: string;
   authorization: string | undefined;
+  methods: string[];
   calls: string[];
   environmentIds: unknown[];
 };
@@ -95,16 +96,28 @@ const startFakeServe = async () => {
       path: url.pathname,
       query: url.search,
       authorization: req.headers.authorization,
+      methods: [],
       calls: [],
       environmentIds: [],
     };
     connections.push(conn);
     socket.on('message', (raw) => {
       const msg = JSON.parse(String(raw)) as {
-        id: number;
-        params: { function: string; environment_id?: unknown };
+        id?: number;
+        method: string;
+        params: { function?: string; environment_id?: unknown };
       };
-      conn.calls.push(msg.params.function);
+      conn.methods.push(msg.method);
+      if (msg.method === 'initialized') {
+        return;
+      }
+      if (msg.method === 'initialize') {
+        socket.send(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { protocol_version: '1.0.0' } }));
+        return;
+      }
+      if (msg.params.function) {
+        conn.calls.push(msg.params.function);
+      }
       conn.environmentIds.push(msg.params.environment_id);
       socket.send(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { ok: true, supported: true, paused: true } }));
     });
@@ -196,6 +209,7 @@ describe('AgentProcess dial auth (serve mode)', () => {
     const callConn = serve.connections.find((c) => c.calls.includes('sandbox.pause'));
     expect(callConn?.authorization).toBe('Bearer serve-token-1');
     expect(callConn?.query).toBe('');
+    expect(callConn?.methods.slice(0, 3)).toEqual(['initialize', 'initialized', 'server_call']);
     expect(callConn?.environmentIds).toEqual(['environment-authenticated']);
 
     // The echoed readiness line (renderer log viewer / stdout) never carries

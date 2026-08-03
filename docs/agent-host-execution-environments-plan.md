@@ -88,13 +88,17 @@ Completed through the framework/runtime vertical slice:
 - Main-process Terminal RPC now completes the mandatory GUI protocol handshake
   before session or terminal operations. This defect was found by the Devbox
   product proof after Files and Git had already routed successfully.
+- All launcher-owned JSON-RPC WebSocket clients now share one typed
+  initialize/initialized handshake boundary. This covers AgentHost control,
+  Terminal, lifecycle one-shot calls, and resident watchers; a source-level
+  completeness test fails when a new main/server JSON-RPC client bypasses the
+  boundary. Resident watchers also retain the runtime bearer credential rather
+  than dialing an authenticated host anonymously.
 
 Next: prove per-tab profile switching and independent close/rebuild against the
-real product, audit every non-renderer RPC client for the same mandatory
-initialize/initialized handshake, and exercise the pooled-host path in server
-mode. Then remove the remaining legacy per-process `SwitchContext`
-startup/shutdown path and obsolete ticket/session process assumptions before
-the final routing audit.
+real product and exercise the pooled-host path in server mode. Then remove the
+remaining legacy per-process `SwitchContext` startup/shutdown path and obsolete
+ticket/session process assumptions before the final routing audit.
 
 ## Executive decision
 

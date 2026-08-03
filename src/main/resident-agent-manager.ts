@@ -63,6 +63,7 @@ import {
   unreadRowsFor,
   USER_PARTICIPANT,
 } from '@/lib/resident-agent';
+import { wsAuthOptions } from '@/lib/ws-auth';
 import {
   residentAgentToRow,
   residentAlarmToRow,
@@ -75,6 +76,7 @@ import {
   rowToResidentMemory,
   rowToResidentMessage,
 } from '@/main/db-store-bridge';
+import { initializeMainRpcConnection } from '@/main/omniagents-rpc-handshake';
 import type { ProcessManager } from '@/main/process-manager';
 import { getDefaultWorkspaceDir } from '@/main/util';
 import type { IIpcListener } from '@/shared/ipc-listener';
@@ -159,6 +161,7 @@ const WORKSPACE_TOOL_TIMEOUT_MS = 120_000;
 // ---------------------------------------------------------------------------
 
 type RunEndInfo = { finalText: string; endReason?: string };
+type ResidentRpcEndpoint = { wsUrl: string; authToken?: string };
 
 class ResidentWatcher {
   private ws: WsWebSocket | null = null;
@@ -174,6 +177,7 @@ class ResidentWatcher {
 
   constructor(
     private readonly wsUrl: string,
+    private readonly authToken: string | undefined,
     private readonly callbacks: {
       onRunStarted: (sessionId: string | null) => void;
       onRunEnd: (sessionId: string | null, info: RunEndInfo) => void;
@@ -189,12 +193,33 @@ class ResidentWatcher {
 
   connect(): Promise<void> {
     return new Promise((resolve, reject) => {
-      const ws = new WsWebSocket(this.wsUrl);
+      const ws = new WsWebSocket(this.wsUrl, wsAuthOptions(this.authToken));
       this.ws = ws;
       const failTimer = setTimeout(() => reject(new Error('watcher connect timed out')), 30_000);
-      ws.once('open', () => {
-        clearTimeout(failTimer);
-        resolve();
+      ws.once('open', async () => {
+        try {
+          await initializeMainRpcConnection({
+            name: 'omni-desktop-resident-watcher',
+            capabilities: { client_functions: true, approvals: true, replay: true },
+            request: (method, params) => this.call(method, params),
+            notify: (method, params) =>
+              new Promise<void>((resolveSend, rejectSend) => {
+                ws.send(JSON.stringify({ jsonrpc: '2.0', method, params }), (error) => {
+                  if (error) {
+                    rejectSend(error);
+                  } else {
+                    resolveSend();
+                  }
+                });
+              }),
+          });
+          clearTimeout(failTimer);
+          resolve();
+        } catch (error) {
+          clearTimeout(failTimer);
+          reject(error instanceof Error ? error : new Error(String(error)));
+          ws.close();
+        }
       });
       ws.once('error', (err) => {
         clearTimeout(failTimer);
@@ -1208,11 +1233,11 @@ export class ResidentAgentManager {
       }
       await this.reflectIfDayRolled(agentId);
       await this.refreshHandbook();
-      const wsUrl = await this.ensureRunning(agentId);
+      const endpoint = await this.ensureRunning(agentId);
       const key = dayKey(this.now());
       rt.day = rt.day ?? key;
       const sessionId = daySessionId(agentId, key);
-      const watcher = await this.ensureWatcher(agentId, wsUrl);
+      const watcher = await this.ensureWatcher(agentId, endpoint);
       await watcher.ensureSession(sessionId, this.agentHome(agentId), this.sessionVariables(agentId));
       if (rt.state === 'starting' || rt.state === 'parked') {
         rt.state = 'idle';
@@ -1353,12 +1378,12 @@ export class ResidentAgentManager {
     // beat so an undelivered beat can re-dispatch on the next sweep.
     let events: ResidentEvent[] = [];
     try {
-      const wsUrl = await this.ensureRunning(agentId);
+      const endpoint = await this.ensureRunning(agentId);
       const nowMs = this.now();
       const key = dayKey(nowMs);
       rt.day = key;
       const sessionId = daySessionId(agentId, key);
-      const watcher = await this.ensureWatcher(agentId, wsUrl);
+      const watcher = await this.ensureWatcher(agentId, endpoint);
       await watcher.ensureSession(sessionId, this.agentHome(agentId), this.sessionVariables(agentId));
 
       events = rt.pending;
@@ -1742,8 +1767,8 @@ export class ResidentAgentManager {
     rt.state = 'reflecting';
     this.broadcastStatus();
     try {
-      const wsUrl = await this.ensureRunning(agentId);
-      const watcher = await this.ensureWatcher(agentId, wsUrl);
+      const endpoint = await this.ensureRunning(agentId);
+      const watcher = await this.ensureWatcher(agentId, endpoint);
       const sessionId = daySessionId(agentId, oldDay);
       await watcher.ensureSession(sessionId, this.agentHome(agentId), this.sessionVariables(agentId));
       // Memory writes happen through the remember/forget client tools
@@ -1931,7 +1956,7 @@ export class ResidentAgentManager {
     });
   }
 
-  private async ensureRunning(agentId: string): Promise<string> {
+  private async ensureRunning(agentId: string): Promise<ResidentRpcEndpoint> {
     const agent = this.agent(agentId);
     if (!agent) {
       throw new Error(`Unknown resident agent: ${agentId}`);
@@ -1940,7 +1965,10 @@ export class ResidentAgentManager {
     const rt = this.runtime(agentId);
     const current = this.processManager.getStatus(pid);
     if (current.type === 'running' && current.data.wsUrl) {
-      return current.data.wsUrl;
+      return {
+        wsUrl: current.data.wsUrl,
+        ...(current.data.authToken ? { authToken: current.data.authToken } : {}),
+      };
     }
     if (current.type !== 'starting' && current.type !== 'connecting') {
       rt.state = 'starting';
@@ -1972,7 +2000,10 @@ export class ResidentAgentManager {
       const status = this.processManager.getStatus(pid);
       if (status.type === 'running' && status.data.wsUrl) {
         rt.containerId = status.data.containerId ?? null;
-        return status.data.wsUrl;
+        return {
+          wsUrl: status.data.wsUrl,
+          ...(status.data.authToken ? { authToken: status.data.authToken } : {}),
+        };
       }
       // `error` is terminal — waiting the full start timeout on a spawn that
       // already failed just delays the attention message by three minutes.
@@ -1986,12 +2017,12 @@ export class ResidentAgentManager {
     }
   }
 
-  private async ensureWatcher(agentId: string, wsUrl: string): Promise<ResidentWatcher> {
+  private async ensureWatcher(agentId: string, endpoint: ResidentRpcEndpoint): Promise<ResidentWatcher> {
     const rt = this.runtime(agentId);
     if (rt.watcher) {
       return rt.watcher;
     }
-    const watcher = new ResidentWatcher(wsUrl, {
+    const watcher = new ResidentWatcher(endpoint.wsUrl, endpoint.authToken, {
       onRunStarted: () => {
         rt.thinking = true;
         rt.speechCount = 0; // the per-turn budget resets every run
