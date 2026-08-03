@@ -71,10 +71,17 @@ Completed through the framework/runtime vertical slice:
   launcher control credential that is never exposed in readiness or renderer
   state.
 - The launcher uses a persistent typed main-process control channel to bind
-  each tab to its own Workspace/environment. Profile switches and rebuilds
-  materialize and bind a replacement before retiring the prior environment;
-  closing one tab stops only its environment. Failed materialization or binding
-  rolls back without orphaning the host or a newly created environment.
+  each tab to its own Workspace/environment. Profile switches materialize and
+  bind a replacement before retiring the prior environment. Rebuilds withdraw
+  and stop the ready environment first so automatic materialization cannot
+  reuse it, then bind a fresh replacement. Closing one tab stops only its
+  environment. Failed profile materialization or binding rolls back without
+  orphaning the host or a newly created environment.
+- Consumer readiness is derived solely from that consumer's recorded runtime
+  binding. A live shared host never supplies fallback Workspace, environment,
+  container, service, or endpoint metadata to an unbound or rebuilding
+  consumer. Ticket URL lookup, container ownership, reconnect, and offline
+  notification paths all pass through the same consumer-scoped status boundary.
 - The embedded React client now receives one typed runtime connection
   (`baseUrl` plus optional authentication) rather than the legacy UI-oriented
   `uiUrl`/token pair. The unused Webview-era split component has been removed.
@@ -94,10 +101,14 @@ Completed through the framework/runtime vertical slice:
   completeness test fails when a new main/server JSON-RPC client bypasses the
   boundary. Resident watchers also retain the runtime bearer credential rather
   than dialing an authenticated host anonymously.
+- Permanent Electron E2E now proves one pooled host survives a real UI profile
+  switch, a destructive environment rebuild, and an independent session close.
+  Alpha receives new environment/container identities at each required
+  boundary, while Beta retains its exact host, Workspace, environment, and
+  container identity and remains usable after Alpha closes.
 
-Next: prove per-tab profile switching and independent close/rebuild against the
-real product and exercise the pooled-host path in server mode. Then remove the
-remaining legacy per-process `SwitchContext` startup/shutdown path and obsolete
+Next: exercise the pooled-host path in server mode. Then remove the remaining
+legacy per-process `SwitchContext` startup/shutdown path and obsolete
 ticket/session process assumptions before the final routing audit.
 
 ## Executive decision

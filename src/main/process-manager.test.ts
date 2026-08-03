@@ -46,6 +46,7 @@ vi.mock('@/main/agent-process', () => ({
           workspaceId: useStartupEnvironment ? 'workspace-startup' : workspaceId,
           environmentId: useStartupEnvironment ? 'environment-startup' : `environment-${workspaceId}`,
           services: {},
+          containerId: useStartupEnvironment ? 'container-startup' : `container-${workspaceId}`,
         };
       }
     );
@@ -420,6 +421,49 @@ describe('ProcessManager', () => {
       expect(recipients).toEqual(['tab-a', 'tab-b']);
     });
 
+    it("does not expose another consumer's runtime while a pooled environment is materializing", async () => {
+      const { pm } = makePm();
+      await pm.start('tab-a', { workspaceDir: '/tmp/a' });
+      const host = hoisted.agentProcessInstances[0]!;
+      host.getStatus.mockReturnValue({
+        type: 'running',
+        data: {
+          wsUrl: 'ws://localhost:9000/ws',
+          uiUrl: 'http://localhost:9000',
+          workspaceId: 'workspace-a',
+          environmentId: 'environment-a',
+        },
+        timestamp: Date.now(),
+      } satisfies WithTimestamp<AgentProcessStatus>);
+
+      let finishMaterializing!: (runtime: {
+        workspaceId: string;
+        environmentId: string;
+        services: Record<string, string>;
+      }) => void;
+      host.configureConsumer.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishMaterializing = resolve;
+          })
+      );
+      const starting = pm.start('tab-b', { workspaceDir: '/tmp/b' });
+      await vi.waitFor(() => expect(host.configureConsumer).toHaveBeenCalledTimes(2));
+
+      expect(pm.getStatus('tab-b')).toMatchObject({ type: 'starting' });
+      expect(pm.getStatus('tab-b')).not.toHaveProperty('data');
+
+      finishMaterializing({ workspaceId: 'workspace-b', environmentId: 'environment-b', services: {} });
+      await starting;
+      expect(pm.getStatus('tab-b')).toMatchObject({
+        type: 'running',
+        data: { workspaceId: 'workspace-b', environmentId: 'environment-b' },
+      });
+      expect(pm.getProcessContainerId('tab-a')).toBe('container-startup');
+      expect(pm.getProcessContainerId('tab-b')).toBeNull();
+      expect(pm.getContainerOwners()).toEqual([{ processId: 'tab-a', containerId: 'container-startup' }]);
+    });
+
     it('stopping one compatible tab leaves the shared host running', async () => {
       const { pm } = makePm();
       await pm.start('tab-a', { workspaceDir: '/tmp/ws', projectId: 'project-1' });
@@ -452,7 +496,33 @@ describe('ProcessManager', () => {
       } satisfies WithTimestamp<AgentProcessStatus>);
       await pm.start('tab-b', { workspaceDir: '/tmp/b' });
 
-      await pm.rebuild('tab-a', { workspaceDir: '/tmp/a' });
+      let finishRebuild!: (runtime: {
+        workspaceId: string;
+        environmentId: string;
+        services: Record<string, string>;
+        containerId: string;
+      }) => void;
+      host.configureConsumer.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishRebuild = resolve;
+          })
+      );
+      const rebuilding = pm.rebuild('tab-a', { workspaceDir: '/tmp/a' });
+      await vi.waitFor(() => expect(host.stopConsumerEnvironment).toHaveBeenCalledWith('environment-startup'));
+      expect(pm.getStatus('tab-a')).toMatchObject({ type: 'starting' });
+      expect(pm.getStatus('tab-a')).not.toHaveProperty('data');
+      expect(pm.getStatus('tab-b')).toMatchObject({
+        type: 'running',
+        data: { environmentId: expect.stringMatching(/^environment-/) },
+      });
+      finishRebuild({
+        workspaceId: 'workspace-a',
+        environmentId: 'environment-rebuilt',
+        services: {},
+        containerId: 'container-rebuilt',
+      });
+      await rebuilding;
 
       expect(host.rebuild).not.toHaveBeenCalled();
       expect(host.stopConsumerEnvironment).toHaveBeenCalledWith('environment-startup');
@@ -462,8 +532,8 @@ describe('ProcessManager', () => {
         expect.objectContaining({ workspaceDir: '/tmp/a' }),
         false
       );
-      expect(host.configureConsumer.mock.invocationCallOrder.at(-1)).toBeLessThan(
-        host.stopConsumerEnvironment.mock.invocationCallOrder.at(-1)!
+      expect(host.stopConsumerEnvironment.mock.invocationCallOrder.at(-1)).toBeLessThan(
+        host.configureConsumer.mock.invocationCallOrder.at(-1)!
       );
     });
 

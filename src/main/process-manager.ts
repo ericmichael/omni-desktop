@@ -323,7 +323,7 @@ export class ProcessManager {
         },
         onStatusChange: (status) => {
           for (const consumerId of this.agentHosts.consumersForHost(proc)) {
-            const tailored = this.statusForConsumer(consumerId, proc, status);
+            const tailored = this.statusForConsumer(consumerId, status);
             if (tailored) {
               this.sendToWindow('agent-process:status', consumerId, tailored);
             }
@@ -366,7 +366,6 @@ export class ProcessManager {
 
   private statusForConsumer(
     consumerId: string,
-    host: AgentProcess,
     status: WithTimestamp<AgentProcessStatus>
   ): WithTimestamp<AgentProcessStatus> | null {
     if (status.type !== 'running' && status.type !== 'connecting') {
@@ -374,8 +373,7 @@ export class ProcessManager {
     }
     const runtime = this.consumerRuntimes.get(consumerId);
     if (!runtime) {
-      const firstConsumer = this.agentHosts.consumersForHost(host)[0];
-      return firstConsumer === consumerId ? status : null;
+      return null;
     }
     return {
       ...status,
@@ -844,13 +842,18 @@ export class ProcessManager {
       const workspaceId = this.consumerWorkspaceIds.get(processId);
       if (compatibilityKey === previousKey && workspaceId) {
         const currentRuntime = this.consumerRuntimes.get(processId);
+        // Automatic environments are intentionally reused for the same
+        // Workspace/Profile pair while they remain ready. Rebuild must first
+        // retire the current environment or materialization is a no-op.
+        // Withdrawing it from the consumer map also prevents stale runtime
+        // metadata from being reported during the replacement window.
+        this.consumerRuntimes.delete(processId);
+        this.sendToWindow('agent-process:status', processId, this.getStatus(processId));
+        if (currentRuntime) {
+          await previous.stopConsumerEnvironment(currentRuntime.environmentId);
+        }
         const runtime = await previous.configureConsumer(processId, workspaceId, startArg, false);
         this.consumerRuntimes.set(processId, runtime);
-        if (currentRuntime && currentRuntime.environmentId !== runtime.environmentId) {
-          await previous.stopConsumerEnvironment(currentRuntime.environmentId).catch((error) => {
-            console.warn(`[process-manager] old environment cleanup failed: ${(error as Error).message}`);
-          });
-        }
         this.lastStartArgs.set(processId, merged);
         this.trackMirrorSources(processId, startArg.sources);
         this.sendToWindow('agent-process:status', processId, this.getStatus(processId));
@@ -874,7 +877,11 @@ export class ProcessManager {
   getStatus = (processId: string): WithTimestamp<AgentProcessStatus> => {
     const proc = this.processes.get(processId);
     const baseStatus = proc ? proc.getStatus() : { type: 'uninitialized' as const, timestamp: Date.now() };
-    const status = proc ? (this.statusForConsumer(processId, proc, baseStatus) ?? baseStatus) : baseStatus;
+    const tailored = proc ? this.statusForConsumer(processId, baseStatus) : baseStatus;
+    // A compatible consumer is attached to the shared host before its own
+    // environment finishes materializing. Never expose the shared host's
+    // running metadata during that window: the consumer is still starting.
+    const status = tailored ?? { type: 'starting' as const, timestamp: Date.now() };
     return this.withHostOfflineOverlay(processId, status);
   };
 
@@ -926,7 +933,7 @@ export class ProcessManager {
       if (!proc) {
         continue;
       }
-      const overlaid = this.withHostOfflineOverlay(processId, proc.getStatus());
+      const overlaid = this.getStatus(processId);
       if (overlaid.type === 'running' && overlaid.data.hostOffline) {
         this.sendToWindow('agent-process:status', processId, overlaid);
       }
@@ -949,7 +956,7 @@ export class ProcessManager {
     for (const processId of toResume) {
       // Skip if a (re)start is already in flight — guards against WS-reconnect
       // flapping triggering overlapping rebuilds.
-      const st = this.processes.get(processId)?.getStatus().type;
+      const st = this.getStatus(processId).type;
       if (st === 'starting' || st === 'connecting') {
         continue;
       }
@@ -1047,11 +1054,7 @@ export class ProcessManager {
       if (tab.ticketId !== ticketId) {
         continue;
       }
-      const proc = this.processes.get(tab.id);
-      if (!proc) {
-        continue;
-      }
-      const status = proc.getStatus();
+      const status = this.getStatus(tab.id);
       if (status.type === 'running' && status.data.wsUrl) {
         return status.data.wsUrl;
       }
@@ -1077,11 +1080,7 @@ export class ProcessManager {
       if (opts.projectId !== projectId) {
         continue;
       }
-      const proc = this.processes.get(processId);
-      if (!proc) {
-        continue;
-      }
-      const status = proc.getStatus();
+      const status = this.getStatus(processId);
       // ``running`` is the post-connect state; ``connecting`` already has
       // ``data.containerId`` because the readiness payload arrives before
       // the WS handshake completes. Accept both so PR queries don't have
@@ -1094,11 +1093,7 @@ export class ProcessManager {
   }
 
   getProcessContainerId(processId: string): string | null {
-    const proc = this.processes.get(processId);
-    if (!proc) {
-      return null;
-    }
-    const status = proc.getStatus();
+    const status = this.getStatus(processId);
     if ((status.type === 'running' || status.type === 'connecting') && status.data.containerId) {
       return status.data.containerId;
     }
@@ -1122,8 +1117,8 @@ export class ProcessManager {
    */
   getContainerOwners(): Array<{ processId: string; containerId: string }> {
     const owners: Array<{ processId: string; containerId: string }> = [];
-    for (const [processId, proc] of this.processes.entries()) {
-      const status = proc.getStatus();
+    for (const processId of this.processes.keys()) {
+      const status = this.getStatus(processId);
       if ((status.type === 'running' || status.type === 'connecting') && status.data.containerId) {
         owners.push({ processId, containerId: status.data.containerId });
       }

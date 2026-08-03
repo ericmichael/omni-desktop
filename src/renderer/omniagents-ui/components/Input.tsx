@@ -324,7 +324,7 @@ export function Input({
           />
 
           <PromptInputActions className="flex items-center justify-between gap-1 sm:gap-2 pt-2 px-2">
-            <div className="flex items-center gap-1 min-w-0 overflow-hidden pr-1">
+            <div className="flex items-center gap-1 min-w-0 pr-1">
               <label
                 htmlFor="file-upload"
                 onClick={(e) => e.stopPropagation()}
