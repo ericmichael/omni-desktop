@@ -66,8 +66,15 @@ export type AgentProcessMode = 'serve' | 'compute';
  * they keep the explicit "Apply to my folder" gate. Launcher-side only; the
  * ``--source`` descriptor sent to omni serve does not include it.
  */
-export type AgentProcessSource = { mountName: string; writable?: boolean } & (
-  | { kind: 'local-git'; workspaceDir: string; ref?: string; launcherOwned?: boolean }
+export type AgentProcessSource = { id?: string; mountName: string; writable?: boolean } & (
+  | {
+      kind: 'local-git';
+      workspaceDir: string;
+      ref?: string;
+      launcherOwned?: boolean;
+      gitDir?: string;
+      gitCommonDir?: string;
+    }
   | { kind: 'local'; workspaceDir: string; launcherOwned?: boolean }
   | {
       kind: 'git-remote';
@@ -162,6 +169,8 @@ export type AgentProcessStartArg = {
 export type AgentHostConsumerRuntime = {
   workspaceId: string;
   environmentId: string;
+  workspaceRoot: string;
+  defaultCwd?: string;
   services: Record<string, string>;
   containerId?: string;
   paused?: boolean;
@@ -241,8 +250,19 @@ const sourceDescriptor = (source: AgentProcessSource): Record<string, unknown> =
     mountName: source.mountName,
     writable: source.writable ?? true,
   };
+  if (source.id) {
+    descriptor.id = source.id;
+  }
   if (source.kind === 'local' || source.kind === 'local-git') {
     descriptor.path = source.workspaceDir;
+  }
+  if (source.kind === 'local-git') {
+    if (source.gitDir) {
+      descriptor.gitDir = source.gitDir;
+    }
+    if (source.gitCommonDir) {
+      descriptor.gitCommonDir = source.gitCommonDir;
+    }
   }
   if (source.kind === 'git-remote') {
     descriptor.repoUrl = source.repoUrl;
@@ -256,11 +276,32 @@ const sourceDescriptor = (source: AgentProcessSource): Record<string, unknown> =
   return descriptor;
 };
 
-const serveWorkspaceDirectory = (arg: AgentProcessStartArg): string => {
-  const firstLocal = arg.sources.find((source) => source.kind === 'local' || source.kind === 'local-git');
-  return firstLocal && (firstLocal.kind === 'local' || firstLocal.kind === 'local-git')
-    ? firstLocal.workspaceDir
-    : getOmniConfigDir();
+const serveWorkspaceDirectory = (workspaceId: string, arg: AgentProcessStartArg): string => {
+  if (arg.sources.length === 0 && arg.workspaceDir) {
+    return arg.workspaceDir;
+  }
+  const source = arg.sources.length === 1 ? arg.sources[0] : undefined;
+  if (source && (source.kind === 'local' || source.kind === 'local-git')) {
+    const sourceRoot = path.resolve(source.workspaceDir);
+    const externalGitMetadata =
+      source.kind === 'local-git' &&
+      [source.gitDir, source.gitCommonDir].some((candidate) => {
+        if (!candidate) {
+          return false;
+        }
+        const relative = path.relative(sourceRoot, path.resolve(candidate));
+        return relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative);
+      });
+    if (!externalGitMetadata) {
+      // A single ordinary local folder is already a complete Host workspace;
+      // preserving that direct root avoids inventing a redundant mount level.
+      return source.workspaceDir;
+    }
+  }
+  // Composite, worktree-metadata, and remote layouts need one neutral,
+  // launcher-owned logical root. The first source and launcher config
+  // directory can never silently become the project boundary.
+  return path.join(getOmniConfigDir(), 'workspaces', workspaceId);
 };
 
 const SERVER_CALL_TIMEOUT_MS = 8_000;
@@ -524,7 +565,7 @@ export class AgentProcess {
       'agent_host_register_workspace',
       {
         workspace_id: workspaceId,
-        materialization_path: serveWorkspaceDirectory(arg),
+        materialization_path: serveWorkspaceDirectory(workspaceId, arg),
         snapshot_ref: snapshotRef,
         sources: arg.sources.map(sourceDescriptor),
         owner_user_id: 'token_user',
@@ -553,9 +594,17 @@ export class AgentProcess {
       throw new Error('AgentHost materialization returned no environment_id');
     }
     materializedEnvironmentId = environmentId;
+    const workspaceRoot = String(materialized['workspace_root'] ?? '').trim();
+    if (!workspaceRoot) {
+      throw new Error('AgentHost materialization returned no workspace_root');
+    }
     const runtime: AgentHostConsumerRuntime = {
       workspaceId,
       environmentId,
+      workspaceRoot,
+      ...(typeof materialized['default_cwd'] === 'string' && materialized['default_cwd'].trim()
+        ? { defaultCwd: materialized['default_cwd'].trim() }
+        : {}),
       services:
         materialized['services'] && typeof materialized['services'] === 'object'
           ? (materialized['services'] as Record<string, string>)

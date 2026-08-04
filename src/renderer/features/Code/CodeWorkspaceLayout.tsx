@@ -28,6 +28,7 @@ import type { AgentRuntimeConnection, TicketId } from '@/shared/types';
 
 import { AppIcon } from './AppIcon';
 import { EnvironmentDock } from './EnvironmentDock';
+import { SurfaceHostSlot } from './SurfaceHostSlot';
 
 type CodeWorkspaceLayoutProps = {
   connection: AgentRuntimeConnection;
@@ -296,19 +297,6 @@ const useStyles = makeStyles({
 });
 
 const transition = { type: 'spring' as const, duration: 0.28, bounce: 0.08 };
-
-const SurfaceHostSlot = memo(({ host }: { host: HTMLDivElement }) => {
-  const ref = useCallback(
-    (element: HTMLDivElement | null) => {
-      if (element) {
-        element.appendChild(host);
-      }
-    },
-    [host]
-  );
-  return <div ref={ref} style={{ width: '100%', height: '100%', minHeight: 0 }} />;
-});
-SurfaceHostSlot.displayName = 'SurfaceHostSlot';
 
 const BUILTIN_TITLES: Record<string, string> = {
   code: 'VS Code',
@@ -701,6 +689,7 @@ export const CodeWorkspaceLayout = memo(
                     {gitActivated && (
                       <WorkspaceGitPortal
                         host={gitHost}
+                        active={activeApp === 'git'}
                         tabId={tabId}
                         environmentId={environmentId}
                         sessionId={sessionId}
@@ -718,6 +707,7 @@ export const CodeWorkspaceLayout = memo(
             <AnimatePresence>
               {activeApp !== 'chat' && activeDescriptor && (
                 <AppSurfaceView
+                  key={activeDescriptor.id}
                   app={activeDescriptor}
                   src={surfaceSrc}
                   onUrlChange={activeDescriptor.kind === 'builtin-browser' ? onPreviewUrlChange : undefined}

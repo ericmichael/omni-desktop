@@ -326,6 +326,7 @@ export const CodeTabContent = memo(
     // lazily so the sandbox can start even when the user hasn't picked a
     // workspace.
     const projectSource = firstSource(project);
+    const primaryLocalSource = project?.sources.find((source) => source.kind === 'local');
     const linkedWorkspaceDir =
       tab.workspaceDir ?? (projectSource?.kind === 'local' ? projectSource.workspaceDir : null) ?? null;
     const [resolvedProjectDir, setResolvedProjectDir] = useState<string | null>(null);
@@ -375,6 +376,10 @@ export const CodeTabContent = memo(
     );
 
     const workspaceDir = chatMode ? chatScratchDir : (linkedWorkspaceDir ?? resolvedProjectDir);
+    const sourceOverrideDir =
+      tab.workspaceDir && primaryLocalSource?.kind === 'local' && tab.workspaceDir !== primaryLocalSource.workspaceDir
+        ? tab.workspaceDir
+        : undefined;
 
     // Sticky profile binding persisted on the tab. The migration backfills
     // existing installs; ``codeApi.addTab*`` seeds new tabs from the same
@@ -407,21 +412,6 @@ export const CodeTabContent = memo(
         })),
       [isEnterprise, store.availableSandboxProfiles, machines]
     );
-
-    // What the agent should treat as its workspace root. For host profiles
-    // the agent runs on the host, so the host path is correct. For
-    // containerized profiles (docker, e2b, …) the agent's filesystem root is
-    // ``/workspace/<mountName>`` (or just ``/workspace`` when no source has
-    // been attached) — passing a host path here would land in
-    // ``session.variables.workspace_root`` and make every ``execute_bash``
-    // try to ``cd`` to a path that doesn't exist inside the container.
-    const agentWorkspaceDir = useMemo(() => {
-      if (profileRunsOnHost(profileName)) {
-        return workspaceDir ?? undefined;
-      }
-      const mountName = projectSource?.mountName;
-      return mountName ? `/workspace/${mountName}` : '/workspace';
-    }, [profileName, workspaceDir, projectSource]);
 
     const [greeting] = useState(getGreeting);
     const allLaunchErrors = useStore($codeTabErrors);
@@ -456,6 +446,7 @@ export const CodeTabContent = memo(
 
     const { phase, retry } = useCodeAutoLaunch(tab.id, tab.snapshotRef ? workspaceDir : null, {
       ...(tab.projectId ? { projectId: tab.projectId } : {}),
+      ...(sourceOverrideDir ? { sourceOverrideDir } : {}),
       profileNameOverride: profileName,
       ...(tab.sessionId ? { sessionId: tab.sessionId } : {}),
       ...(tab.snapshotRef ? { snapshotRef: tab.snapshotRef } : {}),
@@ -485,6 +476,9 @@ export const CodeTabContent = memo(
       }
     }, [pendingMessages, sandboxUrls, tab.id, tab.sessionId]);
     const environmentId = sandboxUrls?.environmentId;
+    // The provisioned environment owns this value. Renderer guesses were the
+    // source of Host/Devbox drift whenever source layouts differed.
+    const agentWorkspaceDir = sandboxUrls?.workspaceRoot;
 
     const handleSessionChange = useCallback(
       (sessionId: string | undefined) => {

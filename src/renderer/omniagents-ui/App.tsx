@@ -917,39 +917,7 @@ export function App({
         const name = command.slice(1);
         const argText = text.slice(command.length).trim();
         try {
-          // Anchor the session's workspace_root before dispatching the
-          // server function. Slash commands like ``/goal`` trigger
-          // ``start_run`` server-side via ``enqueue_message`` + drainer
-          // (the autopilot path bypasses our regular ``startRun(variables)``
-          // call), so the session has to already carry ``workspace_root``
-          // by the time the run kicks off — otherwise the framework raises
-          // ``WorkspaceRootRequiredError``. The unknown-slash fallback
-          // below also routes through ``startRun`` / ``enqueueMessage``
-          // without variables, so we set it once for every slash path.
-          //
-          // Source priority: local ``workspacePath`` state first. It's
-          // seeded synchronously from the ``workspaceDir`` prop (line 77),
-          // refreshed by the boot caps effect (line 161), AND updated by
-          // ``WorkspacePicker.onSelect`` (line 1338) — so a user changing
-          // the workspace via the pill *before* hitting submit is
-          // respected here. Boot capabilities only win when local state
-          // hasn't been seeded (no prop + boot raced React's flush).
           const sid = actor.getSnapshot().context.sessionId ?? sessionId;
-          const caps = bootState.actor.getSnapshot().context.capabilities as
-            | { workspacePath?: string | null; workspaceSupported?: boolean }
-            | undefined;
-          const liveWorkspacePath = workspacePath || caps?.workspacePath || null;
-          const liveWorkspaceSupported = workspaceSupported || !!caps?.workspaceSupported;
-          if (sid && liveWorkspacePath && liveWorkspaceSupported) {
-            try {
-              await client.serverCall('session.ensure', {
-                session_id: sid,
-                workspace_root: liveWorkspacePath,
-              });
-            } catch {
-              /* best-effort — let the server function attempt the run anyway */
-            }
-          }
           const funcs = await client.listServerFunctions();
           const found = funcs.find((f) => String(f.name).toLowerCase() === name.toLowerCase());
           if (!found) {
@@ -1080,22 +1048,12 @@ export function App({
         const stagedSnapshot = stagedContext.length > 0 ? stagedContext.slice() : undefined;
         const agentPrompt = stagedSnapshot ? `${stagedSnapshot.map((c) => c.text).join('\n\n')}\n\n${text}` : text;
 
-        // Merge parent-provided variables (e.g. client_tools) with workspace
-        // variables. Prefer the boot actor's capabilities snapshot over the
-        // destructured React state — boot finishes synchronously inside xstate
-        // (waitFor unblocks awaitChatReady), but the React state that mirrors
-        // its capabilities into setWorkspacePath / setWorkspaceSupported may
-        // not have flushed by the time the supervisor bridge submits the run.
-        const caps = bootState.actor.getSnapshot().context.capabilities;
-        const liveWorkspacePath = caps?.workspacePath ?? workspacePath;
-        const liveWorkspaceSupported = caps?.workspaceSupported ?? workspaceSupported;
-        const workspaceVars: Record<string, unknown> | undefined =
-          liveWorkspacePath && liveWorkspaceSupported ? { workspace_root: liveWorkspacePath } : undefined;
+        // Execution identity comes from start_run's environment selection;
+        // session variables carry product/client metadata only.
         const useVoiceRun = voiceRunRef.current;
         voiceRunRef.current = false;
         const variablesSource = (speakRepliesEnabled || useVoiceRun) && voiceVariables ? voiceVariables : variablesProp;
-        const baseVariables: Record<string, unknown> | undefined =
-          variablesSource || workspaceVars ? { ...variablesSource, ...workspaceVars } : undefined;
+        const baseVariables: Record<string, unknown> | undefined = variablesSource ? { ...variablesSource } : undefined;
         // Merge per-dispatch overrides (from the orchestrator's bridge.run call)
         // on top of the column's locally owned variables. The orchestrator owns
         // autopilot mode and ships its run intent atomically with the dispatch,
@@ -1323,27 +1281,10 @@ export function App({
           sid = await machine.loadSession(undefined);
         }
 
-        // Assemble session.variables. For autopilot we know the
-        // workspace dir definitively — the launcher provisioned a
-        // worktree before calling startGoal and passed it down as the
-        // ``workspaceDir`` prop. Prefer that over the boot machine's
-        // capabilities snapshot (which may not have hydrated yet when
-        // the autopilot button fires on a freshly-spawned tab) and over
-        // ``workspaceSupported`` (which starts false and only flips
-        // true after boot's first capabilities push).
-        //
-        // Fallback order: workspaceDir prop → bootState capabilities →
-        // local workspacePath state.
-        const caps = bootState.actor.getSnapshot().context.capabilities as
-          | { workspacePath?: string | null; workspaceSupported?: boolean }
-          | undefined;
-        const liveWorkspacePath = workspaceDir ?? caps?.workspacePath ?? workspacePath;
-        const workspaceVars: Record<string, unknown> | undefined = liveWorkspacePath
-          ? { workspace_root: liveWorkspacePath }
-          : undefined;
+        // Session variables are non-execution metadata. The goal server
+        // function receives the selected environment explicitly below.
         const baseVariables: Record<string, unknown> = {
           ...((variablesProp as Record<string, unknown> | undefined) ?? {}),
-          ...(workspaceVars ?? {}),
         };
         const variables: Record<string, unknown> = runOverrides
           ? {

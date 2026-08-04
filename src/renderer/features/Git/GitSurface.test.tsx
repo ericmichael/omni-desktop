@@ -240,10 +240,7 @@ describe('GitSurface', () => {
     await settle();
     await settle();
 
-    expect(mocks.rpc.serverCall).toHaveBeenCalledWith('session.ensure', {
-      session_id: 'session-1',
-      workspace_root: '/workspace',
-    });
+    expect(mocks.rpc.serverCall).not.toHaveBeenCalledWith('session.ensure', expect.anything());
     expect(container.querySelector('section[aria-label="Source control"]')).not.toBeNull();
     expect(container.querySelector('select[aria-label="Repository"]')?.getAttribute('value')).toBeNull();
 
@@ -345,6 +342,37 @@ describe('GitSurface', () => {
     expect(container.querySelector<HTMLSelectElement>('select[aria-label="Repository"]')?.value).toBe('apps/api');
   });
 
+  it('refreshes repository status and diffs when the persistent Git surface becomes active again', async () => {
+    await act(async () =>
+      root.render(<GitSurface active environmentId="environment-1" sessionId="session-1" workspaceRoot="/workspace" />)
+    );
+    await settle();
+    await settle();
+    const discoveryCalls = mocks.git.listRepositories.mock.calls.length;
+    const statusCalls = mocks.git.status.mock.calls.length;
+    const diffCalls = mocks.git.diff.mock.calls.length;
+
+    act(() =>
+      root.render(
+        <GitSurface active={false} environmentId="environment-1" sessionId="session-1" workspaceRoot="/workspace" />
+      )
+    );
+    await settle();
+    expect(mocks.git.listRepositories.mock.calls.length).toBe(discoveryCalls);
+    expect(mocks.git.status.mock.calls.length).toBe(statusCalls);
+    expect(mocks.git.diff.mock.calls.length).toBe(diffCalls);
+
+    act(() =>
+      root.render(<GitSurface active environmentId="environment-1" sessionId="session-1" workspaceRoot="/workspace" />)
+    );
+    await settle();
+    await settle();
+
+    expect(mocks.git.listRepositories.mock.calls.length).toBeGreaterThan(discoveryCalls);
+    expect(mocks.git.status.mock.calls.length).toBeGreaterThan(statusCalls);
+    expect(mocks.git.diff.mock.calls.length).toBeGreaterThan(diffCalls);
+  });
+
   it('explains when configured repository sources are outside the session workspace', async () => {
     const discovered = await mocks.git.listRepositories();
     mocks.git.listRepositories.mockResolvedValue({
@@ -360,7 +388,7 @@ describe('GitSurface', () => {
     await settle();
 
     expect(container.querySelector('[role="status"]')?.textContent).toContain(
-      'No repositories are reachable from this workspace'
+      'Configured Git sources were not materialized in this environment'
     );
   });
 

@@ -367,7 +367,7 @@ class ResidentWatcher {
    *  (`variables.client_tools` is connection-scoped — re-declared on
    *  every watcher connect) and the identity `additional_instructions`
    *  the instruction template renders into the system prompt. */
-  async ensureSession(sessionId: string, workspaceRoot: string, variables: Record<string, unknown>): Promise<void> {
+  async ensureSession(sessionId: string, variables: Record<string, unknown>): Promise<void> {
     if (this.attached.has(sessionId)) {
       return;
     }
@@ -375,7 +375,6 @@ class ResidentWatcher {
       function: 'session.ensure',
       args: {
         session_id: sessionId,
-        workspace_root: workspaceRoot,
         variables,
       },
       session_id: sessionId,
@@ -1190,7 +1189,9 @@ export class ResidentAgentManager {
    * mount the real session UI: the current day-session id + runtime connection.
    * Main ensures the session and attaches its watcher FIRST so thinking
    * state and park re-arming cover the user's direct runs, and so the
-   * session exists with a workspace_root before the renderer app boots.
+   * session exists and its non-execution variables are installed before the
+   * renderer app boots. Workspace/environment selection is owned separately
+   * by the AgentHost binding.
    * Serialized on the agent's chain so it can't race a park/reflect.
    */
   ensureSession = (agentId: string): Promise<{ sessionId: string; connection: AgentRuntimeConnection }> => {
@@ -1232,7 +1233,7 @@ export class ResidentAgentManager {
       rt.day = rt.day ?? key;
       const sessionId = daySessionId(agentId, key);
       const watcher = await this.ensureWatcher(agentId, endpoint);
-      await watcher.ensureSession(sessionId, this.agentHome(agentId), this.sessionVariables(agentId));
+      await watcher.ensureSession(sessionId, this.sessionVariables(agentId));
       if (rt.state === 'starting' || rt.state === 'parked') {
         rt.state = 'idle';
       }
@@ -1378,7 +1379,7 @@ export class ResidentAgentManager {
       rt.day = key;
       const sessionId = daySessionId(agentId, key);
       const watcher = await this.ensureWatcher(agentId, endpoint);
-      await watcher.ensureSession(sessionId, this.agentHome(agentId), this.sessionVariables(agentId));
+      await watcher.ensureSession(sessionId, this.sessionVariables(agentId));
 
       events = rt.pending;
       const urge = rt.pendingUrge;
@@ -1764,7 +1765,7 @@ export class ResidentAgentManager {
       const endpoint = await this.ensureRunning(agentId);
       const watcher = await this.ensureWatcher(agentId, endpoint);
       const sessionId = daySessionId(agentId, oldDay);
-      await watcher.ensureSession(sessionId, this.agentHome(agentId), this.sessionVariables(agentId));
+      await watcher.ensureSession(sessionId, this.sessionVariables(agentId));
       // Memory writes happen through the remember/forget client tools
       // DURING this run — the run end only gates the day rollover.
       const prompt = renderReflectPrompt({

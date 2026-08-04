@@ -1579,6 +1579,10 @@ export type AgentProcessData = {
    * separate from the conversation ``sessionId`` by design.
    */
   environmentId?: string;
+  /** Authoritative root returned by the materialized execution environment. */
+  workspaceRoot?: string;
+  /** Environment-selected initial cwd for terminals and agent commands. */
+  defaultCwd?: string;
   /**
    * Bearer token for authenticating WS/HTTP calls against this agent's
    * server. Main-process dials send it as an `Authorization: Bearer`
@@ -1647,6 +1651,12 @@ export type AgentProcessStatus =
  */
 export type AgentProcessStartOptions = {
   workspaceDir: string;
+  /**
+   * Explicit replacement for the project's primary local source (for example
+   * a ticket worktree). Unlike ``workspaceDir`` this changes the registered
+   * Workspace source set; it is never just a renderer cwd hint.
+   */
+  sourceOverrideDir?: string;
   /**
    * Project id, when this consumer belongs to a project. AgentHost uses it
    * while registering the consumer's default profile definition.

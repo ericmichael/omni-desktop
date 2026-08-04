@@ -384,6 +384,8 @@ export class ProcessManager {
         ...status.data,
         workspaceId: runtime.workspaceId,
         environmentId: runtime.environmentId,
+        workspaceRoot: runtime.workspaceRoot,
+        ...(runtime.defaultCwd ? { defaultCwd: runtime.defaultCwd } : {}),
         services: runtime.services,
         containerId: runtime.containerId,
         ...(runtime.paused !== undefined ? { paused: runtime.paused } : {}),
@@ -398,7 +400,7 @@ export class ProcessManager {
     // workspaceDir (chat scratch dirs, managed project dirs).
     const sources = opts.projectIds?.length
       ? this.resolveMultiProjectSources(opts.projectIds)
-      : this.resolveProjectSources(opts.workspaceDir, opts.projectId);
+      : this.resolveProjectSources(opts.workspaceDir, opts.projectId, opts.sourceOverrideDir);
     this.appendExtraSources(sources, opts.extraSources);
     const startArg: AgentProcessStartArg = {
       profileName,
@@ -510,7 +512,11 @@ export class ProcessManager {
    * ``.git`` entry, since the launcher's stored ``gitDetected`` flag
    * isn't guaranteed to be fresh for every code path that lands here.
    */
-  private resolveProjectSources(workspaceDir: string, projectId: string | undefined): AgentProcessSource[] {
+  private resolveProjectSources(
+    workspaceDir: string,
+    projectId: string | undefined,
+    sourceOverrideDir?: string
+  ): AgentProcessSource[] {
     // Translate each Project.source (which carries id + mountName) into
     // the AgentProcessSource shape ``omni serve`` understands. Per-source
     // git-detection happens here so the wire format already commits to
@@ -522,7 +528,14 @@ export class ProcessManager {
       // project) falls through to the synthesized-source path below so its
       // managed directory still seeds the workspace and mirrors back.
       if (project && project.sources.length > 0) {
-        return project.sources.map((source) => this.mapDeclaredSource(source));
+        let overrideApplied = false;
+        return project.sources.map((source) => {
+          if (!overrideApplied && source.kind === 'local' && sourceOverrideDir) {
+            overrideApplied = true;
+            return this.mapDeclaredSource(source, sourceOverrideDir);
+          }
+          return this.mapDeclaredSource(source);
+        });
       }
     }
     // No attached sources (chat scratch dir / managed project dir / Personal
@@ -533,21 +546,24 @@ export class ProcessManager {
     }
     this.ensureWorkspaceDir(workspaceDir);
     const mountName = path.basename(workspaceDir) || 'workspace';
+    const kind = this.directoryHasGit(workspaceDir) ? 'local-git' : 'local';
     return [
       {
         mountName,
-        kind: this.directoryHasGit(workspaceDir) ? 'local-git' : 'local',
+        kind,
         workspaceDir,
         writable: true,
+        ...(kind === 'local-git' ? this.resolveGitMetadata(workspaceDir) : {}),
         ...(isLauncherOwnedDir(workspaceDir) ? { launcherOwned: true } : {}),
       },
     ];
   }
 
   /** Translate one declared ``ProjectSource`` into the wire shape. */
-  private mapDeclaredSource(source: Project['sources'][number]): AgentProcessSource {
+  private mapDeclaredSource(source: Project['sources'][number], localOverride?: string): AgentProcessSource {
     if (source.kind === 'git-remote') {
       const result: AgentProcessSource = {
+        id: source.id,
         mountName: source.mountName,
         kind: 'git-remote',
         repoUrl: source.repoUrl,
@@ -558,15 +574,42 @@ export class ProcessManager {
       }
       return result;
     }
-    this.ensureWorkspaceDir(source.workspaceDir);
+    const workspaceDir = localOverride ?? source.workspaceDir;
+    this.ensureWorkspaceDir(workspaceDir);
     // User-attached folders are never launcherOwned — applying
     // container changes to them stays an explicit user action.
-    return {
+    const kind = this.directoryHasGit(workspaceDir) ? 'local-git' : 'local';
+    const result: AgentProcessSource = {
+      id: source.id,
       mountName: source.mountName,
-      kind: this.directoryHasGit(source.workspaceDir) ? 'local-git' : 'local',
-      workspaceDir: source.workspaceDir,
+      kind,
+      workspaceDir,
       writable: !source.readOnly,
     };
+    if (result.kind === 'local-git') {
+      Object.assign(result, this.resolveGitMetadata(workspaceDir));
+    }
+    return result;
+  }
+
+  private resolveGitMetadata(workspaceDir: string): { gitDir?: string; gitCommonDir?: string } {
+    try {
+      const output = execFileSync(
+        'git',
+        ['rev-parse', '--path-format=absolute', '--absolute-git-dir', '--git-common-dir'],
+        { cwd: workspaceDir, timeout: 3000, encoding: 'utf-8' }
+      );
+      const [gitDir, gitCommonDir] = output
+        .split(/\r?\n/)
+        .map((value) => value.trim())
+        .filter(Boolean);
+      return {
+        ...(gitDir ? { gitDir } : {}),
+        ...(gitCommonDir ? { gitCommonDir } : {}),
+      };
+    } catch {
+      return {};
+    }
   }
 
   /**
@@ -633,11 +676,13 @@ export class ProcessManager {
         mountName = `${extra.mountName}-${n}`;
       }
       this.ensureWorkspaceDir(extra.workspaceDir);
+      const kind = this.directoryHasGit(extra.workspaceDir) ? 'local-git' : 'local';
       sources.push({
         mountName,
-        kind: this.directoryHasGit(extra.workspaceDir) ? 'local-git' : 'local',
+        kind,
         workspaceDir: extra.workspaceDir,
         writable: true,
+        ...(kind === 'local-git' ? this.resolveGitMetadata(extra.workspaceDir) : {}),
         ...(isLauncherOwnedDir(extra.workspaceDir) ? { launcherOwned: true } : {}),
       });
       mountedDirs.add(resolved);
@@ -713,6 +758,7 @@ export class ProcessManager {
   private static launchIdentity(opts: AgentProcessStartOptions): string {
     return JSON.stringify([
       opts.workspaceDir,
+      opts.sourceOverrideDir ?? null,
       opts.projectId ?? null,
       opts.projectIds ?? null,
       opts.sessionId ?? null,

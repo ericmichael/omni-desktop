@@ -21,6 +21,7 @@ export const useCodeAutoLaunch = (
   workspaceDir: string | null,
   opts?: {
     projectId?: string;
+    sourceOverrideDir?: string;
     profileNameOverride?: string;
     sessionId?: string;
     snapshotRef?: string;
@@ -30,6 +31,7 @@ export const useCodeAutoLaunch = (
     processId: tabId,
     workspaceDir,
     ...(opts?.projectId ? { projectId: opts.projectId } : {}),
+    ...(opts?.sourceOverrideDir ? { sourceOverrideDir: opts.sourceOverrideDir } : {}),
     ...(opts?.profileNameOverride ? { profileNameOverride: opts.profileNameOverride } : {}),
     ...(opts?.sessionId ? { sessionId: opts.sessionId } : {}),
     ...(opts?.snapshotRef ? { snapshotRef: opts.snapshotRef } : {}),

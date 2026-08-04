@@ -30,6 +30,8 @@ export type GitSurfaceProps = {
   sessionId?: string;
   workspaceRoot?: string;
   isGlass?: boolean;
+  /** Whether this persistent surface is currently visible in the dock. */
+  active?: boolean;
   onOpenFile?: (path: string, line?: number) => void;
 };
 
@@ -165,7 +167,7 @@ export function sourceForRepository(sources: ProjectSource[], repository: GitRep
 }
 
 export const GitSurface = memo((props: GitSurfaceProps) => {
-  const { tabId, environmentId, sessionId, workspaceRoot, isGlass, onOpenFile } = props;
+  const { tabId, environmentId, sessionId, workspaceRoot, isGlass, active = true, onOpenFile } = props;
   const styles = useStyles();
   const store = useStore(persistedStoreApi.$atom);
   const rpc = useRPCClient();
@@ -226,25 +228,24 @@ export const GitSurface = memo((props: GitSurfaceProps) => {
   }, [currentMode, hasApplyTarget, identityKey]);
 
   useEffect(() => {
-    let active = true;
-    if (!connected || !identityKey || !sessionId || !workspaceRoot) {
+    let alive = true;
+    if (!active || !connected || !identityKey || !sessionId || !workspaceRoot) {
       return () => {
-        active = false;
+        alive = false;
       };
     }
     if (!readSupported) {
       setLoadError('This agent runtime does not support source control.');
       return () => {
-        active = false;
+        alive = false;
       };
     }
     setDiscovering(true);
     setLoadError(null);
-    void rpc
-      .serverCall('session.ensure', { session_id: sessionId, workspace_root: workspaceRoot })
-      .then(() => gitClient.listRepositories())
+    void gitClient
+      .listRepositories()
       .then((result) => {
-        if (!active) {
+        if (!alive) {
           return;
         }
         setRepositories({ identityKey, value: result });
@@ -267,25 +268,25 @@ export const GitSurface = memo((props: GitSurfaceProps) => {
         setPreparedKey(identityKey);
       })
       .catch((error: unknown) => {
-        if (active) {
+        if (alive) {
           setLoadError(errorMessage(error, 'Could not discover repositories in this workspace.'));
         }
       })
       .finally(() => {
-        if (active) {
+        if (alive) {
           setDiscovering(false);
         }
       });
     return () => {
-      active = false;
+      alive = false;
     };
-  }, [connected, discoveryRevision, gitClient, identityKey, readSupported, rpc, sessionId, workspaceRoot]);
+  }, [active, connected, discoveryRevision, gitClient, identityKey, readSupported, rpc, sessionId, workspaceRoot]);
 
   useEffect(() => {
-    let active = true;
-    if (!connected || !gitClient || !identityKey || !currentRepo || preparedKey !== identityKey) {
+    let alive = true;
+    if (!active || !connected || !gitClient || !identityKey || !currentRepo || preparedKey !== identityKey) {
       return () => {
-        active = false;
+        alive = false;
       };
     }
     const key = dataKey(identityKey, currentRepo, currentMode, currentPath);
@@ -299,27 +300,37 @@ export const GitSurface = memo((props: GitSurfaceProps) => {
       }),
     ])
       .then(([status, diff]) => {
-        if (active) {
+        if (alive) {
           setRepositoryData({ key, status, diff });
         }
       })
       .catch((error: unknown) => {
-        if (active) {
+        if (alive) {
           setLoadError(errorMessage(error, 'Could not load source control changes.'));
         }
       })
       .finally(() => {
-        if (active) {
+        if (alive) {
           setLoading(false);
         }
       });
     return () => {
-      active = false;
+      alive = false;
     };
-  }, [connected, currentMode, currentPath, currentRepo, gitClient, identityKey, preparedKey, refreshRevision]);
+  }, [active, connected, currentMode, currentPath, currentRepo, gitClient, identityKey, preparedKey, refreshRevision]);
 
   const refresh = useCallback(() => setRefreshRevision((revision) => revision + 1), []);
   const retryDiscovery = useCallback(() => setDiscoveryRevision((revision) => revision + 1), []);
+  const openRepositoryFile = useCallback(
+    (path: string, line?: number) => {
+      if (!onOpenFile) {
+        return;
+      }
+      const workspacePath = currentRepo && currentRepo !== '.' ? `${currentRepo}/${path}` : path;
+      onOpenFile(workspacePath, line);
+    },
+    [currentRepo, onOpenFile]
+  );
   const chooseRepository = useCallback(
     (repo: WorkspaceRepo) => {
       if (!identityKey) {
@@ -488,7 +499,7 @@ export const GitSurface = memo((props: GitSurfaceProps) => {
     body = (
       <div className={styles.centered} role="status">
         {currentRepositories.unreachable_sources.length > 0
-          ? 'No repositories are reachable from this workspace. Add the source to the workspace to use Git.'
+          ? 'Configured Git sources were not materialized in this environment. Check the selected workspace and profile.'
           : 'No Git repositories were found in this workspace.'}
       </div>
     );
@@ -507,7 +518,7 @@ export const GitSurface = memo((props: GitSurfaceProps) => {
         diffHeading={currentMode === 'session' ? 'Session changes' : undefined}
         isGlass={isGlass}
         onDiscard={discardSupported ? requestDiscard : undefined}
-        onOpenFile={onOpenFile}
+        onOpenFile={onOpenFile ? openRepositoryFile : undefined}
         onSelectFile={choosePath}
         onStage={stageSupported ? stage : undefined}
         onUnstage={unstageSupported ? unstage : undefined}
@@ -605,9 +616,12 @@ export const GitSurface = memo((props: GitSurfaceProps) => {
       {currentRepositories && currentRepositories.unreachable_sources.length > 0 && (
         <div className={mergeClasses(styles.banner, styles.warning)} role="note">
           <Warning20Regular />
-          {currentRepositories.unreachable_sources.length} repository source
-          {currentRepositories.unreachable_sources.length === 1 ? ' is' : 's are'} outside this workspace and cannot be
-          opened.
+          Git source{currentRepositories.unreachable_sources.length === 1 ? '' : 's'}{' '}
+          {currentRepositories.unreachable_sources
+            .map((source) => source.mount_name ?? source.repo_url ?? source.path ?? 'unnamed')
+            .join(', ')}{' '}
+          {currentRepositories.unreachable_sources.length === 1 ? 'was' : 'were'} not materialized in this environment
+          and cannot be opened.
         </div>
       )}
       {currentRepositories?.truncated && (
@@ -669,6 +683,7 @@ GitSurface.displayName = 'GitSurface';
 /** Portal rendered inside the column's existing RPC provider. */
 export function WorkspaceGitPortal({
   host,
+  active,
   tabId,
   environmentId,
   sessionId,
@@ -678,6 +693,7 @@ export function WorkspaceGitPortal({
 }: GitSurfaceProps & { host: HTMLDivElement }) {
   return createPortal(
     <GitSurface
+      active={active}
       tabId={tabId}
       environmentId={environmentId}
       sessionId={sessionId}

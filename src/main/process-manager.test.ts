@@ -48,6 +48,7 @@ vi.mock('@/main/agent-process', () => ({
       return {
         workspaceId,
         environmentId: `environment-${workspaceId}`,
+        workspaceRoot: `/runtime/${workspaceId}`,
         services: {},
         containerId: `container-${workspaceId}`,
       };
@@ -88,7 +89,7 @@ vi.mock('node:child_process', async () => {
 // ---------------------------------------------------------------------------
 
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -283,6 +284,67 @@ describe('ProcessManager', () => {
         { kind: 'local-git', writable: false },
         { kind: 'git-remote', writable: false },
       ]);
+    });
+
+    it('keeps project source identity while applying an isolated local workspace override', async () => {
+      const declaredDir = mkdtempSync(path.join(tmpdir(), 'omni-declared-'));
+      const isolatedDir = mkdtempSync(path.join(tmpdir(), 'omni-isolated-'));
+      const project: Project = {
+        id: 'proj_isolated',
+        label: 'Isolated',
+        slug: 'isolated',
+        createdAt: 0,
+        sources: [
+          { id: 'source-primary', mountName: 'app', kind: 'local', workspaceDir: declaredDir },
+          {
+            id: 'source-docs',
+            mountName: 'docs',
+            kind: 'local',
+            workspaceDir: mkdtempSync(path.join(tmpdir(), 'omni-docs-')),
+          },
+        ],
+      };
+      const { pm } = makePm({ storeData: { projects: [project] } });
+
+      await pm.start('tab-isolated', {
+        workspaceDir: isolatedDir,
+        sourceOverrideDir: isolatedDir,
+        projectId: project.id,
+      });
+
+      const arg = hoisted.agentProcessInstances[0]!.start.mock.calls[0]![0] as {
+        sources: Array<{ id?: string; mountName: string; workspaceDir?: string }>;
+      };
+      expect(arg.sources).toEqual([
+        expect.objectContaining({ id: 'source-primary', mountName: 'app', workspaceDir: isolatedDir }),
+        expect.objectContaining({ id: 'source-docs', mountName: 'docs' }),
+      ]);
+      expect(arg.sources[0]!.workspaceDir).not.toBe(declaredDir);
+    });
+
+    it('publishes external Git metadata for a synthesized local worktree source', async () => {
+      const primary = mkdtempSync(path.join(tmpdir(), 'omni-synth-primary-'));
+      const checkout = `${primary}-checkout`;
+      const cp = (await vi.importActual('node:child_process')) as typeof import('node:child_process');
+      cp.execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: primary });
+      cp.execFileSync('git', ['config', 'user.email', 'tester@example.com'], { cwd: primary });
+      cp.execFileSync('git', ['config', 'user.name', 'Tester'], { cwd: primary });
+      writeFileSync(path.join(primary, 'tracked.txt'), 'tracked\n');
+      cp.execFileSync('git', ['add', '-A'], { cwd: primary });
+      cp.execFileSync('git', ['commit', '-qm', 'init'], { cwd: primary });
+      cp.execFileSync('git', ['worktree', 'add', '-q', '-b', 'feature', checkout], { cwd: primary });
+      const { pm } = makePm();
+
+      await pm.start('tab-worktree', { workspaceDir: checkout });
+
+      const arg = hoisted.agentProcessInstances[0]!.start.mock.calls[0]![0] as {
+        sources: Array<{ kind: string; gitDir?: string; gitCommonDir?: string }>;
+      };
+      expect(arg.sources[0]).toMatchObject({
+        kind: 'local-git',
+        gitDir: path.join(primary, '.git', 'worktrees', path.basename(checkout)),
+        gitCommonDir: path.join(primary, '.git'),
+      });
     });
   });
 

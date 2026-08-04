@@ -24,6 +24,8 @@ type UseAutoLaunchOptions = {
   processId: string;
   /** Workspace directory. When null the machine won't launch. */
   workspaceDir: string | null;
+  /** Explicit replacement for the project's primary local source. */
+  sourceOverrideDir?: string;
   /** Project id, forwarded to ProcessManager for per-project profile lookup. */
   projectId?: string;
   /**
@@ -54,7 +56,10 @@ export const useAutoLaunch = (opts: UseAutoLaunchOptions) => {
   processIdRef.current = processId;
   const workspaceDirRef = useRef(opts.workspaceDir);
   workspaceDirRef.current = opts.workspaceDir;
+  const sourceOverrideDirRef = useRef(opts.sourceOverrideDir);
+  sourceOverrideDirRef.current = opts.sourceOverrideDir;
   const previousWorkspaceDirRef = useRef(opts.workspaceDir);
+  const previousSourceOverrideDirRef = useRef(opts.sourceOverrideDir);
   const projectIdRef = useRef(opts.projectId);
   projectIdRef.current = opts.projectId;
   const profileNameOverrideRef = useRef(opts.profileNameOverride);
@@ -172,6 +177,7 @@ export const useAutoLaunch = (opts: UseAutoLaunchOptions) => {
         void agentProcessApi
           .start(processIdRef.current, {
             workspaceDir: wd,
+            ...(sourceOverrideDirRef.current ? { sourceOverrideDir: sourceOverrideDirRef.current } : {}),
             ...(projectIdRef.current ? { projectId: projectIdRef.current } : {}),
             ...(profileNameOverrideRef.current ? { profileNameOverride: profileNameOverrideRef.current } : {}),
             ...(sessionIdRef.current ? { sessionId: sessionIdRef.current } : {}),
@@ -270,12 +276,17 @@ export const useAutoLaunch = (opts: UseAutoLaunchOptions) => {
     }
   }, [initialized, opts.workspaceDir, actor]);
 
-  // Reset when workspaceDir changes (supervisor-aware processes guard against stopping supervisor sandboxes)
+  // Reset when the registered Workspace definition changes
+  // (supervisor-aware processes guard against stopping supervisor sandboxes).
   useEffect(() => {
     const previousWorkspaceDir = previousWorkspaceDirRef.current;
+    const previousSourceOverrideDir = previousSourceOverrideDirRef.current;
     previousWorkspaceDirRef.current = opts.workspaceDir;
+    previousSourceOverrideDirRef.current = opts.sourceOverrideDir;
 
-    if (!initialized || !opts.workspaceDir || !previousWorkspaceDir || previousWorkspaceDir === opts.workspaceDir) {
+    const workspaceChanged = Boolean(previousWorkspaceDir && previousWorkspaceDir !== opts.workspaceDir);
+    const sourceOverrideChanged = previousSourceOverrideDir !== opts.sourceOverrideDir;
+    if (!initialized || !opts.workspaceDir || (!workspaceChanged && !sourceOverrideChanged)) {
       return;
     }
 
@@ -298,7 +309,7 @@ export const useAutoLaunch = (opts: UseAutoLaunchOptions) => {
     return () => {
       cancelled = true;
     };
-  }, [initialized, opts.workspaceDir, actor]);
+  }, [initialized, opts.sourceOverrideDir, opts.workspaceDir, actor]);
 
   // React to a per-launch sandbox profile override change (written by the
   // SandboxPicker). The main process materializes the selected profile as a

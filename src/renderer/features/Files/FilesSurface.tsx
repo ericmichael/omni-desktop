@@ -43,6 +43,13 @@ type FileSelection = {
   revealRequest?: { requestId: string; location: OpenFileLocation };
 };
 
+type FilesResources = {
+  identityKey: string;
+  fsClient: FsClient;
+  watches: WatchRegistry;
+  editors: FileEditorRegistry;
+};
+
 const FILES_READ_OPERATIONS = [
   'fs_watch',
   'fs_unwatch',
@@ -302,10 +309,7 @@ export const FilesSurface = memo(({ environmentId, sessionId, workspaceRoot, isG
   const styles = useStyles();
   const rpc = useRPCClient();
   const connected = useRPCConnected();
-  const fsClient = useMemo(() => new FsClient(rpc), [rpc]);
-  useEffect(() => () => fsClient.dispose(), [fsClient]);
   const identityKey = sessionId && workspaceRoot ? JSON.stringify([sessionId, environmentId, workspaceRoot]) : null;
-  const [preparedKey, setPreparedKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selection, setSelection] = useState<FileSelection | null>(null);
   const [lastOpened, setLastOpened] = useState<{ path: string; location?: OpenFileLocation } | null>(null);
@@ -314,56 +318,45 @@ export const FilesSurface = memo(({ environmentId, sessionId, workspaceRoot, isG
   const readSupported = FILES_READ_OPERATIONS.every((operation) => rpc.supportsExperimentalOperation(operation));
   const writeSupported = FILES_WRITE_OPERATIONS.every((operation) => rpc.supportsExperimentalOperation(operation));
 
-  const resources = useMemo(() => {
-    if (!sessionId || !workspaceRoot) {
-      return null;
+  // These objects have terminal dispose operations, so their ownership must
+  // begin inside the effect whose cleanup ends it. React StrictMode runs
+  // effect setup → cleanup → setup again in development; creating them in
+  // useMemo would reuse the permanently disposed first instance.
+  const [resourceState, setResourceState] = useState<FilesResources | null>(null);
+  useEffect(() => {
+    if (!identityKey) {
+      setResourceState(null);
+      return;
     }
+    const fsClient = new FsClient(rpc);
     const watches = new WatchRegistry(fsClient, environmentId);
     const editors = new FileEditorRegistry(new FsFileEditorIO(fsClient, watches, environmentId));
-    return { watches, editors };
-  }, [environmentId, fsClient, sessionId, workspaceRoot]);
-  useEffect(
-    () => () => {
+    const next = { identityKey, fsClient, watches, editors };
+    setResourceState(next);
+
+    return () => {
       for (const lease of leasesRef.values()) {
         lease.release();
       }
       leasesRef.clear();
-      resources?.editors.dispose();
-      void resources?.watches.dispose();
-    },
-    [leasesRef, resources]
-  );
+      editors.dispose();
+      void watches.dispose();
+      fsClient.dispose();
+      setResourceState((current) => (current === next ? null : current));
+    };
+  }, [environmentId, identityKey, leasesRef, rpc]);
+  const resources = resourceState?.identityKey === identityKey ? resourceState : null;
+  const fsClient = resources?.fsClient ?? null;
 
   useEffect(() => {
-    let active = true;
     setError(null);
     if (!connected || !sessionId || !workspaceRoot || !identityKey) {
-      return () => {
-        active = false;
-      };
+      return;
     }
     if (!readSupported) {
       setError('This agent runtime does not support workspace files.');
-      return () => {
-        active = false;
-      };
     }
-    void rpc
-      .serverCall('session.ensure', { session_id: sessionId, workspace_root: workspaceRoot })
-      .then(() => {
-        if (active) {
-          setPreparedKey(identityKey);
-        }
-      })
-      .catch((reason: unknown) => {
-        if (active) {
-          setError(reason instanceof Error ? reason.message : 'Could not prepare the workspace session.');
-        }
-      });
-    return () => {
-      active = false;
-    };
-  }, [connected, identityKey, readSupported, rpc, sessionId, workspaceRoot]);
+  }, [connected, identityKey, readSupported, sessionId, workspaceRoot]);
 
   const handleOpenFile = useCallback(
     (path: string) => {
@@ -388,7 +381,7 @@ export const FilesSurface = memo(({ environmentId, sessionId, workspaceRoot, isG
         reason,
         message,
       });
-      if (!connected || !identityKey || !resources || !sessionId || !workspaceRoot) {
+      if (!connected || !identityKey || !resources || !fsClient || !sessionId || !workspaceRoot) {
         return failed(
           'workspace-unavailable',
           'Workspace files are reconnecting or the session has no workspace. Try again shortly.'
@@ -396,17 +389,6 @@ export const FilesSurface = memo(({ environmentId, sessionId, workspaceRoot, isG
       }
       if (!readSupported) {
         return failed('unsupported', 'This agent runtime does not support workspace files.');
-      }
-      if (preparedKey !== identityKey) {
-        try {
-          await rpc.serverCall('session.ensure', { session_id: sessionId, workspace_root: workspaceRoot });
-          setPreparedKey(identityKey);
-        } catch (reason) {
-          return failed(
-            'workspace-unavailable',
-            reason instanceof Error ? reason.message : 'Could not prepare the workspace session. Try again.'
-          );
-        }
       }
       try {
         const stat = await fsClient.stat(environmentId, intent.path);
@@ -440,26 +422,17 @@ export const FilesSurface = memo(({ environmentId, sessionId, workspaceRoot, isG
         location: intent.location,
       };
     },
-    [
-      connected,
-      environmentId,
-      fsClient,
-      identityKey,
-      leasesRef,
-      preparedKey,
-      readSupported,
-      resources,
-      rpc,
-      sessionId,
-      workspaceRoot,
-    ]
+    [connected, environmentId, fsClient, identityKey, leasesRef, readSupported, resources, sessionId, workspaceRoot]
   );
   useEffect(() => {
-    if (!sessionId) {
+    // Do not advertise this surface until its RPC-backed resources exist.
+    // Git may activate Files and dispatch immediately; registering an
+    // unready callback would wake that pending request only to reject it.
+    if (!connected || !identityKey || !resources || !fsClient || !sessionId || !workspaceRoot) {
       return;
     }
     return registerOpenFileTarget(sessionId, handleOpenFileIntent);
-  }, [handleOpenFileIntent, sessionId]);
+  }, [connected, fsClient, handleOpenFileIntent, identityKey, resources, sessionId, workspaceRoot]);
   const selectedLease = selectedPath ? (leasesRef.get(selectedPath) ?? null) : null;
 
   let body;
@@ -469,7 +442,7 @@ export const FilesSurface = memo(({ environmentId, sessionId, workspaceRoot, isG
         {error}
       </div>
     );
-  } else if (!identityKey || preparedKey !== identityKey || !sessionId || !resources) {
+  } else if (!identityKey || !sessionId || !resources) {
     body = (
       <div className={styles.centered} role="status">
         <Spinner size="md" />
@@ -482,7 +455,7 @@ export const FilesSurface = memo(({ environmentId, sessionId, workspaceRoot, isG
         <div className={styles.treePane}>
           <WorkspaceFileTree
             environmentId={environmentId}
-            fsClient={fsClient}
+            fsClient={resources.fsClient}
             onOpenFile={handleOpenFile}
             selectedPath={selectedPath}
             watchRegistry={resources.watches}
@@ -494,7 +467,7 @@ export const FilesSurface = memo(({ environmentId, sessionId, workspaceRoot, isG
             <FileEditorPane
               connected={connected}
               environmentId={environmentId}
-              fsClient={fsClient}
+              fsClient={resources.fsClient}
               key={`${sessionId}:${selectedPath}`}
               lease={selectedLease}
               path={selectedPath}

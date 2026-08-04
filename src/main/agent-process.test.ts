@@ -57,6 +57,8 @@ vi.mock('@/main/agent-host-control-client', () => ({
       if (method === 'agent_host_materialize_environment') {
         return {
           environment_id: 'environment-materialized',
+          workspace_root: '/workspace',
+          default_cwd: '/workspace',
           services: { code_server: 'http://service' },
           container_id: 'container-materialized',
         };
@@ -264,7 +266,7 @@ describe('AgentProcess (serve mode)', () => {
     const h = makeHarness();
     const arg: AgentProcessStartArg = {
       profileName: 'devbox',
-      sources: [localGitSource('/repos/second', 'second')],
+      sources: [{ ...localGitSource('/repos/second', 'second'), id: 'source-second' }],
       projectId: 'project-2',
     };
     await h.proc.start(arg);
@@ -283,6 +285,8 @@ describe('AgentProcess (serve mode)', () => {
     expect(runtime).toEqual({
       workspaceId: 'workspace-2',
       environmentId: 'environment-materialized',
+      workspaceRoot: '/workspace',
+      defaultCwd: '/workspace',
       services: { code_server: 'http://service' },
       containerId: 'container-materialized',
     });
@@ -332,6 +336,7 @@ describe('AgentProcess (serve mode)', () => {
 
     await h.proc.configureConsumer('ui-tab-consumer', 'workspace-2', arg);
 
+    expect(hoisted.controlCalls[0]!.params.materialization_path).toBe('/repos/second');
     expect(hoisted.controlCalls.find((call) => call.method === 'agent_host_bind_thread')?.params).toMatchObject({
       thread_id: 'conversation-session',
     });
@@ -433,6 +438,9 @@ describe('AgentProcess (serve mode)', () => {
         remoteSource('https://github.com/me/omniagents.git', 'omniagents', 'main'),
       ],
     });
+    expect(hoisted.controlCalls[0]!.params.materialization_path).toBe(
+      path.join('/fake/config', 'workspaces', 'workspace-1')
+    );
     expect(hoisted.controlCalls[0]!.params.sources).toEqual([
       { kind: 'local-git', mountName: 'launcher', writable: true, path: '/repos/launcher' },
       { kind: 'local-git', mountName: 'omni-code', writable: true, path: '/repos/omni-code' },

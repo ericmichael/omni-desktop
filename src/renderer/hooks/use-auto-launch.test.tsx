@@ -210,4 +210,31 @@ describe('useAutoLaunch sandbox profile override switching', () => {
 
     expect(agentProcessApi.switchSandbox).toHaveBeenCalledWith('code-tab-1', 'devbox');
   });
+
+  it('relaunches when the registered source override changes', async () => {
+    await renderHook({
+      processId: 'code-tab-1',
+      workspaceDir: '/workspace/project',
+      sourceOverrideDir: '/workspace/worktree-a',
+      profileNameOverride: 'host',
+    });
+    await flushEffects();
+    await act(async () => {
+      $agentStatuses.set({ 'code-tab-1': runningStatus() });
+      await flushEffects();
+    });
+    stop.mockClear();
+
+    await renderHook({
+      processId: 'code-tab-1',
+      workspaceDir: '/workspace/project',
+      sourceOverrideDir: '/workspace/worktree-b',
+      profileNameOverride: 'host',
+    });
+    await act(async () => {
+      await flushEffects();
+    });
+
+    expect(agentProcessApi.stop).toHaveBeenCalledWith('code-tab-1');
+  });
 });
