@@ -1,0 +1,3 @@
+.omni-status-banner-grid {
+  grid-template-columns: 1rem minmax(0, 1fr) auto;
+}

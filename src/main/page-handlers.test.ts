@@ -1,22 +1,15 @@
 /**
- * Contract tests for page IPC handlers — verifies all 13 channels are
+ * Contract tests for page IPC handlers — verifies all 12 channels are
  * registered and delegate to the correct PageManager methods.
  *
- * `page:prepare-notebook` and `page:set-notebook-glass` are the only
- * non-trivial handlers — they chain async calls to writeGlassCss,
- * ensureNotebookCssReference, and writeMarimoAiConfig. These are mocked
- * here since the actual logic is tested in marimo-glass.test.ts and
- * marimo-config.test.ts.
+ * `page:prepare-notebook` writes marimo's AI configuration. It is mocked here
+ * because its filesystem behavior is covered in marimo-config.test.ts.
  */
 import { describe, expect, it, vi } from 'vitest';
 
 import { StubIpc } from '@/test-helpers/stub-ipc';
 
 // Mock the extension modules so the handlers can be invoked without fs
-vi.mock('@/main/extensions/marimo-glass', () => ({
-  writeGlassCss: vi.fn(async () => {}),
-  ensureNotebookCssReference: vi.fn(async () => {}),
-}));
 vi.mock('@/main/extensions/marimo-config', () => ({
   writeMarimoAiConfig: vi.fn(async () => {}),
 }));
@@ -37,7 +30,6 @@ const EXPECTED_CHANNELS = [
   'page:unwatch',
   'page:get-notebook-paths',
   'page:prepare-notebook',
-  'page:set-notebook-glass',
 ];
 
 const makeManager = () => ({

@@ -1,153 +1,14 @@
-import { makeStyles, mergeClasses, shorthands, tokens } from '@fluentui/react-components';
-import { ArrowLeft20Regular, DataBarVertical20Regular, Open20Regular } from '@fluentui/react-icons';
-import { useStore } from '@nanostores/react';
+import { ArrowLeft, ChartNoAxesColumnIncreasing, ExternalLink } from 'lucide-react';
 import { memo, useCallback, useEffect, useState } from 'react';
 
-import { openMobileNav } from '@/renderer/app/mobile-nav';
 import { useIsDesktop } from '@/renderer/common/use-is-desktop';
-import { TopAppBar } from '@/renderer/ds';
+import { TopAppBar } from '@/renderer/ds/TopAppBar';
+import { Button } from '@/renderer/ds/ui/button';
+import { Card } from '@/renderer/ds/ui/card';
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/renderer/ds/ui/empty';
+import { Spinner } from '@/renderer/ds/ui/spinner';
 import { emitter } from '@/renderer/services/ipc';
-import { $glassEnabled } from '@/renderer/theme/use-glass';
 import type { PlatformDashboard } from '@/shared/types';
-
-const useStyles = makeStyles({
-  root: {
-    display: 'flex',
-    flexDirection: 'column',
-    width: '100%',
-    height: '100%',
-    backgroundColor: tokens.colorNeutralBackground1,
-  },
-  rootGlass: {
-    backgroundColor: tokens.colorNeutralBackground1,
-    backdropFilter: 'var(--glass-blur)',
-    WebkitBackdropFilter: 'var(--glass-blur)',
-  },
-  dashCardGlass: {
-    backgroundColor: tokens.colorNeutralBackground3,
-    backdropFilter: 'var(--glass-blur-light)',
-    WebkitBackdropFilter: 'var(--glass-blur-light)',
-  },
-  embedHeaderGlass: {
-    backgroundColor: tokens.colorNeutralBackground2,
-    backdropFilter: 'var(--glass-blur-light)',
-    WebkitBackdropFilter: 'var(--glass-blur-light)',
-  },
-  listHeader: {
-    paddingLeft: tokens.spacingHorizontalXL,
-    paddingRight: tokens.spacingHorizontalXL,
-    paddingTop: tokens.spacingVerticalXXL,
-    paddingBottom: tokens.spacingVerticalL,
-    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
-  },
-  listTitle: {
-    fontSize: '24px',
-    fontWeight: tokens.fontWeightBold,
-    color: tokens.colorNeutralForeground1,
-    letterSpacing: '-0.025em',
-  },
-  listSubtitle: { fontSize: tokens.fontSizeBase300, color: tokens.colorNeutralForeground3, marginTop: '4px' },
-  listBody: { flex: '1 1 0', overflowY: 'auto', padding: tokens.spacingHorizontalXL },
-  loading: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    height: '128px',
-    color: tokens.colorNeutralForeground2,
-  },
-  emptyState: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    height: '128px',
-    color: tokens.colorNeutralForeground2,
-  },
-  emptyIcon: { marginBottom: tokens.spacingVerticalS, opacity: 0.4 },
-  emptyHint: { fontSize: tokens.fontSizeBase200, marginTop: '4px' },
-  grid: {
-    display: 'grid',
-    gridTemplateColumns: '1fr',
-    gap: tokens.spacingVerticalL,
-    '@media (min-width: 640px)': { gridTemplateColumns: 'repeat(2, 1fr)' },
-    '@media (min-width: 1024px)': { gridTemplateColumns: 'repeat(3, 1fr)' },
-  },
-  dashCard: {
-    display: 'flex',
-    flexDirection: 'column',
-    textAlign: 'left',
-    padding: tokens.spacingHorizontalL,
-    borderRadius: tokens.borderRadiusLarge,
-    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
-    backgroundColor: tokens.colorNeutralBackground2,
-    transitionProperty: 'background-color',
-    transitionDuration: '150ms',
-    cursor: 'pointer',
-    ':hover': { backgroundColor: tokens.colorNeutralBackground2Hover },
-  },
-  dashCardTop: { display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' },
-  dashCardIcon: { color: tokens.colorBrandForeground1, flexShrink: 0, marginTop: '2px' },
-  dashCardOpenIcon: {
-    color: tokens.colorNeutralForeground2,
-    opacity: 0,
-    transitionProperty: 'opacity',
-    transitionDuration: '150ms',
-  },
-  dashCardName: {
-    fontSize: tokens.fontSizeBase300,
-    fontWeight: tokens.fontWeightSemibold,
-    color: tokens.colorNeutralForeground1,
-    marginTop: tokens.spacingVerticalS,
-    lineHeight: '1.375',
-  },
-  dashCardWidgets: { fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground2, marginTop: '4px' },
-  embedHeader: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalM,
-    paddingLeft: tokens.spacingHorizontalL,
-    paddingRight: tokens.spacingHorizontalL,
-    paddingTop: '10px',
-    paddingBottom: '10px',
-    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
-    backgroundColor: tokens.colorNeutralBackground2,
-    flexShrink: 0,
-  },
-  backBtn: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '6px',
-    fontSize: tokens.fontSizeBase300,
-    color: tokens.colorNeutralForeground2,
-    transitionProperty: 'color',
-    transitionDuration: '150ms',
-    cursor: 'pointer',
-    border: 'none',
-    backgroundColor: 'transparent',
-    ':hover': { color: tokens.colorNeutralForeground1 },
-  },
-  embedTitleWrap: { flex: '1 1 0', minWidth: 0 },
-  embedTitle: {
-    fontSize: tokens.fontSizeBase300,
-    fontWeight: tokens.fontWeightSemibold,
-    color: tokens.colorNeutralForeground1,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-  },
-  openLink: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '6px',
-    fontSize: tokens.fontSizeBase200,
-    color: tokens.colorNeutralForeground2,
-    transitionProperty: 'color',
-    transitionDuration: '150ms',
-    ':hover': { color: tokens.colorNeutralForeground1 },
-  },
-  embedBody: { flex: '1 1 0', minHeight: 0 },
-  iframe: { width: '100%', height: '100%', border: 'none' },
-});
 
 /**
  * Dashboards tab — shows entitled Databricks dashboards from platform policy.
@@ -161,7 +22,6 @@ export const Dashboards = memo(() => {
   const [dashboards, setDashboards] = useState<PlatformDashboard[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeDashboard, setActiveDashboard] = useState<PlatformDashboard | null>(null);
-  const isGlass = useStore($glassEnabled);
 
   useEffect(() => {
     emitter
@@ -180,10 +40,10 @@ export const Dashboards = memo(() => {
   }, []);
 
   if (activeDashboard) {
-    return <DashboardEmbed dashboard={activeDashboard} onBack={closeDashboard} isGlass={isGlass} />;
+    return <DashboardEmbed dashboard={activeDashboard} onBack={closeDashboard} />;
   }
 
-  return <DashboardList dashboards={dashboards} loading={loading} onOpen={openDashboard} isGlass={isGlass} />;
+  return <DashboardList dashboards={dashboards} loading={loading} onOpen={openDashboard} />;
 });
 Dashboards.displayName = 'Dashboards';
 
@@ -196,49 +56,60 @@ const DashboardList = memo(
     dashboards,
     loading,
     onOpen,
-    isGlass,
   }: {
     dashboards: PlatformDashboard[];
     loading: boolean;
     onOpen: (d: PlatformDashboard) => void;
-    isGlass: boolean;
   }) => {
-    const styles = useStyles();
     const isDesktop = useIsDesktop();
     return (
-      <div className={mergeClasses(styles.root, isGlass && styles.rootGlass)}>
-        {!isDesktop && <TopAppBar title="Dashboards" onMenu={openMobileNav} />}
-        <div className={styles.listHeader}>
-          <h1 className={styles.listTitle}>Dashboards</h1>
-          <p className={styles.listSubtitle}>Your entitled Databricks dashboards</p>
+      <div className="flex flex-col w-full h-full bg-background">
+        {!isDesktop && <TopAppBar title="Dashboards" showMenu />}
+        <div className="pl-6 pr-6 pt-8 pb-5">
+          <h1 className="text-2xl font-bold text-foreground tracking-tight">Dashboards</h1>
+          <p className="text-sm text-muted-foreground mt-1">Your entitled Databricks dashboards</p>
         </div>
 
-        <div className={styles.listBody}>
-          {loading && <div className={styles.loading}>Loading dashboards...</div>}
-
-          {!loading && dashboards.length === 0 && (
-            <div className={styles.emptyState}>
-              <DataBarVertical20Regular style={{ width: 32, height: 32 }} className={styles.emptyIcon} />
-              <p>No dashboards available.</p>
-              <p className={styles.emptyHint}>Request access from your domain admin.</p>
+        <div className="flex-1 overflow-y-auto p-6">
+          {loading && (
+            <div className="flex h-32 items-center justify-center gap-2 text-sm text-muted-foreground" role="status">
+              <Spinner />
+              Loading dashboards…
             </div>
           )}
 
+          {!loading && dashboards.length === 0 && (
+            <Empty className="h-32 p-4 md:p-4">
+              <EmptyHeader>
+                <EmptyMedia variant="icon">
+                  <ChartNoAxesColumnIncreasing />
+                </EmptyMedia>
+                <EmptyTitle>No dashboards available</EmptyTitle>
+                <EmptyDescription>Request access from your domain admin.</EmptyDescription>
+              </EmptyHeader>
+            </Empty>
+          )}
+
           {!loading && dashboards.length > 0 && (
-            <div className={styles.grid}>
+            <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
               {dashboards.map((d) => (
-                <button
-                  key={d.resource_id}
-                  onClick={() => onOpen(d)}
-                  className={mergeClasses(styles.dashCard, isGlass && styles.dashCardGlass)}
-                >
-                  <div className={styles.dashCardTop}>
-                    <DataBarVertical20Regular className={styles.dashCardIcon} />
-                    <Open20Regular style={{ width: 14, height: 14 }} className={styles.dashCardOpenIcon} />
-                  </div>
-                  <h3 className={styles.dashCardName}>{d.name}</h3>
-                  <p className={styles.dashCardWidgets}>{d.widget_count} widgets</p>
-                </button>
+                <Card key={d.resource_id} className="gap-0 overflow-hidden py-0">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="h-auto min-h-30 w-full flex-col items-stretch justify-start gap-0 whitespace-normal rounded-xl p-5 text-left"
+                    onClick={() => onOpen(d)}
+                  >
+                    <div className="flex items-start justify-between">
+                      <ChartNoAxesColumnIncreasing className="size-5 text-primary shrink-0 mt-0.5" />
+                      <ExternalLink
+                        className={`size-4 ${'text-muted-foreground opacity-0 transition-opacity duration-150'}`}
+                      />
+                    </div>
+                    <h3 className="text-sm font-semibold text-foreground mt-2 leading-snug">{d.name}</h3>
+                    <p className="text-xs text-muted-foreground mt-1">{d.widget_count} widgets</p>
+                  </Button>
+                </Card>
               ))}
             </div>
           )}
@@ -253,37 +124,43 @@ DashboardList.displayName = 'DashboardList';
 // Embed view
 // ---------------------------------------------------------------------------
 
-const DashboardEmbed = memo(
-  ({ dashboard, onBack, isGlass }: { dashboard: PlatformDashboard; onBack: () => void; isGlass: boolean }) => {
-    const styles = useStyles();
-    return (
-      <div className={mergeClasses(styles.root, isGlass && styles.rootGlass)}>
-        {/* Header bar */}
-        <div className={mergeClasses(styles.embedHeader, isGlass && styles.embedHeaderGlass)}>
-          <button onClick={onBack} className={styles.backBtn}>
-            <ArrowLeft20Regular style={{ width: 16, height: 16 }} />
-            <span>Back</span>
-          </button>
-          <div className={styles.embedTitleWrap}>
-            <h2 className={styles.embedTitle}>{dashboard.name}</h2>
-          </div>
-          <a href={dashboard.workspace_url} target="_blank" rel="noopener noreferrer" className={styles.openLink}>
-            <Open20Regular style={{ width: 14, height: 14 }} />
+const DashboardEmbed = memo(({ dashboard, onBack }: { dashboard: PlatformDashboard; onBack: () => void }) => {
+  return (
+    <div className="flex flex-col w-full h-full bg-background">
+      {/* Header bar */}
+      <div className="flex shrink-0 items-center gap-4 border-b border-border bg-card px-5 py-2.5">
+        <Button type="button" variant="ghost" size="sm" onClick={onBack}>
+          <ArrowLeft className="size-4" />
+          <span>Back</span>
+        </Button>
+        <div className="flex-1 min-w-0">
+          <h2 className="text-sm font-semibold text-foreground overflow-hidden text-ellipsis whitespace-nowrap">
+            {dashboard.name}
+          </h2>
+        </div>
+        <Button
+          asChild
+          variant="link"
+          size="sm"
+          className="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors duration-150 hover:text-foreground"
+        >
+          <a href={dashboard.workspace_url} target="_blank" rel="noopener noreferrer">
+            <ExternalLink className="size-4" />
             <span>Open in Databricks</span>
           </a>
-        </div>
-
-        {/* Embedded dashboard — uses published embed URL with embed_credentials */}
-        <div className={styles.embedBody}>
-          <iframe
-            src={dashboard.embed_url}
-            className={styles.iframe}
-            sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
-            title={dashboard.name}
-          />
-        </div>
+        </Button>
       </div>
-    );
-  }
-);
+
+      {/* Embedded dashboard — uses published embed URL with embed_credentials */}
+      <div className="flex-1 min-h-0">
+        <iframe
+          src={dashboard.embed_url}
+          className="w-full h-full border-0"
+          sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
+          title={dashboard.name}
+        />
+      </div>
+    </div>
+  );
+});
 DashboardEmbed.displayName = 'DashboardEmbed';

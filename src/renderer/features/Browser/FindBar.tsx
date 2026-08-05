@@ -4,58 +4,11 @@
  * `WebviewHandle`. The parent (BrowserView) owns open/close state and passes
  * in the webview ref.
  */
-import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
-import { ChevronDown16Regular, ChevronUp16Regular, Dismiss16Regular } from '@fluentui/react-icons';
+import { ChevronDown, ChevronUp, X } from 'lucide-react';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 
 import type { WebviewHandle } from '@/renderer/common/Webview';
-
-const useStyles = makeStyles({
-  root: {
-    position: 'absolute',
-    top: '8px',
-    right: '12px',
-    zIndex: 10,
-    display: 'flex',
-    alignItems: 'center',
-    gap: '4px',
-    padding: '4px 6px',
-    borderRadius: tokens.borderRadiusMedium,
-    backgroundColor: tokens.colorNeutralBackground1,
-    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
-    boxShadow: tokens.shadow16,
-  },
-  input: {
-    flex: '0 0 200px',
-    height: '22px',
-    padding: '0 6px',
-    fontSize: tokens.fontSizeBase200,
-    color: tokens.colorNeutralForeground1,
-    backgroundColor: tokens.colorNeutralBackground1,
-    border: 'none',
-    outline: 'none',
-  },
-  counter: {
-    fontSize: tokens.fontSizeBase100,
-    color: tokens.colorNeutralForeground3,
-    minWidth: '48px',
-    textAlign: 'center',
-  },
-  btn: {
-    display: 'inline-flex',
-    width: '22px',
-    height: '22px',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: tokens.borderRadiusSmall,
-    border: 'none',
-    backgroundColor: 'transparent',
-    color: tokens.colorNeutralForeground2,
-    cursor: 'pointer',
-    ':hover': { backgroundColor: tokens.colorSubtleBackgroundHover, color: tokens.colorNeutralForeground1 },
-    ':disabled': { opacity: 0.4, cursor: 'not-allowed', ':hover': { backgroundColor: 'transparent' } },
-  },
-});
+import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '@/renderer/ds/ui/input-group';
 
 export const FindBar = memo(
   ({
@@ -63,11 +16,10 @@ export const FindBar = memo(
     onClose,
     result,
   }: {
-    webviewRef: React.RefObject<WebviewHandle>;
+    webviewRef: React.RefObject<WebviewHandle | null>;
     onClose: () => void;
     result: { ordinal: number; matches: number } | null;
   }) => {
-    const styles = useStyles();
     const [query, setQuery] = useState('');
     const inputRef = useRef<HTMLInputElement>(null);
 
@@ -142,11 +94,11 @@ export const FindBar = memo(
         : '';
 
     return (
-      <div className={styles.root} role="search" aria-label="Find in page">
-        <input
+      <InputGroup className="absolute top-2 right-3 z-10 w-85 bg-background shadow-lg" aria-label="Find in page">
+        <InputGroupInput
           ref={inputRef}
           type="text"
-          className={styles.input}
+          className="text-xs"
           value={query}
           onChange={handleChange}
           onKeyDown={handleKeyDown}
@@ -154,31 +106,31 @@ export const FindBar = memo(
           spellCheck={false}
           autoComplete="off"
         />
-        <span className={styles.counter}>{countLabel}</span>
-        <button
-          type="button"
-          className={styles.btn}
-          onClick={() => advance(false)}
-          aria-label="Previous match"
-          title="Previous (Shift+Enter)"
-          disabled={!query}
-        >
-          <ChevronUp16Regular />
-        </button>
-        <button
-          type="button"
-          className={styles.btn}
-          onClick={() => advance(true)}
-          aria-label="Next match"
-          title="Next (Enter)"
-          disabled={!query}
-        >
-          <ChevronDown16Regular />
-        </button>
-        <button type="button" className={styles.btn} onClick={close} aria-label="Close find" title="Close (Esc)">
-          <Dismiss16Regular />
-        </button>
-      </div>
+        <InputGroupAddon align="inline-end" className="gap-0 pr-1">
+          <span className="min-w-12 text-center text-xs text-muted-foreground">{countLabel}</span>
+          <InputGroupButton
+            size="icon-xs"
+            onClick={() => advance(false)}
+            aria-label="Previous match"
+            title="Previous (Shift+Enter)"
+            disabled={!query}
+          >
+            <ChevronUp />
+          </InputGroupButton>
+          <InputGroupButton
+            size="icon-xs"
+            onClick={() => advance(true)}
+            aria-label="Next match"
+            title="Next (Enter)"
+            disabled={!query}
+          >
+            <ChevronDown />
+          </InputGroupButton>
+          <InputGroupButton size="icon-xs" onClick={close} aria-label="Close find" title="Close (Esc)">
+            <X />
+          </InputGroupButton>
+        </InputGroupAddon>
+      </InputGroup>
     );
   }
 );

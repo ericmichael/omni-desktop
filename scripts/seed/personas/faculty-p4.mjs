@@ -144,9 +144,8 @@ Medium — three weeks of calendar, one FTE-equivalent. We don't reproduce 1T (w
       description: 'Scaffold Python project, pin torch / transformers / lm-eval versions.',
       columnId: 'completed',
       priority: 'high',
-      resolution: 'completed',
       createdAgo: 20 * day,
-      resolvedAgo: 18 * day,
+      completedAgo: 18 * day,
       phase: 'completed',
     },
     {
@@ -201,8 +200,7 @@ Medium — three weeks of calendar, one FTE-equivalent. We don't reproduce 1T (w
         columnId: t.columnId,
         priority: t.priority,
         createdAt: now - t.createdAgo,
-        resolvedAt: t.resolvedAgo !== undefined ? now - t.resolvedAgo : undefined,
-        resolution: t.resolution,
+        completedAt: t.completedAgo !== undefined ? now - t.completedAgo : undefined,
         phase: t.phase,
       })
     );

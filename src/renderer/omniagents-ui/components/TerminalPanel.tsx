@@ -5,6 +5,8 @@ import { Terminal } from '@xterm/xterm';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createActor } from 'xstate';
 
+import { Button } from '@/renderer/ds/ui/button';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/renderer/ds/ui/tabs';
 import { withConnectTicket } from '@/renderer/omniagents-ui/rpc/ws-ticket';
 import { useRPCClient, useRPCConnected } from '@/renderer/omniagents-ui/rpc-context';
 import { useUiConfig } from '@/renderer/omniagents-ui/ui-config';
@@ -580,36 +582,34 @@ export function TerminalPanel({
       aria-hidden={open ? undefined : true}
     >
       <div className="absolute inset-0 bg-background/60" onClick={onClose} />
-      <div
+      <Tabs
+        value={activeId ?? ''}
+        onValueChange={setActiveId}
         className={[
-          'absolute left-0 right-0 bottom-0 h-[50vh] sm:h-[70vh] bg-bgColumn border-t border-bgCardAlt flex flex-col transition-transform',
+          'terminal-panel-height absolute right-0 bottom-0 left-0 flex flex-col gap-0 border-t border-accent bg-card transition-transform',
           open ? 'translate-y-0' : 'translate-y-4',
         ].join(' ')}
       >
-        <div className="px-4 py-3 border-b border-bgCardAlt flex items-center justify-between flex-shrink-0">
+        <div className="px-4 py-3 flex items-center justify-between flex-shrink-0">
           <div className="flex items-center gap-3">
-            <div className="text-base font-semibold text-textHeading">Terminal</div>
-            {activeTab ? <div className="text-xs text-textSecondary">{statusLabel(activeTab)}</div> : null}
-            {activeTab?.cwd ? <div className="text-xs text-textSecondary">{activeTab.cwd}</div> : null}
-            {activeTab?.error ? <div className="text-xs text-errorRed">{activeTab.error}</div> : null}
+            <div className="text-base font-semibold text-foreground">Terminal</div>
+            {activeTab ? <div className="text-xs text-muted-foreground">{statusLabel(activeTab)}</div> : null}
+            {activeTab?.cwd ? <div className="text-xs text-muted-foreground">{activeTab.cwd}</div> : null}
+            {activeTab?.error ? <div className="text-xs text-destructive">{activeTab.error}</div> : null}
           </div>
           <div className="flex items-center gap-2">
-            <button
-              className="px-3 py-1.5 rounded bg-bgCardAlt hover:bg-bgCardAlt/80 text-textPrimary text-sm"
-              onClick={() => addTab()}
-            >
+            <Button variant="secondary" size="sm" onClick={() => addTab()}>
               New
-            </button>
-            <button
-              className="w-8 h-8 rounded hover:bg-bgCardAlt text-textPrimary"
-              onClick={onClose}
-              aria-label="Close"
-            >
+            </Button>
+            <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label="Close">
               ✕
-            </button>
+            </Button>
           </div>
         </div>
-        <div className="px-4 py-2 border-b border-bgCardAlt flex items-center gap-1 overflow-x-auto flex-shrink-0">
+        <TabsList
+          variant="line"
+          className="h-auto w-full justify-start overflow-x-auto rounded-none border-b border-accent bg-transparent px-4 py-2"
+        >
           {tabs.map((t) => {
             const active = t.id === activeId;
             return (
@@ -618,34 +618,42 @@ export function TerminalPanel({
                 className={[
                   'flex items-center gap-1 px-2 py-1 rounded text-xs whitespace-nowrap border',
                   active
-                    ? 'bg-bgCardAlt text-textHeading border-bgCardAlt'
-                    : 'bg-transparent text-textSecondary border-bgCardAlt/60 hover:bg-bgCardAlt/40',
+                    ? 'bg-accent text-foreground border-accent'
+                    : 'bg-transparent text-muted-foreground border-accent/60 hover:bg-accent/40',
                 ].join(' ')}
               >
-                <button className="text-left" onClick={() => setActiveId(t.id)}>
+                <TabsTrigger
+                  value={t.id}
+                  className="h-auto border-0 bg-transparent p-0 text-left text-xs after:hidden data-[state=active]:bg-transparent data-[state=active]:shadow-none"
+                >
                   {t.label}
-                </button>
-                <button
-                  className="ml-1 text-textSecondary hover:text-textHeading"
+                </TabsTrigger>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  className="ml-1 text-muted-foreground hover:text-foreground"
                   aria-label="Close tab"
                   onClick={() => closeTab(t.id)}
                 >
                   ✕
-                </button>
+                </Button>
               </div>
             );
           })}
-        </div>
+        </TabsList>
         <div className="flex-1 overflow-hidden">
           {tabs.map((t) => (
-            <div
+            <TabsContent
+              value={t.id}
+              forceMount
               key={t.id}
               ref={(el) => setContainer(t.id, el)}
-              className={t.id === activeId ? 'h-full w-full' : 'hidden'}
+              className="m-0 h-full w-full data-[state=inactive]:hidden"
             />
           ))}
         </div>
-      </div>
+      </Tabs>
     </div>
   );
 }

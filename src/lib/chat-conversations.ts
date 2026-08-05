@@ -1,8 +1,7 @@
 /**
- * Pure helpers for the chat-conversation history index (`chatConversations`
- * in the store). Closing an activated chat column demotes it to this index
- * instead of destroying it; the Focus sidebar's Recent section lists it and
- * resuming rebuilds a column from the entry. All functions are pure — the
+ * Pure helpers for the conversation history index (`chatConversations` in
+ * the store). Archiving an agent session records it in this index; restoring
+ * rebuilds a column with its project and ticket context. All functions are pure — the
  * caller persists the result and deletes snapshots for pruned entries.
  */
 
@@ -33,7 +32,7 @@ export function conversationTitle(firstMessage: string): string {
 /**
  * Insert or update an entry, keeping the list newest-first by
  * ``lastActiveAt``. An update merges over the existing entry so a caller that
- * only knows some fields (e.g. a title-less close) doesn't erase the rest.
+ * only knows some fields (e.g. a title-only update) doesn't erase the rest.
  */
 export function upsertConversation(
   list: readonly ChatConversation[],

@@ -7,19 +7,20 @@
  * count of active downloads so users notice progress even without opening
  * the tray.
  */
-import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
-import {
-  ArrowDownload20Regular,
-  CheckmarkCircle16Regular,
-  Delete16Regular,
-  ErrorCircle16Regular,
-  FolderOpen16Regular,
-} from '@fluentui/react-icons';
+
 import { useStore } from '@nanostores/react';
+import { CircleCheck, CircleX, Download, FolderOpen, Trash2 } from 'lucide-react';
 import { atom } from 'nanostores';
 import { memo, useCallback, useState } from 'react';
 
-import { Menu, MenuItem, MenuList, MenuPopover, MenuTrigger } from '@/renderer/ds';
+import { Badge } from '@/renderer/ds/ui/badge';
+import { Button } from '@/renderer/ds/ui/button';
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/renderer/ds/ui/context-menu';
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/renderer/ds/ui/empty';
+import { ItemContent, ItemGroup, ItemMedia } from '@/renderer/ds/ui/item';
+import { Popover, PopoverContent, PopoverTrigger } from '@/renderer/ds/ui/popover';
+import { Progress } from '@/renderer/ds/ui/progress';
+import { ScrollArea } from '@/renderer/ds/ui/scroll-area';
 import { emitter, ipc } from '@/renderer/services/ipc';
 import type { BrowserDownloadEntry } from '@/shared/types';
 
@@ -36,120 +37,6 @@ void emitter
     /* server mode / race — atom already has [] */
   });
 
-const useStyles = makeStyles({
-  btn: {
-    position: 'relative',
-    display: 'inline-flex',
-    width: '26px',
-    height: '26px',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: tokens.borderRadiusMedium,
-    border: 'none',
-    backgroundColor: 'transparent',
-    color: tokens.colorNeutralForeground2,
-    cursor: 'pointer',
-    flexShrink: 0,
-    ':hover': { backgroundColor: tokens.colorSubtleBackgroundHover, color: tokens.colorNeutralForeground1 },
-  },
-  badge: {
-    position: 'absolute',
-    top: '-2px',
-    right: '-2px',
-    minWidth: '14px',
-    height: '14px',
-    padding: '0 3px',
-    borderRadius: '7px',
-    backgroundColor: tokens.colorBrandBackground,
-    color: tokens.colorNeutralForegroundOnBrand,
-    fontSize: '0.5625rem',
-    fontWeight: tokens.fontWeightSemibold,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    pointerEvents: 'none',
-  },
-  panel: {
-    width: '320px',
-    maxHeight: '400px',
-    display: 'flex',
-    flexDirection: 'column',
-  },
-  header: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: '10px 12px',
-    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
-  },
-  title: { fontSize: tokens.fontSizeBase300, fontWeight: tokens.fontWeightSemibold },
-  clearBtn: {
-    fontSize: tokens.fontSizeBase100,
-    color: tokens.colorNeutralForeground3,
-    border: 'none',
-    backgroundColor: 'transparent',
-    cursor: 'pointer',
-    padding: '2px 6px',
-    borderRadius: tokens.borderRadiusSmall,
-    ':hover': { color: tokens.colorNeutralForeground1, backgroundColor: tokens.colorSubtleBackgroundHover },
-  },
-  list: {
-    flex: '1 1 0',
-    minHeight: 0,
-    overflowY: 'auto',
-    padding: '4px',
-  },
-  empty: {
-    padding: '20px',
-    textAlign: 'center',
-    color: tokens.colorNeutralForeground4,
-    fontSize: tokens.fontSizeBase200,
-  },
-  row: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '10px',
-    padding: '8px 10px',
-    borderRadius: tokens.borderRadiusSmall,
-    cursor: 'pointer',
-    ':hover': { backgroundColor: tokens.colorSubtleBackgroundHover },
-  },
-  rowInner: { flex: '1 1 0', minWidth: 0 },
-  filename: {
-    fontSize: tokens.fontSizeBase200,
-    color: tokens.colorNeutralForeground1,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-  },
-  meta: {
-    fontSize: tokens.fontSizeBase100,
-    color: tokens.colorNeutralForeground3,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-  },
-  progressBar: {
-    position: 'relative',
-    height: '2px',
-    backgroundColor: tokens.colorNeutralBackground3,
-    borderRadius: '1px',
-    marginTop: '4px',
-    overflow: 'hidden',
-  },
-  progressFill: {
-    position: 'absolute',
-    top: 0,
-    bottom: 0,
-    left: 0,
-    backgroundColor: tokens.colorBrandBackground,
-    transitionProperty: 'width',
-    transitionDuration: '150ms',
-  },
-  iconOk: { color: tokens.colorPaletteGreenForeground1, width: '16px', height: '16px', flexShrink: 0 },
-  iconErr: { color: tokens.colorPaletteRedForeground1, width: '16px', height: '16px', flexShrink: 0 },
-});
-
 function formatBytes(bytes: number): string {
   if (bytes < 1024) {
     return `${bytes} B`;
@@ -164,7 +51,6 @@ function formatBytes(bytes: number): string {
 }
 
 const DownloadRow = memo(({ entry }: { entry: BrowserDownloadEntry }) => {
-  const styles = useStyles();
   const pct = entry.totalBytes > 0 ? Math.min(100, Math.round((entry.receivedBytes / entry.totalBytes) * 100)) : 0;
 
   const handleOpen = useCallback(() => {
@@ -183,19 +69,30 @@ const DownloadRow = memo(({ entry }: { entry: BrowserDownloadEntry }) => {
   }, [entry.id]);
 
   return (
-    <Menu positioning={{ position: 'below', align: 'start' }} openOnContext>
-      <MenuTrigger>
-        <div className={styles.row} onClick={handleOpen} role="button" tabIndex={0}>
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          className="h-auto w-full justify-start gap-2.5 px-4 py-3 font-normal"
+          onClick={handleOpen}
+        >
           {entry.state === 'completed' ? (
-            <CheckmarkCircle16Regular className={styles.iconOk} />
+            <ItemMedia>
+              <CircleCheck className="size-4 text-success" />
+            </ItemMedia>
           ) : entry.state === 'interrupted' || entry.state === 'cancelled' ? (
-            <ErrorCircle16Regular className={styles.iconErr} />
+            <ItemMedia>
+              <CircleX className="size-4 text-destructive" />
+            </ItemMedia>
           ) : (
-            <ArrowDownload20Regular style={{ width: 14, height: 14, flexShrink: 0 }} />
+            <ItemMedia>
+              <Download className="size-4" />
+            </ItemMedia>
           )}
-          <div className={styles.rowInner}>
-            <div className={styles.filename}>{entry.filename}</div>
-            <div className={styles.meta}>
+          <ItemContent className="min-w-0 gap-1 text-left">
+            <div className="truncate text-xs text-foreground">{entry.filename}</div>
+            <div className="truncate text-xs text-muted-foreground">
               {entry.state === 'completed'
                 ? formatBytes(entry.receivedBytes)
                 : entry.state === 'cancelled'
@@ -204,34 +101,29 @@ const DownloadRow = memo(({ entry }: { entry: BrowserDownloadEntry }) => {
                     ? 'Failed'
                     : `${formatBytes(entry.receivedBytes)} / ${formatBytes(entry.totalBytes)}`}
             </div>
-            {(entry.state === 'progressing' || entry.state === 'paused') && (
-              <div className={styles.progressBar}>
-                <div className={styles.progressFill} style={{ width: `${pct}%` }} />
-              </div>
-            )}
-          </div>
-        </div>
-      </MenuTrigger>
-      <MenuPopover>
-        <MenuList>
-          {entry.state === 'completed' && <MenuItem onClick={handleOpen}>Open</MenuItem>}
-          {entry.savePath && (
-            <MenuItem icon={<FolderOpen16Regular />} onClick={handleShowFolder}>
-              Show in folder
-            </MenuItem>
-          )}
-          <MenuItem icon={<Delete16Regular />} onClick={handleRemove}>
-            Remove from list
-          </MenuItem>
-        </MenuList>
-      </MenuPopover>
-    </Menu>
+            {(entry.state === 'progressing' || entry.state === 'paused') && <Progress value={pct} className="h-0.5" />}
+          </ItemContent>
+        </Button>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        {entry.state === 'completed' && <ContextMenuItem onSelect={handleOpen}>Open</ContextMenuItem>}
+        {entry.savePath && (
+          <ContextMenuItem onSelect={handleShowFolder}>
+            <FolderOpen />
+            Show in folder
+          </ContextMenuItem>
+        )}
+        <ContextMenuItem variant="destructive" onSelect={handleRemove}>
+          <Trash2 />
+          Remove from list
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 });
 DownloadRow.displayName = 'DownloadRow';
 
 export const DownloadsTray = memo(() => {
-  const styles = useStyles();
   const items = useStore($downloads);
   const [open, setOpen] = useState(false);
 
@@ -248,33 +140,53 @@ export const DownloadsTray = memo(() => {
   }
 
   return (
-    <Menu open={open} onOpenChange={(_, data) => setOpen(data.open)} positioning={{ position: 'below', align: 'end' }}>
-      <MenuTrigger>
-        <button type="button" className={styles.btn} aria-label="Downloads" title={`Downloads (${items.length})`}>
-          <ArrowDownload20Regular style={{ width: 14, height: 14 }} />
-          {activeCount > 0 && <span className={styles.badge}>{activeCount}</span>}
-        </button>
-      </MenuTrigger>
-      <MenuPopover>
-        <div className={styles.panel}>
-          <div className={styles.header}>
-            <span className={styles.title}>Downloads</span>
-            {items.length > 0 && (
-              <button type="button" className={styles.clearBtn} onClick={handleClear}>
-                Clear completed
-              </button>
-            )}
-          </div>
-          <div className={styles.list}>
-            {items.length === 0 ? (
-              <div className={styles.empty}>No downloads yet.</div>
-            ) : (
-              items.map((e) => <DownloadRow key={e.id} entry={e} />)
-            )}
-          </div>
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-xs"
+          className="relative"
+          aria-label={`Downloads (${items.length})`}
+        >
+          <Download className="size-4" />
+          {activeCount > 0 && (
+            <Badge className="pointer-events-none absolute -top-1 -right-1 h-3.5 min-w-3.5 px-1 text-xs">
+              {activeCount}
+            </Badge>
+          )}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="flex w-80 flex-col p-0">
+        <div className="flex items-center justify-between border-b px-3 py-2.5">
+          <span className="text-sm font-semibold">Downloads</span>
+          {items.length > 0 && (
+            <Button type="button" variant="ghost" size="xs" onClick={handleClear}>
+              Clear completed
+            </Button>
+          )}
         </div>
-      </MenuPopover>
-    </Menu>
+        <ScrollArea className="max-h-96">
+          {items.length === 0 ? (
+            <Empty className="min-h-40 border-0 p-6">
+              <EmptyHeader>
+                <EmptyMedia variant="icon">
+                  <Download />
+                </EmptyMedia>
+                <EmptyTitle>No downloads</EmptyTitle>
+                <EmptyDescription>Downloads from this session will appear here.</EmptyDescription>
+              </EmptyHeader>
+            </Empty>
+          ) : (
+            <ItemGroup className="p-1">
+              {items.map((e) => (
+                <DownloadRow key={e.id} entry={e} />
+              ))}
+            </ItemGroup>
+          )}
+        </ScrollArea>
+      </PopoverContent>
+    </Popover>
   );
 });
 DownloadsTray.displayName = 'DownloadsTray';

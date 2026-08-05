@@ -2,10 +2,10 @@ import type { LucideProps } from 'lucide-react';
 import { BookmarkIcon } from 'lucide-react';
 import type { ComponentProps, HTMLAttributes } from 'react';
 
-import { Button } from '@/renderer/omniagents-ui/components/ui/button';
-import { Separator } from '@/renderer/omniagents-ui/components/ui/separator';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/renderer/omniagents-ui/components/ui/tooltip';
-import { cn } from '@/renderer/omniagents-ui/lib/utils';
+import { cn } from '@/renderer/ds/cn';
+import { Button } from '@/renderer/ds/ui/button';
+import { Separator } from '@/renderer/ds/ui/separator';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/renderer/ds/ui/tooltip';
 
 export type CheckpointProps = HTMLAttributes<HTMLDivElement>;
 

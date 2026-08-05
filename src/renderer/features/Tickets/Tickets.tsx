@@ -1,80 +1,37 @@
-import { makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useMemo } from 'react';
 
-import { openMobileNav } from '@/renderer/app/mobile-nav';
 import { useIsDesktop } from '@/renderer/common/use-is-desktop';
-import { TopAppBar } from '@/renderer/ds';
+import { TopAppBar } from '@/renderer/ds/TopAppBar';
 import { InboxView } from '@/renderer/features/Inbox/InboxView';
 import { $inboxItems, $inboxView } from '@/renderer/features/Inbox/state';
 import { $milestones } from '@/renderer/features/Initiatives/state';
 import { PageView } from '@/renderer/features/Pages/PageView';
 import { $pages, pageApi } from '@/renderer/features/Pages/state';
 import { persistedStoreApi } from '@/renderer/services/store';
-import { $glassEnabled } from '@/renderer/theme/use-glass';
 import type { ProjectId } from '@/shared/types';
 
 import { MilestoneDetail } from './MilestoneDetail';
 import { ProjectHome } from './ProjectHome';
 import { ProjectPagesTab } from './ProjectPagesTab';
 import { ProjectSettings } from './ProjectSettings';
+import { ProjectShell } from './ProjectShell';
 import { $ticketsView, type ProjectTab, ticketApi } from './state';
-import { TicketAutopilotLaunchDialog } from './TicketAutopilotLaunchDialog';
 import { TicketDetail } from './TicketDetail';
 import { WorkAllView } from './WorkAllView';
 import { WorkItemsList } from './WorkItemsList';
-
-const useStyles = makeStyles({
-  root: {
-    display: 'flex',
-    width: '100%',
-    height: '100%',
-  },
-  rootGlass: {
-    backgroundColor: 'transparent',
-  },
-  // Glass surfaces inherit translucent neutral colors via Fluent token overrides
-  // pushed at the deck-bg root in MainContent. These classes only opt in to the
-  // blur layer — bg/border colors come from --colorNeutralBackground* / --colorNeutralStroke1.
-  contentAreaGlass: {
-    backgroundColor: tokens.colorNeutralBackground1,
-    backdropFilter: 'var(--glass-blur)',
-    WebkitBackdropFilter: 'var(--glass-blur)',
-  },
-  mainColumn: {
-    flex: '1 1 0',
-    minWidth: 0,
-    display: 'flex',
-    flexDirection: 'column',
-  },
-  mobileHeader: {
-    flexShrink: 0,
-    '@media (min-width: 640px)': {
-      display: 'none',
-    },
-  },
-  contentArea: {
-    flex: '1 1 0',
-    minHeight: 0,
-  },
-  content: {
-    height: '100%',
-  },
-});
 
 /* ---------- Main export ---------- */
 
 /**
  * The Work surface: the inbox, all projects, and their tasks. The unified
  * AppSidebar picks the view (desktop column; the mobile nav drawer). Every
- * view fills the content plane (the Basecamp model — one master per tab);
- * on mobile the TopAppBar carries the drawer handle at a surface root and a
- * back arrow at depth.
+ * project-scoped routes stay inside a persistent local shell; on mobile the
+ * TopAppBar carries the drawer handle at a surface root and a back arrow at
+ * depth.
  */
 export const Tickets = memo(() => {
-  const styles = useStyles();
   const persistedStore = useStore(persistedStoreApi.$atom);
-  const isGlass = useStore($glassEnabled);
   const view = useStore($ticketsView);
   const isDesktop = useIsDesktop();
 
@@ -124,12 +81,11 @@ export const Tickets = memo(() => {
       return milestones[view.milestoneId]?.title || 'Milestone';
     }
     if (view.type === 'project') {
-      // Sub-pages title themselves; only Home carries the project name.
-      if (view.tab === 'board') {
+      if (view.tab === 'tasks') {
         return 'Tasks';
       }
       if (view.tab === 'pages') {
-        return 'Docs';
+        return 'Pages';
       }
       if (view.tab === 'settings') {
         return 'Settings';
@@ -151,7 +107,8 @@ export const Tickets = memo(() => {
 
   // A surface root has no "up" — it shows the drawer handle instead; every
   // deeper view shows a back arrow.
-  const atSurfaceRoot = view.type === 'all' || (view.type === 'inbox' && inboxView.selectedItemId === null);
+  const atSurfaceRoot =
+    view.type === 'all' || view.type === 'project' || (view.type === 'inbox' && inboxView.selectedItemId === null);
 
   // Keyboard shortcut: Cmd/Ctrl+N → new page in current project
   useEffect(() => {
@@ -186,9 +143,9 @@ export const Tickets = memo(() => {
     return () => window.removeEventListener('keydown', handler);
   }, [view]);
 
-  // There is no project tab bar (the Basecamp model): the project home is
-  // the hub, and every sub-page — Tasks board, Docs, Settings, details —
-  // takes over the full content plane with a breadcrumb as the way back up.
+  // Project routes share one persistent shell. Detail routes keep their
+  // parent tab selected so moving between work, runs, review, and context
+  // never loses project orientation.
   const content = (() => {
     if (view.type === 'inbox') {
       return <InboxView />;
@@ -198,8 +155,8 @@ export const Tickets = memo(() => {
       if (tab === 'home') {
         return <ProjectHome projectId={view.projectId} />;
       }
-      if (tab === 'board') {
-        return <WorkItemsList projectId={view.projectId} pageTitle="Tasks" hideChrome={!isDesktop} />;
+      if (tab === 'tasks') {
+        return <WorkItemsList projectId={view.projectId} pageTitle="Tasks" hideChrome />;
       }
       if (tab === 'pages') {
         return <ProjectPagesTab projectId={view.projectId} />;
@@ -226,29 +183,46 @@ export const Tickets = memo(() => {
     return null;
   })();
 
+  const activeProjectTab: ProjectTab | null = (() => {
+    if (view.type === 'project') {
+      return view.tab;
+    }
+    if (view.type === 'ticket' || view.type === 'milestone') {
+      return 'tasks';
+    }
+    if (view.type === 'page') {
+      return 'pages';
+    }
+    return null;
+  })();
+
   return (
-    <div className={mergeClasses(styles.root, isGlass && styles.rootGlass)}>
+    <div className="flex w-full h-full">
       {/* Desktop navigation lives in the unified AppSidebar; the mobile
           overlay drawer below is the only sidebar this surface owns. */}
-      <div className={styles.mainColumn}>
+      <div className="flex-1 min-w-0 flex flex-col">
         {/* Mobile: header with sidebar access */}
-        <div className={styles.mobileHeader}>
+        <div className="shrink-0 sm:hidden">
           <TopAppBar
             title={mobileHeaderTitle}
-            {...(atSurfaceRoot ? { onMenu: openMobileNav } : { onBack: handleBack })}
-            className={isGlass ? 'omni-glass-mobile-top-app-bar' : 'bg-surface-raised'}
+            {...(atSurfaceRoot ? { showMenu: true } : { onBack: handleBack })}
+            className="bg-card"
           />
         </div>
 
-        <div className={mergeClasses(styles.contentArea, isGlass && styles.contentAreaGlass)}>
-          <div className={styles.content}>
+        <div className="flex-1 min-h-0">
+          <div className="h-full">
             {view.type === 'all' && <WorkAllView />}
-            {content}
+            {shellProjectId && activeProjectTab ? (
+              <ProjectShell projectId={shellProjectId} activeTab={activeProjectTab}>
+                {content}
+              </ProjectShell>
+            ) : (
+              content
+            )}
           </div>
         </div>
       </div>
-
-      <TicketAutopilotLaunchDialog />
     </div>
   );
 });

@@ -1,15 +1,9 @@
-import { Menu, MenuDivider, MenuItem, MenuList, MenuPopover, MenuTrigger } from '@fluentui/react-components';
-import { Bot20Regular, Person20Regular } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
+import { Bot, User } from 'lucide-react';
 import { memo, useCallback, useEffect } from 'react';
 
 import { residentPrincipalId } from '@/lib/resident-agent';
-import { Button } from '@/renderer/ds';
-import { $members, loadMembers } from '@/renderer/features/Teams/state';
-import { ticketApi } from '@/renderer/features/Tickets/state';
-import { persistedStoreApi } from '@/renderer/services/store';
-import type { TeamMember, TicketId } from '@/shared/types';
-
+import { Button } from '@/renderer/ds/ui/button';
 /**
  * Assign a ticket to a team member or a resident agent, or leave it
  * Unassigned (the default). Ownership stays with the team — this only sets
@@ -17,7 +11,18 @@ import type { TeamMember, TicketId } from '@/shared/types';
  * residents (`agent:<id>`), the assignment wakeup. Any team member may
  * reassign. In single-user/local mode the member list is empty, so the
  * options are Unassigned + the resident roster.
- */
+ */ import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/renderer/ds/ui/dropdown-menu';
+import { $members, loadMembers } from '@/renderer/features/Teams/state';
+import { ticketApi } from '@/renderer/features/Tickets/state';
+import { persistedStoreApi } from '@/renderer/services/store';
+import type { TeamMember, TicketId } from '@/shared/types';
 export const AssigneePicker = memo(function AssigneePicker({
   ticketId,
   assignee,
@@ -35,8 +40,10 @@ export const AssigneePicker = memo(function AssigneePicker({
     }
   }, [members.length]);
 
-  const handleUnassign = useCallback(() => void ticketApi.assignTicket(ticketId, null), [ticketId]);
-  const handleAssign = useCallback((userId: string) => () => void ticketApi.assignTicket(ticketId, userId), [ticketId]);
+  const handleAssign = useCallback(
+    (principalId: string) => void ticketApi.assignTicket(ticketId, principalId || null),
+    [ticketId]
+  );
 
   const currentMember = members.find((m) => m.userId === assignee);
   const currentResident = residents.find((a) => residentPrincipalId(a.id) === assignee);
@@ -49,34 +56,31 @@ export const AssigneePicker = memo(function AssigneePicker({
         : 'Unassigned';
 
   return (
-    <Menu>
-      <MenuTrigger disableButtonEnhancement>
-        <Button
-          size="sm"
-          variant="ghost"
-          leftIcon={currentResident ? <Bot20Regular /> : <Person20Regular />}
-          aria-label="Assign ticket"
-        >
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button size="sm" variant="ghost" aria-label="Assign ticket">
+          {currentResident ? <Bot /> : <User />}
           {label}
         </Button>
-      </MenuTrigger>
-      <MenuPopover>
-        <MenuList>
-          <MenuItem onClick={handleUnassign}>Unassigned</MenuItem>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent>
+        <DropdownMenuRadioGroup value={assignee ?? ''} onValueChange={handleAssign}>
+          <DropdownMenuRadioItem value="">Unassigned</DropdownMenuRadioItem>
           {members.map((m) => (
-            <MenuItem key={m.userId} onClick={handleAssign(m.userId)}>
+            <DropdownMenuRadioItem key={m.userId} value={m.userId}>
               {memberLabel(m)}
-            </MenuItem>
+            </DropdownMenuRadioItem>
           ))}
-          {residents.length > 0 && <MenuDivider />}
+          {residents.length > 0 && <DropdownMenuSeparator />}
           {residents.map((a) => (
-            <MenuItem key={a.id} icon={<Bot20Regular />} onClick={handleAssign(residentPrincipalId(a.id))}>
+            <DropdownMenuRadioItem key={a.id} value={residentPrincipalId(a.id)}>
+              <Bot />
               {a.name}
-            </MenuItem>
+            </DropdownMenuRadioItem>
           ))}
-        </MenuList>
-      </MenuPopover>
-    </Menu>
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 });
 

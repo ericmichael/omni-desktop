@@ -1,5 +1,7 @@
 import React from 'react';
 
+import { Button } from '@/renderer/ds/ui/button';
+import { Item, ItemContent, ItemDescription, ItemGroup, ItemTitle } from '@/renderer/ds/ui/item';
 import { formatRelativeTime, generateSessionTitle } from '@/renderer/omniagents-ui/lib/utils';
 
 export type SessionItem = {
@@ -14,27 +16,29 @@ export type SessionItem = {
 export function SessionList({ sessions, onSelect }: { sessions: SessionItem[]; onSelect: (id?: string) => void }) {
   return (
     <div className="px-3 py-3">
-      <div className="text-sm text-textSubtle mb-2">Resume a previous session or start a new one.</div>
-      <div className="space-y-2">
+      <div className="text-sm text-muted-foreground mb-2">Resume a previous session or start a new one.</div>
+      <ItemGroup className="gap-2">
         {sessions
           .filter((s) => s.message_count > 0)
           .map((s) => (
-            <button
-              key={s.id}
-              className="w-full text-left px-3 py-2 rounded-md bg-bgCardAlt border border-bgCardAlt hover:brightness-110"
-              onClick={() => onSelect(s.id)}
-            >
-              <div className="text-sm font-medium text-textPrimary truncate">{generateSessionTitle(s)}</div>
-              <div className="text-xs text-textSubtle">{formatRelativeTime(s.created_at)}</div>
-            </button>
+            <Item key={s.id} asChild variant="outline" size="sm">
+              <Button
+                type="button"
+                variant="ghost"
+                className="h-auto w-full justify-start whitespace-normal"
+                onClick={() => onSelect(s.id)}
+              >
+                <ItemContent className="min-w-0 items-start text-left">
+                  <ItemTitle className="max-w-full truncate">{generateSessionTitle(s)}</ItemTitle>
+                  <ItemDescription>{formatRelativeTime(s.created_at)}</ItemDescription>
+                </ItemContent>
+              </Button>
+            </Item>
           ))}
-        <button
-          className="px-3 py-2 rounded-md bg-primary hover:brightness-110 text-primary-foreground"
-          onClick={() => onSelect(undefined)}
-        >
+        <Button className="self-start" onClick={() => onSelect(undefined)}>
           Start New Session
-        </button>
-      </div>
+        </Button>
+      </ItemGroup>
     </div>
   );
 }

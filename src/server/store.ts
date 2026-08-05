@@ -48,8 +48,6 @@ export const DEFAULTS: StoreData = {
   chatConversations: [],
   activeCodeTabId: null,
   codeLayoutMode: 'focus',
-  codeDeckBackground: null,
-  glassTone: 'dark',
   activeTicketId: null,
   wipLimit: 3,
   scheduledTasks: [],

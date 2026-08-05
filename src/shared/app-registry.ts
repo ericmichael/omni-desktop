@@ -50,7 +50,7 @@ export const BUILTIN_APPS: AppDescriptor[] = [
   {
     id: 'chat',
     label: 'Chat',
-    icon: 'Chat20Regular',
+    icon: 'MessageCircle',
     kind: 'builtin-chat',
     scope: 'always',
     builtin: true,
@@ -60,7 +60,7 @@ export const BUILTIN_APPS: AppDescriptor[] = [
   {
     id: 'code',
     label: 'Code',
-    icon: 'Code20Regular',
+    icon: 'Code',
     kind: 'builtin-code',
     scope: 'sandbox',
     builtin: true,
@@ -71,7 +71,7 @@ export const BUILTIN_APPS: AppDescriptor[] = [
   {
     id: 'desktop',
     label: 'Desktop',
-    icon: 'Desktop20Regular',
+    icon: 'Monitor',
     kind: 'builtin-desktop',
     scope: 'sandbox',
     builtin: true,
@@ -82,7 +82,7 @@ export const BUILTIN_APPS: AppDescriptor[] = [
   {
     id: 'browser',
     label: 'Browser',
-    icon: 'Globe20Regular',
+    icon: 'Globe',
     kind: 'builtin-browser',
     scope: 'always',
     builtin: true,
@@ -92,7 +92,7 @@ export const BUILTIN_APPS: AppDescriptor[] = [
   {
     id: 'files',
     label: 'Files',
-    icon: 'Folder20Regular',
+    icon: 'Folder',
     kind: 'builtin-files',
     scope: 'always',
     builtin: true,
@@ -102,7 +102,7 @@ export const BUILTIN_APPS: AppDescriptor[] = [
   {
     id: 'git',
     label: 'Git',
-    icon: 'Branch20Regular',
+    icon: 'GitBranch',
     kind: 'builtin-git',
     scope: 'always',
     builtin: true,
@@ -112,7 +112,7 @@ export const BUILTIN_APPS: AppDescriptor[] = [
   {
     id: 'terminal',
     label: 'Terminal',
-    icon: 'WindowConsole20Regular',
+    icon: 'SquareTerminal',
     kind: 'builtin-terminal',
     // Terminals route through `omni serve`'s `SessionPtyBackend`, so the
     // shell needs a running agent process. We keep the app `scope: 'always'`

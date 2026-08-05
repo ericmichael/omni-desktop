@@ -11,20 +11,14 @@
  * per-source ticket / PR state stays attached. Reached from the sidebar's
  * Sources ⋯ menu, alongside Remove.
  */
-import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useState } from 'react';
 
-import {
-  AnimatedDialog,
-  Button,
-  Checkbox,
-  DialogBody,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  Input,
-} from '@/renderer/ds';
+import { cn } from '@/renderer/ds/cn';
+import { Button } from '@/renderer/ds/ui/button';
+import { Checkbox } from '@/renderer/ds/ui/checkbox';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/renderer/ds/ui/dialog';
+import { Input } from '@/renderer/ds/ui/input';
 import { GitCredentialDialog } from '@/renderer/features/SettingsModal/GitCredentialDialog';
 import { DirectoryBrowserDialog } from '@/renderer/features/Tickets/DirectoryBrowserDialog';
 import { persistedStoreApi } from '@/renderer/services/store';
@@ -35,28 +29,6 @@ import { CredentialStatus } from './CredentialStatus';
 import { deriveMountName, emptyLocalDraft } from './source-draft';
 import { projectsApi } from './state';
 
-const useStyles = makeStyles({
-  body: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalL },
-  field: { display: 'flex', flexDirection: 'column', gap: '4px' },
-  label: { fontSize: tokens.fontSizeBase300, color: tokens.colorNeutralForeground1 },
-  hint: { fontSize: tokens.fontSizeBase100, color: tokens.colorNeutralForeground3 },
-  full: { width: '100%' },
-  dirRow: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS },
-  dirDisplay: {
-    flex: '1 1 0',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    borderRadius: tokens.borderRadiusMedium,
-    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
-    backgroundColor: tokens.colorNeutralBackground1,
-    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
-    fontSize: tokens.fontSizeBase300,
-    color: tokens.colorNeutralForeground2,
-  },
-  footer: { gap: tokens.spacingHorizontalS, justifyContent: 'flex-end' },
-});
-
 type EditSourceDialogProps = {
   open: boolean;
   onClose: () => void;
@@ -65,7 +37,6 @@ type EditSourceDialogProps = {
 };
 
 export const EditSourceDialog = memo(({ open, onClose, project, source }: EditSourceDialogProps) => {
-  const styles = useStyles();
   const storeData = useStore(persistedStoreApi.$atom);
   const credentials = storeData.gitCredentials ?? [];
 
@@ -170,89 +141,100 @@ export const EditSourceDialog = memo(({ open, onClose, project, source }: EditSo
 
   return (
     <>
-      <AnimatedDialog open={open} onClose={onClose}>
+      <Dialog open={open} onOpenChange={(nextOpen) => !nextOpen && onClose()}>
         <DialogContent className="max-w-md">
-          <DialogHeader>Edit source</DialogHeader>
-          <DialogBody className={styles.body}>
+          <DialogHeader>
+            <DialogTitle>Edit source</DialogTitle>
+          </DialogHeader>
+          <div className={cn('min-h-0 overflow-y-auto', 'flex flex-col gap-5')}>
             {isLocal ? (
-              <div className={styles.field}>
-                <label className={styles.label}>Workspace directory</label>
-                <div className={styles.dirRow}>
-                  <span className={styles.dirDisplay}>{workspaceDir || 'No directory selected'}</span>
+              <div className="flex flex-col gap-1">
+                <label className="text-sm text-foreground">Workspace directory</label>
+                <div className="flex items-center gap-2">
+                  <span className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap rounded-lg border border-border bg-background px-4 py-2 text-sm text-muted-foreground">
+                    {workspaceDir || 'No directory selected'}
+                  </span>
                   <Button size="sm" variant="ghost" onClick={openBrowse}>
                     Browse
                   </Button>
                 </div>
               </div>
             ) : (
-              <div className={styles.field}>
-                <label className={styles.label}>Repo URL</label>
+              <div className="flex flex-col gap-1">
+                <label className="text-sm text-foreground">Repo URL</label>
                 <Input
                   type="text"
                   value={repoUrl}
                   onChange={handleRepoUrl}
                   placeholder="https://github.com/owner/name"
-                  className={styles.full}
+                  className="w-full"
                 />
+
                 <CredentialStatus repoUrl={repoUrl} credentials={credentials} onAddToken={setAddTokenHost} />
               </div>
             )}
 
-            <div className={styles.field}>
-              <label className={styles.label}>
-                Mount name <span className={styles.hint}>(folder under /workspace/)</span>
+            <div className="flex flex-col gap-1">
+              <label className="text-sm text-foreground">
+                Mount name <span className="text-xs text-muted-foreground">(folder under /workspace/)</span>
               </label>
               <Input
                 type="text"
                 value={mount}
                 onChange={handleMount}
                 placeholder={mountPlaceholder || 'e.g. launcher'}
-                className={styles.full}
+                className="w-full"
               />
             </div>
 
             {!isLocal && (
-              <div className={styles.field}>
-                <label className={styles.label}>
-                  Default branch <span className={styles.hint}>(optional)</span>
+              <div className="flex flex-col gap-1">
+                <label className="text-sm text-foreground">
+                  Default branch <span className="text-xs text-muted-foreground">(optional)</span>
                 </label>
                 <Input
                   type="text"
                   value={branch}
                   onChange={handleBranch}
                   placeholder="Leave blank for the repo's default branch"
-                  className={styles.full}
+                  className="w-full"
                 />
               </div>
             )}
 
-            <div className={styles.field}>
-              <Checkbox checked={readOnly} onCheckedChange={setReadOnly} label="Read-only source" />
-              <span className={styles.hint}>Omni’s file editor can inspect this source but cannot change its files.</span>
+            <div className="flex flex-col gap-1">
+              <label className="inline-flex items-center gap-2 text-sm">
+                <Checkbox checked={readOnly} onCheckedChange={(checked) => setReadOnly(checked === true)} />
+                Read-only source
+              </label>
+              <span className="text-xs text-muted-foreground">
+                Omni’s file editor can inspect this source but cannot change its files.
+              </span>
             </div>
 
             {error && (
-              <div role="alert" style={{ color: 'var(--colorPaletteRedForeground1)' }}>
+              <div role="alert" className="text-sm text-destructive">
                 {error}
               </div>
             )}
-          </DialogBody>
-          <DialogFooter className={styles.footer}>
+          </div>
+          <DialogFooter className="gap-2 justify-end">
             <Button variant="ghost" onClick={onClose}>
               Cancel
             </Button>
-            <Button onClick={handleSave} isDisabled={saving}>
+            <Button onClick={handleSave} disabled={saving}>
               {saving ? 'Saving…' : 'Save'}
             </Button>
           </DialogFooter>
         </DialogContent>
-      </AnimatedDialog>
+      </Dialog>
       <DirectoryBrowserDialog
         open={browseDir}
         onClose={closeBrowse}
         onSelect={handleDirSelected}
         initialPath={workspaceDir || undefined}
       />
+
       <GitCredentialDialog open={addTokenHost !== null} onClose={closeAddToken} initialHost={addTokenHost ?? ''} />
     </>
   );

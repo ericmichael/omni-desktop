@@ -1,0 +1,17 @@
+.omni-browser-loading-bar {
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 1;
+  height: 0.125rem;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.omni-browser-loading-bar::before {
+  position: absolute;
+  inset-block: 0;
+  width: 40%;
+  content: '';
+  background-image: linear-gradient(90deg, transparent, var(--primary), transparent);
+  animation: omni-browserview-tsx-loadingBar-0 1.4s linear infinite;
+}

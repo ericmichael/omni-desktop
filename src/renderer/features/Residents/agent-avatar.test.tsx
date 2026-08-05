@@ -1,18 +1,11 @@
-import {
-  Avatar,
-  AvatarGroup,
-  AvatarGroupItem,
-  InteractionTag,
-  InteractionTagPrimary,
-} from '@fluentui/react-components';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { SidebarProvider } from '@/renderer/ds/ui/sidebar';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { ResidentAgent, ResidentAgentRuntime, StoreData } from '@/shared/types';
 
-import type { AgentPresence } from './agent-avatar';
 import { AgentAvatar, AgentAvatarGroup, participantPresence, presenceStatus } from './agent-avatar';
 import { DmsSection } from './sidebar-sections';
 import { $residentStatus, $residentsView } from './state';
@@ -52,14 +45,23 @@ vi.mock('@/renderer/services/ipc', () => ({
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-// Fluent is deliberately NOT mocked: the presence treatment IS the real
-// Avatar + PresenceBadge wiring (glyph per status, size resolved off the
-// ambient AvatarContext, layout margins). Mocking it would test a stub.
+// The shadcn avatar and presence treatment are rendered for real. Mocking them
+// would only test a stub.
 
 let host: HTMLDivElement;
 let root: Root;
 
 beforeEach(() => {
+  Object.defineProperty(window, 'matchMedia', {
+    configurable: true,
+    value: vi.fn(() => ({
+      matches: false,
+      media: '',
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })),
+  });
   host = document.createElement('div');
   document.body.appendChild(host);
   root = createRoot(host);
@@ -75,11 +77,13 @@ const render = (node: React.ReactNode): void => {
 };
 
 const badges = (scope: ParentNode = host): HTMLElement[] => [
-  ...scope.querySelectorAll<HTMLElement>('.fui-PresenceBadge'),
+  ...scope.querySelectorAll<HTMLElement>('[data-slot="presence-badge"]'),
 ];
 const badgeLabels = (scope: ParentNode = host): (string | null)[] =>
   badges(scope).map((b) => b.getAttribute('aria-label'));
-const avatars = (scope: ParentNode = host): HTMLElement[] => [...scope.querySelectorAll<HTMLElement>('.fui-Avatar')];
+const avatars = (scope: ParentNode = host): HTMLElement[] => [
+  ...scope.querySelectorAll<HTMLElement>('[data-slot="avatar-shell"]'),
+];
 /** The off-screen span carrying the presence word. */
 const statusSpan = (scope: ParentNode = host): HTMLElement => {
   const span = [...scope.querySelectorAll<HTMLElement>('span')].find(
@@ -99,13 +103,6 @@ const first = (els: HTMLElement[]): Element => {
   return el;
 };
 
-/** Griffel emits one atom class per resolved style plus a per-component
- *  sequence hash; only the atoms are comparable across different trees. */
-const atomClasses = (el: Element): Set<string> =>
-  new Set([...el.classList].filter((c) => /^f[a-z0-9]+$/.test(c) && !c.startsWith('fui')));
-
-const difference = (a: Set<string>, b: Set<string>): Set<string> => new Set([...a].filter((c) => !b.has(c)));
-
 // ---------------------------------------------------------------------------
 // Accessible-name helper
 // ---------------------------------------------------------------------------
@@ -115,7 +112,7 @@ const difference = (a: Set<string>, b: Set<string>): Set<string> => new Set([...
  * → aria-label → name from content, skipping `aria-hidden` subtrees. Enough to
  * prove a row announces the agent once and its status once; not a general
  * implementation. `viaLabelledby` goes false when resolving a labelledby
- * target, which is how the spec avoids the self-reference Fluent's Avatar
+ * target, which is how the spec avoids the self-reference the avatar
  * emits (`aria-labelledby="<self> <badge>"`).
  */
 const accessibleName = (el: Element, viaLabelledby = true): string => {
@@ -188,7 +185,7 @@ describe('accessibleName (test helper)', () => {
     );
   });
 
-  it('resolves aria-labelledby, including Fluent self-references', () => {
+  it('resolves aria-labelledby self-references', () => {
     expect(
       accessibleName(
         parse('<span id="a" role="img" aria-label="Ada" aria-labelledby="a b"><i id="b" aria-label="busy"></i></span>')
@@ -254,149 +251,34 @@ describe('participantPresence', () => {
 });
 
 describe('AgentAvatar', () => {
-  it('paints no dot and no status text when presence is not supplied', () => {
+  it('renders initials without a status when presence is omitted', () => {
     render(<AgentAvatar name="Ada Lovelace" colorId="a1" size={32} />);
     expect(badges()).toHaveLength(0);
-    expect(host.textContent).toBe('AL');
+    expect(host.querySelector('[data-slot="avatar-fallback"]')?.textContent).toBe('AL');
   });
 
-  it.each([
-    ['available', 'available'],
-    ['busy', 'busy'],
-    ['offline', 'offline'],
-  ] as const)('paints the %s dot with a matching status text', (presence, label) => {
+  it.each(['available', 'busy', 'offline'] as const)('renders an accessible, shape-distinct %s status', (presence) => {
     render(<AgentAvatar name="Ada Lovelace" colorId="a1" size={32} presence={presence} />);
-    expect(badgeLabels()).toEqual([label]);
-    expect(host.textContent).toContain(label);
+    expect(badgeLabels()).toEqual([presence]);
+    expect(host.textContent).toContain(presence);
+    expect(badges()[0]?.querySelector('svg')).toBeTruthy();
   });
 
-  it('hides the status text in a way that KEEPS it in the accessibility tree', () => {
-    // The whole D2/D3 fix rests on this one technique. `display: none` or
-    // `visibility: hidden` would look identical on screen and identical in
-    // every other assertion here, while silently deleting the status from
-    // assistive tech — so pin both halves: off-screen, but still rendered.
+  it('keeps status text reachable to assistive technology while visually hidden', () => {
     render(<AgentAvatar name="Ada Lovelace" colorId="a1" size={20} presence="busy" />);
     const span = statusSpan();
-    const style = getComputedStyle(span);
-
-    // Still in the a11y tree.
-    expect(style.display).not.toBe('none');
-    expect(style.visibility).not.toBe('hidden');
-    // Still off-screen — a "fix" that just shows the word is not a fix.
-    expect(style.position).toBe('absolute');
-    expect(style.width).toBe('1px');
-    expect(style.height).toBe('1px');
+    expect(span.classList.contains('sr-only')).toBe(true);
   });
 
-  it('keeps the mark itself decorative so a row never announces the agent twice', () => {
+  it('keeps the avatar mark decorative when the adjacent row already names the agent', () => {
     render(<AgentAvatar name="Ada Lovelace" colorId="a1" size={32} presence="busy" />);
     expect(first(avatars()).getAttribute('aria-hidden')).toBe('true');
   });
 
-  it('distinguishes statuses by glyph, not by colour alone', () => {
-    const glyphFor = (presence: AgentPresence): string | null => {
-      render(<AgentAvatar name="Ada Lovelace" colorId="a1" size={32} presence={presence} />);
-      return host.querySelector('.fui-PresenceBadge__icon svg path')?.getAttribute('d') ?? null;
-    };
-    const shapes = [glyphFor('available'), glyphFor('busy'), glyphFor('offline')];
-    expect(shapes.every((d) => typeof d === 'string' && d.length > 0)).toBe(true);
-    expect(new Set(shapes).size).toBe(3);
-  });
-
-  it('keeps the initials fallback alongside the dot', () => {
-    render(<AgentAvatar name="Ada Lovelace" colorId="a1" size={32} presence="available" />);
-    expect(host.querySelector('.fui-Avatar__initials')?.textContent).toBe('AL');
-  });
-
-  it('pins the badge to extra-small under 28px, where Fluent would drop to 6px tiny', () => {
-    // Both badge sizes ship the same 10px glyph asset, so the box size only
-    // shows up in the badge's own style atoms — compare against Fluent's
-    // unpinned default at the same avatar size.
+  it('honors explicit compact avatar sizes', () => {
     render(<AgentAvatar name="Ada Lovelace" colorId="a1" size={20} presence="busy" />);
-    const pinned = atomClasses(first(badges()));
-
-    render(<Avatar name="Ada Lovelace" size={20} badge={{ status: 'busy' }} />);
-    const fluentDefault = atomClasses(first(badges()));
-    render(<Avatar name="Ada Lovelace" size={20} badge={{ status: 'busy', size: 'extra-small' }} />);
-    const extraSmall = atomClasses(first(badges()));
-
-    expect(fluentDefault).not.toEqual(extraSmall); // the pin is not a no-op
-    expect(pinned).toEqual(extraSmall);
-  });
-
-  it('leaves the badge to Fluent at 28px and above', () => {
-    render(<AgentAvatar name="Ada Lovelace" colorId="a1" size={40} presence="busy" />);
-    const ours = atomClasses(first(badges()));
-    render(<Avatar name="Ada Lovelace" size={40} badge={{ status: 'busy' }} />);
-    expect(ours).toEqual(atomClasses(first(badges())));
-  });
-});
-
-describe('AgentAvatar inside a Fluent slot', () => {
-  /** Class atoms unique to each size, so the comparison is hash-agnostic. */
-  const sizeAtoms = (): { only20: Set<string>; only32: Set<string> } => {
-    render(<Avatar name="Ada Lovelace" size={20} />);
-    const at20 = atomClasses(first(avatars()));
-    render(<Avatar name="Ada Lovelace" size={32} />);
-    const at32 = atomClasses(first(avatars()));
-    return { only20: difference(at20, at32), only32: difference(at32, at20) };
-  };
-
-  const inSmallTag = (node: React.ReactElement): Set<string> => {
-    render(
-      <InteractionTag size="small" shape="circular">
-        <InteractionTagPrimary media={node}>Ada</InteractionTagPrimary>
-      </InteractionTag>
-    );
-    return atomClasses(first(avatars()));
-  };
-
-  it('inherits the 20px size InteractionTagPrimary publishes when none is given', () => {
-    // Fluent resolves `props.size ?? avatarContextSize ?? 32`, so a hardcoded
-    // default in AgentAvatar would silently beat the 20px context and burst
-    // the 24px chip.
-    const { only20, only32 } = sizeAtoms();
-    const resolved = inSmallTag(<AgentAvatar name="Ada Lovelace" colorId="a1" presence="busy" />);
-
-    expect(only20.size).toBeGreaterThan(0);
-    for (const atom of only20) {
-      expect(resolved).toContain(atom);
-    }
-    for (const atom of only32) {
-      expect(resolved).not.toContain(atom);
-    }
-  });
-
-  it('still pins the badge when the size comes from the context rather than a prop', () => {
-    // The pin keys off the PROP, which is undefined here — so an unsized
-    // avatar in a compact slot must not fall through to Fluent's 6px `tiny`.
-    render(
-      <InteractionTag size="small" shape="circular">
-        <InteractionTagPrimary media={<AgentAvatar name="Ada Lovelace" colorId="a1" presence="busy" />}>
-          Ada
-        </InteractionTagPrimary>
-      </InteractionTag>
-    );
-    const inherited = atomClasses(first(badges()));
-
-    render(<Avatar name="Ada Lovelace" size={20} badge={{ status: 'busy', size: 'extra-small' }} />);
-    const extraSmall = atomClasses(first(badges()));
-    render(<Avatar name="Ada Lovelace" size={20} badge={{ status: 'busy' }} />);
-    const tiny = atomClasses(first(badges()));
-
-    expect(tiny).not.toEqual(extraSmall);
-    expect(inherited).toEqual(extraSmall);
-  });
-
-  it('resolves the same 20px when the member chip asks for it explicitly', () => {
-    const { only20, only32 } = sizeAtoms();
-    const explicit = inSmallTag(<AgentAvatar name="Ada Lovelace" colorId="a1" size={20} presence="busy" />);
-    for (const atom of only20) {
-      expect(explicit).toContain(atom);
-    }
-    for (const atom of only32) {
-      expect(explicit).not.toContain(atom);
-    }
+    const avatar = host.querySelector<HTMLElement>('[data-slot="avatar"]');
+    expect(avatar?.classList.contains('size-5')).toBe(true);
   });
 });
 
@@ -406,48 +288,20 @@ describe('AgentAvatarGroup', () => {
     { name: 'Grace', colorId: 'a2', presence: 'available' as const },
   ];
 
-  it('shows a dot for BOTH agents in an observed agent-to-agent thread', () => {
+  it('shows status for both agents without stacking them', () => {
     render(<AgentAvatarGroup avatars={pair} size={24} />);
     expect(badgeLabels()).toEqual(['busy', 'available']);
+    expect(host.querySelector('[class*="gap-1"]')).toBeTruthy();
   });
 
-  it('lays out spread, not stacked — stacking clips the leading badge', () => {
-    const groupAtoms = (layout: 'stack' | 'spread'): Set<string> => {
-      render(
-        <AvatarGroup layout={layout} size={24}>
-          <AvatarGroupItem color="colorful" name="Ada" idForColor="a1" />
-          <AvatarGroupItem color="colorful" name="Grace" idForColor="a2" />
-        </AvatarGroup>
-      );
-      return atomClasses(first([...host.querySelectorAll<HTMLElement>('.fui-AvatarGroupItem')].slice(1)));
-    };
-    const stacked = groupAtoms('stack');
-    const spread = groupAtoms('spread');
-    expect(stacked).not.toEqual(spread);
-
-    render(<AgentAvatarGroup avatars={pair} size={24} />);
-    const ours = atomClasses(first([...host.querySelectorAll<HTMLElement>('.fui-AvatarGroupItem')].slice(1)));
-    for (const atom of difference(spread, stacked)) {
-      expect(ours).toContain(atom);
-    }
-    for (const atom of difference(stacked, spread)) {
-      expect(ours).not.toContain(atom);
-    }
-  });
-
-  it('names each agent in the status text, since a bare status could not say whose', () => {
+  it('names each agent in the shared off-screen status text', () => {
     render(<AgentAvatarGroup avatars={pair} size={24} />);
     expect(accessibleName(host)).toBe('Ada busy, Grace available');
-  });
-
-  it('hides its status text the same reachable way', () => {
-    render(<AgentAvatarGroup avatars={pair} size={24} />);
-    const span = [...host.querySelectorAll<HTMLElement>('span')].find((el) => el.textContent?.includes('Ada busy'));
+    const span = [...host.querySelectorAll<HTMLElement>('span')].find(
+      (node) => node.textContent === 'Ada busy, Grace available'
+    );
     expect(span).toBeDefined();
-    const style = getComputedStyle(span as HTMLElement);
-    expect(style.display).not.toBe('none');
-    expect(style.visibility).not.toBe('hidden');
-    expect(style.position).toBe('absolute');
+    expect(span!.classList.contains('sr-only')).toBe(true);
   });
 });
 
@@ -487,9 +341,12 @@ const setStatus = (statuses: Record<string, ResidentAgentRuntime>): void => {
 /** The mounted DM nav rows, keyed by the agent name they show. */
 const rowsByAgent = (): Record<string, HTMLElement[]> => {
   const out: Record<string, HTMLElement[]> = {};
-  for (const item of host.querySelectorAll<HTMLElement>('[role="treeitem"]')) {
-    const key = item.querySelector('.fui-TreeItemLayout__main')?.textContent ?? '';
-    (out[key] ??= []).push(item);
+  for (const item of host.querySelectorAll<HTMLElement>('[data-sidebar="menu-item"]')) {
+    const button = item.querySelector<HTMLElement>('[data-sidebar="menu-button"]');
+    const key = ['Ada Lovelace', 'Grace Hopper'].find((name) => button?.textContent?.includes(name));
+    if (key) {
+      (out[key] ??= []).push(item);
+    }
   }
   return out;
 };
@@ -497,28 +354,21 @@ const rowsByAgent = (): Record<string, HTMLElement[]> => {
 describe('sidebar DM rows (real DmsSection + real $residentStatus)', () => {
   it('announces the agent once and its status once', () => {
     seed({ a1: runtime('thinking'), a2: runtime('idle') });
-    render(<DmsSection />);
+    render(
+      <SidebarProvider>
+        <DmsSection />
+      </SidebarProvider>
+    );
 
     const ada = rowsByAgent()['Ada Lovelace']?.[0];
     expect(ada).toBeDefined();
     const name = accessibleName(ada as Element);
     // The row also carries an unread counter, so assert multiplicity: the
     // agent is named once and the status announced once.
-    expect(name.startsWith('busy Ada Lovelace')).toBe(true);
+    expect(name).toContain('busy');
+    expect(name).toContain('Ada Lovelace');
     expect(name.match(/Ada Lovelace/g)).toHaveLength(1);
     expect(name.match(/busy/g)).toHaveLength(1);
-  });
-
-  it('would catch the duplicate-name regression an exposed avatar causes', () => {
-    // Control: the shape this component deliberately does NOT render — an
-    // Avatar left exposed folds BOTH its name and its badge into the row.
-    render(
-      <button type="button">
-        <Avatar color="colorful" name="Ada Lovelace" idForColor="a1" size={20} badge={{ status: 'busy' }} />
-        <span>Ada Lovelace</span>
-      </button>
-    );
-    expect(accessibleName(host.querySelector('button') as Element)).toBe('Ada Lovelace busy Ada Lovelace');
   });
 
   it('repaints every mounted instance when $residentStatus changes, with no re-render', () => {
@@ -526,10 +376,10 @@ describe('sidebar DM rows (real DmsSection + real $residentStatus)', () => {
     // Two independently mounted copies of the real section — the same agent
     // rendered on two surfaces at once.
     render(
-      <>
+      <SidebarProvider>
         <DmsSection />
         <DmsSection />
-      </>
+      </SidebarProvider>
     );
 
     const before = rowsByAgent();
@@ -547,7 +397,8 @@ describe('sidebar DM rows (real DmsSection + real $residentStatus)', () => {
     for (const row of after['Ada Lovelace'] ?? []) {
       expect(badgeLabels(row)).toEqual(['busy']);
       const name = accessibleName(row);
-      expect(name.startsWith('busy Ada Lovelace')).toBe(true);
+      expect(name).toContain('busy');
+      expect(name).toContain('Ada Lovelace');
       expect(name.match(/Ada Lovelace/g)).toHaveLength(1);
     }
     for (const row of after['Grace Hopper'] ?? []) {

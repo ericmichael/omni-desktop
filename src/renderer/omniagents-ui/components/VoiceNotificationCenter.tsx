@@ -1,5 +1,9 @@
 import React, { useEffect, useRef } from 'react';
 
+import { cn } from '@/renderer/ds/cn';
+import { Button } from '@/renderer/ds/ui/button';
+import { Card } from '@/renderer/ds/ui/card';
+
 export interface VoiceNotification {
   id: string;
   type: 'tool_called' | 'tool_result' | 'tool_approval';
@@ -18,6 +22,14 @@ interface Props {
   onReject?: (requestId: string) => void;
   onDismiss?: (id: string) => void;
 }
+
+const NOTIFICATION_STACK_CLASSES = [
+  'opacity-100',
+  'opacity-100',
+  'opacity-100',
+  'translate-y-1 scale-95 opacity-50',
+  'translate-y-2 scale-95 opacity-50',
+] as const;
 
 function truncate(text: string | undefined, max: number): string {
   if (!text) {
@@ -98,13 +110,8 @@ function NotificationCard({
   onDismiss?: (id: string) => void;
 }) {
   return (
-    <div
-      className="pointer-events-auto max-w-[320px] rounded-xl border border-border px-4 py-3 transition-all duration-300 ease-out"
-      style={{
-        background: 'color-mix(in srgb, var(--color-card) 85%, transparent)',
-        backdropFilter: 'blur(40px) saturate(1.6)',
-        boxShadow: 'var(--shadow-lg)',
-      }}
+    <Card
+      className="pointer-events-auto max-w-80 gap-0 px-4 py-3 shadow-lg transition-all duration-300 ease-out"
       onClick={() => n.type !== 'tool_approval' && onDismiss?.(n.id)}
     >
       {/* Header */}
@@ -139,28 +146,34 @@ function NotificationCard({
             </div>
           )}
           <div className="flex gap-2 mt-3">
-            <button
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
               onClick={(e) => {
                 e.stopPropagation();
                 onApprove?.(n.request_id!);
               }}
-              className="flex-1 text-xs font-medium py-1.5 rounded-lg bg-success/20 text-success hover:bg-success/30 border border-success/20 transition-colors"
+              className="flex-1 border-success/30 text-success hover:bg-success/10 hover:text-success"
             >
               Approve
-            </button>
-            <button
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="destructive"
               onClick={(e) => {
                 e.stopPropagation();
                 onReject?.(n.request_id!);
               }}
-              className="flex-1 text-xs font-medium py-1.5 rounded-lg bg-destructive/20 text-destructive hover:bg-destructive/30 border border-destructive/20 transition-colors"
+              className="flex-1"
             >
               Reject
-            </button>
+            </Button>
           </div>
         </>
       )}
-    </div>
+    </Card>
   );
 }
 
@@ -210,12 +223,7 @@ export function VoiceNotificationCenter({ notifications, onApprove, onReject, on
       {visible.map((n, i) => (
         <div
           key={n.id}
-          className="animate-[slideInRight_0.3s_ease-out]"
-          style={{
-            opacity: i < 3 ? 1 : 0.5,
-            transform: i >= 3 ? `scale(0.95) translateY(${(i - 2) * 4}px)` : undefined,
-            transition: 'opacity 0.3s, transform 0.3s',
-          }}
+          className={cn('animate-slide-in-right transition-all duration-300', NOTIFICATION_STACK_CLASSES[i])}
         >
           <NotificationCard n={n} onApprove={onApprove} onReject={onReject} onDismiss={onDismiss} />
         </div>

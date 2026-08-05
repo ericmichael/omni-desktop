@@ -415,31 +415,28 @@ describe('SupervisorOrchestrator integration', () => {
       expect(ctx.bridge.stopGoal).toHaveBeenCalled();
     });
 
-    it('moving to the terminal column auto-resolves the ticket as completed', async () => {
+    it('moving to the done column records completion', async () => {
       const { ctx } = setupRunning();
       ctx.pm.moveTicketToColumn('t1', 'done');
       await vi.runOnlyPendingTimersAsync();
 
       const ticket = ctx.store.get('tickets', []).find((t: Ticket) => t.id === 't1')!;
-      expect(ticket.resolution).toBe('completed');
-      expect(ticket.resolvedAt).toBeGreaterThan(0);
+      expect(ticket.completedAt).toBeGreaterThan(0);
     });
 
-    it('reopen (terminal → non-terminal) clears resolution and resolvedAt', async () => {
+    it('moving out of done clears the completion timestamp', async () => {
       const { ctx } = setupRunning();
-      ctx.pm.resolveTicket('t1', 'completed');
+      ctx.pm.moveTicketToColumn('t1', 'done');
       await vi.runOnlyPendingTimersAsync();
 
       let ticket = ctx.store.get('tickets', []).find((t: Ticket) => t.id === 't1')!;
-      expect(ticket.resolution).toBe('completed');
-      expect(ticket.resolvedAt).toBeGreaterThan(0);
+      expect(ticket.completedAt).toBeGreaterThan(0);
 
       // Reopen into an active column.
       ctx.pm.moveTicketToColumn('t1', 'in_progress');
 
       ticket = ctx.store.get('tickets', []).find((t: Ticket) => t.id === 't1')!;
-      expect(ticket.resolution).toBeUndefined();
-      expect(ticket.resolvedAt).toBeUndefined();
+      expect(ticket.completedAt).toBeUndefined();
     });
 
     it('is a no-op for an unknown ticket', () => {

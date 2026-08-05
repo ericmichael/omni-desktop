@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { useEffect, useMemo } from 'react';
+import { useMemo } from 'react';
 
 import { serverOrigin } from '@/renderer/services/ipc';
 import type { SessionController } from '@/renderer/services/session-control';
@@ -10,7 +10,7 @@ import type { ClientToolCallHandler } from './App';
 import { App as OmniAgentsCore } from './App';
 import type { PendingMessage } from './ChatShell';
 import { RPCClientProvider } from './rpc-context';
-import { UiConfigProvider, useUiConfig } from './ui-config';
+import { UiConfigProvider } from './ui-config';
 
 type OmniAgentsAppProps = {
   /** RPC server connection for the directly embedded React client. */
@@ -57,20 +57,6 @@ type OmniAgentsAppProps = {
   providerChildren?: ReactNode;
 };
 
-const ThemeSync = ({ children }: { children: ReactNode }) => {
-  const { theme } = useUiConfig();
-
-  useEffect(() => {
-    if (!theme || theme === 'default') {
-      document.documentElement.removeAttribute('data-theme');
-      return;
-    }
-    document.documentElement.setAttribute('data-theme', theme);
-  }, [theme]);
-
-  return <>{children}</>;
-};
-
 export const OmniAgentsApp = ({
   connection,
   sessionId,
@@ -111,36 +97,34 @@ export const OmniAgentsApp = ({
   return (
     <UiConfigProvider connection={normalizedConnection}>
       <RPCClientProvider>
-        <ThemeSync>
-          <OmniAgentsCore
-            sessionId={sessionId}
-            environmentId={environmentId}
-            onSessionChange={onSessionChange}
-            variables={variables}
-            voiceVariables={voiceVariables}
-            greeting={greeting}
-            suggestions={suggestions}
-            onReady={onReady}
-            headerActionsTargetId={headerActionsTargetId}
-            headerActionsCompact={headerActionsCompact}
-            pendingMessages={pendingMessages}
-            onPendingMessagesFlushed={onPendingMessagesFlushed}
-            sandboxLabel={sandboxLabel}
-            sandboxOptions={sandboxOptions}
-            currentSandboxProfile={currentSandboxProfile}
-            onSandboxChange={onSandboxChange}
-            onClientToolCall={onClientToolCall}
-            onController={onController}
-            onRunEnd={onRunEnd}
-            onRunStarted={onRunStarted}
-            pendingPlan={pendingPlan}
-            onPlanDecision={onPlanDecision}
-            ticketId={ticketId}
-            routineId={routineId}
-            workspaceDir={workspaceDir}
-          />
-          {providerChildren}
-        </ThemeSync>
+        <OmniAgentsCore
+          sessionId={sessionId}
+          environmentId={environmentId}
+          onSessionChange={onSessionChange}
+          variables={variables}
+          voiceVariables={voiceVariables}
+          greeting={greeting}
+          suggestions={suggestions}
+          onReady={onReady}
+          headerActionsTargetId={headerActionsTargetId}
+          headerActionsCompact={headerActionsCompact}
+          pendingMessages={pendingMessages}
+          onPendingMessagesFlushed={onPendingMessagesFlushed}
+          sandboxLabel={sandboxLabel}
+          sandboxOptions={sandboxOptions}
+          currentSandboxProfile={currentSandboxProfile}
+          onSandboxChange={onSandboxChange}
+          onClientToolCall={onClientToolCall}
+          onController={onController}
+          onRunEnd={onRunEnd}
+          onRunStarted={onRunStarted}
+          pendingPlan={pendingPlan}
+          onPlanDecision={onPlanDecision}
+          ticketId={ticketId}
+          routineId={routineId}
+          workspaceDir={workspaceDir}
+        />
+        {providerChildren}
       </RPCClientProvider>
     </UiConfigProvider>
   );

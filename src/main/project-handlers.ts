@@ -29,13 +29,11 @@ export function registerProjectHandlers(ipc: IIpcListener, resolve: (event: unkn
   // Ticket handlers
   h('project:add-ticket', (pm, ticket) => pm.addTicket(ticket));
   h('project:update-ticket', (pm, id, patch) => pm.updateTicket(id, patch));
-  h('project:remove-ticket', (pm, id) => pm.removeTicket(id));
   h('project:get-tickets', (pm, projectId) => pm.getTicketsByProject(projectId));
   h('project:get-next-ticket', (pm, projectId) => pm.getNextTicket(projectId));
 
   // Kanban
   h('project:move-ticket-to-column', (pm, ticketId, columnId) => pm.moveTicketToColumn(ticketId, columnId));
-  h('project:resolve-ticket', (pm, ticketId, resolution) => pm.resolveTicket(ticketId, resolution));
   h('project:assign-ticket', (pm, ticketId, assignee) => pm.assignTicket(ticketId, assignee));
   h('project:get-pipeline', (pm, projectId) => pm.getPipeline(projectId));
 

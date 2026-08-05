@@ -3,10 +3,21 @@
  * origin. Read-only for now beyond per-key delete + per-section clear-all;
  * full edit-cell UX is cheap to add later but not needed v1.
  */
-import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
-import { ArrowClockwise16Regular, Delete16Regular } from '@fluentui/react-icons';
+import { RefreshCw, Trash2 } from 'lucide-react';
 import { memo, useCallback, useEffect, useState } from 'react';
 
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/renderer/ds/ui/alert-dialog';
+import { Button } from '@/renderer/ds/ui/button';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/renderer/ds/ui/table';
 import { emitter } from '@/renderer/services/ipc';
 import type { AppHandleId } from '@/shared/app-control-types';
 
@@ -21,94 +32,11 @@ type Cookie = {
   expirationDate?: number;
 };
 
-const useStyles = makeStyles({
-  root: { display: 'flex', flexDirection: 'column', flex: '1 1 0', minHeight: 0, overflowY: 'auto' },
-  section: { display: 'flex', flexDirection: 'column', minHeight: 0 },
-  sectionHeader: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-    padding: '6px 12px',
-    backgroundColor: tokens.colorNeutralBackground2,
-    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
-    position: 'sticky',
-    top: 0,
-    zIndex: 1,
-  },
-  sectionTitle: {
-    fontSize: '11px',
-    textTransform: 'uppercase',
-    letterSpacing: '0.04em',
-    color: tokens.colorNeutralForeground2,
-    fontWeight: tokens.fontWeightSemibold,
-  },
-  counter: { fontSize: tokens.fontSizeBase100, color: tokens.colorNeutralForeground3 },
-  spacer: { flex: '1 1 0' },
-  iconBtn: {
-    display: 'inline-flex',
-    width: '22px',
-    height: '22px',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: tokens.borderRadiusSmall,
-    border: 'none',
-    backgroundColor: 'transparent',
-    color: tokens.colorNeutralForeground2,
-    cursor: 'pointer',
-    ':hover': { backgroundColor: tokens.colorSubtleBackgroundHover, color: tokens.colorNeutralForeground1 },
-  },
-  table: {
-    width: '100%',
-    fontFamily: "ui-monospace, 'SFMono-Regular', Menlo, monospace",
-    fontSize: '11px',
-    borderCollapse: 'collapse',
-  },
-  th: {
-    textAlign: 'left',
-    padding: '3px 8px',
-    fontSize: '10px',
-    textTransform: 'uppercase',
-    color: tokens.colorNeutralForeground3,
-    letterSpacing: '0.04em',
-    fontWeight: tokens.fontWeightRegular,
-    borderBottom: `1px solid ${tokens.colorNeutralStroke1}`,
-    position: 'sticky',
-    top: 0,
-    backgroundColor: tokens.colorNeutralBackground1,
-  },
-  td: {
-    padding: '3px 8px',
-    borderBottom: `1px solid ${tokens.colorNeutralBackground3}`,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    maxWidth: '200px',
-  },
-  tdValue: { color: tokens.colorNeutralForeground2 },
-  tdAction: { width: '24px', padding: '2px 4px' },
-  rowBtn: {
-    width: '18px',
-    height: '18px',
-    padding: 0,
-    border: 'none',
-    backgroundColor: 'transparent',
-    color: tokens.colorNeutralForeground3,
-    cursor: 'pointer',
-    borderRadius: tokens.borderRadiusSmall,
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    ':hover': { backgroundColor: tokens.colorSubtleBackgroundHover, color: tokens.colorPaletteRedForeground1 },
-  },
-  empty: { padding: '16px 12px', color: tokens.colorNeutralForeground4, fontSize: tokens.fontSizeBase200 },
-  warn: { padding: '8px 12px', color: tokens.colorNeutralForeground3, fontSize: tokens.fontSizeBase200 },
-});
-
 export const StorageTab = memo(({ handleId, activeOrigin }: { handleId: AppHandleId; activeOrigin: string | null }) => {
-  const styles = useStyles();
   const [cookies, setCookies] = useState<Cookie[]>([]);
   const [local, setLocal] = useState<Record<string, string>>({});
   const [session, setSession] = useState<Record<string, string>>({});
+  const [pendingClear, setPendingClear] = useState<'cookies' | 'local' | 'session' | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -144,9 +72,6 @@ export const StorageTab = memo(({ handleId, activeOrigin }: { handleId: AppHandl
   );
 
   const clearCookies = useCallback(async () => {
-    if (!window.confirm('Delete all cookies for this origin?')) {
-      return;
-    }
     const filter = activeOrigin ? { url: activeOrigin } : {};
     try {
       await emitter.invoke('app:cookies-clear', handleId, filter);
@@ -158,9 +83,6 @@ export const StorageTab = memo(({ handleId, activeOrigin }: { handleId: AppHandl
 
   const clearStorage = useCallback(
     async (which: 'local' | 'session') => {
-      if (!window.confirm(`Clear all ${which}Storage keys?`)) {
-        return;
-      }
       try {
         await emitter.invoke('app:storage-clear', handleId, which);
         await refresh();
@@ -171,109 +93,174 @@ export const StorageTab = memo(({ handleId, activeOrigin }: { handleId: AppHandl
     [handleId, refresh]
   );
 
+  const confirmClear = useCallback(() => {
+    if (pendingClear === 'cookies') {
+      void clearCookies();
+    } else if (pendingClear) {
+      void clearStorage(pendingClear);
+    }
+  }, [clearCookies, clearStorage, pendingClear]);
+
   const renderKVTable = (rows: Record<string, string>, onClear: () => void, label: string) => {
     const keys = Object.keys(rows);
     return (
-      <div className={styles.section}>
-        <div className={styles.sectionHeader}>
-          <span className={styles.sectionTitle}>{label}</span>
-          <span className={styles.counter}>{keys.length}</span>
-          <div className={styles.spacer} />
-          <button type="button" className={styles.iconBtn} onClick={onClear} title={`Clear ${label}`}>
-            <Delete16Regular />
-          </button>
+      <div className="flex flex-col min-h-0">
+        <div className="flex items-center gap-2 px-3 py-1.5 bg-card border-b border-border sticky top-0 z-1">
+          <span className="text-xs uppercase tracking-wide text-muted-foreground font-semibold">{label}</span>
+          <span className="text-xs text-muted-foreground">{keys.length}</span>
+          <div className="flex-1" />
+          <Button type="button" variant="ghost" size="icon-xs" onClick={onClear} title={`Clear ${label}`}>
+            <Trash2 />
+          </Button>
         </div>
         {keys.length === 0 ? (
-          <div className={styles.empty}>No keys.</div>
+          <div className="px-3 py-4 text-muted-foreground text-xs">No keys.</div>
         ) : (
-          <table className={styles.table}>
-            <thead>
-              <tr>
-                <th className={styles.th}>Key</th>
-                <th className={styles.th}>Value</th>
-              </tr>
-            </thead>
-            <tbody>
+          <Table className="w-full font-mono text-xs border-collapse">
+            <TableHeader>
+              <TableRow>
+                <TableHead className="text-left px-2 py-0.5 text-xs uppercase text-muted-foreground tracking-wide font-normal border-b border-border sticky top-0 bg-background">
+                  Key
+                </TableHead>
+                <TableHead className="text-left px-2 py-0.5 text-xs uppercase text-muted-foreground tracking-wide font-normal border-b border-border sticky top-0 bg-background">
+                  Value
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {keys.map((k) => (
-                <tr key={k}>
-                  <td className={styles.td} title={k}>
+                <TableRow key={k}>
+                  <TableCell
+                    className="px-2 py-0.5 border-b border-muted overflow-hidden text-ellipsis whitespace-nowrap max-w-50"
+                    title={k}
+                  >
                     {k}
-                  </td>
-                  <td className={`${styles.td} ${styles.tdValue}`} title={rows[k]}>
+                  </TableCell>
+                  <TableCell
+                    className={`${'px-2 py-0.5 border-b border-muted overflow-hidden text-ellipsis whitespace-nowrap max-w-50'} ${'text-muted-foreground'}`}
+                    title={rows[k]}
+                  >
                     {rows[k]}
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         )}
       </div>
     );
   };
 
   return (
-    <div className={styles.root}>
-      {!activeOrigin && <div className={styles.warn}>Navigate to a page to see its storage.</div>}
-      <div className={styles.section}>
-        <div className={styles.sectionHeader}>
-          <span className={styles.sectionTitle}>Cookies</span>
-          <span className={styles.counter}>{cookies.length}</span>
-          <span className={styles.counter}>{activeOrigin ? `— ${activeOrigin}` : ''}</span>
-          <div className={styles.spacer} />
-          <button type="button" className={styles.iconBtn} onClick={() => void refresh()} title="Refresh">
-            <ArrowClockwise16Regular />
-          </button>
-          <button type="button" className={styles.iconBtn} onClick={() => void clearCookies()} title="Clear cookies">
-            <Delete16Regular />
-          </button>
+    <div className="flex flex-col flex-1 min-h-0 overflow-y-auto">
+      {!activeOrigin && (
+        <div className="px-3 py-2 text-muted-foreground text-xs">Navigate to a page to see its storage.</div>
+      )}
+      <div className="flex flex-col min-h-0">
+        <div className="flex items-center gap-2 px-3 py-1.5 bg-card border-b border-border sticky top-0 z-1">
+          <span className="text-xs uppercase tracking-wide text-muted-foreground font-semibold">Cookies</span>
+          <span className="text-xs text-muted-foreground">{cookies.length}</span>
+          <span className="text-xs text-muted-foreground">{activeOrigin ? `— ${activeOrigin}` : ''}</span>
+          <div className="flex-1" />
+          <Button type="button" variant="ghost" size="icon-xs" onClick={() => void refresh()} title="Refresh">
+            <RefreshCw />
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            onClick={() => setPendingClear('cookies')}
+            title="Clear cookies"
+          >
+            <Trash2 />
+          </Button>
         </div>
         {cookies.length === 0 ? (
-          <div className={styles.empty}>No cookies.</div>
+          <div className="px-3 py-4 text-muted-foreground text-xs">No cookies.</div>
         ) : (
-          <table className={styles.table}>
-            <thead>
-              <tr>
-                <th className={styles.th}>Name</th>
-                <th className={styles.th}>Value</th>
-                <th className={styles.th}>Domain</th>
-                <th className={styles.th}>Path</th>
-                <th className={styles.th}>Flags</th>
-                <th className={styles.th} />
-              </tr>
-            </thead>
-            <tbody>
+          <Table className="w-full font-mono text-xs border-collapse">
+            <TableHeader>
+              <TableRow>
+                <TableHead className="text-left px-2 py-0.5 text-xs uppercase text-muted-foreground tracking-wide font-normal border-b border-border sticky top-0 bg-background">
+                  Name
+                </TableHead>
+                <TableHead className="text-left px-2 py-0.5 text-xs uppercase text-muted-foreground tracking-wide font-normal border-b border-border sticky top-0 bg-background">
+                  Value
+                </TableHead>
+                <TableHead className="text-left px-2 py-0.5 text-xs uppercase text-muted-foreground tracking-wide font-normal border-b border-border sticky top-0 bg-background">
+                  Domain
+                </TableHead>
+                <TableHead className="text-left px-2 py-0.5 text-xs uppercase text-muted-foreground tracking-wide font-normal border-b border-border sticky top-0 bg-background">
+                  Path
+                </TableHead>
+                <TableHead className="text-left px-2 py-0.5 text-xs uppercase text-muted-foreground tracking-wide font-normal border-b border-border sticky top-0 bg-background">
+                  Flags
+                </TableHead>
+                <TableHead className="text-left px-2 py-0.5 text-xs uppercase text-muted-foreground tracking-wide font-normal border-b border-border sticky top-0 bg-background" />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {cookies.map((c, i) => (
-                <tr key={`${c.domain ?? ''}-${c.path ?? ''}-${c.name}-${i}`}>
-                  <td className={styles.td} title={c.name}>
+                <TableRow key={`${c.domain ?? ''}-${c.path ?? ''}-${c.name}-${i}`}>
+                  <TableCell
+                    className="px-2 py-0.5 border-b border-muted overflow-hidden text-ellipsis whitespace-nowrap max-w-50"
+                    title={c.name}
+                  >
                     {c.name}
-                  </td>
-                  <td className={`${styles.td} ${styles.tdValue}`} title={c.value}>
+                  </TableCell>
+                  <TableCell
+                    className={`${'px-2 py-0.5 border-b border-muted overflow-hidden text-ellipsis whitespace-nowrap max-w-50'} ${'text-muted-foreground'}`}
+                    title={c.value}
+                  >
                     {c.value}
-                  </td>
-                  <td className={styles.td}>{c.domain ?? ''}</td>
-                  <td className={styles.td}>{c.path ?? ''}</td>
-                  <td className={styles.td}>
+                  </TableCell>
+                  <TableCell className="px-2 py-0.5 border-b border-muted overflow-hidden text-ellipsis whitespace-nowrap max-w-50">
+                    {c.domain ?? ''}
+                  </TableCell>
+                  <TableCell className="px-2 py-0.5 border-b border-muted overflow-hidden text-ellipsis whitespace-nowrap max-w-50">
+                    {c.path ?? ''}
+                  </TableCell>
+                  <TableCell className="px-2 py-0.5 border-b border-muted overflow-hidden text-ellipsis whitespace-nowrap max-w-50">
                     {[c.secure && 'Secure', c.httpOnly && 'HttpOnly', c.sameSite].filter(Boolean).join(' · ')}
-                  </td>
-                  <td className={styles.tdAction}>
-                    <button
+                  </TableCell>
+                  <TableCell className="w-6 px-1 py-0.5">
+                    <Button
                       type="button"
-                      className={styles.rowBtn}
+                      variant="ghost"
+                      size="icon-xs"
                       onClick={() => void deleteCookie(c)}
                       aria-label={`Delete cookie ${c.name}`}
                       title="Delete cookie"
                     >
-                      <Delete16Regular style={{ width: 12, height: 12 }} />
-                    </button>
-                  </td>
-                </tr>
+                      <Trash2 className="size-3" />
+                    </Button>
+                  </TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         )}
       </div>
-      {renderKVTable(local, () => void clearStorage('local'), 'Local storage')}
-      {renderKVTable(session, () => void clearStorage('session'), 'Session storage')}
+      {renderKVTable(local, () => setPendingClear('local'), 'Local storage')}
+      {renderKVTable(session, () => setPendingClear('session'), 'Session storage')}
+      <AlertDialog open={pendingClear !== null} onOpenChange={(open) => !open && setPendingClear(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Clear browser storage?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingClear === 'cookies'
+                ? 'Delete all cookies for this origin?'
+                : `Clear all ${pendingClear ?? ''}Storage keys?`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={confirmClear}>
+              Clear
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 });

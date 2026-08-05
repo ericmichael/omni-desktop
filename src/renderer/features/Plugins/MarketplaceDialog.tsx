@@ -1,16 +1,9 @@
-import { makeStyles, tokens } from '@fluentui/react-components';
 import { memo, useCallback, useEffect, useState } from 'react';
 
-import {
-  AnimatedDialog,
-  Button,
-  DialogBody,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  Input,
-  Spinner,
-} from '@/renderer/ds';
+import { Button } from '@/renderer/ds/ui/button';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/renderer/ds/ui/dialog';
+import { Input } from '@/renderer/ds/ui/input';
+import { Spinner } from '@/renderer/ds/ui/spinner';
 import type { ExploreContext } from '@/renderer/features/Plugins/ExploreSection';
 import { ExploreCard, installKeyOf } from '@/renderer/features/Plugins/ExploreSection';
 import type { ExplorePlugin } from '@/renderer/features/Plugins/plugin-cards';
@@ -19,27 +12,6 @@ import { emitter } from '@/renderer/services/ipc';
 import type { MarketplaceManifest } from '@/shared/types';
 
 const DEFAULT_MARKETPLACE = 'anthropics/skills';
-
-const useStyles = makeStyles({
-  form: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalM },
-  fetchRow: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS },
-  flex1: { flex: '1 1 0' },
-  list: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalS,
-    maxHeight: '24rem',
-    overflowY: 'auto',
-  },
-  empty: { color: tokens.colorNeutralForeground3, fontSize: tokens.fontSizeBase200 },
-  errorBanner: {
-    padding: tokens.spacingVerticalM,
-    borderRadius: tokens.borderRadiusMedium,
-    backgroundColor: tokens.colorPaletteRedBackground1,
-    color: tokens.colorPaletteRedForeground1,
-    fontSize: tokens.fontSizeBase200,
-  },
-});
 
 type MarketplaceDialogProps = {
   open: boolean;
@@ -54,7 +26,6 @@ type MarketplaceDialogProps = {
  * bundles, and apps — the manual-entry counterpart to the featured sections.
  */
 export const MarketplaceDialog = memo(({ open, onClose, ctx, installingKey, onInstall }: MarketplaceDialogProps) => {
-  const styles = useStyles();
   const [repo, setRepo] = useState(DEFAULT_MARKETPLACE);
   const [manifest, setManifest] = useState<MarketplaceManifest | null>(null);
   const [fetching, setFetching] = useState(false);
@@ -89,31 +60,34 @@ export const MarketplaceDialog = memo(({ open, onClose, ctx, installingKey, onIn
   const items = manifest ? buildExplorePlugins(repo, manifest, ctx) : [];
 
   return (
-    <AnimatedDialog open={open} onClose={onClose}>
+    <Dialog open={open} onOpenChange={(nextOpen) => !nextOpen && onClose()}>
       <DialogContent>
-        <DialogHeader>Browse a marketplace</DialogHeader>
-        <DialogBody>
-          <div className={styles.form}>
-            <div className={styles.fetchRow}>
+        <DialogHeader>
+          <DialogTitle>Browse a marketplace</DialogTitle>
+        </DialogHeader>
+        <div className="min-h-0 overflow-y-auto">
+          <div className="flex flex-col gap-4">
+            <div className="flex items-center gap-2">
               <Input
                 value={repo}
                 onChange={(e) => setRepo(e.target.value)}
                 placeholder="owner/repo"
                 aria-label="Marketplace repository"
-                className={styles.flex1}
+                className="flex-1"
               />
-              <Button size="sm" onClick={onFetch} isDisabled={fetching || !repo.trim()}>
-                {fetching ? <Spinner size="sm" /> : 'Load'}
+
+              <Button size="sm" onClick={onFetch} disabled={fetching || !repo.trim()}>
+                {fetching ? <Spinner /> : 'Load'}
               </Button>
             </div>
 
-            {error && <div className={styles.errorBanner}>{error}</div>}
+            {error && <div className="p-4 rounded-lg bg-destructive/10 text-destructive text-xs">{error}</div>}
 
             {manifest &&
               (items.length === 0 ? (
-                <div className={styles.empty}>This marketplace has nothing to install.</div>
+                <div className="text-muted-foreground text-xs">This marketplace has nothing to install.</div>
               ) : (
-                <div className={styles.list}>
+                <div className="flex flex-col gap-2 max-h-96 overflow-y-auto">
                   {items.map((item) => (
                     <ExploreCard
                       key={installKeyOf(item)}
@@ -125,14 +99,14 @@ export const MarketplaceDialog = memo(({ open, onClose, ctx, installingKey, onIn
                 </div>
               ))}
           </div>
-        </DialogBody>
+        </div>
         <DialogFooter>
           <Button variant="ghost" onClick={onClose}>
             Close
           </Button>
         </DialogFooter>
       </DialogContent>
-    </AnimatedDialog>
+    </Dialog>
   );
 });
 MarketplaceDialog.displayName = 'MarketplaceDialog';

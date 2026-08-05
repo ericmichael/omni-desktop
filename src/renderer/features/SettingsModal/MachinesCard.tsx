@@ -7,12 +7,14 @@
  * No-op in browser/server mode (cloud is the renderer's runtime, not a
  * remote target) and in standalone-Electron mode (no cloud → no registry).
  */
-import { makeStyles, tokens } from '@fluentui/react-components';
-import { Delete16Regular, Desktop16Regular } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
+import { Monitor, Trash2 } from 'lucide-react';
 import { memo, useCallback, useEffect, useState } from 'react';
 
-import { Body1, Button, Caption1, Card, Input } from '@/renderer/ds';
+import { cn } from '@/renderer/ds/cn';
+import { Button } from '@/renderer/ds/ui/button';
+import { Card, CardContent } from '@/renderer/ds/ui/card';
+import { Input } from '@/renderer/ds/ui/input';
 import { isCloudLinked, isElectron } from '@/renderer/services/ipc';
 import {
   $machineIdentity,
@@ -22,47 +24,6 @@ import {
   setMachineLabel,
 } from '@/renderer/services/machines';
 import type { MachineSummary } from '@/shared/types';
-
-const useStyles = makeStyles({
-  card: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalS },
-  header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
-  summary: { color: tokens.colorNeutralForeground2 },
-  row: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalM,
-    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalS}`,
-    borderRadius: tokens.borderRadiusMedium,
-    backgroundColor: tokens.colorNeutralBackground2,
-  },
-  meta: { flex: '1 1 0', minWidth: 0, display: 'flex', flexDirection: 'column', gap: '2px' },
-  dot: {
-    width: '8px',
-    height: '8px',
-    borderRadius: '4px',
-    flexShrink: 0,
-  },
-  dotOnline: { backgroundColor: tokens.colorPaletteGreenBackground3 },
-  dotOffline: { backgroundColor: tokens.colorNeutralStroke2 },
-  labelRow: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS },
-  selfTag: {
-    fontSize: tokens.fontSizeBase100,
-    fontWeight: tokens.fontWeightSemibold,
-    color: tokens.colorBrandForeground1,
-    textTransform: 'uppercase',
-    letterSpacing: '0.04em',
-  },
-  id: {
-    fontFamily: tokens.fontFamilyMonospace,
-    color: tokens.colorNeutralForeground3,
-  },
-  actions: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalXS },
-  empty: {
-    padding: `${tokens.spacingVerticalM} 0`,
-    color: tokens.colorNeutralForeground3,
-    fontStyle: 'italic',
-  },
-});
 
 const MachineRow = memo(
   ({
@@ -74,7 +35,6 @@ const MachineRow = memo(
     onSave: (label: string) => Promise<void>;
     onRemove?: () => Promise<void>;
   }) => {
-    const styles = useStyles();
     const [editing, setEditing] = useState(false);
     const [draft, setDraft] = useState(machine.label);
     const [busy, setBusy] = useState(false);
@@ -113,13 +73,14 @@ const MachineRow = memo(
     }, [draft, machine.label, onSave, cancelEdit]);
 
     return (
-      <div className={styles.row}>
-        <Desktop16Regular />
+      <div className="flex items-center gap-4 p-2 rounded-lg bg-card">
+        <Monitor />
         <span
-          className={`${styles.dot} ${machine.online ? styles.dotOnline : styles.dotOffline}`}
+          className={`${'w-2 h-2 rounded shrink-0'} ${machine.online ? 'bg-success/20' : 'bg-border'}`}
           title={machine.online ? 'Online' : 'Offline'}
         />
-        <div className={styles.meta}>
+
+        <div className="flex-1 min-w-0 flex flex-col gap-0.5">
           {editing ? (
             <Input
               autoFocus
@@ -135,22 +96,24 @@ const MachineRow = memo(
               }}
             />
           ) : (
-            <div className={styles.labelRow}>
-              <Body1>{machine.label}</Body1>
-              {machine.isSelf && <span className={styles.selfTag}>This device</span>}
+            <div className="flex items-center gap-2">
+              <span className="text-sm">{machine.label}</span>
+              {machine.isSelf && (
+                <span className="text-xs font-semibold text-primary uppercase tracking-wide">This device</span>
+              )}
             </div>
           )}
-          <Caption1 className={styles.id}>
+          <span className={cn('text-xs text-muted-foreground', 'font-mono text-muted-foreground')}>
             {machine.platform} · {machine.machineId.slice(0, 8)}
-          </Caption1>
+          </span>
         </div>
-        <div className={styles.actions}>
+        <div className="flex items-center gap-1">
           {editing ? (
             <>
-              <Button size="sm" variant="ghost" onClick={cancelEdit} isDisabled={busy}>
+              <Button size="sm" variant="ghost" onClick={cancelEdit} disabled={busy}>
                 Cancel
               </Button>
-              <Button size="sm" onClick={() => void submit()} isDisabled={busy}>
+              <Button size="sm" onClick={() => void submit()} disabled={busy}>
                 {busy ? 'Saving…' : 'Save'}
               </Button>
             </>
@@ -160,7 +123,8 @@ const MachineRow = memo(
                 Rename
               </Button>
               {onRemove && (
-                <Button size="sm" variant="ghost" onClick={() => void onRemove()} leftIcon={<Delete16Regular />}>
+                <Button size="sm" variant="ghost" onClick={() => void onRemove()}>
+                  <Trash2 />
                   Remove
                 </Button>
               )}
@@ -174,7 +138,6 @@ const MachineRow = memo(
 MachineRow.displayName = 'MachineRow';
 
 export const MachinesCard = memo(() => {
-  const styles = useStyles();
   const identity = useStore($machineIdentity);
   const machines = useStore($machines);
 
@@ -200,18 +163,18 @@ export const MachinesCard = memo(() => {
 
   return (
     <Card>
-      <div className={styles.card}>
-        <div className={styles.header}>
+      <CardContent className="flex flex-col gap-2">
+        <div className="flex justify-between items-center">
           <div>
-            <Body1>My computers</Body1>
-            <Caption1 className={styles.summary}>
+            <span className="text-sm">My computers</span>
+            <span className={cn('text-xs text-muted-foreground', 'text-muted-foreground')}>
               Electrons signed in as you. The cloud can dispatch sandbox sessions to any of these when you pick them in
               the sandbox picker.
-            </Caption1>
+            </span>
           </div>
         </div>
         {list.length === 0 ? (
-          <div className={styles.empty}>No machines registered yet.</div>
+          <div className="py-4 text-muted-foreground italic">No machines registered yet.</div>
         ) : (
           list.map((m) => (
             <MachineRow
@@ -236,7 +199,7 @@ export const MachinesCard = memo(() => {
             />
           ))
         )}
-      </div>
+      </CardContent>
     </Card>
   );
 });

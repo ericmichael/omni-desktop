@@ -7,15 +7,10 @@ import type { ComponentProps, HTMLAttributes, ReactElement } from 'react';
 import { createContext, memo, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { Streamdown } from 'streamdown';
 
+import { cn } from '@/renderer/ds/cn';
+import { Button } from '@/renderer/ds/ui/button';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/renderer/ds/ui/tooltip';
 import type { UIMessage } from '@/renderer/omniagents-ui/ai-types';
-import { Button } from '@/renderer/omniagents-ui/components/ui/button';
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@/renderer/omniagents-ui/components/ui/tooltip';
-import { cn } from '@/renderer/omniagents-ui/lib/utils';
 
 export type MessageProps = HTMLAttributes<HTMLDivElement> & {
   from: UIMessage['role'];
@@ -24,7 +19,7 @@ export type MessageProps = HTMLAttributes<HTMLDivElement> & {
 export const Message = ({ className, from, ...props }: MessageProps) => (
   <div
     className={cn(
-      'group flex w-full max-w-[95%] flex-col gap-2',
+      'group flex w-full max-w-full flex-col gap-2',
       from === 'user' ? 'is-user ml-auto justify-end' : 'is-assistant',
       className
     )}
@@ -195,7 +190,7 @@ export const MessageBranchPrevious = ({ children, ...props }: MessageBranchPrevi
       variant="ghost"
       {...props}
     >
-      {children ?? <ChevronLeftIcon size={14} />}
+      {children ?? <ChevronLeftIcon className="size-4" />}
     </Button>
   );
 };
@@ -214,7 +209,7 @@ export const MessageBranchNext = ({ children, ...props }: MessageBranchNextProps
       variant="ghost"
       {...props}
     >
-      {children ?? <ChevronRightIcon size={14} />}
+      {children ?? <ChevronRightIcon className="size-4" />}
     </Button>
   );
 };
@@ -239,7 +234,7 @@ export const MessageResponse = memo(
     <Streamdown
       className={cn(
         'size-full min-w-0 max-w-full overflow-hidden break-words [&>*:first-child]:mt-0 [&>*:last-child]:mb-0',
-        '[&_a]:break-words [&_a]:[overflow-wrap:anywhere] [&_code]:break-words [&_code]:[overflow-wrap:anywhere]',
+        'markdown-overflow-wrap [&_a]:break-words [&_code]:break-words',
         '[&_p]:break-words [&_li]:break-words [&_h1]:break-words [&_h2]:break-words [&_h3]:break-words [&_h4]:break-words',
         '[&_img]:max-w-full [&_svg]:max-w-full [&_.katex-display]:max-w-full [&_.katex-display]:overflow-x-auto [&_.katex-display]:overflow-y-hidden',
         '[&_[data-streamdown="code-block"]]:max-w-full [&_[data-streamdown="code-block"]]:min-w-0 [&_[data-streamdown="table-wrapper"]]:max-w-full [&_[data-streamdown="table-wrapper"]]:min-w-0 [&_[data-streamdown="table-wrapper"]]:overflow-hidden',

@@ -1,8 +1,9 @@
-import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 
-import { Button, Caption1, ConfirmDialog, Input, SectionLabel, Select, Switch } from '@/renderer/ds';
+import { Input } from '@/renderer/ds/ui/input';
+import { NativeSelect as Select } from '@/renderer/ds/ui/native-select';
+import { Switch } from '@/renderer/ds/ui/switch';
 import { $sandboxProfiles } from '@/renderer/features/Sandboxes/state';
 import { getAvailableProfileNames, getProfileMenuLabel } from '@/renderer/features/SandboxProfile/profile-list';
 import { emitter } from '@/renderer/services/ipc';
@@ -11,76 +12,11 @@ import type { ProjectId } from '@/shared/types';
 
 import { PipelineEditor } from './PipelineEditor';
 import { ProjectPageHeader } from './ProjectPageHeader';
+import { ProjectSourcesSettings } from './ProjectSourcesSettings';
 import { ticketApi } from './state';
 
 /** Sentinel value for the "Inherit default" option in the profile <Select>. */
 const INHERIT_PROFILE = '__inherit__';
-
-const useStyles = makeStyles({
-  root: {
-    height: '100%',
-    overflowY: 'auto',
-  },
-  container: {
-    maxWidth: '720px',
-    marginLeft: 'auto',
-    marginRight: 'auto',
-    paddingLeft: '16px',
-    paddingRight: '16px',
-    paddingTop: '24px',
-    paddingBottom: '48px',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '28px',
-  },
-  /* The container already pads horizontally — zero the header's own padding
-     so the title aligns with the sections below. */
-  pageHeader: {
-    paddingLeft: 0,
-    paddingRight: 0,
-    paddingTop: 0,
-    paddingBottom: 0,
-  },
-  section: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalM,
-  },
-  field: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '4px',
-    maxWidth: '360px',
-  },
-  fieldLabel: {
-    fontSize: tokens.fontSizeBase200,
-    color: tokens.colorNeutralForeground3,
-  },
-  switchRow: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: tokens.spacingHorizontalM,
-    maxWidth: '480px',
-  },
-  switchLabel: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '2px',
-  },
-  danger: {
-    ...shorthands.border('1px', 'solid', tokens.colorPaletteRedBorder1),
-    borderRadius: tokens.borderRadiusMedium,
-    padding: tokens.spacingVerticalM,
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalM,
-  },
-  dangerText: {
-    flex: '1 1 0',
-    minWidth: 0,
-  },
-});
 
 /**
  * The shell's Settings tab — the single place a project is configured.
@@ -88,12 +24,10 @@ const useStyles = makeStyles({
  * explicit save (structural changes shouldn't thrash running agents).
  */
 export const ProjectSettings = memo(({ projectId }: { projectId: ProjectId }) => {
-  const styles = useStyles();
   const store = useStore(persistedStoreApi.$atom);
   const project = useMemo(() => store.projects.find((p) => p.id === projectId), [store.projects, projectId]);
 
   const [name, setName] = useState(project?.label ?? '');
-  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
 
   // Keep the name buffer in sync with external renames (shell header, root page).
   const projectLabel = project?.label;
@@ -153,27 +87,20 @@ export const ProjectSettings = memo(({ projectId }: { projectId: ProjectId }) =>
     [projectId]
   );
 
-  const handleOpenDelete = useCallback(() => setDeleteConfirmOpen(true), []);
-  const handleCloseDelete = useCallback(() => setDeleteConfirmOpen(false), []);
-  const handleDelete = useCallback(async () => {
-    await ticketApi.removeProject(projectId);
-    ticketApi.goToAllWork();
-  }, [projectId]);
-
   if (!project) {
     return null;
   }
 
   return (
-    <div className={styles.root} data-slot="project-settings">
-      <div className={styles.container}>
-        <ProjectPageHeader projectId={projectId} title="Settings" className={styles.pageHeader} />
+    <div className="h-full overflow-y-auto" data-slot="project-settings">
+      <div className="mx-auto flex w-full max-w-6xl flex-col gap-7 px-6 py-6">
+        <ProjectPageHeader title="Settings" className="pl-0 pr-0 pt-0 pb-0" />
 
         {/* General */}
-        <div className={styles.section}>
-          <SectionLabel>General</SectionLabel>
-          <div className={styles.field}>
-            <label className={styles.fieldLabel}>Name</label>
+        <div className="flex flex-col gap-4">
+          <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">General</span>
+          <div className="flex flex-col gap-1 max-w-sm">
+            <label className="text-xs text-muted-foreground">Name</label>
             <Input
               aria-label="Project name"
               type="text"
@@ -183,8 +110,8 @@ export const ProjectSettings = memo(({ projectId }: { projectId: ProjectId }) =>
               onKeyDown={handleNameKeyDown}
             />
           </div>
-          <div className={styles.field}>
-            <label className={styles.fieldLabel}>Due date</label>
+          <div className="flex flex-col gap-1 max-w-sm">
+            <label className="text-xs text-muted-foreground">Due date</label>
             <Input
               aria-label="Project due date"
               type="date"
@@ -194,66 +121,52 @@ export const ProjectSettings = memo(({ projectId }: { projectId: ProjectId }) =>
           </div>
         </div>
 
-        {/* Execution */}
-        <div className={styles.section}>
-          <SectionLabel>Execution</SectionLabel>
-          <div className={styles.field}>
-            <label className={styles.fieldLabel}>Sandbox profile</label>
-            <Select
-              aria-label="Sandbox profile"
-              value={project.sandboxProfile ?? INHERIT_PROFILE}
-              onChange={handleSandboxProfileChange}
-            >
-              <option value={INHERIT_PROFILE}>Inherit default</option>
-              {availableProfiles.map((profileName) => (
-                <option key={profileName} value={profileName}>
-                  {getProfileMenuLabel(profileName)}
-                </option>
-              ))}
-            </Select>
-          </div>
-          {project.sources.length > 0 && (
-            <div className={styles.switchRow}>
-              <div className={styles.switchLabel}>
-                <label className={styles.fieldLabel}>Auto-dispatch</label>
-                <Caption1>Automatically assign and start tickets from the backlog</Caption1>
+        <ProjectSourcesSettings projectId={projectId} />
+
+        <details className="rounded-xl border px-4 py-3">
+          <summary className="cursor-pointer text-sm font-medium text-muted-foreground hover:text-foreground">
+            Advanced
+          </summary>
+          <div className="mt-5 flex flex-col gap-7">
+            <div className="flex flex-col gap-4">
+              <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                Agent environment
+              </span>
+              <div className="flex flex-col gap-1 max-w-sm">
+                <label className="text-xs text-muted-foreground">Sandbox profile</label>
+                <Select
+                  aria-label="Sandbox profile"
+                  value={project.sandboxProfile ?? INHERIT_PROFILE}
+                  onChange={handleSandboxProfileChange}
+                >
+                  <option value={INHERIT_PROFILE}>Inherit default</option>
+                  {availableProfiles.map((profileName) => (
+                    <option key={profileName} value={profileName}>
+                      {getProfileMenuLabel(profileName)}
+                    </option>
+                  ))}
+                </Select>
               </div>
-              <Switch checked={project.autoDispatch ?? false} onCheckedChange={handleAutoDispatchChange} />
+              {project.sources.length > 0 && (
+                <div className="flex items-center justify-between gap-4 max-w-lg">
+                  <div className="flex flex-col gap-0.5">
+                    <label className="text-xs text-muted-foreground">Automatic task assignment</label>
+                    <span className="text-xs text-muted-foreground">Let Omni begin queued tasks automatically</span>
+                  </div>
+                  <Switch checked={project.autoDispatch ?? false} onCheckedChange={handleAutoDispatchChange} />
+                </div>
+              )}
             </div>
-          )}
-        </div>
 
-        {/* Pipeline */}
-        <div className={styles.section}>
-          <SectionLabel>Pipeline</SectionLabel>
-          <PipelineEditor projectId={projectId} />
-        </div>
-
-        {/* Danger zone */}
-        {!project.isPersonal && (
-          <div className={styles.section}>
-            <SectionLabel>Danger zone</SectionLabel>
-            <div className={styles.danger}>
-              <Caption1 className={styles.dangerText}>
-                Deletes the project and all its tickets. Workspace files are not affected.
-              </Caption1>
-              <Button variant="destructive" onClick={handleOpenDelete}>
-                Delete project
-              </Button>
+            <div className="flex flex-col gap-4">
+              <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                Task workflow
+              </span>
+              <PipelineEditor projectId={projectId} />
             </div>
           </div>
-        )}
+        </details>
       </div>
-
-      <ConfirmDialog
-        open={deleteConfirmOpen}
-        onClose={handleCloseDelete}
-        onConfirm={handleDelete}
-        title="Delete project?"
-        description="This will remove the project and all its tickets. Your workspace files will not be affected."
-        confirmLabel="Delete"
-        destructive
-      />
     </div>
   );
 });

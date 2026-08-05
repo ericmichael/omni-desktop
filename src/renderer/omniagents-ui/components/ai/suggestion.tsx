@@ -1,9 +1,9 @@
 import type { ComponentProps } from 'react';
 import { useCallback } from 'react';
 
-import { Button } from '@/renderer/omniagents-ui/components/ui/button';
-import { ScrollArea, ScrollBar } from '@/renderer/omniagents-ui/components/ui/scroll-area';
-import { cn } from '@/renderer/omniagents-ui/lib/utils';
+import { cn } from '@/renderer/ds/cn';
+import { Button } from '@/renderer/ds/ui/button';
+import { ScrollArea, ScrollBar } from '@/renderer/ds/ui/scroll-area';
 
 export type SuggestionsProps = ComponentProps<typeof ScrollArea>;
 

@@ -5,28 +5,19 @@
  * stores it in react-hotkeys-hook format (e.g. `alt+v`).
  */
 
-import { makeStyles, tokens } from '@fluentui/react-components';
 import { useStore } from '@nanostores/react';
 import { useCallback, useEffect, useState } from 'react';
 
-import { Body1Strong, Button, Caption1, Card, SectionLabel } from '@/renderer/ds';
+import { Button } from '@/renderer/ds/ui/button';
+import { Card, CardContent } from '@/renderer/ds/ui/card';
+import { Field, FieldContent, FieldDescription, FieldLabel } from '@/renderer/ds/ui/field';
+import { Kbd } from '@/renderer/ds/ui/kbd';
+import {
+  settingsCardContentClassName,
+  SettingsPane,
+  SettingsSection,
+} from '@/renderer/features/SettingsModal/SettingsLayout';
 import { persistedStoreApi } from '@/renderer/services/store';
-
-const useStyles = makeStyles({
-  root: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalXXL },
-  description: { fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground2 },
-  row: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: tokens.spacingHorizontalM },
-  label: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalXXS },
-  controls: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS },
-  combo: {
-    fontFamily: tokens.fontFamilyMonospace,
-    padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalS}`,
-    borderRadius: tokens.borderRadiusMedium,
-    backgroundColor: tokens.colorNeutralBackground3,
-    minWidth: '88px',
-    textAlign: 'center',
-  },
-});
 
 const MOD_ORDER = ['ctrl', 'alt', 'shift', 'meta'] as const;
 
@@ -85,7 +76,6 @@ function HotkeyRecorder({
   value: string | null;
   onChange: (combo: string | null) => void;
 }): React.ReactElement {
-  const styles = useStyles();
   const [recording, setRecording] = useState(false);
 
   useEffect(() => {
@@ -113,11 +103,15 @@ function HotkeyRecorder({
   const clear = useCallback(() => onChange(null), [onChange]);
 
   return (
-    <div className={styles.controls}>
-      <span className={styles.combo}>{recording ? 'Press keys…' : value ? formatCombo(value) : 'Not set'}</span>
-      <Button onClick={startRecording}>{recording ? 'Recording…' : 'Record'}</Button>
+    <div className="flex flex-wrap items-center justify-end gap-2">
+      <Kbd className="min-w-24 justify-center">
+        {recording ? 'Press keys…' : value ? formatCombo(value) : 'Not set'}
+      </Kbd>
+      <Button size="sm" variant="outline" onClick={startRecording} disabled={recording}>
+        {recording ? 'Listening…' : value ? 'Change' : 'Set shortcut'}
+      </Button>
       {value ? (
-        <Button variant="ghost" onClick={clear}>
+        <Button size="sm" variant="ghost" onClick={clear}>
           Clear
         </Button>
       ) : null}
@@ -126,7 +120,6 @@ function HotkeyRecorder({
 }
 
 export function SettingsModalHotkeysTab(): React.ReactElement {
-  const styles = useStyles();
   const store = useStore(persistedStoreApi.$atom);
   const hotkey = store.voiceToggleHotkey;
   const globalHotkey = store.globalVoiceToggleHotkey;
@@ -139,33 +132,29 @@ export function SettingsModalHotkeysTab(): React.ReactElement {
   }, []);
 
   return (
-    <div className={styles.root}>
-      <div>
-        <SectionLabel>Voice</SectionLabel>
+    <SettingsPane>
+      <SettingsSection title="Voice">
         <Card>
-          <div className={styles.row}>
-            <div className={styles.label}>
-              <Body1Strong>Voice input hotkey</Body1Strong>
-              <Caption1>
-                Records on the column your pointer is over (code deck) or the active chat. Tap to toggle (tap again to
-                send); press and hold to talk, release to send. Use any key — typing keys (letters, digits, space,
-                arrows) need a modifier (Ctrl/Alt/Cmd); dedicated keys (function, media, Insert…) work on their own.
-              </Caption1>
-            </div>
-            <HotkeyRecorder value={hotkey} onChange={setVoiceHotkey} />
-          </div>
-          <div className={styles.row}>
-            <div className={styles.label}>
-              <Body1Strong>Orchestrator hotkey</Body1Strong>
-              <Caption1>
-                Opens your workspace-superuser agent’s DM and records to it (set the superuser flag on an agent in the
-                Agents tab). Same tap-to-toggle / hold-to-talk gesture. A separate binding from the column hotkey above.
-              </Caption1>
-            </div>
-            <HotkeyRecorder value={globalHotkey} onChange={setGlobalVoiceHotkey} />
-          </div>
+          <CardContent className={settingsCardContentClassName}>
+            <Field orientation="horizontal" className="justify-between gap-5">
+              <FieldContent>
+                <FieldLabel>Voice shortcut</FieldLabel>
+                <FieldDescription>
+                  Record in the active chat or the column under your pointer. Tap to toggle or hold to talk.
+                </FieldDescription>
+              </FieldContent>
+              <HotkeyRecorder value={hotkey} onChange={setVoiceHotkey} />
+            </Field>
+            <Field orientation="horizontal" className="justify-between gap-5">
+              <FieldContent>
+                <FieldLabel>Workspace agent shortcut</FieldLabel>
+                <FieldDescription>Open your workspace agent and immediately start recording.</FieldDescription>
+              </FieldContent>
+              <HotkeyRecorder value={globalHotkey} onChange={setGlobalVoiceHotkey} />
+            </Field>
+          </CardContent>
         </Card>
-      </div>
-    </div>
+      </SettingsSection>
+    </SettingsPane>
   );
 }

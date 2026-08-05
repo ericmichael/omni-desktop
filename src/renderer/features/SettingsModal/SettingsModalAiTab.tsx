@@ -1,30 +1,25 @@
-import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
-import { Add20Regular, Delete20Regular } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
+import { Plus, Trash2 } from 'lucide-react';
 import type { ChangeEvent } from 'react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 
 import { buildCodexConfig, probeForProvider } from '@/lib/provider-config';
+import { SaveBar } from '@/renderer/ds/SaveBar';
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/renderer/ds/ui/accordion';
+import { Button } from '@/renderer/ds/ui/button';
+import { Card, CardContent } from '@/renderer/ds/ui/card';
+import { Checkbox } from '@/renderer/ds/ui/checkbox';
+import { Field, FieldLabel } from '@/renderer/ds/ui/field';
+import { Input } from '@/renderer/ds/ui/input';
+import { NativeSelect as Select } from '@/renderer/ds/ui/native-select';
+import { RadioGroup, RadioGroupItem } from '@/renderer/ds/ui/radio-group';
+import { Skeleton } from '@/renderer/ds/ui/skeleton';
+import { Spinner } from '@/renderer/ds/ui/spinner';
 import {
-  Accordion,
-  AccordionHeader,
-  AccordionItem,
-  AccordionPanel,
-  Button,
-  Caption1,
-  Card,
-  Checkbox,
-  FormField,
-  FormSkeleton,
-  IconButton,
-  Input,
-  Radio,
-  RadioGroup,
-  SaveBar,
-  SectionLabel,
-  Select,
-  Spinner,
-} from '@/renderer/ds';
+  settingsCardContentClassName,
+  SettingsPane,
+  SettingsSection,
+} from '@/renderer/features/SettingsModal/SettingsLayout';
 import { SettingsModalConnectionCards } from '@/renderer/features/SettingsModal/SettingsModalConnectionCards';
 import { agentConfigApi } from '@/renderer/services/config';
 import { emitter, ipc } from '@/renderer/services/ipc';
@@ -85,107 +80,7 @@ function collectRealtimeModelKeys(config: ModelsConfig): string[] {
   return keys;
 }
 
-const useStyles = makeStyles({
-  root: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalM },
-  sectionLabelSpaced: { marginTop: tokens.spacingVerticalS },
-  addRow: {
-    padding: tokens.spacingVerticalL,
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-  },
-  flex1: { flex: '1 1 0' },
-  codexCard: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalS },
-  codeBox: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '2px',
-    padding: tokens.spacingVerticalS,
-    borderRadius: tokens.borderRadiusMedium,
-    backgroundColor: tokens.colorNeutralBackground1,
-    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke2),
-  },
-  codeText: {
-    fontFamily: tokens.fontFamilyMonospace,
-    fontSize: tokens.fontSizeBase500,
-    fontWeight: tokens.fontWeightSemibold,
-    letterSpacing: '0.1em',
-  },
-  pendingRow: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS },
-  headerRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-    width: '100%',
-    minWidth: 0,
-  },
-  headerContent: { flex: '1 1 0', minWidth: 0 },
-  headerName: {
-    fontSize: tokens.fontSizeBase300,
-    fontWeight: tokens.fontWeightMedium,
-    color: tokens.colorNeutralForeground1,
-  },
-  headerSummary: {
-    fontSize: tokens.fontSizeBase300,
-    color: tokens.colorNeutralForeground2,
-    '@media (min-width: 640px)': { fontSize: tokens.fontSizeBase200 },
-  },
-  panelBody: {
-    paddingLeft: tokens.spacingHorizontalL,
-    paddingRight: tokens.spacingHorizontalL,
-    paddingBottom: tokens.spacingVerticalL,
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalM,
-  },
-  colGap1: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalXS },
-  rowGap2: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS },
-  iconMr: { marginRight: tokens.spacingHorizontalXS },
-  modelCard: {
-    backgroundColor: tokens.colorNeutralBackground1,
-    opacity: 0.8,
-    borderRadius: tokens.borderRadiusLarge,
-    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke2),
-  },
-  modelHeader: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-    paddingLeft: tokens.spacingHorizontalM,
-    paddingRight: tokens.spacingHorizontalM,
-    paddingTop: '10px',
-    paddingBottom: '10px',
-    '@media (min-width: 640px)': {
-      paddingTop: tokens.spacingVerticalS,
-      paddingBottom: tokens.spacingVerticalS,
-    },
-  },
-  modelId: {
-    fontSize: tokens.fontSizeBase300,
-    fontFamily: 'monospace',
-    color: tokens.colorNeutralForeground1,
-    flex: '1 1 0',
-    '@media (min-width: 640px)': { fontSize: tokens.fontSizeBase200 },
-  },
-  modelLabel: {
-    fontSize: tokens.fontSizeBase300,
-    color: tokens.colorNeutralForeground2,
-    '@media (min-width: 640px)': { fontSize: tokens.fontSizeBase200 },
-  },
-  modelEditBody: {
-    paddingLeft: tokens.spacingHorizontalM,
-    paddingRight: tokens.spacingHorizontalM,
-    paddingBottom: tokens.spacingVerticalM,
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalS,
-    ...shorthands.borderTop('1px', 'solid', tokens.colorNeutralStroke2),
-    paddingTop: tokens.spacingVerticalS,
-  },
-});
-
 export const SettingsModalAiTab = memo(() => {
-  const styles = useStyles();
   const [config, setConfig] = useState<ModelsConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [dirty, setDirty] = useState(false);
@@ -506,144 +401,182 @@ export const SettingsModalAiTab = memo(() => {
   }, []);
 
   if (loading || !config) {
-    return <FormSkeleton fields={5} />;
+    return (
+      <div className="flex w-full flex-col gap-5 p-4">
+        {Array.from({ length: 5 }, (_, index) => (
+          <div key={index} className="flex flex-col gap-2">
+            <Skeleton className={`h-3 ${['w-15', 'w-18', 'w-20'][index % 3]}`} />
+            <Skeleton className="h-8 w-full" />
+          </div>
+        ))}
+      </div>
+    );
   }
 
   return (
-    <div className={styles.root}>
-      <SectionLabel>Connections</SectionLabel>
-      <CodexSignInCard onSignedIn={applyCodexSignIn} />
-      <SettingsModalConnectionCards config={config} onFixKey={applyKeyFix} />
+    <SettingsPane>
+      <SettingsSection title="Connections">
+        <CodexSignInCard onSignedIn={applyCodexSignIn} />
+        <SettingsModalConnectionCards config={config} onFixKey={applyKeyFix} />
+      </SettingsSection>
 
-      <SectionLabel className={styles.sectionLabelSpaced}>Defaults</SectionLabel>
-      <Card>
-        <FormField label="Default model">
-          <Select value={config.default ?? ''} onChange={onChangeDefault}>
-            <option value="">None</option>
-            {modelKeys.map((k) => (
-              <option key={k} value={k}>
-                {k}
-              </option>
-            ))}
-          </Select>
-        </FormField>
-        <FormField label="Voice">
-          <RadioGroup
-            layout="horizontal"
-            value={localVoiceEnabled ? 'local' : config.voice_default ? 'hosted' : 'off'}
-            onChange={(_, data) => onChangeVoiceProvider(data.value)}
-          >
-            <Radio value="off" label="Off" />
-            <Radio
-              value="hosted"
-              label="Hosted"
-              disabled={!hostedVoiceAvailable}
-              title={
-                hostedVoiceAvailable ? undefined : 'No realtime model configured — sign in with ChatGPT or add one'
-              }
-            />
-            <Radio
-              value="local"
-              label="Local"
-              disabled={!localVoiceCapable}
-              title={localVoiceCapable ? undefined : 'Not available in this deployment'}
-            />
-          </RadioGroup>
-        </FormField>
-        {!localVoiceEnabled && config.voice_default !== null ? (
-          <FormField label="Model">
-            <Select value={config.voice_default ?? ''} onChange={onChangeVoiceDefault}>
-              <option value="">None</option>
-              {realtimeModelKeys.map((k) => (
-                <option key={k} value={k}>
-                  {k}
-                </option>
-              ))}
-            </Select>
-          </FormField>
-        ) : null}
-        {localVoiceEnabled ? (
-          <>
-            <FormField label="Speech-to-text">
-              <Select value="parakeet" disabled>
-                <option value="parakeet">Parakeet 0.6B</option>
+      <SettingsSection title="Defaults">
+        <Card>
+          <CardContent className={settingsCardContentClassName}>
+            <Field orientation="horizontal" className="justify-between gap-4">
+              <div className="min-w-0">
+                <FieldLabel>Default model</FieldLabel>
+              </div>
+              <Select value={config.default ?? ''} onChange={onChangeDefault}>
+                <option value="">None</option>
+                {modelKeys.map((k) => (
+                  <option key={k} value={k}>
+                    {k}
+                  </option>
+                ))}
               </Select>
-            </FormField>
-            <FormField label="Text-to-speech">
-              <Select value="pocket" disabled>
-                <option value="pocket">Pocket</option>
-              </Select>
-            </FormField>
-            <Caption1>Runs on this machine · models download on first use.</Caption1>
-          </>
-        ) : null}
-      </Card>
+            </Field>
+            <Field orientation="horizontal" className="justify-between gap-4">
+              <div className="min-w-0">
+                <FieldLabel>Voice</FieldLabel>
+              </div>
+              <RadioGroup
+                className="flex flex-wrap"
+                value={localVoiceEnabled ? 'local' : config.voice_default ? 'hosted' : 'off'}
+                onValueChange={onChangeVoiceProvider}
+              >
+                <label className="inline-flex items-center gap-2 text-sm">
+                  <RadioGroupItem value="off" />
+                  Off
+                </label>
+                <label
+                  className="inline-flex items-center gap-2 text-sm"
+                  title={
+                    hostedVoiceAvailable ? undefined : 'No realtime model configured — sign in with ChatGPT or add one'
+                  }
+                >
+                  <RadioGroupItem value="hosted" disabled={!hostedVoiceAvailable} />
+                  Hosted
+                </label>
 
-      <SectionLabel className={styles.sectionLabelSpaced}>Advanced</SectionLabel>
-      <Accordion collapsible>
-        <AccordionItem value="advanced-editor">
-          <AccordionHeader>
-            <div className={styles.headerContent}>
-              <div className={styles.headerName}>Providers and models</div>
-              <div className={styles.headerSummary}>Raw configuration — endpoints, token limits, reasoning effort</div>
-            </div>
-          </AccordionHeader>
-          <AccordionPanel>
-            <Accordion
-              collapsible
-              onToggle={(_e, data) => {
-                setExpandedProvider(
-                  data.openItems.length > 0 ? String(data.openItems[data.openItems.length - 1]) : null
-                );
-                setEditingModel(null);
-              }}
-              openItems={expandedProvider ? [expandedProvider] : []}
-            >
-              {Object.entries(config.providers).map(([name, provider]) => {
-                const prefix = `${name}/`;
-                const discoveredModels = runtimeModelNames
-                  .filter((n) => n.startsWith(prefix))
-                  .map((n) => n.slice(prefix.length));
-                return (
-                  <ProviderRow
-                    key={name}
-                    name={name}
-                    provider={provider}
-                    discoveredModels={discoveredModels}
-                    codexBroken={codexBroken}
-                    editingModel={editingModel}
-                    newModelId={newModelId}
-                    onRemove={removeProvider}
-                    onUpdateProvider={updateProvider}
-                    onAddModel={addModel}
-                    onRemoveModel={removeModel}
-                    onUpdateModel={updateModel}
-                    onToggleEditModel={toggleEditModel}
-                    onChangeNewModelId={onChangeNewModelId}
-                  />
-                );
-              })}
-            </Accordion>
-            <div className={styles.addRow}>
-              <Input
-                type="text"
-                value={newProviderName}
-                onChange={onChangeNewProviderName}
-                placeholder="Provider name"
-                mono
-                className={styles.flex1}
-              />
-              <Button size="sm" variant="ghost" onClick={addProvider} isDisabled={!newProviderName.trim()}>
-                <Add20Regular className={styles.iconMr} />
-                Add provider
-              </Button>
-            </div>
-          </AccordionPanel>
-        </AccordionItem>
-      </Accordion>
+                <label
+                  className="inline-flex items-center gap-2 text-sm"
+                  title={localVoiceCapable ? undefined : 'Not available in this deployment'}
+                >
+                  <RadioGroupItem value="local" disabled={!localVoiceCapable} />
+                  Local
+                </label>
+              </RadioGroup>
+            </Field>
+            {!localVoiceEnabled && config.voice_default !== null ? (
+              <Field orientation="horizontal" className="justify-between gap-4">
+                <div className="min-w-0">
+                  <FieldLabel>Model</FieldLabel>
+                </div>
+                <Select value={config.voice_default ?? ''} onChange={onChangeVoiceDefault}>
+                  <option value="">None</option>
+                  {realtimeModelKeys.map((k) => (
+                    <option key={k} value={k}>
+                      {k}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+            ) : null}
+            {localVoiceEnabled ? (
+              <>
+                <Field orientation="horizontal" className="justify-between gap-4">
+                  <div className="min-w-0">
+                    <FieldLabel>Speech-to-text</FieldLabel>
+                  </div>
+                  <Select value="parakeet" disabled>
+                    <option value="parakeet">Parakeet 0.6B</option>
+                  </Select>
+                </Field>
+                <Field orientation="horizontal" className="justify-between gap-4">
+                  <div className="min-w-0">
+                    <FieldLabel>Text-to-speech</FieldLabel>
+                  </div>
+                  <Select value="pocket" disabled>
+                    <option value="pocket">Pocket</option>
+                  </Select>
+                </Field>
+                <span className="text-xs text-muted-foreground">
+                  Runs on this machine · models download on first use.
+                </span>
+              </>
+            ) : null}
+          </CardContent>
+        </Card>
+      </SettingsSection>
+
+      <SettingsSection title="Advanced">
+        <Accordion type="single" collapsible>
+          <AccordionItem value="advanced-editor">
+            <AccordionTrigger>
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium text-foreground">Providers and models</div>
+                <div className="text-sm text-muted-foreground sm:text-xs">
+                  Raw configuration — endpoints, token limits, reasoning effort
+                </div>
+              </div>
+            </AccordionTrigger>
+            <AccordionContent>
+              <Accordion
+                type="single"
+                collapsible
+                onValueChange={(value) => {
+                  setExpandedProvider(value || null);
+                  setEditingModel(null);
+                }}
+                value={expandedProvider ?? ''}
+              >
+                {Object.entries(config.providers).map(([name, provider]) => {
+                  const prefix = `${name}/`;
+                  const discoveredModels = runtimeModelNames
+                    .filter((n) => n.startsWith(prefix))
+                    .map((n) => n.slice(prefix.length));
+                  return (
+                    <ProviderRow
+                      key={name}
+                      name={name}
+                      provider={provider}
+                      discoveredModels={discoveredModels}
+                      codexBroken={codexBroken}
+                      editingModel={editingModel}
+                      newModelId={newModelId}
+                      onRemove={removeProvider}
+                      onUpdateProvider={updateProvider}
+                      onAddModel={addModel}
+                      onRemoveModel={removeModel}
+                      onUpdateModel={updateModel}
+                      onToggleEditModel={toggleEditModel}
+                      onChangeNewModelId={onChangeNewModelId}
+                    />
+                  );
+                })}
+              </Accordion>
+              <div className="p-5 flex items-center gap-2">
+                <Input
+                  type="text"
+                  value={newProviderName}
+                  onChange={onChangeNewProviderName}
+                  placeholder="Provider name"
+                  className="flex-1"
+                />
+
+                <Button size="sm" variant="ghost" onClick={addProvider} disabled={!newProviderName.trim()}>
+                  <Plus className="mr-1" />
+                  Add provider
+                </Button>
+              </div>
+            </AccordionContent>
+          </AccordionItem>
+        </Accordion>
+      </SettingsSection>
 
       <SaveBar onSave={save} dirty={dirty} saving={saving} error={error} />
-    </div>
+    </SettingsPane>
   );
 });
 SettingsModalAiTab.displayName = 'SettingsModalAiTab';
@@ -658,7 +591,6 @@ SettingsModalAiTab.displayName = 'SettingsModalAiTab';
  * provider setup. `onSignedIn` does that and returns the chosen model ref.
  */
 const CodexSignInCard = memo(({ onSignedIn }: { onSignedIn: () => Promise<string | undefined> }) => {
-  const styles = useStyles();
   const [status, setStatus] = useState<{ signedIn: boolean; accountId?: string; broken?: boolean } | null>(null);
   const [activeModel, setActiveModel] = useState<string | undefined>(undefined);
   const [busy, setBusy] = useState(false);
@@ -713,17 +645,17 @@ const CodexSignInCard = memo(({ onSignedIn }: { onSignedIn: () => Promise<string
 
   return (
     <Card>
-      <div className={styles.codexCard}>
-        <div className={styles.rowGap2}>
-          <div className={styles.headerContent}>
-            <div className={styles.headerName}>
+      <CardContent className="flex flex-col gap-2">
+        <div className="flex items-center gap-2">
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-medium text-foreground">
               {status?.broken
                 ? 'ChatGPT session expired'
                 : status?.signedIn
                   ? 'Signed in to ChatGPT'
                   : 'Use your ChatGPT subscription'}
             </div>
-            <div className={styles.headerSummary}>
+            <div className="text-sm text-muted-foreground sm:text-xs">
               {status?.broken
                 ? 'Sign in again to reconnect.'
                 : status?.signedIn
@@ -732,33 +664,33 @@ const CodexSignInCard = memo(({ onSignedIn }: { onSignedIn: () => Promise<string
             </div>
           </div>
           {status?.signedIn && !status.broken ? (
-            <Button size="sm" variant="ghost" onClick={onSignOut} isDisabled={busy}>
+            <Button size="sm" variant="ghost" onClick={onSignOut} disabled={busy}>
               Sign out
             </Button>
           ) : (
-            <Button size="sm" onClick={onSignIn} isDisabled={busy}>
+            <Button size="sm" onClick={onSignIn} disabled={busy}>
               {busy ? 'Waiting for authorization…' : status?.broken ? 'Sign in again' : 'Sign in with ChatGPT'}
             </Button>
           )}
         </div>
 
         {busy && deviceCode && (
-          <div className={styles.codeBox}>
-            <Caption1>
+          <div className="flex flex-col gap-0.5 p-2 rounded-lg bg-background border border-border">
+            <span className="text-xs text-muted-foreground">
               Open{' '}
               <a href={deviceCode.verificationUri} target="_blank" rel="noopener noreferrer">
                 {deviceCode.verificationUri}
               </a>{' '}
               and enter this code:
-            </Caption1>
-            <span className={styles.codeText}>{deviceCode.userCode}</span>
-            <div className={styles.pendingRow}>
-              <Spinner size="sm" />
-              <Caption1>Waiting for authorization…</Caption1>
+            </span>
+            <span className="font-mono text-xl font-semibold tracking-widest">{deviceCode.userCode}</span>
+            <div className="flex items-center gap-2">
+              <Spinner />
+              <span className="text-xs text-muted-foreground">Waiting for authorization…</span>
             </div>
           </div>
         )}
-      </div>
+      </CardContent>
     </Card>
   );
 });
@@ -783,8 +715,7 @@ const ProviderRow = memo(
     name: string;
     provider: ProviderEntry;
     discoveredModels: string[];
-    /** Dead ChatGPT session — suppress the "discovered" list (it's just seeds). */
-    codexBroken: boolean;
+    /** Dead ChatGPT session — suppress the "discovered" list (it's just seeds). */ codexBroken: boolean;
     editingModel: { provider: string; modelId: string } | null;
     newModelId: string;
     onRemove: (name: string) => void;
@@ -795,7 +726,6 @@ const ProviderRow = memo(
     onToggleEditModel: (provider: string, modelId: string) => void;
     onChangeNewModelId: (e: ChangeEvent<HTMLInputElement>) => void;
   }) => {
-    const styles = useStyles();
     const storedCount = Object.keys(provider.models).length;
     const isOauth = provider.type === 'openai-oauth';
     // Show runtime-discovered models for OAuth providers (Codex) where the
@@ -842,20 +772,25 @@ const ProviderRow = memo(
 
     return (
       <AccordionItem value={name}>
-        <AccordionHeader expandIconPosition="end">
-          <div className={styles.headerRow}>
-            <div className={styles.headerContent}>
-              <div className={styles.headerName}>{name}</div>
-              <div className={styles.headerSummary}>
+        <AccordionTrigger>
+          <div className="flex items-center gap-2 w-full min-w-0">
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-medium text-foreground">{name}</div>
+              <div className="text-sm text-muted-foreground sm:text-xs">
                 Type: {provider.type} &middot; Models: {modelCount}
               </div>
             </div>
-            <IconButton aria-label="Remove provider" icon={<Delete20Regular />} size="sm" onClick={onClickRemove} />
+            <Button type="button" variant="ghost" size="icon-sm" aria-label="Remove provider" onClick={onClickRemove}>
+              <Trash2 />
+            </Button>
           </div>
-        </AccordionHeader>
-        <AccordionPanel>
-          <div className={styles.panelBody}>
-            <FormField label="Type">
+        </AccordionTrigger>
+        <AccordionContent>
+          <div className="pl-5 pr-5 pb-5 flex flex-col gap-4">
+            <Field orientation="horizontal" className="justify-between gap-4">
+              <div className="min-w-0">
+                <FieldLabel>Type</FieldLabel>
+              </div>
               <Select value={provider.type} onChange={onChangeType}>
                 {PROVIDER_TYPES.map((t) => (
                   <option key={t} value={t}>
@@ -863,45 +798,54 @@ const ProviderRow = memo(
                   </option>
                 ))}
               </Select>
-            </FormField>
+            </Field>
             {showApiKey && (
-              <FormField label="API Key">
+              <Field orientation="horizontal" className="justify-between gap-4">
+                <div className="min-w-0">
+                  <FieldLabel>API Key</FieldLabel>
+                </div>
                 <Input
                   type="text"
                   value={provider.api_key ?? ''}
                   onChange={onChangeApiKey}
                   placeholder="sk-..."
-                  mono
-                  className={styles.flex1}
+                  className="flex-1"
                 />
-              </FormField>
+              </Field>
             )}
             {showBaseUrl && (
-              <FormField label="Base URL">
+              <Field orientation="horizontal" className="justify-between gap-4">
+                <div className="min-w-0">
+                  <FieldLabel>Base URL</FieldLabel>
+                </div>
                 <Input
                   type="text"
                   value={provider.base_url ?? ''}
                   onChange={onChangeBaseUrl}
                   placeholder="https://..."
-                  mono
-                  className={styles.flex1}
+                  className="flex-1"
                 />
-              </FormField>
+              </Field>
             )}
             {showApiVersion && (
-              <FormField label="API Version">
+              <Field orientation="horizontal" className="justify-between gap-4">
+                <div className="min-w-0">
+                  <FieldLabel>API Version</FieldLabel>
+                </div>
                 <Input
                   type="text"
                   value={provider.api_version ?? ''}
                   onChange={onChangeApiVersion}
                   placeholder="2024-02-01"
-                  mono
-                  className={styles.flex1}
+                  className="flex-1"
                 />
-              </FormField>
+              </Field>
             )}
             {showApiMode && (
-              <FormField label="OpenAI API mode">
+              <Field orientation="horizontal" className="justify-between gap-4">
+                <div className="min-w-0">
+                  <FieldLabel>OpenAI API mode</FieldLabel>
+                </div>
                 <Select
                   value={provider.use_responses === false ? 'chat_completions' : 'responses'}
                   onChange={onChangeApiMode}
@@ -909,11 +853,11 @@ const ProviderRow = memo(
                   <option value="responses">Responses API (recommended)</option>
                   <option value="chat_completions">Chat Completions API</option>
                 </Select>
-              </FormField>
+              </Field>
             )}
 
-            <SectionLabel className={styles.sectionLabelSpaced}>Models</SectionLabel>
-            <div className={styles.colGap1}>
+            <span className="mt-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Models</span>
+            <div className="flex flex-col gap-1">
               {Object.entries(provider.models).map(([modelId, model]) => {
                 const isEditing = editingModel?.provider === name && editingModel.modelId === modelId;
                 return (
@@ -930,40 +874,42 @@ const ProviderRow = memo(
                 );
               })}
               {extraDiscovered.map((modelId) => (
-                <div key={`discovered-${modelId}`} className={styles.modelCard}>
-                  <div className={styles.modelHeader}>
-                    <div className={styles.modelId}>{modelId}</div>
-                    <div className={styles.modelLabel}>discovered from ChatGPT</div>
+                <div key={`discovered-${modelId}`} className="bg-background opacity-80 rounded-xl border border-border">
+                  <div className="flex items-center gap-2 pl-4 pr-4 pt-2.5 pb-2.5 sm:pt-2 sm:pb-2">
+                    <div className="text-sm font-mono text-foreground flex-1 sm:text-xs">{modelId}</div>
+                    <div className="text-sm text-muted-foreground sm:text-xs">discovered from ChatGPT</div>
                   </div>
                 </div>
               ))}
               {isOauth && codexBroken && (
-                <div className={styles.modelCard}>
-                  <div className={styles.modelHeader}>
-                    <div className={styles.modelLabel}>Sign-in expired — model list unavailable</div>
+                <div className="bg-background opacity-80 rounded-xl border border-border">
+                  <div className="flex items-center gap-2 pl-4 pr-4 pt-2.5 pb-2.5 sm:pt-2 sm:pb-2">
+                    <div className="text-sm text-muted-foreground sm:text-xs">
+                      Sign-in expired — model list unavailable
+                    </div>
                   </div>
                 </div>
               )}
             </div>
 
             {!isOauth && (
-              <div className={styles.rowGap2}>
+              <div className="flex items-center gap-2">
                 <Input
                   type="text"
                   value={newModelId}
                   onChange={onChangeNewModelId}
                   placeholder="Model ID"
-                  mono
-                  className={styles.flex1}
+                  className="flex-1"
                 />
-                <Button size="sm" variant="ghost" onClick={onClickAddModel} isDisabled={!newModelId.trim()}>
-                  <Add20Regular className={styles.iconMr} />
+
+                <Button size="sm" variant="ghost" onClick={onClickAddModel} disabled={!newModelId.trim()}>
+                  <Plus className="mr-1" />
                   Add model
                 </Button>
               </div>
             )}
           </div>
-        </AccordionPanel>
+        </AccordionContent>
       </AccordionItem>
     );
   }
@@ -988,7 +934,6 @@ const ModelRow = memo(
     onRemove: (providerName: string, modelId: string) => void;
     onUpdate: (providerName: string, modelId: string, field: string, value: unknown) => void;
   }) => {
-    const styles = useStyles();
     const onClickToggle = useCallback(() => onToggleEdit(providerName, modelId), [providerName, modelId, onToggleEdit]);
     const onClickRemove = useCallback(() => onRemove(providerName, modelId), [providerName, modelId, onRemove]);
 
@@ -1068,61 +1013,83 @@ const ModelRow = memo(
     );
 
     return (
-      <div className={styles.modelCard}>
-        <div className={styles.modelHeader}>
-          <span className={styles.modelId}>{modelId}</span>
-          {model.label && <span className={styles.modelLabel}>&ldquo;{model.label}&rdquo;</span>}
+      <div className="bg-background opacity-80 rounded-xl border border-border">
+        <div className="flex items-center gap-2 pl-4 pr-4 pt-2.5 pb-2.5 sm:pt-2 sm:pb-2">
+          <span className="text-sm font-mono text-foreground flex-1 sm:text-xs">{modelId}</span>
+          {model.label && <span className="text-sm text-muted-foreground sm:text-xs">&ldquo;{model.label}&rdquo;</span>}
           <Button size="sm" variant="ghost" onClick={onClickToggle}>
             {isEditing ? 'Done' : 'Edit'}
           </Button>
-          <IconButton aria-label="Remove model" icon={<Delete20Regular />} size="sm" onClick={onClickRemove} />
+          <Button type="button" variant="ghost" size="icon-sm" aria-label="Remove model" onClick={onClickRemove}>
+            <Trash2 />
+          </Button>
         </div>
         {isEditing && (
-          <div className={styles.modelEditBody}>
-            <FormField label="Label">
+          <div className="pl-4 pr-4 pb-4 flex flex-col gap-2 border-t border-border pt-2">
+            <Field orientation="horizontal" className="justify-between gap-4">
+              <div className="min-w-0">
+                <FieldLabel>Label</FieldLabel>
+              </div>
               <Input
-                size="sm"
                 type="text"
                 value={model.label ?? ''}
                 onChange={onChangeLabel}
                 placeholder="Display label"
-                className={styles.flex1}
+                className="flex-1"
               />
-            </FormField>
-            <FormField label="Max input tokens">
+            </Field>
+            <Field orientation="horizontal" className="justify-between gap-4">
+              <div className="min-w-0">
+                <FieldLabel>Max input tokens</FieldLabel>
+              </div>
               <Input
-                size="sm"
                 type="number"
                 value={model.max_input_tokens?.toString() ?? ''}
                 onChange={onChangeMaxInput}
-                className={styles.flex1}
+                className="flex-1"
               />
-            </FormField>
-            <FormField label="Max output tokens">
+            </Field>
+            <Field orientation="horizontal" className="justify-between gap-4">
+              <div className="min-w-0">
+                <FieldLabel>Max output tokens</FieldLabel>
+              </div>
               <Input
-                size="sm"
                 type="number"
                 value={model.max_output_tokens?.toString() ?? ''}
                 onChange={onChangeMaxOutput}
-                className={styles.flex1}
+                className="flex-1"
               />
-            </FormField>
-            <FormField label="Reasoning">
-              <Select size="sm" value={model.reasoning ?? 'none'} onChange={onChangeReasoning}>
+            </Field>
+            <Field orientation="horizontal" className="justify-between gap-4">
+              <div className="min-w-0">
+                <FieldLabel>Reasoning</FieldLabel>
+              </div>
+              <Select value={model.reasoning ?? 'none'} onChange={onChangeReasoning}>
                 {REASONING_OPTIONS.map((r) => (
                   <option key={r} value={r}>
                     {r}
                   </option>
                 ))}
               </Select>
-            </FormField>
-            <Checkbox checked={model.realtime ?? false} onCheckedChange={onChangeRealtime} label="Realtime model" />
-            <Checkbox checked={!storeValue} onCheckedChange={onChangeStore} label="Disable storage (store: false)" />
-            <Checkbox
-              checked={hasEncryptedReasoning}
-              onCheckedChange={onChangeEncryptedReasoning}
-              label="Include encrypted reasoning content"
-            />
+            </Field>
+            <label className="inline-flex items-center gap-2 text-sm">
+              <Checkbox
+                checked={model.realtime ?? false}
+                onCheckedChange={(checked) => onChangeRealtime(checked === true)}
+              />
+              Realtime model
+            </label>
+            <label className="inline-flex items-center gap-2 text-sm">
+              <Checkbox checked={!storeValue} onCheckedChange={(checked) => onChangeStore(checked === true)} />
+              Disable storage (store: false)
+            </label>
+            <label className="inline-flex items-center gap-2 text-sm">
+              <Checkbox
+                checked={hasEncryptedReasoning}
+                onCheckedChange={(checked) => onChangeEncryptedReasoning(checked === true)}
+              />
+              Include encrypted reasoning content
+            </label>
           </div>
         )}
       </div>

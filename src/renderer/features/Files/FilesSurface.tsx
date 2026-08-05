@@ -1,10 +1,13 @@
-import { Button as FluentButton, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
-import { Warning20Regular } from '@fluentui/react-icons';
 import { useSelector } from '@xstate/react';
+import { TriangleAlert } from 'lucide-react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 
-import { Button, Spinner } from '@/renderer/ds';
+import { Alert, AlertDescription, AlertTitle } from '@/renderer/ds/ui/alert';
+import { Button } from '@/renderer/ds/ui/button';
+import { ButtonGroup } from '@/renderer/ds/ui/button-group';
+import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/renderer/ds/ui/empty';
+import { Spinner } from '@/renderer/ds/ui/spinner';
 import { FsClient, WatchRegistry } from '@/renderer/omniagents-ui/rpc/fs';
 import { useRPCClient, useRPCConnected } from '@/renderer/omniagents-ui/rpc-context';
 import { type FileEditorLease, FileEditorRegistry } from '@/shared/machines/file-editor-registry';
@@ -23,7 +26,6 @@ type FilesSurfaceProps = {
   environmentId: string;
   sessionId?: string;
   workspaceRoot?: string;
-  isGlass?: boolean;
 };
 
 type FileEditorPaneProps = {
@@ -33,7 +35,6 @@ type FileEditorPaneProps = {
   connected: boolean;
   lease: FileEditorLease;
   writeSupported: boolean;
-  isGlass?: boolean;
   revealRequest?: { requestId: string; location: OpenFileLocation };
 };
 
@@ -64,102 +65,8 @@ const FILES_READ_OPERATIONS = [
 
 const FILES_WRITE_OPERATIONS = ['fs_upload_open', 'fs_upload_chunk', 'fs_upload_commit', 'fs_upload_abort'] as const;
 
-const useStyles = makeStyles({
-  root: {
-    display: 'flex',
-    minWidth: 0,
-    minHeight: 0,
-    width: '100%',
-    height: '100%',
-    backgroundColor: tokens.colorNeutralBackground1,
-    '@media (max-width: 700px)': { flexDirection: 'column' },
-  },
-  rootGlass: { backgroundColor: 'transparent' },
-  treePane: {
-    flex: '0 0 18rem',
-    minWidth: 0,
-    minHeight: 0,
-    borderRight: `1px solid ${tokens.colorNeutralStroke2}`,
-    '@media (max-width: 700px)': {
-      flexBasis: '35%',
-      borderRight: 'none',
-      borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
-    },
-  },
-  editorPane: { display: 'flex', flex: '1 1 0', minWidth: 0, minHeight: 0, flexDirection: 'column' },
-  editorHeader: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-    minHeight: '42px',
-    padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalM}`,
-    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
-    backgroundColor: tokens.colorNeutralBackground2,
-  },
-  editorHeaderGlass: { backgroundColor: 'transparent' },
-  path: {
-    minWidth: 0,
-    flex: '1 1 auto',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-    fontSize: tokens.fontSizeBase200,
-    color: tokens.colorNeutralForeground2,
-  },
-  editorFill: { flex: '1 1 0', minHeight: 0, minWidth: 0 },
-  centered: {
-    display: 'flex',
-    flex: '1 1 0',
-    minHeight: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalM,
-    padding: tokens.spacingVerticalXXL,
-    textAlign: 'center',
-    color: tokens.colorNeutralForeground3,
-  },
-  status: { fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3, whiteSpace: 'nowrap' },
-  dirty: { color: tokens.colorPaletteDarkOrangeForeground1 },
-  error: { color: tokens.colorPaletteRedForeground1 },
-  banner: {
-    display: 'flex',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: tokens.spacingHorizontalS,
-    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
-    borderBottom: `1px solid ${tokens.colorPaletteDarkOrangeBorderActive}`,
-    backgroundColor: tokens.colorPaletteDarkOrangeBackground1,
-    color: tokens.colorNeutralForeground1,
-    fontSize: tokens.fontSizeBase200,
-  },
-  bannerText: { flex: '1 1 18rem' },
-  visuallyHidden: {
-    position: 'absolute',
-    width: '1px',
-    height: '1px',
-    padding: 0,
-    margin: '-1px',
-    overflow: 'hidden',
-    clip: 'rect(0, 0, 0, 0)',
-    whiteSpace: 'nowrap',
-    border: 0,
-  },
-});
-
 const FileEditorPane = memo(
-  ({
-    path,
-    environmentId,
-    fsClient,
-    connected,
-    lease,
-    writeSupported,
-    isGlass,
-    revealRequest,
-  }: FileEditorPaneProps) => {
-    const styles = useStyles();
+  ({ path, environmentId, fsClient, connected, lease, writeSupported, revealRequest }: FileEditorPaneProps) => {
     const snapshot = useSelector(lease.actor, (value) => value);
     const [writable, setWritable] = useState<boolean | null>(null);
     const [statError, setStatError] = useState<string | null>(null);
@@ -203,30 +110,43 @@ const FileEditorPane = memo(
 
     if (isLoading) {
       return (
-        <div className={styles.centered} role="status">
-          <Spinner size="md" />
-          Loading {path}…
-        </div>
+        <Empty className="h-full rounded-none border-0" role="status">
+          <EmptyHeader>
+            <EmptyMedia>
+              <Spinner />
+            </EmptyMedia>
+            <EmptyTitle>Loading file</EmptyTitle>
+            <EmptyDescription className="break-all">{path}</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
       );
     }
 
     if (isLoadError) {
       return (
-        <div className={styles.centered} role="alert">
-          <span>{snapshot.context.error ?? `Could not load ${path}.`}</span>
-          <Button onClick={() => lease.actor.send({ type: 'RETRY_LOAD' })}>Retry</Button>
-        </div>
+        <Empty className="h-full rounded-none border-0" role="alert">
+          <EmptyHeader>
+            <EmptyTitle>Could not load file</EmptyTitle>
+            <EmptyDescription>{snapshot.context.error ?? `Could not load ${path}.`}</EmptyDescription>
+          </EmptyHeader>
+          <EmptyContent>
+            <Button onClick={() => lease.actor.send({ type: 'RETRY_LOAD' })}>Retry</Button>
+          </EmptyContent>
+        </Empty>
       );
     }
 
     return (
       <>
-        <div className={mergeClasses(styles.editorHeader, isGlass && styles.editorHeaderGlass)}>
-          <span className={styles.path} title={path}>
+        <div className="flex items-center gap-2 min-h-10.5 px-4 py-1 border-b border-border bg-card">
+          <span
+            className="min-w-0 flex-auto overflow-hidden text-ellipsis whitespace-nowrap font-mono text-xs text-muted-foreground"
+            title={path}
+          >
             {path}
           </span>
           <span
-            className={`${styles.status} ${isDirty || isConflict ? styles.dirty : ''} ${snapshot.matches('saveError') ? styles.error : ''}`}
+            className={`${'text-xs text-muted-foreground whitespace-nowrap'} ${isDirty || isConflict ? 'text-warning' : ''} ${snapshot.matches('saveError') ? 'text-destructive' : ''}`}
             role="status"
           >
             {isSaving
@@ -243,51 +163,51 @@ const FileEditorPane = memo(
                         ? 'Read-only'
                         : `Saved ${path}`}
           </span>
-          <FluentButton
-            appearance="primary"
-            aria-label={`Save ${path}`}
-            disabled={!canSave || isSaving}
-            onClick={save}
-            size="small"
-          >
+          <Button aria-label={`Save ${path}`} disabled={!canSave || isSaving} onClick={save} size="sm">
             Save
-          </FluentButton>
+          </Button>
         </div>
         {isConflict && (
-          <div className={styles.banner} role="alert">
-            <Warning20Regular />
-            <span className={styles.bannerText}>
+          <Alert className="rounded-none border-x-0 border-t-0 border-warning bg-warning text-warning-foreground">
+            <TriangleAlert />
+            <AlertTitle>File changed on disk</AlertTitle>
+            <AlertDescription className="text-warning-foreground">
               {snapshot.context.diskDeleted
                 ? 'This file was deleted outside the editor. Choose which version to keep.'
                 : 'This file changed outside the editor. Choose which version to keep.'}
-            </span>
-            <Button size="sm" onClick={() => lease.actor.send({ type: 'USE_DISK' })}>
-              Use disk version
-            </Button>
-            <Button size="sm" variant="primary" onClick={() => lease.actor.send({ type: 'KEEP_LOCAL' })}>
-              Keep my changes
-            </Button>
-          </div>
+              <ButtonGroup className="mt-2 flex-wrap">
+                <Button size="sm" variant="outline" onClick={() => lease.actor.send({ type: 'USE_DISK' })}>
+                  Use disk version
+                </Button>
+                <Button size="sm" onClick={() => lease.actor.send({ type: 'KEEP_LOCAL' })}>
+                  Keep my changes
+                </Button>
+              </ButtonGroup>
+            </AlertDescription>
+          </Alert>
         )}
         {writable === false && !isConflict && (
-          <div className={styles.banner} role="status">
-            This source is read-only. You can inspect it, but saving is disabled.
-          </div>
+          <Alert className="rounded-none border-x-0 border-t-0" role="status">
+            <AlertDescription>This source is read-only. You can inspect it, but saving is disabled.</AlertDescription>
+          </Alert>
         )}
         {statError && !isConflict && (
-          <div className={styles.banner} role="alert">
-            <span className={styles.bannerText}>{statError}</span>
-            <Button size="sm" onClick={() => setStatAttempt((attempt) => attempt + 1)}>
-              Retry permissions
-            </Button>
-          </div>
+          <Alert className="rounded-none border-x-0 border-t-0" variant="destructive">
+            <AlertTitle>Could not check file permissions</AlertTitle>
+            <AlertDescription>
+              {statError}
+              <Button size="sm" variant="outline" onClick={() => setStatAttempt((attempt) => attempt + 1)}>
+                Retry permissions
+              </Button>
+            </AlertDescription>
+          </Alert>
         )}
         {!connected && (
-          <div className={styles.banner} role="status">
-            Reconnecting to workspace… Your unsaved changes are preserved.
-          </div>
+          <Alert className="rounded-none border-x-0 border-t-0" role="status">
+            <AlertDescription>Reconnecting to workspace… Your unsaved changes are preserved.</AlertDescription>
+          </Alert>
         )}
-        <div className={styles.editorFill} data-editor-state={state}>
+        <div className="flex-1 min-h-0 min-w-0" data-editor-state={state}>
           <CodeMirrorEditor
             ariaLabel={`Editor for ${path}`}
             autoFocus
@@ -295,7 +215,6 @@ const FileEditorPane = memo(
             onSave={save}
             readOnly={!connected || writable !== true || isConflict}
             value={snapshot.context.content}
-            isGlass={isGlass}
             revealRequest={revealRequest}
           />
         </div>
@@ -305,8 +224,7 @@ const FileEditorPane = memo(
 );
 FileEditorPane.displayName = 'FileEditorPane';
 
-export const FilesSurface = memo(({ environmentId, sessionId, workspaceRoot, isGlass }: FilesSurfaceProps) => {
-  const styles = useStyles();
+export const FilesSurface = memo(({ environmentId, sessionId, workspaceRoot }: FilesSurfaceProps) => {
   const rpc = useRPCClient();
   const connected = useRPCConnected();
   const identityKey = sessionId && workspaceRoot ? JSON.stringify([sessionId, environmentId, workspaceRoot]) : null;
@@ -438,31 +356,37 @@ export const FilesSurface = memo(({ environmentId, sessionId, workspaceRoot, isG
   let body;
   if (error) {
     body = (
-      <div className={styles.centered} role="alert">
-        {error}
-      </div>
+      <Empty className="h-full rounded-none border-0" role="alert">
+        <EmptyHeader>
+          <EmptyTitle>Workspace files unavailable</EmptyTitle>
+          <EmptyDescription>{error}</EmptyDescription>
+        </EmptyHeader>
+      </Empty>
     );
   } else if (!identityKey || !sessionId || !resources) {
     body = (
-      <div className={styles.centered} role="status">
-        <Spinner size="md" />
-        Preparing workspace files…
-      </div>
+      <Empty className="h-full rounded-none border-0" role="status">
+        <EmptyHeader>
+          <EmptyMedia>
+            <Spinner />
+          </EmptyMedia>
+          <EmptyTitle>Preparing workspace files…</EmptyTitle>
+        </EmptyHeader>
+      </Empty>
     );
   } else {
     body = (
       <>
-        <div className={styles.treePane}>
+        <div className="w-72 flex-none min-w-0 min-h-0 border-r border-border [@media(max-width:700px)]:basis-1/3 [@media(max-width:700px)]:border-r-0 [@media(max-width:700px)]:border-b border-border">
           <WorkspaceFileTree
             environmentId={environmentId}
             fsClient={resources.fsClient}
             onOpenFile={handleOpenFile}
             selectedPath={selectedPath}
             watchRegistry={resources.watches}
-            isGlass={isGlass}
           />
         </div>
-        <div className={styles.editorPane}>
+        <div className="flex flex-1 min-w-0 min-h-0 flex-col">
           {selectedPath && selectedLease ? (
             <FileEditorPane
               connected={connected}
@@ -472,11 +396,15 @@ export const FilesSurface = memo(({ environmentId, sessionId, workspaceRoot, isG
               lease={selectedLease}
               path={selectedPath}
               writeSupported={writeSupported}
-              isGlass={isGlass}
               revealRequest={selection?.identityKey === identityKey ? selection.revealRequest : undefined}
             />
           ) : (
-            <div className={styles.centered}>Select a text file to inspect or edit it.</div>
+            <Empty className="h-full rounded-none border-0">
+              <EmptyHeader>
+                <EmptyTitle>No file selected</EmptyTitle>
+                <EmptyDescription>Select a text file to inspect or edit it.</EmptyDescription>
+              </EmptyHeader>
+            </Empty>
           )}
         </div>
       </>
@@ -484,10 +412,13 @@ export const FilesSurface = memo(({ environmentId, sessionId, workspaceRoot, isG
   }
 
   return (
-    <section className={mergeClasses(styles.root, isGlass && styles.rootGlass)} aria-label="Workspace files">
+    <section
+      className="flex min-w-0 min-h-0 w-full h-full bg-card [@media(max-width:700px)]:flex-col"
+      aria-label="Workspace files"
+    >
       {body}
       {lastOpened && (
-        <div className={styles.visuallyHidden} role="status" aria-live="polite">
+        <div className="sr-only" role="status" aria-live="polite">
           Opened {lastOpened.path}
           {lastOpened.location ? ` at line ${lastOpened.location.line}` : ''}
         </div>
@@ -503,15 +434,9 @@ export function WorkspaceFilesPortal({
   environmentId,
   sessionId,
   workspaceRoot,
-  isGlass,
 }: FilesSurfaceProps & { host: HTMLDivElement }) {
   return createPortal(
-    <FilesSurface
-      environmentId={environmentId}
-      sessionId={sessionId}
-      workspaceRoot={workspaceRoot}
-      isGlass={isGlass}
-    />,
+    <FilesSurface environmentId={environmentId} sessionId={sessionId} workspaceRoot={workspaceRoot} />,
     host
   );
 }

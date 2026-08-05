@@ -67,7 +67,7 @@ describe('runMigrations', () => {
         expect(t.phase).toBe('idle');
       }
       // Fall-through means schemaVersion ends up at the current version.
-      expect(store.get('schemaVersion')).toBe(28);
+      expect(store.get('schemaVersion')).toBe(29);
     });
   });
 
@@ -376,19 +376,20 @@ describe('runMigrations', () => {
       expect(t2.phaseChangedAt).toBe(999); // preserved
     });
 
-    it('backfills resolvedAt only when resolution is defined', () => {
+    it('carries a legacy completion timestamp into the unified completion field', () => {
       const store = makeStore({
         schemaVersion: 14,
         tickets: [
           { id: 't-unresolved', updatedAt: 500 },
-          { id: 't-resolved', updatedAt: 800, resolution: 'done' },
+          { id: 't-completed', updatedAt: 800, resolution: 'completed' },
         ],
       });
       runMigrations(store, makeDeps());
 
       const tickets = store.get('tickets') as Array<Record<string, unknown>>;
-      expect(tickets.find((t) => t.id === 't-unresolved')!.resolvedAt).toBeUndefined();
-      expect(tickets.find((t) => t.id === 't-resolved')!.resolvedAt).toBe(800);
+      expect(tickets.find((t) => t.id === 't-unresolved')!.completedAt).toBeUndefined();
+      expect(tickets.find((t) => t.id === 't-completed')!.completedAt).toBe(800);
+      expect(tickets.find((t) => t.id === 't-completed')!.resolution).toBeUndefined();
     });
 
     it('backfills milestone.completedAt iff status is completed', () => {
@@ -426,7 +427,7 @@ describe('runMigrations', () => {
         projects: [{ id: 'p1', label: 'A', workspaceDir: '/tmp/w' }],
       });
       expect(() => runMigrations(store, makeDeps())).not.toThrow();
-      expect(store.get('schemaVersion')).toBe(28);
+      expect(store.get('schemaVersion')).toBe(29);
     });
 
     it('v21 → v22 maps docker→devbox, drops legacy sandbox keys, strips Project.sandbox', () => {
@@ -443,7 +444,7 @@ describe('runMigrations', () => {
       });
       runMigrations(store, makeDeps());
       // v21→v22 → falls through to v22→v23 (sticky profile seeding).
-      expect(store.get('schemaVersion')).toBe(28);
+      expect(store.get('schemaVersion')).toBe(29);
       expect(store.get('defaultProfileName')).toBe('devbox');
       expect(store.get('sandboxBackend')).toBeUndefined();
       expect(store.get('sandboxProfiles')).toBeUndefined();
@@ -489,7 +490,7 @@ describe('runMigrations', () => {
       const deps = makeDeps();
       runMigrations(store, deps);
 
-      expect(store.get('schemaVersion')).toBe(28);
+      expect(store.get('schemaVersion')).toBe(29);
       expect(deps.writeProjectContextBrief).not.toHaveBeenCalled();
     });
 
@@ -510,7 +511,7 @@ describe('runMigrations', () => {
         expect(t).not.toHaveProperty('supervisorSessionId');
       }
       // Falls through to v23, the current head.
-      expect(store.get('schemaVersion')).toBe(28);
+      expect(store.get('schemaVersion')).toBe(29);
     });
 
     it('v18 → v19 backfills installedBundles from existing skillSources', () => {
@@ -533,7 +534,7 @@ describe('runMigrations', () => {
       });
       runMigrations(store, makeDeps());
 
-      expect(store.get('schemaVersion')).toBe(28);
+      expect(store.get('schemaVersion')).toBe(29);
       const bundles = store.get('installedBundles') as Record<string, { skillNames: string[] }>;
       expect(Object.keys(bundles).sort()).toEqual([
         'anthropics/skills:creative-skills',
@@ -565,7 +566,7 @@ describe('runMigrations', () => {
         codeTabs: [],
       });
       runMigrations(store, makeDeps());
-      expect(store.get('schemaVersion')).toBe(28);
+      expect(store.get('schemaVersion')).toBe(29);
       // v23 seeds chatProfileName; v26 folds it onto the reserved chat tab.
       const chatTab = (store.get('codeTabs', []) as Array<Record<string, unknown>>).find((t) => t.id === 'chat')!;
       expect(chatTab.profileName).toBe('devbox');
@@ -649,7 +650,7 @@ describe('runMigrations', () => {
       });
       runMigrations(store, makeDeps({ newSessionId: () => '11111111-2222-4333-8444-555555555555' }));
 
-      expect(store.get('schemaVersion')).toBe(28);
+      expect(store.get('schemaVersion')).toBe(29);
       // The reminted chat session id lands on the reserved chat tab (v26).
       const tabs = store.get('codeTabs', []) as Array<Record<string, unknown>>;
       const byId = (id: string) => tabs.find((t) => t.id === id)!;
@@ -677,7 +678,7 @@ describe('runMigrations', () => {
     it('v23 → v24 is a no-op when there are no sessions to migrate', () => {
       const store = makeStore({ schemaVersion: 23, tickets: [], projects: [] });
       runMigrations(store, makeDeps());
-      expect(store.get('schemaVersion')).toBe(28);
+      expect(store.get('schemaVersion')).toBe(29);
       expect(store.get('chatSessionId')).toBeUndefined();
       // v26 still synthesizes the reserved chat record with a minted session.
       const chatTab = (store.get('codeTabs', []) as Array<Record<string, unknown>>).find((t) => t.id === 'chat')!;
@@ -693,7 +694,7 @@ describe('runMigrations', () => {
         codeLayoutMode: 'deck',
       });
       runMigrations(store, makeDeps());
-      expect(store.get('schemaVersion')).toBe(28);
+      expect(store.get('schemaVersion')).toBe(29);
       // v20 lands on 'spaces'; v27 folds it into 'chat' in the same run.
       expect(store.get('layoutMode')).toBe('chat');
       // v20 lands on 'tile'; v27 flips to 'focus' — no deck columns here.
@@ -709,7 +710,7 @@ describe('runMigrations', () => {
         codeLayoutMode: 'spaces',
       });
       runMigrations(store, makeDeps());
-      expect(store.get('schemaVersion')).toBe(28);
+      expect(store.get('schemaVersion')).toBe(29);
       expect(store.get('layoutMode')).toBe('chat');
       expect(store.get('codeLayoutMode')).toBe('focus');
     });
@@ -723,7 +724,7 @@ describe('runMigrations', () => {
         codeLayoutMode: 'focus',
       });
       runMigrations(store, makeDeps());
-      expect(store.get('schemaVersion')).toBe(28);
+      expect(store.get('schemaVersion')).toBe(29);
       expect(store.get('layoutMode')).toBe('projects');
       expect(store.get('codeLayoutMode')).toBe('focus');
     });
@@ -767,7 +768,7 @@ describe('runMigrations', () => {
       expect(t1.description).toBe('Existing body.\n\n**Done when:** redirect works\n**Out of scope:** password reset');
       expect('shaping' in t1).toBe(false);
       expect(tickets.find((t) => t.id === 't2')!.description).toBe('Untouched.');
-      expect(store.get('schemaVersion')).toBe(28);
+      expect(store.get('schemaVersion')).toBe(29);
     });
 
     it("folds inbox shaping into the note and collapses 'shaped' to 'new' with a fresh createdAt", () => {
@@ -826,7 +827,7 @@ describe('runMigrations', () => {
       expect(store.get('chatSessionId')).toBeUndefined();
       expect(store.get('chatProfileName')).toBeUndefined();
       expect(store.get('chatContainerId')).toBeUndefined();
-      expect(store.get('schemaVersion')).toBe(28);
+      expect(store.get('schemaVersion')).toBe(29);
     });
 
     it('mints a session id and seeds the profile from the default when the keys are absent', () => {
@@ -857,7 +858,7 @@ describe('runMigrations', () => {
       expect(tabs).toHaveLength(1);
       expect(tabs[0]!.sessionId).toBe('keep-me');
       expect(store.get('chatSessionId')).toBeUndefined();
-      expect(store.get('schemaVersion')).toBe(28);
+      expect(store.get('schemaVersion')).toBe(29);
     });
   });
 
@@ -870,7 +871,7 @@ describe('runMigrations', () => {
       });
       runMigrations(store, makeDeps());
       expect(store.get('layoutMode')).toBe('chat');
-      expect(store.get('schemaVersion')).toBe(28);
+      expect(store.get('schemaVersion')).toBe(29);
     });
 
     it('stamps activatedAt on every pre-merge tab (eager-launch parity)', () => {
@@ -915,7 +916,7 @@ describe('runMigrations', () => {
         codeTabs: [{ id: 'tab-1', projectId: null, createdAt: 5, activatedAt: 5 }],
       });
       runMigrations(store, makeDeps());
-      expect(store.get('schemaVersion')).toBe(28);
+      expect(store.get('schemaVersion')).toBe(29);
       expect((store.get('codeTabs') as Array<Record<string, unknown>>)[0]!.activatedAt).toBe(5);
     });
   });
@@ -929,10 +930,68 @@ describe('runMigrations', () => {
         codeTabs: [{ id: 'tab-1', projectId: null, createdAt: 5, activatedAt: 5 }],
       });
       runMigrations(store, makeDeps());
-      expect(store.get('schemaVersion')).toBe(28);
+      expect(store.get('schemaVersion')).toBe(29);
       expect(store.get('weeklyReviewDay')).toBeUndefined();
       expect(store.get('lastWeeklyReviewAt')).toBeUndefined();
       expect((store.get('codeTabs') as Array<Record<string, unknown>>)[0]!.activatedAt).toBe(5);
+    });
+  });
+
+  describe('v28 → v29: one task status model', () => {
+    const projects = [
+      {
+        id: 'p1',
+        pipeline: {
+          columns: [
+            { id: 'todo', category: 'todo' },
+            { id: 'doing', category: 'doing' },
+            { id: 'done', category: 'done' },
+          ],
+        },
+      },
+    ];
+
+    it('moves completed legacy tasks to Done and removes resolution', () => {
+      const store = makeStore({
+        schemaVersion: 28,
+        projects,
+        tickets: [
+          { id: 't1', projectId: 'p1', columnId: 'doing', resolution: 'completed', resolvedAt: 500, updatedAt: 600 },
+        ],
+      });
+      runMigrations(store, makeDeps());
+
+      const ticket = (store.get('tickets') as Array<Record<string, unknown>>)[0]!;
+      expect(ticket).toMatchObject({ columnId: 'done', completedAt: 500 });
+      expect(ticket.resolution).toBeUndefined();
+      expect(ticket.resolvedAt).toBeUndefined();
+    });
+
+    it('archives retired close outcomes instead of preserving a second status', () => {
+      const store = makeStore({
+        schemaVersion: 28,
+        projects,
+        tickets: [
+          { id: 't1', projectId: 'p1', columnId: 'doing', resolution: 'cancelled', resolvedAt: 700, updatedAt: 800 },
+        ],
+      });
+      runMigrations(store, makeDeps());
+
+      const ticket = (store.get('tickets') as Array<Record<string, unknown>>)[0]!;
+      expect(ticket.archivedAt).toBe(700);
+      expect(ticket.completedAt).toBeUndefined();
+      expect(ticket.resolution).toBeUndefined();
+    });
+
+    it('backfills completedAt for tasks already in Done', () => {
+      const store = makeStore({
+        schemaVersion: 28,
+        projects,
+        tickets: [{ id: 't1', projectId: 'p1', columnId: 'done', updatedAt: 900 }],
+      });
+      runMigrations(store, makeDeps());
+
+      expect((store.get('tickets') as Array<Record<string, unknown>>)[0]!.completedAt).toBe(900);
     });
   });
 });

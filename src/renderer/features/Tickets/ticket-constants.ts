@@ -1,6 +1,4 @@
-import { tokens } from '@fluentui/react-components';
-
-import type { TicketPhase, TicketPriority, TicketResolution } from '@/shared/types';
+import type { TicketPhase, TicketPriority } from '@/shared/types';
 
 export const TICKET_PRIORITY_LABELS: Record<TicketPriority, string> = {
   low: 'Low',
@@ -9,12 +7,12 @@ export const TICKET_PRIORITY_LABELS: Record<TicketPriority, string> = {
   critical: 'Critical',
 };
 
-/** Fill colors for the priority dot on task rows (lists, board, home). */
-export const PRIORITY_DOT_COLORS: Record<string, string> = {
-  critical: tokens.colorPaletteRedForeground1,
-  high: tokens.colorPaletteYellowForeground1,
-  medium: tokens.colorPaletteBlueForeground2,
-  low: tokens.colorNeutralForeground3,
+/** Semantic classes for the priority dot on task rows (lists, board, home). */
+export const PRIORITY_DOT_CLASSES: Record<TicketPriority, string> = {
+  critical: 'bg-destructive',
+  high: 'bg-warning',
+  medium: 'bg-primary',
+  low: 'bg-muted-foreground',
 };
 
 export type BadgeColor = 'default' | 'blue' | 'green' | 'purple' | 'red' | 'yellow' | 'sky' | 'orange';
@@ -28,87 +26,61 @@ export const TICKET_PRIORITY_COLORS: Record<TicketPriority, BadgeColor> = {
 
 /** Column color definitions — each column maps to a hue used for border-top, background tint, and badge. */
 type ColumnColorDef = {
-  borderTop: string;
-  background: string;
-  badgeColor: string;
-  badgeBg: string;
+  columnClassName: string;
+  badgeClassName: string;
 };
 
 const COLUMN_COLOR_DEFS: Record<string, ColumnColorDef> = {
   backlog: {
-    borderTop: '#6b7280',
-    background: 'rgba(107, 114, 128, 0.05)',
-    badgeColor: '#9ca3af',
-    badgeBg: 'rgba(156, 163, 175, 0.1)',
+    columnClassName: 'border-t-muted-foreground bg-muted/50',
+    badgeClassName: 'bg-muted text-muted-foreground',
   },
   spec: {
-    borderTop: '#a855f7',
-    background: 'rgba(168, 85, 247, 0.05)',
-    badgeColor: '#c084fc',
-    badgeBg: 'rgba(192, 132, 252, 0.1)',
+    columnClassName: 'border-t-chart-1 bg-chart-1/5',
+    badgeClassName: 'bg-chart-1/10 text-chart-1',
   },
   implementation: {
-    borderTop: '#3b82f6',
-    background: 'rgba(59, 130, 246, 0.05)',
-    badgeColor: '#60a5fa',
-    badgeBg: 'rgba(96, 165, 250, 0.1)',
+    columnClassName: 'border-t-chart-2 bg-chart-2/5',
+    badgeClassName: 'bg-chart-2/10 text-chart-2',
   },
   review: {
-    borderTop: '#f97316',
-    background: 'rgba(249, 115, 22, 0.05)',
-    badgeColor: '#fb923c',
-    badgeBg: 'rgba(251, 146, 60, 0.1)',
+    columnClassName: 'border-t-warning bg-warning/5',
+    badgeClassName: 'bg-warning/10 text-warning',
   },
   pr: {
-    borderTop: '#6366f1',
-    background: 'rgba(99, 102, 241, 0.05)',
-    badgeColor: '#818cf8',
-    badgeBg: 'rgba(129, 140, 248, 0.1)',
+    columnClassName: 'border-t-chart-4 bg-chart-4/5',
+    badgeClassName: 'bg-chart-4/10 text-chart-4',
   },
   completed: {
-    borderTop: '#22c55e',
-    background: 'rgba(34, 197, 94, 0.05)',
-    badgeColor: '#4ade80',
-    badgeBg: 'rgba(74, 222, 128, 0.1)',
+    columnClassName: 'border-t-success bg-success/5',
+    badgeClassName: 'bg-success/10 text-success',
   },
 };
 
 const FALLBACK_COLORS: ColumnColorDef[] = [
   {
-    borderTop: '#14b8a6',
-    background: 'rgba(20, 184, 166, 0.05)',
-    badgeColor: '#2dd4bf',
-    badgeBg: 'rgba(45, 212, 191, 0.1)',
+    columnClassName: 'border-t-chart-1 bg-chart-1/5',
+    badgeClassName: 'bg-chart-1/10 text-chart-1',
   },
   {
-    borderTop: '#f43f5e',
-    background: 'rgba(244, 63, 94, 0.05)',
-    badgeColor: '#fb7185',
-    badgeBg: 'rgba(251, 113, 133, 0.1)',
+    columnClassName: 'border-t-chart-2 bg-chart-2/5',
+    badgeClassName: 'bg-chart-2/10 text-chart-2',
   },
   {
-    borderTop: '#f59e0b',
-    background: 'rgba(245, 158, 11, 0.05)',
-    badgeColor: '#fbbf24',
-    badgeBg: 'rgba(251, 191, 36, 0.1)',
+    columnClassName: 'border-t-chart-3 bg-chart-3/5',
+    badgeClassName: 'bg-chart-3/10 text-chart-3',
   },
   {
-    borderTop: '#06b6d4',
-    background: 'rgba(6, 182, 212, 0.05)',
-    badgeColor: '#22d3ee',
-    badgeBg: 'rgba(34, 211, 238, 0.1)',
+    columnClassName: 'border-t-chart-4 bg-chart-4/5',
+    badgeClassName: 'bg-chart-4/10 text-chart-4',
   },
   {
-    borderTop: '#84cc16',
-    background: 'rgba(132, 204, 22, 0.05)',
-    badgeColor: '#a3e635',
-    badgeBg: 'rgba(163, 230, 53, 0.1)',
+    columnClassName: 'border-t-chart-5 bg-chart-5/5',
+    badgeClassName: 'bg-chart-5/10 text-chart-5',
   },
   {
-    borderTop: '#d946ef',
-    background: 'rgba(217, 70, 239, 0.05)',
-    badgeColor: '#e879f9',
-    badgeBg: 'rgba(232, 121, 249, 0.1)',
+    columnClassName: 'border-t-primary bg-primary/5',
+    badgeClassName: 'bg-primary/10 text-primary',
   },
 ];
 
@@ -124,22 +96,6 @@ const stableIndex = (id: string, len: number): number => {
 /** Returns the color definition for a column, falling back to a stable hash-based color for custom columns. */
 export const getColumnColors = (columnId: string): ColumnColorDef =>
   COLUMN_COLOR_DEFS[columnId] ?? FALLBACK_COLORS[stableIndex(columnId, FALLBACK_COLORS.length)]!;
-
-/** Human-readable labels for ticket resolutions. */
-export const RESOLUTION_LABELS: Record<TicketResolution, string> = {
-  completed: 'Completed',
-  wont_do: "Won't do",
-  duplicate: 'Duplicate',
-  cancelled: 'Cancelled',
-};
-
-/** Badge colors for ticket resolutions. */
-export const RESOLUTION_COLORS: Record<TicketResolution, BadgeColor> = {
-  completed: 'green',
-  wont_do: 'default',
-  duplicate: 'yellow',
-  cancelled: 'red',
-};
 
 /** Human-readable labels for ticket phases. */
 export const PHASE_LABELS: Partial<Record<TicketPhase, string>> = {

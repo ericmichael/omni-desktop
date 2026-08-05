@@ -3,9 +3,9 @@ import type { ComponentProps } from 'react';
 import { useCallback } from 'react';
 import { StickToBottom, useStickToBottomContext } from 'use-stick-to-bottom';
 
+import { cn } from '@/renderer/ds/cn';
+import { Button } from '@/renderer/ds/ui/button';
 import type { UIMessage } from '@/renderer/omniagents-ui/ai-types';
-import { Button } from '@/renderer/omniagents-ui/components/ui/button';
-import { cn } from '@/renderer/omniagents-ui/lib/utils';
 
 export type ConversationProps = ComponentProps<typeof StickToBottom>;
 
@@ -68,7 +68,7 @@ export const ConversationScrollButton = ({ className, ...props }: ConversationSc
     !isAtBottom && (
       <Button
         className={cn(
-          'absolute bottom-4 left-[50%] translate-x-[-50%] rounded-full bg-background hover:bg-muted',
+          'absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full bg-background hover:bg-muted',
           className
         )}
         onClick={handleScrollToBottom}

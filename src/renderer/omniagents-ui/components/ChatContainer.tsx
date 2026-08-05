@@ -1,6 +1,6 @@
 import React from 'react';
 
-import { cn } from '@/renderer/omniagents-ui/lib/utils';
+import { cn } from '@/renderer/ds/cn';
 
 import { Conversation, ConversationContent, ConversationScrollButton } from './ai/conversation';
 

@@ -1,10 +1,10 @@
 import type { ComponentProps, ReactNode } from 'react';
 import { createContext, useContext, useMemo } from 'react';
 
+import { cn } from '@/renderer/ds/cn';
+import { Alert, AlertDescription } from '@/renderer/ds/ui/alert';
+import { Button } from '@/renderer/ds/ui/button';
 import type { ToolUIPart } from '@/renderer/omniagents-ui/ai-types';
-import { Alert, AlertDescription } from '@/renderer/omniagents-ui/components/ui/alert';
-import { Button } from '@/renderer/omniagents-ui/components/ui/button';
-import { cn } from '@/renderer/omniagents-ui/lib/utils';
 
 type ToolUIPartApproval =
   | { id: string; approved?: never; reason?: never }
@@ -47,8 +47,7 @@ export const Confirmation = ({ className, approval, state, ...props }: Confirmat
       <Alert
         className={cn(
           'flex flex-col gap-2',
-          isPending &&
-            'border-2 border-warning bg-warning/10 ring-2 ring-warning/40 animate-[pulse_2.5s_ease-in-out_infinite]',
+          isPending && 'animate-pulse border-2 border-warning bg-warning/10 ring-2 ring-warning/40',
           className
         )}
         {...props}

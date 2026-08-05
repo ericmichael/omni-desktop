@@ -1,6 +1,6 @@
 import { memo } from 'react';
 
-import { IconButton } from '@/renderer/ds';
+import { Button } from '@/renderer/ds/ui/button';
 
 const GitHubIcon = () => (
   <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
@@ -11,7 +11,9 @@ const GitHubIcon = () => (
 export const GitHubButton = memo(() => {
   return (
     <a href="https://github.com/ericmichael/omni-code" target="_blank" rel="noopener noreferrer">
-      <IconButton aria-label="GitHub" icon={<GitHubIcon />} />
+      <Button type="button" variant="ghost" size="icon" aria-label="GitHub">
+        <GitHubIcon />
+      </Button>
     </a>
   );
 });

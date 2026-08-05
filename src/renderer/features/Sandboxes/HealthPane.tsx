@@ -15,12 +15,24 @@
  *   The card self-hides unless cloud-linked, so it mounts unconditionally.
  */
 
-import { makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
-import { ArrowClockwise16Regular } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
+import { RefreshCw } from 'lucide-react';
 import { memo, useCallback, useEffect, useState } from 'react';
 
-import { Body1, Button, Caption1, Card, ConfirmDialog, IconButton, SectionLabel, Spinner } from '@/renderer/ds';
+import { cn } from '@/renderer/ds/cn';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/renderer/ds/ui/alert-dialog';
+import { Button } from '@/renderer/ds/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/renderer/ds/ui/card';
+import { Spinner } from '@/renderer/ds/ui/spinner';
 import { formatBytes } from '@/renderer/features/Sandboxes/format-bytes';
 import {
   $sandboxesError,
@@ -40,21 +52,6 @@ import {
   serverOrigin,
 } from '@/renderer/services/ipc';
 import type { SandboxImageStatus, SandboxSubstrateStatus, WslBackendStatus } from '@/shared/types';
-
-const useStyles = makeStyles({
-  root: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalM },
-  card: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalS },
-  header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
-  row: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalM },
-  main: { flex: '1 1 0', minWidth: 0, display: 'flex', flexDirection: 'column', gap: '2px' },
-  actions: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS, flexShrink: 0 },
-  pendingRow: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS },
-  summary: { color: tokens.colorNeutralForeground2 },
-  error: { color: tokens.colorPaletteRedForeground1 },
-  warn: { color: tokens.colorPaletteYellowForeground1 },
-  ok: { color: tokens.colorPaletteGreenForeground1 },
-  mono: { fontFamily: tokens.fontFamilyMonospace },
-});
 
 type StatusLine = { text: string; tone: 'ok' | 'warn' | 'error' | 'muted' };
 
@@ -123,8 +120,14 @@ const backendSummary = (): string => {
   return 'Backend running locally on this computer';
 };
 
-const toneClasses = (styles: ReturnType<typeof useStyles>, tone: StatusLine['tone']): string =>
-  tone === 'error' ? styles.error : tone === 'warn' ? styles.warn : tone === 'ok' ? styles.ok : styles.summary;
+const toneClasses = (tone: StatusLine['tone']): string =>
+  tone === 'error'
+    ? 'text-destructive'
+    : tone === 'warn'
+      ? 'text-warning'
+      : tone === 'ok'
+        ? 'text-success'
+        : 'text-muted-foreground';
 
 const WSL_STATUS_POLL_MS = 5000;
 
@@ -133,7 +136,6 @@ const openAccountSettings = (): void => {
 };
 
 export const HealthPane = memo(() => {
-  const styles = useStyles();
   const substrate = useStore($substrateStatus);
   const fetchError = useStore($sandboxesError);
 
@@ -253,117 +255,164 @@ export const HealthPane = memo(() => {
   const wsl = wslStatusLine(wslStatus);
 
   return (
-    <div className={styles.root}>
-      <SectionLabel>Substrate</SectionLabel>
+    <div className="flex flex-col gap-4">
       <Card>
-        <div className={styles.card}>
-          <div className={styles.row}>
-            <div className={styles.main}>
-              <Body1>Docker</Body1>
-              <Caption1 className={toneClasses(styles, docker.tone)}>{docker.text}</Caption1>
-            </div>
-            <div className={styles.actions}>
-              {isWslLinked && substrate?.docker === 'missing' && (
-                <Button size="sm" variant="ghost" onClick={onInstallDocker} isDisabled={bootstrapping !== null}>
-                  {`Install Docker in ${wslStatus?.distro ?? 'the distro'}`}
+        <CardHeader>
+          <CardTitle>Runtime</CardTitle>
+          <CardDescription>Docker powers sandboxed apps and agent sessions on this backend.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-col gap-4">
+            <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center">
+              <div className="flex-1 min-w-0 flex flex-col gap-0.5">
+                <span className="text-sm">Docker</span>
+                <span className={cn('text-xs text-muted-foreground', toneClasses(docker.tone))}>{docker.text}</span>
+              </div>
+              <div className="flex items-center gap-1 flex-wrap shrink-0 self-start sm:self-center">
+                {isWslLinked && substrate?.docker === 'missing' && (
+                  <Button size="sm" variant="ghost" onClick={onInstallDocker} disabled={bootstrapping !== null}>
+                    {`Install Docker in ${wslStatus?.distro ?? 'the distro'}`}
+                  </Button>
+                )}
+                {isWslLinked && substrate?.docker === 'daemon-down' && (
+                  <Button size="sm" variant="ghost" onClick={onStartDocker} disabled={bootstrapping !== null}>
+                    Start Docker
+                  </Button>
+                )}
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="Refresh substrate status"
+                  onClick={onRefresh}
+                  title="Refresh"
+                >
+                  <RefreshCw />
                 </Button>
-              )}
-              {isWslLinked && substrate?.docker === 'daemon-down' && (
-                <Button size="sm" variant="ghost" onClick={onStartDocker} isDisabled={bootstrapping !== null}>
-                  Start Docker
-                </Button>
-              )}
-              <IconButton
-                aria-label="Refresh substrate status"
-                icon={<ArrowClockwise16Regular />}
-                size="sm"
-                tooltip="Refresh"
-                onClick={onRefresh}
-              />
-            </div>
-          </div>
-          {bootstrapping !== null && (
-            <div className={styles.pendingRow}>
-              <Spinner size="sm" />
-              <Caption1 className={styles.summary}>
-                {bootstrapping === 'install' ? 'Installing Docker — this takes a few minutes…' : 'Starting Docker…'}
-              </Caption1>
-            </div>
-          )}
-          {bootstrapError && <Caption1 className={styles.error}>{bootstrapError}</Caption1>}
-          {isWslLinked && (
-            <div className={styles.row}>
-              <div className={styles.main}>
-                <Body1>WSL daemon</Body1>
-                <Caption1 className={toneClasses(styles, wsl.tone)}>{wsl.text}</Caption1>
               </div>
             </div>
-          )}
-          {fetchError && <Caption1 className={styles.error}>{fetchError}</Caption1>}
-        </div>
+            {bootstrapping !== null && (
+              <div className="flex items-center gap-2">
+                <Spinner />
+                <span className={cn('text-xs text-muted-foreground', 'text-muted-foreground')}>
+                  {bootstrapping === 'install' ? 'Installing Docker — this takes a few minutes…' : 'Starting Docker…'}
+                </span>
+              </div>
+            )}
+            {bootstrapError && (
+              <span className={cn('text-xs text-muted-foreground', 'text-destructive')}>{bootstrapError}</span>
+            )}
+            {isWslLinked && (
+              <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center">
+                <div className="flex-1 min-w-0 flex flex-col gap-0.5">
+                  <span className="text-sm">WSL daemon</span>
+                  <span className={cn('text-xs text-muted-foreground', toneClasses(wsl.tone))}>{wsl.text}</span>
+                </div>
+              </div>
+            )}
+            {fetchError && (
+              <span className={cn('text-xs text-muted-foreground', 'text-destructive')}>{fetchError}</span>
+            )}
+          </div>
+        </CardContent>
       </Card>
 
       {showImages && devboxImage && (
-        <>
-          <SectionLabel>Images</SectionLabel>
-          <Card>
-            <div className={styles.card}>
-              <div className={styles.row}>
-                <div className={styles.main}>
-                  <Body1>Devbox image</Body1>
-                  <Caption1 className={mergeClasses(styles.summary, styles.mono)}>{devboxImage}</Caption1>
-                  <Caption1
-                    className={imageStatus === null ? styles.summary : imageStatus.present ? styles.ok : styles.warn}
+        <Card>
+          <CardHeader>
+            <CardTitle>Images</CardTitle>
+            <CardDescription>The base environment used when a Devbox sandbox starts.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-col gap-4">
+              <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center">
+                <div className="flex-1 min-w-0 flex flex-col gap-0.5">
+                  <span className="text-sm">Devbox image</span>
+                  <span
+                    className={cn(
+                      'text-xs text-muted-foreground',
+                      cn('text-muted-foreground', 'font-mono wrap-anywhere')
+                    )}
+                  >
+                    {devboxImage}
+                  </span>
+                  <span
+                    className={cn(
+                      'text-xs text-muted-foreground',
+                      imageStatus === null
+                        ? 'text-muted-foreground'
+                        : imageStatus.present
+                          ? 'text-success'
+                          : 'text-warning'
+                    )}
                   >
                     {imageStatus === null
                       ? 'Checking image…'
                       : imageStatus.present
                         ? `Present${imageStatus.sizeBytes !== null ? ` — ${formatBytes(imageStatus.sizeBytes)}` : ''}`
                         : 'Not pulled'}
-                  </Caption1>
+                  </span>
                 </div>
-                <div className={styles.actions}>
-                  <Button size="sm" variant="ghost" onClick={onPull} isDisabled={pulling}>
+                <div className="flex items-center gap-1 flex-wrap shrink-0 self-start sm:self-center">
+                  <Button size="sm" variant="ghost" onClick={onPull} disabled={pulling}>
                     {pulling ? 'Pulling…' : 'Pull'}
                   </Button>
                   <Button size="sm" variant="ghost" onClick={openPruneConfirm}>
-                    Prune dangling images
+                    Prune unused
                   </Button>
                 </div>
               </div>
               {pulling && (
-                <div className={styles.pendingRow}>
-                  <Spinner size="sm" />
-                  <Caption1 className={styles.summary}>Pulling — this downloads several GB…</Caption1>
+                <div className="flex items-center gap-2">
+                  <Spinner />
+                  <span className={cn('text-xs text-muted-foreground', 'text-muted-foreground')}>
+                    Pulling — this downloads several GB…
+                  </span>
                 </div>
               )}
-              {pruneResult && <Caption1 className={styles.ok}>{pruneResult}</Caption1>}
-              {imageError && <Caption1 className={styles.error}>{imageError}</Caption1>}
+              {pruneResult && (
+                <span className={cn('text-xs text-muted-foreground', 'text-success')}>{pruneResult}</span>
+              )}
+              {imageError && (
+                <span className={cn('text-xs text-muted-foreground', 'text-destructive')}>{imageError}</span>
+              )}
             </div>
-          </Card>
-        </>
+          </CardContent>
+        </Card>
       )}
 
-      <ConfirmDialog
-        open={pruneConfirmOpen}
-        onClose={closePruneConfirm}
-        onConfirm={onConfirmPrune}
-        title="Prune dangling images?"
-        description="Remove all dangling (untagged) Docker images on the backend. Tagged images are untouched."
-        confirmLabel="Prune"
-        destructive
-      />
+      <AlertDialog open={pruneConfirmOpen} onOpenChange={(open) => !open && closePruneConfirm()}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Prune dangling images?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Remove all dangling (untagged) Docker images on the backend. Tagged images are untouched.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={onConfirmPrune}>
+              Prune
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
-      <SectionLabel>Backend</SectionLabel>
       <Card>
-        <div className={styles.row}>
-          <div className={styles.main}>
-            <Caption1 className={styles.summary}>{backendSummary()}</Caption1>
+        <CardHeader>
+          <CardTitle>Connection</CardTitle>
+          <CardDescription>Where sandbox operations run.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center">
+            <div className="flex-1 min-w-0 flex flex-col gap-0.5">
+              <span className={cn('text-sm text-muted-foreground', 'text-muted-foreground')}>{backendSummary()}</span>
+            </div>
+            <Button size="sm" variant="ghost" onClick={openAccountSettings}>
+              Manage in Settings
+            </Button>
           </div>
-          <Button size="sm" variant="ghost" onClick={openAccountSettings}>
-            Manage in Settings
-          </Button>
-        </div>
+        </CardContent>
       </Card>
 
       <MachinesCard />

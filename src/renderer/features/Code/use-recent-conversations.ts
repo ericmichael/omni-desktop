@@ -8,7 +8,6 @@ import { generateSessionTitle } from '@/renderer/omniagents-ui/lib/utils';
 import { getSessionController, onColumnRunEnd } from '@/renderer/services/session-control';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { ChatConversation, CodeTab } from '@/shared/types';
-import { isChatColumn } from '@/shared/types';
 
 /** How often to re-list sessions while the sidebar is mounted. Controllers
  *  register asynchronously after a column connects, so a one-shot load would
@@ -17,11 +16,12 @@ const REFRESH_MS = 15_000;
 
 /**
  * Conversation data for the Focus sidebar, from the union of the launcher's
- * own ``chatConversations`` index and, when a chat column is running, the
+ * own ``chatConversations`` index and, when an agent column is running, the
  * agent server's session listing (the same source the old conversations
  * drawer read — it backfills conversations that predate the index).
  *
- * - ``recent``: closed conversations (open ones excluded) for the Recent list.
+ * - ``recent``: indexed conversations without active columns; callers group
+ *   project-associated entries and leave the rest in Recents.
  * - ``sessionTitles``: titles for EVERY known conversation, open ones
  *   included — the Open rows' labels, so a resumed or migrated conversation
  *   isn't stuck reading "New chat".
@@ -33,13 +33,13 @@ export function useRecentConversations(tabs: CodeTab[]): {
   const store = useStore(persistedStoreApi.$atom);
   const [liveSessions, setLiveSessions] = useState<SessionItem[]>([]);
 
-  const chatTabKey = tabs
-    .filter(isChatColumn)
+  const agentTabKey = tabs
+    .filter((tab) => !tab.customAppId && Boolean(tab.sessionId))
     .map((t) => t.id)
     .join(',');
 
   useEffect(() => {
-    const ids = chatTabKey.split(',').filter(Boolean);
+    const ids = agentTabKey.split(',').filter(Boolean);
     let cancelled = false;
     const load = async () => {
       for (const id of ids) {
@@ -54,7 +54,7 @@ export function useRecentConversations(tabs: CodeTab[]): {
           }
           return;
         } catch {
-          // Column mid-restart — try the next chat column.
+          // Column mid-restart — try the next agent column.
         }
       }
     };
@@ -67,7 +67,7 @@ export function useRecentConversations(tabs: CodeTab[]): {
       clearInterval(interval);
       offRunEnd();
     };
-  }, [chatTabKey]);
+  }, [agentTabKey]);
 
   return useMemo(() => {
     const open = new Set(tabs.map((t) => t.sessionId).filter(Boolean));

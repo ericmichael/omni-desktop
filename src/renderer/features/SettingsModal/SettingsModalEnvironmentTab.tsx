@@ -1,9 +1,12 @@
-import { makeStyles, tokens } from '@fluentui/react-components';
-import { Add20Regular, Delete20Regular } from '@fluentui/react-icons';
+import { Plus, Trash2 } from 'lucide-react';
 import type { ChangeEvent } from 'react';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 
-import { Button, Card, IconButton, Input, SaveBar, SectionLabel } from '@/renderer/ds';
+import { SaveBar } from '@/renderer/ds/SaveBar';
+import { Button } from '@/renderer/ds/ui/button';
+import { Card, CardContent } from '@/renderer/ds/ui/card';
+import { Input } from '@/renderer/ds/ui/input';
+import { SettingsPane, SettingsSection } from '@/renderer/features/SettingsModal/SettingsLayout';
 import { agentConfigApi, configApi } from '@/renderer/services/config';
 import { isElectron } from '@/renderer/services/ipc';
 
@@ -43,38 +46,7 @@ function serializeEnvLines(lines: EnvLine[]): string {
     .join('\n');
 }
 
-const useStyles = makeStyles({
-  root: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalM },
-  sectionLabelSpaced: { marginTop: tokens.spacingVerticalS },
-  filePath: {
-    fontSize: tokens.fontSizeBase300,
-    color: tokens.colorNeutralForeground2,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    '@media (min-width: 640px)': { fontSize: tokens.fontSizeBase200 },
-  },
-  comment: {
-    fontSize: tokens.fontSizeBase300,
-    color: tokens.colorNeutralForeground3,
-    fontFamily: 'monospace',
-    opacity: 0.6,
-    '@media (min-width: 640px)': { fontSize: tokens.fontSizeBase200 },
-  },
-  addButton: { alignSelf: 'flex-start', marginTop: tokens.spacingVerticalXXS },
-  entryRow: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS },
-  flex1: { flex: '1 1 0' },
-  flex2: { flex: '2 1 0' },
-  iconMr: { marginRight: tokens.spacingHorizontalXS },
-  equals: {
-    color: tokens.colorNeutralForeground3,
-    fontSize: tokens.fontSizeBase300,
-    '@media (min-width: 640px)': { fontSize: tokens.fontSizeBase200 },
-  },
-});
-
 export const SettingsModalEnvironmentTab = memo(() => {
-  const styles = useStyles();
   const [envFilePath, setEnvFilePath] = useState<string | null>(null);
   const [lines, setLines] = useState<EnvLine[]>([]);
   const [dirty, setDirty] = useState(false);
@@ -137,42 +109,48 @@ export const SettingsModalEnvironmentTab = memo(() => {
   }, [lines]);
 
   return (
-    <div className={styles.root}>
+    <SettingsPane>
       {/* The on-disk path is meaningful only on desktop; in hosted mode `.env`
           is injected straight into the agent env (no file). */}
       {isElectron && (
-        <>
-          <SectionLabel>Environment File</SectionLabel>
+        <SettingsSection title="Environment file">
           <Card>
-            <span className={styles.filePath}>{envFilePath ?? 'Loading\u2026'}</span>
+            <CardContent>
+              <span className="text-sm text-muted-foreground overflow-hidden text-ellipsis whitespace-nowrap sm:text-xs">
+                {envFilePath ?? 'Loading\u2026'}
+              </span>
+            </CardContent>
           </Card>
-        </>
+        </SettingsSection>
       )}
 
-      <SectionLabel className={styles.sectionLabelSpaced}>Variables</SectionLabel>
-      <Card className={styles.root}>
-        {lines.map((line, i) => {
-          if (line.kind === 'blank') {
-            return null;
-          }
-          if (line.kind === 'comment') {
-            return (
-              <div key={i} className={styles.comment}>
-                {line.text}
-              </div>
-            );
-          }
-          return <EnvEntryRow key={i} index={i} line={line} onUpdate={updateEntry} onRemove={removeEntry} />;
-        })}
+      <SettingsSection title="Variables">
+        <Card>
+          <CardContent className="flex flex-col gap-4">
+            {lines.map((line, i) => {
+              if (line.kind === 'blank') {
+                return null;
+              }
+              if (line.kind === 'comment') {
+                return (
+                  <div key={i} className="text-sm text-muted-foreground font-mono opacity-60 sm:text-xs">
+                    {line.text}
+                  </div>
+                );
+              }
+              return <EnvEntryRow key={i} index={i} line={line} onUpdate={updateEntry} onRemove={removeEntry} />;
+            })}
 
-        <Button size="sm" variant="ghost" onClick={addEntry} className={styles.addButton}>
-          <Add20Regular className={styles.iconMr} />
-          Add variable
-        </Button>
-      </Card>
+            <Button size="sm" variant="ghost" onClick={addEntry} className="self-start mt-0.5">
+              <Plus className="mr-1" />
+              Add variable
+            </Button>
+          </CardContent>
+        </Card>
+      </SettingsSection>
 
       <SaveBar onSave={save} dirty={dirty} saving={saving} error={error} />
-    </div>
+    </SettingsPane>
   );
 });
 SettingsModalEnvironmentTab.displayName = 'SettingsModalEnvironmentTab';
@@ -189,7 +167,6 @@ const EnvEntryRow = memo(
     onUpdate: (index: number, field: 'key' | 'value', value: string) => void;
     onRemove: (index: number) => void;
   }) => {
-    const styles = useStyles();
     const onChangeKey = useCallback(
       (e: ChangeEvent<HTMLInputElement>) => {
         onUpdate(index, 'key', e.target.value);
@@ -207,19 +184,13 @@ const EnvEntryRow = memo(
     }, [index, onRemove]);
 
     return (
-      <div className={styles.entryRow}>
-        <Input type="text" value={line.key} onChange={onChangeKey} placeholder="KEY" mono className={styles.flex1} />
-        <span className={styles.equals}>=</span>
-        <Input
-          size="sm"
-          type="text"
-          value={line.value}
-          onChange={onChangeValue}
-          placeholder="value"
-          mono
-          className={styles.flex2}
-        />
-        <IconButton aria-label="Remove variable" icon={<Delete20Regular />} size="sm" onClick={onClickRemove} />
+      <div className="flex items-center gap-2">
+        <Input type="text" value={line.key} onChange={onChangeKey} placeholder="KEY" className="flex-1" />
+        <span className="text-muted-foreground text-sm sm:text-xs">=</span>
+        <Input type="text" value={line.value} onChange={onChangeValue} placeholder="value" className="grow-2 basis-0" />
+        <Button type="button" variant="ghost" size="icon-sm" aria-label="Remove variable" onClick={onClickRemove}>
+          <Trash2 />
+        </Button>
       </div>
     );
   }

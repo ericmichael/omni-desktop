@@ -7,10 +7,7 @@
  * the caller injects a tenant-aware `getProjectDir(event, projectId)`.
  */
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import path from 'path';
-
 import { writeMarimoAiConfig } from '@/main/extensions/marimo-config';
-import { ensureNotebookCssReference, writeGlassCss } from '@/main/extensions/marimo-glass';
 import type { PageManager } from '@/main/page-manager';
 import type { IIpcListener } from '@/shared/ipc-listener';
 import type { ProjectId } from '@/shared/types';
@@ -51,14 +48,11 @@ export function registerPageHandlers(
     }
     return { filePath, projectDir };
   });
-  h('page:prepare-notebook', async (m, event, pageId, glassEnabled) => {
+  h('page:prepare-notebook', async (m, event, pageId) => {
     const filePath = m.getNotebookFilePath(pageId);
     if (!filePath) {
       return;
     }
-    const pagesDir = path.dirname(filePath);
-    await writeGlassCss(pagesDir, glassEnabled);
-    await ensureNotebookCssReference(filePath);
     // Wire the launcher's default model into marimo via .marimo.toml in the
     // project directory (marimo searches up from cwd for it). Only writes
     // when a default model with an api key is configured; refuses to
@@ -71,12 +65,5 @@ export function registerPageHandlers(
       }
     }
   });
-  h('page:set-notebook-glass', async (_m, _e, projectDir, enabled) => {
-    // The renderer passes the project's working directory; notebook files
-    // (and the glass CSS) live in `<projectDir>/pages/`.
-    const pagesDir = path.join(projectDir, 'pages');
-    await writeGlassCss(pagesDir, enabled);
-  });
-
   return channels;
 }

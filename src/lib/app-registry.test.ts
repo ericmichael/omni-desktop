@@ -11,7 +11,7 @@ describe('buildAppRegistry', () => {
 
   it('appends custom apps after builtins when order is higher', () => {
     const custom: CustomAppEntry[] = [
-      { id: 'teams', label: 'Teams', icon: 'People20Regular', url: 'https://teams.microsoft.com', order: 50 },
+      { id: 'teams', label: 'Teams', icon: 'Users', url: 'https://teams.microsoft.com', order: 50 },
     ];
     const registry = buildAppRegistry(custom);
     expect(registry).toHaveLength(BUILTIN_APPS.length + 1);
@@ -25,8 +25,8 @@ describe('buildAppRegistry', () => {
 
   it('sorts custom apps by order among builtins', () => {
     const custom: CustomAppEntry[] = [
-      { id: 'app-a', label: 'A', icon: 'Star20Regular', url: 'https://a.com', order: 15 },
-      { id: 'app-b', label: 'B', icon: 'Star20Regular', url: 'https://b.com', order: 5 },
+      { id: 'app-a', label: 'A', icon: 'Star', url: 'https://a.com', order: 15 },
+      { id: 'app-b', label: 'B', icon: 'Star', url: 'https://b.com', order: 5 },
     ];
     const registry = buildAppRegistry(custom);
     const ids = registry.map((a) => a.id);
@@ -34,7 +34,7 @@ describe('buildAppRegistry', () => {
   });
 
   it('preserves stable order for equal-order items', () => {
-    const custom: CustomAppEntry[] = [{ id: 'x', label: 'X', icon: 'Star20Regular', url: 'https://x.com', order: 0 }];
+    const custom: CustomAppEntry[] = [{ id: 'x', label: 'X', icon: 'Star', url: 'https://x.com', order: 0 }];
     const registry = buildAppRegistry(custom);
     // chat (order 0) comes before x (order 0) because builtins are first in the spread
     expect(registry[0]!.id).toBe('chat');
@@ -43,8 +43,8 @@ describe('buildAppRegistry', () => {
 
   it('defaults custom apps to columnScoped=false and respects opt-in', () => {
     const custom: CustomAppEntry[] = [
-      { id: 'a', label: 'A', icon: 'Star20Regular', url: 'https://a.com', order: 50 },
-      { id: 'b', label: 'B', icon: 'Star20Regular', url: 'https://b.com', order: 60, columnScoped: true },
+      { id: 'a', label: 'A', icon: 'Star', url: 'https://a.com', order: 50 },
+      { id: 'b', label: 'B', icon: 'Star', url: 'https://b.com', order: 60, columnScoped: true },
     ];
     const registry = buildAppRegistry(custom);
     const a = registry.find((r) => r.id === 'a');

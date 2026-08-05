@@ -1,6 +1,3 @@
-import './yoopta-fluent.css';
-
-import { makeStyles, tokens } from '@fluentui/react-components';
 import Accordion from '@yoopta/accordion';
 import Blockquote from '@yoopta/blockquote';
 import Callout from '@yoopta/callout';
@@ -340,33 +337,6 @@ const EditorFloatingBlockActions = () => {
 };
 
 // ---------------------------------------------------------------------------
-// Styles
-// ---------------------------------------------------------------------------
-
-const useStyles = makeStyles({
-  root: {
-    minHeight: '80px',
-    paddingLeft: tokens.spacingHorizontalM,
-    paddingRight: tokens.spacingHorizontalM,
-    paddingTop: tokens.spacingVerticalS,
-    paddingBottom: tokens.spacingVerticalS,
-    fontSize: tokens.fontSizeBase300,
-    lineHeight: tokens.lineHeightBase300,
-    // Override dnd-kit sortable transition to exclude opacity.
-    // The default includes "opacity 200ms ease" which causes blocks to
-    // become invisible when Yoopta inserts/splits blocks on Enter,
-    // because dnd-kit's drop animation sets active elements to opacity:0.
-    '--yoopta-ui-block-dnd-transition': 'transform 200ms ease',
-    // Force sortable blocks to always be fully opaque
-    '& .yoopta-ui-block-dnd-sortable': {
-      opacity: '1 !important',
-    },
-  },
-});
-
-const EDITOR_STYLE = { width: '100%', paddingBottom: 40 };
-
-// ---------------------------------------------------------------------------
 // Deserialization workarounds
 // ---------------------------------------------------------------------------
 
@@ -409,7 +379,6 @@ type ContextEditorProps = {
 };
 
 export const ContextEditor = memo(({ initialMarkdown, onChangeMarkdown }: ContextEditorProps) => {
-  const styles = useStyles();
   const initializedRef = useRef(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -468,11 +437,11 @@ export const ContextEditor = memo(({ initialMarkdown, onChangeMarkdown }: Contex
   );
 
   return (
-    <div ref={containerRef} className={styles.root}>
+    <div ref={containerRef} className="min-h-20 pl-4 pr-4 pt-2 pb-2 text-sm leading-5">
       <BlockDndContext editor={editor}>
         <YooptaEditor
           editor={editor}
-          style={EDITOR_STYLE}
+          className="w-full pb-10"
           onChange={handleChange}
           renderBlock={renderBlock}
           placeholder="Describe your project — goals, constraints, context... (type / for commands)"

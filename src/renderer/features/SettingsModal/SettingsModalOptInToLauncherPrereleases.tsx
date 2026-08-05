@@ -1,42 +1,31 @@
-import { makeStyles, tokens } from '@fluentui/react-components';
-import { Beaker20Filled } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
+import { Beaker } from 'lucide-react';
 import { memo, useCallback } from 'react';
 
-import { Checkbox, FormField } from '@/renderer/ds';
+import { Checkbox } from '@/renderer/ds/ui/checkbox';
+import { Field, FieldLabel } from '@/renderer/ds/ui/field';
 import { persistedStoreApi } from '@/renderer/services/store';
 
-const useStyles = makeStyles({
-  root: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalS },
-  labelRow: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS },
-  labelIcon: { color: tokens.colorPaletteYellowForeground1 },
-  hint: {
-    fontSize: tokens.fontSizeBase300,
-    color: tokens.colorNeutralForeground3,
-    '@media (min-width: 640px)': { fontSize: tokens.fontSizeBase200 },
-  },
-});
-
 export const SettingsModalOptInToLauncherPrereleases = memo(() => {
-  const styles = useStyles();
   const { optInToLauncherPrereleases } = useStore(persistedStoreApi.$atom);
   const onChange = useCallback((checked: boolean) => {
     persistedStoreApi.setKey('optInToLauncherPrereleases', checked);
   }, []);
 
   return (
-    <div className={styles.root}>
-      <FormField
-        label={
-          <span className={styles.labelRow}>
-            <Beaker20Filled className={styles.labelIcon} />
-            Opt-in to Launcher Prereleases
-          </span>
-        }
-      >
-        <Checkbox checked={optInToLauncherPrereleases} onCheckedChange={onChange} />
-      </FormField>
-      <span className={styles.hint}>
+    <div className="flex flex-col gap-2">
+      <Field orientation="horizontal" className="justify-between gap-4">
+        <div className="min-w-0">
+          <FieldLabel>
+            <span className="flex items-center gap-2">
+              <Beaker className="text-warning" />
+              Opt-in to Launcher Prereleases
+            </span>
+          </FieldLabel>
+        </div>
+        <Checkbox checked={optInToLauncherPrereleases} onCheckedChange={(checked) => onChange(checked === true)} />
+      </Field>
+      <span className="text-sm text-muted-foreground sm:text-xs">
         Check for prerelease versions of the launcher on startup. If disabled, the launcher will only check for stable
         releases.
       </span>

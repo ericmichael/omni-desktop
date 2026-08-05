@@ -1,120 +1,22 @@
-import { makeStyles, Spinner, tokens } from '@fluentui/react-components';
-import { ErrorCircle20Regular, PuzzlePiece20Filled } from '@fluentui/react-icons';
-import { useStore } from '@nanostores/react';
+import { CircleX, Puzzle } from 'lucide-react';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { Webview, type WebviewHandle } from '@/renderer/common/Webview';
-import { Button } from '@/renderer/ds';
+import { Webview } from '@/renderer/common/Webview';
+import { Button } from '@/renderer/ds/ui/button';
+import { Spinner } from '@/renderer/ds/ui/spinner';
 import { emitter, ipc } from '@/renderer/services/ipc';
-import { $glassEnabled } from '@/renderer/theme/use-glass';
 import type { ExtensionInstanceState } from '@/shared/extensions';
 import type { PageId } from '@/shared/types';
 
 const MARIMO_EXTENSION_ID = 'marimo';
 
-const useStyles = makeStyles({
-  root: { display: 'flex', flexDirection: 'column', width: '100%', height: '100%' },
-  state: {
-    flex: 1,
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: tokens.spacingVerticalM,
-    padding: tokens.spacingHorizontalXL,
-    color: tokens.colorNeutralForeground2,
-  },
-  title: { fontWeight: 600, fontSize: tokens.fontSizeBase400 },
-  hint: {
-    fontSize: tokens.fontSizeBase200,
-    color: tokens.colorNeutralForeground3,
-    textAlign: 'center',
-    maxWidth: '480px',
-  },
-  errorIcon: { color: tokens.colorPaletteRedForeground1 },
-  errorBox: {
-    width: '100%',
-    maxWidth: '640px',
-    maxHeight: '240px',
-    overflow: 'auto',
-    padding: tokens.spacingHorizontalM,
-    border: `1px solid ${tokens.colorNeutralStroke2}`,
-    borderRadius: tokens.borderRadiusMedium,
-    backgroundColor: tokens.colorNeutralBackground2,
-    fontFamily: tokens.fontFamilyMonospace,
-    fontSize: tokens.fontSizeBase100,
-    whiteSpace: 'pre-wrap',
-  },
-  webviewWrap: { flex: 1, minHeight: 0, position: 'relative' },
-});
-
 type Paths = { filePath: string; projectDir: string };
 
 export const NotebookView = memo(({ pageId }: { pageId: PageId }) => {
-  const styles = useStyles();
   const [paths, setPaths] = useState<Paths | null>(null);
   const [status, setStatus] = useState<ExtensionInstanceState>({ state: 'idle' });
   const [enabled, setEnabled] = useState<boolean | null>(null);
   const cwdRef = useRef<string | null>(null);
-
-  // Glass mode tracks the launcher's Code Deck background — when set, the
-  // chrome goes transparent/blurred and we want marimo to follow suit.
-  // Marimo styling is delivered via its own per-notebook `css_file` argument
-  // (a sidecar file the main process writes/rewrites), not runtime DOM
-  // injection — that path doesn't work for iframes (browser/server mode) and
-  // marimo's HTML pipeline is more reliable anyway.
-  const isGlass = useStore($glassEnabled);
-  // Mirror isGlass into a ref so the ensure-instance effect can read the
-  // current value without listing isGlass as a dep (which would unnecessarily
-  // tear down marimo on every glass toggle).
-  const isGlassRef = useRef(isGlass);
-  useEffect(() => {
-    isGlassRef.current = isGlass;
-  }, [isGlass]);
-
-  const webviewRef = useRef<WebviewHandle>(null);
-  const lastAppliedGlassRef = useRef<boolean | null>(null);
-
-  // When the launcher's glass mode toggles AFTER marimo is already running,
-  // rewrite the CSS sidecar file and reload the webview so marimo re-inlines
-  // the new content. Skipped on the first run for a given (paths, isGlass)
-  // pair because `prepare-notebook` (below) already wrote the right content
-  // before the webview ever loaded.
-  useEffect(() => {
-    if (!paths) {
-      return;
-    }
-    if (status.state !== 'running') {
-      return;
-    }
-    if (lastAppliedGlassRef.current === isGlass) {
-      return;
-    }
-
-    // First time we observe the running state for this paths value, just
-    // record the current isGlass without reloading — prepare-notebook already
-    // primed the file.
-    if (lastAppliedGlassRef.current === null) {
-      lastAppliedGlassRef.current = isGlass;
-      return;
-    }
-
-    lastAppliedGlassRef.current = isGlass;
-    void (async () => {
-      try {
-        await emitter.invoke('page:set-notebook-glass', paths.projectDir, isGlass);
-        webviewRef.current?.reload();
-      } catch {
-        // The status pane will surface marimo errors; CSS rewrite failures
-        // are non-fatal — the notebook just keeps the previous glass state.
-      }
-    })();
-  }, [isGlass, paths, status.state]);
-
-  // Reset the "first apply" tracker when the open notebook changes.
-  useEffect(() => {
-    lastAppliedGlassRef.current = null;
-  }, [paths]);
 
   // Resolve on-disk paths whenever the pageId changes.
   useEffect(() => {
@@ -182,9 +84,8 @@ export const NotebookView = memo(({ pageId }: { pageId: PageId }) => {
 
     void (async () => {
       try {
-        // Prime the marimo glass CSS sidecar and migrate the notebook to
-        // reference it. Idempotent — safe to call on every open.
-        await emitter.invoke('page:prepare-notebook', pageId, isGlassRef.current);
+        // Prime the notebook's marimo AI configuration before launch.
+        await emitter.invoke('page:prepare-notebook', pageId);
         if (cancelled) {
           return;
         }
@@ -192,7 +93,7 @@ export const NotebookView = memo(({ pageId }: { pageId: PageId }) => {
         // first event. The `cancelled` guard is load-bearing: without it, a
         // late resolve from this effect's closure could clobber a newer
         // status update that arrived via `extension:status-changed` on the
-        // next effect run (e.g. rapid notebook switches or glass toggles).
+        // next effect run (for example, during rapid notebook switches).
         const current = await emitter.invoke('extension:get-instance-status', MARIMO_EXTENSION_ID, cwd);
         if (cancelled) {
           return;
@@ -231,10 +132,10 @@ export const NotebookView = memo(({ pageId }: { pageId: PageId }) => {
 
   if (enabled === false) {
     return (
-      <div className={styles.state}>
-        <PuzzlePiece20Filled />
-        <div className={styles.title}>Marimo extension is disabled</div>
-        <div className={styles.hint}>
+      <div className="flex-1 flex flex-col items-center justify-center gap-4 p-6 text-muted-foreground">
+        <Puzzle className="size-8" />
+        <div className="font-semibold text-base">Marimo extension is disabled</div>
+        <div className="text-xs text-muted-foreground text-center max-w-lg">
           Enable the Marimo Notebooks extension in Settings → Extensions to open this notebook.
         </div>
       </div>
@@ -243,10 +144,10 @@ export const NotebookView = memo(({ pageId }: { pageId: PageId }) => {
 
   if (!paths || enabled === null || status.state === 'idle' || status.state === 'starting') {
     return (
-      <div className={styles.state}>
-        <Spinner size="medium" />
-        <div className={styles.title}>Preparing notebook environment…</div>
-        <div className={styles.hint}>
+      <div className="flex-1 flex flex-col items-center justify-center gap-4 p-6 text-muted-foreground">
+        <Spinner />
+        <div className="font-semibold text-base">Preparing notebook environment…</div>
+        <div className="text-xs text-muted-foreground text-center max-w-lg">
           First open of a notebook with new dependencies can take 10–30 seconds while uv resolves the environment.
         </div>
       </div>
@@ -255,20 +156,24 @@ export const NotebookView = memo(({ pageId }: { pageId: PageId }) => {
 
   if (status.state === 'error') {
     return (
-      <div className={styles.state}>
-        <ErrorCircle20Regular className={styles.errorIcon} />
-        <div className={styles.title}>Failed to start marimo</div>
-        <div className={styles.hint}>{status.error}</div>
-        {status.lastStderr && <pre className={styles.errorBox}>{status.lastStderr.slice(-2000)}</pre>}
+      <div className="flex-1 flex flex-col items-center justify-center gap-4 p-6 text-muted-foreground">
+        <CircleX className={`size-6 ${'text-destructive'}`} />
+        <div className="font-semibold text-base">Failed to start marimo</div>
+        <div className="text-xs text-muted-foreground text-center max-w-lg">{status.error}</div>
+        {status.lastStderr && (
+          <pre className="w-full max-w-2xl max-h-60 overflow-auto p-4 border border-border rounded-lg bg-card font-mono text-xs whitespace-pre-wrap">
+            {status.lastStderr.slice(-2000)}
+          </pre>
+        )}
         <Button onClick={onRetry}>Retry</Button>
       </div>
     );
   }
 
   return (
-    <div className={styles.root}>
-      <div className={styles.webviewWrap}>
-        <Webview ref={webviewRef} src={webviewSrc} />
+    <div className="flex flex-col w-full h-full">
+      <div className="flex-1 min-h-0 relative">
+        <Webview src={webviewSrc} />
       </div>
     </div>
   );

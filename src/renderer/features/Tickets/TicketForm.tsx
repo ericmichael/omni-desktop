@@ -1,8 +1,14 @@
-import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
 import { useStore } from '@nanostores/react';
+import { Check, ChevronsUpDown } from 'lucide-react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 
-import { Button, Input, Select, Switch, Textarea } from '@/renderer/ds';
+import { Button } from '@/renderer/ds/ui/button';
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/renderer/ds/ui/command';
+import { Input } from '@/renderer/ds/ui/input';
+import { NativeSelect as Select } from '@/renderer/ds/ui/native-select';
+import { Popover, PopoverContent, PopoverTrigger } from '@/renderer/ds/ui/popover';
+import { Switch } from '@/renderer/ds/ui/switch';
+import { Textarea } from '@/renderer/ds/ui/textarea';
 import { $milestones } from '@/renderer/features/Initiatives/state';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { GitRepoInfo, MilestoneId, ProjectId, TicketPriority } from '@/shared/types';
@@ -10,41 +16,7 @@ import { firstSource } from '@/shared/types';
 
 import { $activeMilestoneId, $tickets, ticketApi } from './state';
 
-const useStyles = makeStyles({
-  root: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalM,
-    borderRadius: tokens.borderRadiusMedium,
-    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
-    backgroundColor: tokens.colorNeutralBackground2,
-    padding: tokens.spacingVerticalL,
-  },
-  fieldRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalM,
-    flexWrap: 'wrap',
-  },
-  fieldGroup: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-  },
-  fieldLabel: {
-    fontSize: tokens.fontSizeBase200,
-    fontWeight: tokens.fontWeightMedium,
-    color: tokens.colorNeutralForeground3,
-  },
-  actions: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-  },
-});
-
 export const TicketForm = memo(({ projectId, onClose }: { projectId: ProjectId; onClose: () => void }) => {
-  const styles = useStyles();
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [priority, setPriority] = useState<TicketPriority>('medium');
@@ -105,10 +77,21 @@ export const TicketForm = memo(({ projectId, onClose }: { projectId: ProjectId; 
     setPriority(e.target.value as TicketPriority);
   }, []);
 
-  const handleBlockedByChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
-    const selected = Array.from(e.target.selectedOptions, (opt) => opt.value);
-    setBlockedBy(selected);
+  const handleToggleBlocker = useCallback((ticketId: string) => {
+    setBlockedBy((current) =>
+      current.includes(ticketId) ? current.filter((id) => id !== ticketId) : [...current, ticketId]
+    );
   }, []);
+
+  const blockedByLabel = useMemo(() => {
+    if (blockedBy.length === 0) {
+      return 'None';
+    }
+    if (blockedBy.length === 1) {
+      return projectTickets.find((ticket) => ticket.id === blockedBy[0])?.title ?? '1 task';
+    }
+    return `${blockedBy.length} tasks`;
+  }, [blockedBy, projectTickets]);
 
   const handleSubmit = useCallback(async () => {
     if (!title.trim() || isSubmitting) {
@@ -148,7 +131,7 @@ export const TicketForm = memo(({ projectId, onClose }: { projectId: ProjectId; 
   ]);
 
   return (
-    <div className={styles.root}>
+    <div className="flex flex-col gap-4 rounded-lg border border-border bg-card p-5">
       <Input
         aria-label="Task title"
         value={title}
@@ -156,6 +139,7 @@ export const TicketForm = memo(({ projectId, onClose }: { projectId: ProjectId; 
         placeholder="Task title..."
         className="w-full"
       />
+
       <Textarea
         aria-label="Task description"
         value={description}
@@ -163,11 +147,12 @@ export const TicketForm = memo(({ projectId, onClose }: { projectId: ProjectId; 
         placeholder="Description (optional)..."
         rows={2}
       />
-      <div className={styles.fieldRow}>
+
+      <div className="flex items-center gap-4 flex-wrap">
         {projectMilestones.length > 1 && (
-          <div className={styles.fieldGroup}>
-            <label className={styles.fieldLabel}>Milestone</label>
-            <Select value={milestoneId} onChange={(e) => setMilestoneId(e.target.value)} size="sm">
+          <div className="flex items-center gap-2">
+            <label className="text-xs font-medium text-muted-foreground">Milestone</label>
+            <Select value={milestoneId} onChange={(e) => setMilestoneId(e.target.value)}>
               {projectMilestones.map((i) => (
                 <option key={i.id} value={i.id}>
                   {i.title}
@@ -176,9 +161,9 @@ export const TicketForm = memo(({ projectId, onClose }: { projectId: ProjectId; 
             </Select>
           </div>
         )}
-        <div className={styles.fieldGroup}>
-          <label className={styles.fieldLabel}>Priority</label>
-          <Select value={priority} onChange={handlePriorityChange} size="sm">
+        <div className="flex items-center gap-2">
+          <label className="text-xs font-medium text-muted-foreground">Priority</label>
+          <Select value={priority} onChange={handlePriorityChange}>
             <option value="low">Low</option>
             <option value="medium">Medium</option>
             <option value="high">High</option>
@@ -186,28 +171,52 @@ export const TicketForm = memo(({ projectId, onClose }: { projectId: ProjectId; 
           </Select>
         </div>
         {projectTickets.length > 0 && (
-          <div className={styles.fieldGroup}>
-            <label className={styles.fieldLabel}>Blocked by</label>
-            <Select multiple value={blockedBy} onChange={handleBlockedByChange} size="sm" className="max-h-20">
-              {projectTickets.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.title}
-                </option>
-              ))}
-            </Select>
+          <div className="flex items-center gap-2">
+            <label className="text-xs font-medium text-muted-foreground">Blocked by</label>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button type="button" variant="outline" className="w-48 justify-between font-normal">
+                  <span className="truncate">{blockedByLabel}</span>
+                  <ChevronsUpDown className="opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-64 p-0" align="start">
+                <Command>
+                  <CommandInput placeholder="Search tasks…" />
+                  <CommandList>
+                    <CommandEmpty>No tasks found.</CommandEmpty>
+                    <CommandGroup>
+                      {projectTickets.map((ticket) => {
+                        const selected = blockedBy.includes(ticket.id);
+                        return (
+                          <CommandItem
+                            key={ticket.id}
+                            value={`${ticket.title} ${ticket.id}`}
+                            onSelect={() => handleToggleBlocker(ticket.id)}
+                          >
+                            <Check className={selected ? 'opacity-100' : 'opacity-0'} />
+                            <span className="truncate">{ticket.title}</span>
+                          </CommandItem>
+                        );
+                      })}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
           </div>
         )}
       </div>
       {projectHasRepo && gitInfo?.isGitRepo && (
-        <div className={styles.fieldRow}>
-          <div className={styles.fieldGroup}>
-            <label className={styles.fieldLabel}>Isolated worktree</label>
+        <div className="flex items-center gap-4 flex-wrap">
+          <div className="flex items-center gap-2">
+            <label className="text-xs font-medium text-muted-foreground">Isolated worktree</label>
             <Switch checked={useWorktree} onCheckedChange={setUseWorktree} />
           </div>
           {useWorktree && (
-            <div className={styles.fieldGroup}>
-              <label className={styles.fieldLabel}>Branch</label>
-              <Select value={branch} onChange={(e) => setBranch(e.target.value)} size="sm">
+            <div className="flex items-center gap-2">
+              <label className="text-xs font-medium text-muted-foreground">Branch</label>
+              <Select value={branch} onChange={(e) => setBranch(e.target.value)}>
                 {gitInfo.branches.map((b) => (
                   <option key={b} value={b}>
                     {b}
@@ -218,8 +227,8 @@ export const TicketForm = memo(({ projectId, onClose }: { projectId: ProjectId; 
           )}
         </div>
       )}
-      <div className={styles.actions}>
-        <Button onClick={handleSubmit} isDisabled={!title.trim() || isSubmitting}>
+      <div className="flex items-center gap-2">
+        <Button onClick={handleSubmit} disabled={!title.trim() || isSubmitting}>
           Create Ticket
         </Button>
         <Button variant="ghost" onClick={onClose}>

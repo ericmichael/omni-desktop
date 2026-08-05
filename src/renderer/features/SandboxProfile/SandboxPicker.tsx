@@ -12,11 +12,20 @@
  * an online/offline indicator pulled from `$machines`.
  */
 
-import { Checkmark16Regular, ChevronDown16Regular, Cube16Regular } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
-import { memo, useCallback } from 'react';
+import { Box, ChevronDown } from 'lucide-react';
+import { memo } from 'react';
 
-import { Menu, MenuItem, MenuList, MenuPopover, MenuTrigger } from '@/renderer/ds';
+import { Button } from '@/renderer/ds/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/renderer/ds/ui/dropdown-menu';
 import { $sandboxProfiles } from '@/renderer/features/Sandboxes/state';
 import { $machines } from '@/renderer/services/machines';
 
@@ -53,77 +62,55 @@ export const SandboxPicker = memo(({ value, onChange, context, disabled, compact
   const discovered = useStore($sandboxProfiles);
   const names = getAvailableProfileNames({ ...context, machines, discovered });
 
-  const handleSelect = useCallback(
-    (name: string) => {
-      if (name !== value) {
-        onChange(name);
-      }
-    },
-    [onChange, value]
-  );
-
   // Two groups: cloud (everything that isn't `local:*`) and "My computers".
   // We keep ordering inside each group as supplied by `getAvailableProfileNames`.
   const cloudNames = names.filter((n) => !isLocalProfile(n));
   const localNames = names.filter(isLocalProfile);
 
   return (
-    <Menu>
-      <MenuTrigger disableButtonEnhancement>
-        <button
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
           type="button"
+          size="sm"
+          variant="outline"
           disabled={disabled}
           className={
             compact
-              ? 'inline-flex min-w-0 max-w-24 items-center justify-between gap-1 px-2 py-1 rounded-md border border-stroke-1 bg-bgCard text-fg-muted text-xs font-medium hover:bg-bgHover hover:border-stroke-2 disabled:opacity-50'
-              : 'inline-flex items-center gap-1 px-2 py-1 rounded-md border border-stroke-1 bg-bgCard text-fg-muted text-xs font-medium hover:bg-bgHover hover:border-stroke-2 disabled:opacity-50'
+              ? 'min-w-0 max-w-24 justify-between px-2 text-xs text-muted-foreground'
+              : 'px-2 text-xs text-muted-foreground'
           }
         >
           <span className="inline-flex min-w-0 items-center gap-1">
-            {!compact && <Cube16Regular />}
+            {!compact && <Box />}
             <span className="truncate">
               {compact ? getCompactProfileLabel(value) : getProfileMenuLabel(value, machines)}
             </span>
           </span>
-          <ChevronDown16Regular className="shrink-0" />
-        </button>
-      </MenuTrigger>
-      <MenuPopover>
-        <MenuList>
-          {cloudNames.map((name) => {
-            const selected = name === value;
-            return (
-              <MenuItem
-                key={name}
-                onClick={() => handleSelect(name)}
-                icon={selected ? <Checkmark16Regular className="text-brand" /> : <span className="w-4" />}
-              >
-                {getProfileMenuLabel(name, machines)}
-              </MenuItem>
-            );
-          })}
+          <ChevronDown className="shrink-0" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent>
+        <DropdownMenuRadioGroup value={value} onValueChange={onChange}>
+          {cloudNames.map((name) => (
+            <DropdownMenuRadioItem key={name} value={name}>
+              {getProfileMenuLabel(name, machines)}
+            </DropdownMenuRadioItem>
+          ))}
           {localNames.length > 0 && (
             <>
-              <div className="px-2 py-1 text-[10px] uppercase tracking-wider text-fg-subtle border-t border-stroke-1 mt-1 pt-2">
-                My computers
-              </div>
-              {localNames.map((name) => {
-                const selected = name === value;
-                return (
-                  <MenuItem
-                    key={name}
-                    onClick={() => handleSelect(name)}
-                    icon={selected ? <Checkmark16Regular className="text-brand" /> : <span className="w-4" />}
-                  >
-                    {getProfileMenuLabel(name, machines)}
-                  </MenuItem>
-                );
-              })}
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel>My computers</DropdownMenuLabel>
+              {localNames.map((name) => (
+                <DropdownMenuRadioItem key={name} value={name}>
+                  {getProfileMenuLabel(name, machines)}
+                </DropdownMenuRadioItem>
+              ))}
             </>
           )}
-        </MenuList>
-      </MenuPopover>
-    </Menu>
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 });
 

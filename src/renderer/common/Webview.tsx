@@ -13,6 +13,10 @@ import {
   openInBrowserTab,
   type WebviewLoadError,
 } from '@/renderer/common/webview-fallback';
+import { Button } from '@/renderer/ds/ui/button';
+import { ButtonGroup } from '@/renderer/ds/ui/button-group';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/renderer/ds/ui/collapsible';
+import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from '@/renderer/ds/ui/empty';
 import { registerApp, unregisterApp, updateApp } from '@/renderer/features/AppControl/live-registry';
 import { resolveProxiedSrc, unproxyUrl } from '@/renderer/services/proxy-resolver';
 import type { AppHandleId, AppRegistrationPayload } from '@/shared/app-control-types';
@@ -798,64 +802,68 @@ export const Webview = forwardRef<
         return null;
       }
       return (
-        <div className="flex items-center justify-center w-full h-full border border-surface-border rounded-lg">
-          <span className="text-fg-muted">Not available</span>
-        </div>
+        <Empty className="h-full rounded-lg border border-border">
+          <EmptyHeader>
+            <EmptyTitle>Not available</EmptyTitle>
+          </EmptyHeader>
+        </Empty>
       );
     }
 
     if (internalError) {
       const diagnostics = getWebviewFallbackDiagnostics(internalError, src);
       return (
-        <div
-          style={{
-            display: 'flex',
-            height: '100%',
-            width: '100%',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: 24,
-          }}
-        >
-          <div style={{ display: 'flex', maxWidth: 580, flexDirection: 'column', gap: 12, textAlign: 'center' }}>
-            <div style={{ fontSize: 16, fontWeight: 600 }}>{diagnostics.title}</div>
-            <div style={{ opacity: 0.78 }}>{diagnostics.reason}</div>
-            <div>
-              <div style={{ marginBottom: 4, fontSize: 12, fontWeight: 600, opacity: 0.7 }}>Canonical URL</div>
-              <div style={{ wordBreak: 'break-all', opacity: 0.7, fontSize: 12 }}>{diagnostics.displayUrl}</div>
-            </div>
-            <div style={{ opacity: 0.7, fontSize: 12 }}>{diagnostics.instructions}</div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 8 }}>
-              <button
-                type="button"
-                onClick={() => {
-                  retryAttemptRef.current = 0;
-                  setInternalError(null);
-                  setReloadNonce((n) => n + 1);
-                }}
-              >
-                Retry
-              </button>
-              <button
-                type="button"
-                onClick={() => void navigator.clipboard.writeText(diagnostics.canonicalUrl).catch(() => {})}
-              >
-                Copy URL
-              </button>
-              <button type="button" onClick={() => openInBrowserTab(diagnostics.canonicalUrl)}>
-                Open in Browser
-              </button>
-            </div>
-            {(diagnostics.transportUrl || diagnostics.debugDescription) && (
-              <details style={{ marginTop: 4, textAlign: 'left', fontSize: 11, opacity: 0.65 }}>
-                <summary style={{ cursor: 'pointer', textAlign: 'center' }}>Details</summary>
-                {diagnostics.debugDescription && <div>Reason: {diagnostics.debugDescription}</div>}
-                {diagnostics.transportUrl && (
-                  <div style={{ wordBreak: 'break-all' }}>Proxy transport: {diagnostics.transportUrl}</div>
-                )}
-              </details>
-            )}
-          </div>
+        <div className="flex size-full items-center justify-center p-6">
+          <Empty className="max-w-xl border">
+            <EmptyHeader>
+              <EmptyTitle>{diagnostics.title}</EmptyTitle>
+              <EmptyDescription>{diagnostics.reason}</EmptyDescription>
+            </EmptyHeader>
+            <EmptyContent>
+              <div className="text-xs text-muted-foreground">
+                <div className="mb-1 font-semibold">Canonical URL</div>
+                <div className="break-all">{diagnostics.displayUrl}</div>
+              </div>
+              <p className="text-xs text-muted-foreground">{diagnostics.instructions}</p>
+              <ButtonGroup className="flex-wrap justify-center">
+                <Button
+                  type="button"
+                  onClick={() => {
+                    retryAttemptRef.current = 0;
+                    setInternalError(null);
+                    setReloadNonce((n) => n + 1);
+                  }}
+                >
+                  Retry
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => void navigator.clipboard.writeText(diagnostics.canonicalUrl).catch(() => {})}
+                >
+                  Copy URL
+                </Button>
+                <Button type="button" variant="outline" onClick={() => openInBrowserTab(diagnostics.canonicalUrl)}>
+                  Open in Browser
+                </Button>
+              </ButtonGroup>
+              {(diagnostics.transportUrl || diagnostics.debugDescription) && (
+                <Collapsible className="mt-1 text-left text-xs opacity-65">
+                  <CollapsibleTrigger asChild>
+                    <Button variant="ghost" size="sm" className="mx-auto">
+                      Details
+                    </Button>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent>
+                    {diagnostics.debugDescription && <div>Reason: {diagnostics.debugDescription}</div>}
+                    {diagnostics.transportUrl && (
+                      <div className="break-all">Proxy transport: {diagnostics.transportUrl}</div>
+                    )}
+                  </CollapsibleContent>
+                </Collapsible>
+              )}
+            </EmptyContent>
+          </Empty>
         </div>
       );
     }
@@ -871,7 +879,7 @@ export const Webview = forwardRef<
           src={src}
           {...{ useragent: embeddedUserAgent }}
           {...(partition ? { partition } : {})}
-          style={{ width: '100%', height: '100%' }}
+          className="size-full"
         />
       );
     }
@@ -881,7 +889,7 @@ export const Webview = forwardRef<
         key={reloadNonce}
         ref={callbackRef as React.RefCallback<HTMLIFrameElement>}
         src={iframeSrc}
-        style={{ width: '100%', height: '100%', border: 'none' }}
+        className="size-full border-0"
         sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
       />
     );

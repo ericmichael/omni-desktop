@@ -1,31 +1,6 @@
-import { makeStyles, tokens } from '@fluentui/react-components';
-import { Navigation20Regular, PanelRight20Regular } from '@fluentui/react-icons';
+import { Navigation, PanelRight } from 'lucide-react';
 
-import { IconButton } from '@/renderer/ds/IconButton';
-
-const useStyles = makeStyles({
-  root: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingLeft: tokens.spacingHorizontalM,
-    paddingRight: tokens.spacingHorizontalM,
-    paddingTop: tokens.spacingVerticalS,
-    paddingBottom: tokens.spacingVerticalS,
-    backgroundColor: tokens.colorNeutralBackground1,
-  },
-  leading: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-    minWidth: 0,
-  },
-  trailing: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalXS,
-  },
-});
+import { Button } from '@/renderer/ds/ui/button';
 
 export function Header({
   agentName: _agentName,
@@ -38,28 +13,34 @@ export function Header({
   onArtifactsToggle?: () => void;
   showArtifactsButton?: boolean;
 }) {
-  const styles = useStyles();
-
   return (
-    <div className={styles.root}>
-      <div className={styles.leading}>
+    <div className="flex items-center justify-between bg-background px-4 py-2">
+      <div className="flex min-w-0 items-center gap-2">
         {onMenu ? (
-          <IconButton
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
             aria-label="Toggle sidebar"
-            tooltip="Toggle sidebar"
-            icon={<Navigation20Regular />}
             onClick={onMenu}
-          />
+            title="Toggle sidebar"
+          >
+            <Navigation />
+          </Button>
         ) : null}
       </div>
-      <div className={styles.trailing}>
+      <div className="flex items-center gap-1">
         {showArtifactsButton && onArtifactsToggle ? (
-          <IconButton
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
             aria-label="Toggle artifacts"
-            tooltip="Toggle artifacts"
-            icon={<PanelRight20Regular />}
             onClick={onArtifactsToggle}
-          />
+            title="Toggle artifacts"
+          >
+            <PanelRight />
+          </Button>
         ) : null}
       </div>
     </div>

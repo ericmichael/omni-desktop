@@ -1,8 +1,7 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import { memo } from 'react';
 
-import { BodyContainer, BodyContent } from '@/renderer/common/layout';
-import { cn, Heading } from '@/renderer/ds';
+import { cn } from '@/renderer/ds/cn';
 
 const fadeVariants = {
   initial: { opacity: 0, y: 8 },
@@ -30,11 +29,12 @@ export const SessionStartupShell = memo(
     className,
     contentClassName,
   }: SessionStartupShellProps) => {
-    const toneClasses = tone === 'danger' ? 'border-red-400/20 bg-red-400/5' : 'border-transparent bg-transparent';
+    const toneClasses =
+      tone === 'danger' ? 'border-destructive/20 bg-destructive/5' : 'border-transparent bg-transparent';
 
     return (
-      <BodyContainer className="p-6">
-        <BodyContent className="justify-center items-center">
+      <div className="relative flex h-full min-h-0 w-full flex-col items-center gap-4 p-6">
+        <div className="flex h-full min-h-0 w-full flex-col items-center justify-center gap-4">
           <AnimatePresence mode="wait">
             <motion.div
               key={`${tone}-${title}-${description}`}
@@ -49,15 +49,15 @@ export const SessionStartupShell = memo(
               )}
             >
               <div className="flex flex-col items-center gap-2 text-center">
-                <span className="text-xs font-semibold uppercase tracking-[0.18em] text-fg-subtle">{eyebrow}</span>
-                <Heading size="md">{title}</Heading>
-                <p className="max-w-xl text-sm text-fg-muted text-center">{description}</p>
+                <span className="text-xs font-semibold tracking-widest text-muted-foreground uppercase">{eyebrow}</span>
+                <h2 className="font-display text-lg font-semibold tracking-tight">{title}</h2>
+                <p className="max-w-xl text-center text-sm text-muted-foreground">{description}</p>
               </div>
               <div className={cn('w-full', contentClassName)}>{children}</div>
             </motion.div>
           </AnimatePresence>
-        </BodyContent>
-      </BodyContainer>
+        </div>
+      </div>
     );
   }
 );

@@ -2,119 +2,17 @@
  * Network tab — polls `app:network-log` while mounted and renders a live
  * table of requests. Click a row to inspect request/response detail.
  */
-import { makeStyles, mergeClasses, shorthands, tokens } from '@fluentui/react-components';
-import { Delete16Regular, Search16Regular } from '@fluentui/react-icons';
+import { Search, Trash2 } from 'lucide-react';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 
 import type { NetworkLogEntry } from '@/main/app-control-cdp';
+import { cn } from '@/renderer/ds/cn';
+import { Button } from '@/renderer/ds/ui/button';
+import { InputGroup, InputGroupAddon, InputGroupInput } from '@/renderer/ds/ui/input-group';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/renderer/ds/ui/table';
+import { ToggleGroup, ToggleGroupItem } from '@/renderer/ds/ui/toggle-group';
 import { emitter } from '@/renderer/services/ipc';
 import type { AppHandleId } from '@/shared/app-control-types';
-
-const useStyles = makeStyles({
-  root: { display: 'flex', flexDirection: 'column', flex: '1 1 0', minHeight: 0 },
-  toolbar: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '6px',
-    height: '28px',
-    paddingLeft: tokens.spacingHorizontalM,
-    paddingRight: tokens.spacingHorizontalM,
-    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
-    backgroundColor: tokens.colorNeutralBackground2,
-    fontSize: tokens.fontSizeBase200,
-  },
-  input: {
-    flex: '0 0 240px',
-    height: '22px',
-    padding: '0 6px',
-    fontSize: tokens.fontSizeBase200,
-    color: tokens.colorNeutralForeground1,
-    backgroundColor: tokens.colorNeutralBackground1,
-    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
-    borderRadius: tokens.borderRadiusSmall,
-    outline: 'none',
-  },
-  filter: {
-    height: '22px',
-    paddingLeft: '8px',
-    paddingRight: '8px',
-    borderRadius: tokens.borderRadiusSmall,
-    border: 'none',
-    backgroundColor: 'transparent',
-    color: tokens.colorNeutralForeground2,
-    cursor: 'pointer',
-    fontSize: tokens.fontSizeBase200,
-    ':hover': { backgroundColor: tokens.colorSubtleBackgroundHover, color: tokens.colorNeutralForeground1 },
-  },
-  filterActive: {
-    backgroundColor: tokens.colorSubtleBackgroundHover,
-    color: tokens.colorNeutralForeground1,
-  },
-  spacer: { flex: '1 1 0' },
-  iconBtn: {
-    display: 'inline-flex',
-    width: '22px',
-    height: '22px',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: tokens.borderRadiusSmall,
-    border: 'none',
-    backgroundColor: 'transparent',
-    color: tokens.colorNeutralForeground2,
-    cursor: 'pointer',
-    ':hover': { backgroundColor: tokens.colorSubtleBackgroundHover, color: tokens.colorNeutralForeground1 },
-  },
-  counter: { fontSize: tokens.fontSizeBase100, color: tokens.colorNeutralForeground3 },
-  split: { display: 'flex', flex: '1 1 0', minHeight: 0 },
-  list: {
-    flex: '1 1 0',
-    minWidth: 0,
-    overflowY: 'auto',
-    overflowX: 'hidden',
-    fontSize: tokens.fontSizeBase100,
-    fontFamily: "ui-monospace, 'SFMono-Regular', Menlo, monospace",
-  },
-  header: {
-    display: 'grid',
-    gridTemplateColumns: '60px 60px minmax(0, 1fr) 80px 80px 80px',
-    columnGap: '8px',
-    padding: '4px 10px',
-    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
-    backgroundColor: tokens.colorNeutralBackground2,
-    color: tokens.colorNeutralForeground3,
-    fontSize: '10px',
-    textTransform: 'uppercase',
-    letterSpacing: '0.04em',
-    position: 'sticky',
-    top: 0,
-  },
-  row: {
-    display: 'grid',
-    gridTemplateColumns: '60px 60px minmax(0, 1fr) 80px 80px 80px',
-    columnGap: '8px',
-    padding: '3px 10px',
-    cursor: 'pointer',
-    borderBottom: `1px solid ${tokens.colorNeutralBackground3}`,
-    ':hover': { backgroundColor: tokens.colorSubtleBackgroundHover },
-  },
-  rowSelected: { backgroundColor: tokens.colorSubtleBackgroundSelected },
-  rowErr: { color: tokens.colorPaletteRedForeground1 },
-  rowWarn: { color: tokens.colorPaletteYellowForeground1 },
-  cell: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-  url: { color: tokens.colorNeutralForeground1 },
-  details: {
-    flex: '0 0 340px',
-    minHeight: 0,
-    overflow: 'auto',
-    padding: '10px 12px',
-    ...shorthands.borderLeft('1px', 'solid', tokens.colorNeutralStroke1),
-    backgroundColor: tokens.colorNeutralBackground2,
-    fontSize: tokens.fontSizeBase200,
-  },
-  dtLabel: { fontSize: '10px', textTransform: 'uppercase', color: tokens.colorNeutralForeground3, marginTop: '10px' },
-  dtValue: { wordBreak: 'break-all', fontFamily: "ui-monospace, 'SFMono-Regular', Menlo, monospace", fontSize: '11px' },
-  empty: { padding: '24px', textAlign: 'center', color: tokens.colorNeutralForeground4 },
-});
 
 type Filter = 'all' | 'xhr' | 'doc' | 'css' | 'js' | 'img' | 'err';
 
@@ -172,7 +70,6 @@ function formatSize(bytes?: number): string {
 }
 
 export const NetworkTab = memo(({ handleId }: { handleId: AppHandleId }) => {
-  const styles = useStyles();
   const [entries, setEntries] = useState<NetworkLogEntry[]>([]);
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
@@ -232,115 +129,138 @@ export const NetworkTab = memo(({ handleId }: { handleId: AppHandleId }) => {
   ];
 
   return (
-    <div className={styles.root}>
-      <div className={styles.toolbar}>
-        <Search16Regular />
-        <input
-          type="text"
-          className={styles.input}
-          placeholder="Filter URL or method"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          spellCheck={false}
-        />
-        {FILTERS.map((f) => (
-          <button
-            key={f.id}
-            type="button"
-            className={mergeClasses(styles.filter, filter === f.id && styles.filterActive)}
-            onClick={() => setFilter(f.id)}
-          >
-            {f.label}
-          </button>
-        ))}
-        <span className={styles.counter}>
+    <div className="flex flex-col flex-1 min-h-0">
+      <div className="flex items-center gap-1.5 h-7 pl-4 pr-4 border-b border-border bg-card text-xs">
+        <InputGroup className="h-6 w-60 shrink-0">
+          <InputGroupAddon className="pl-2">
+            <Search className="size-3.5" />
+          </InputGroupAddon>
+          <InputGroupInput
+            className="h-6 text-xs"
+            placeholder="Filter URL or method"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            spellCheck={false}
+          />
+        </InputGroup>
+        <ToggleGroup
+          type="single"
+          value={filter}
+          onValueChange={(value) => value && setFilter(value as Filter)}
+          size="sm"
+          className="h-6"
+        >
+          {FILTERS.map((f) => (
+            <ToggleGroupItem key={f.id} value={f.id} className="h-6 px-2 text-xs">
+              {f.label}
+            </ToggleGroupItem>
+          ))}
+        </ToggleGroup>
+        <span className="text-xs text-muted-foreground">
           {filtered.length}/{entries.length}
         </span>
-        <div className={styles.spacer} />
-        <button type="button" className={styles.iconBtn} onClick={() => void handleClear()} title="Clear">
-          <Delete16Regular />
-        </button>
+        <div className="flex-1" />
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          className="size-6"
+          onClick={() => void handleClear()}
+          title="Clear"
+        >
+          <Trash2 />
+        </Button>
       </div>
-      <div className={styles.split}>
-        <div className={styles.list}>
-          <div className={styles.header}>
-            <span>Method</span>
-            <span>Status</span>
-            <span>URL</span>
-            <span>Type</span>
-            <span>Size</span>
-            <span>Time</span>
-          </div>
-          {filtered.length === 0 ? (
-            <div className={styles.empty}>No requests yet.</div>
-          ) : (
-            filtered.map((e) => {
-              const statusClass =
-                e.errorText || (e.status ?? 0) >= 500
-                  ? styles.rowErr
-                  : (e.status ?? 0) >= 400
-                    ? styles.rowWarn
-                    : undefined;
-              return (
-                <div
-                  key={e.requestId}
-                  className={mergeClasses(styles.row, selectedId === e.requestId && styles.rowSelected, statusClass)}
-                  onClick={() => setSelectedId(e.requestId)}
-                  role="row"
-                >
-                  <span className={styles.cell}>{e.method}</span>
-                  <span className={styles.cell}>{e.errorText ? '—' : (e.status ?? '…')}</span>
-                  <span className={`${styles.cell} ${styles.url}`} title={e.url}>
-                    {e.url}
-                  </span>
-                  <span className={styles.cell}>{e.resourceType ?? ''}</span>
-                  <span className={styles.cell}>{formatSize(e.encodedDataLength)}</span>
-                  <span className={styles.cell}>{formatDuration(e)}</span>
-                </div>
-              );
-            })
-          )}
+      <div className="flex flex-1 min-h-0">
+        <div className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden text-xs font-mono">
+          <Table className="table-fixed text-xs">
+            <TableHeader className="sticky top-0 z-10 bg-card uppercase tracking-wide text-muted-foreground">
+              <TableRow>
+                <TableHead className="h-7 w-15 text-xs">Method</TableHead>
+                <TableHead className="h-7 w-15 text-xs">Status</TableHead>
+                <TableHead className="h-7 text-xs">URL</TableHead>
+                <TableHead className="h-7 w-20 text-xs">Type</TableHead>
+                <TableHead className="h-7 w-20 text-xs">Size</TableHead>
+                <TableHead className="h-7 w-20 text-xs">Time</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {filtered.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={6} className="h-24 text-center text-muted-foreground">
+                    No requests yet.
+                  </TableCell>
+                </TableRow>
+              ) : (
+                filtered.map((e) => {
+                  const statusClass =
+                    e.errorText || (e.status ?? 0) >= 500
+                      ? 'text-destructive'
+                      : (e.status ?? 0) >= 400
+                        ? 'text-warning'
+                        : undefined;
+                  return (
+                    <TableRow
+                      key={e.requestId}
+                      data-state={selectedId === e.requestId ? 'selected' : undefined}
+                      className={cn('cursor-pointer', statusClass)}
+                      onClick={() => setSelectedId(e.requestId)}
+                    >
+                      <TableCell className="truncate px-2 py-1">{e.method}</TableCell>
+                      <TableCell className="truncate px-2 py-1">{e.errorText ? '—' : (e.status ?? '…')}</TableCell>
+                      <TableCell className="truncate px-2 py-1 text-foreground" title={e.url}>
+                        {e.url}
+                      </TableCell>
+                      <TableCell className="truncate px-2 py-1">{e.resourceType ?? ''}</TableCell>
+                      <TableCell className="truncate px-2 py-1">{formatSize(e.encodedDataLength)}</TableCell>
+                      <TableCell className="truncate px-2 py-1">{formatDuration(e)}</TableCell>
+                    </TableRow>
+                  );
+                })
+              )}
+            </TableBody>
+          </Table>
         </div>
         {selected && (
-          <div className={styles.details}>
-            <div className={styles.dtLabel}>Method</div>
-            <div className={styles.dtValue}>{selected.method}</div>
-            <div className={styles.dtLabel}>URL</div>
-            <div className={styles.dtValue}>{selected.url}</div>
-            <div className={styles.dtLabel}>Status</div>
-            <div className={styles.dtValue}>
+          <div className="w-85 flex-none min-h-0 overflow-auto px-3 py-2.5 border-l border-border bg-card text-xs">
+            <div className="text-xs uppercase text-muted-foreground mt-2.5">Method</div>
+            <div className="break-all font-mono text-xs">{selected.method}</div>
+            <div className="text-xs uppercase text-muted-foreground mt-2.5">URL</div>
+            <div className="break-all font-mono text-xs">{selected.url}</div>
+            <div className="text-xs uppercase text-muted-foreground mt-2.5">Status</div>
+            <div className="break-all font-mono text-xs">
               {selected.status ?? '(pending)'} {selected.statusText ? `— ${selected.statusText}` : ''}
             </div>
             {selected.mimeType && (
               <>
-                <div className={styles.dtLabel}>MIME</div>
-                <div className={styles.dtValue}>{selected.mimeType}</div>
+                <div className="text-xs uppercase text-muted-foreground mt-2.5">MIME</div>
+                <div className="break-all font-mono text-xs">{selected.mimeType}</div>
               </>
             )}
             {selected.resourceType && (
               <>
-                <div className={styles.dtLabel}>Type</div>
-                <div className={styles.dtValue}>{selected.resourceType}</div>
+                <div className="text-xs uppercase text-muted-foreground mt-2.5">Type</div>
+                <div className="break-all font-mono text-xs">{selected.resourceType}</div>
               </>
             )}
             {selected.encodedDataLength !== undefined && (
               <>
-                <div className={styles.dtLabel}>Size</div>
-                <div className={styles.dtValue}>{formatSize(selected.encodedDataLength)}</div>
+                <div className="text-xs uppercase text-muted-foreground mt-2.5">Size</div>
+                <div className="break-all font-mono text-xs">{formatSize(selected.encodedDataLength)}</div>
               </>
             )}
-            <div className={styles.dtLabel}>Timing</div>
-            <div className={styles.dtValue}>{formatDuration(selected)}</div>
+            <div className="text-xs uppercase text-muted-foreground mt-2.5">Timing</div>
+            <div className="break-all font-mono text-xs">{formatDuration(selected)}</div>
             {selected.errorText && (
               <>
-                <div className={styles.dtLabel}>Error</div>
-                <div className={styles.dtValue}>{selected.errorText}</div>
+                <div className="text-xs uppercase text-muted-foreground mt-2.5">Error</div>
+                <div className="break-all font-mono text-xs">{selected.errorText}</div>
               </>
             )}
             {selected.fromCache && (
               <>
-                <div className={styles.dtLabel}>Cache</div>
-                <div className={styles.dtValue}>from disk cache</div>
+                <div className="text-xs uppercase text-muted-foreground mt-2.5">Cache</div>
+                <div className="break-all font-mono text-xs">from disk cache</div>
               </>
             )}
           </div>

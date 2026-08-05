@@ -57,8 +57,11 @@ interface JsonTicket {
   blockedBy: string[];
   /** Legacy structured shaping (removed system) — folded into description on import. */
   shaping?: { doneLooksLike: string; appetite: string; outOfScope: string };
+  /** Legacy close outcome; consumed only by this one-way import. */
   resolution?: string;
+  /** Legacy completion timestamp; consumed only by this one-way import. */
   resolvedAt?: number;
+  completedAt?: number;
   archivedAt?: number;
   columnChangedAt?: number;
   useWorktree?: boolean;
@@ -289,7 +292,22 @@ export function migrateFromJson(repo: ProjectsRepo, db: DatabaseSync, data: Json
     // 3. Tickets + comments
     for (const t of tickets) {
       // Resolve column_id through remap if it was reassigned during column dedup
-      const resolvedColumnId = columnIdRemap.get(`${t.projectId}:${t.columnId}`) ?? t.columnId;
+      let resolvedColumnId = columnIdRemap.get(`${t.projectId}:${t.columnId}`) ?? t.columnId;
+      const columns = repo.listColumns(t.projectId);
+      const doneColumn = [...columns].reverse().find((column) => column.category === 'done');
+      let completedAt = t.completedAt;
+      let archivedAt = t.archivedAt;
+
+      if (t.resolution === 'completed' && doneColumn) {
+        resolvedColumnId = doneColumn.id;
+        completedAt ??= t.resolvedAt ?? t.updatedAt;
+      } else if (t.resolution) {
+        archivedAt ??= t.resolvedAt ?? t.updatedAt;
+        completedAt = undefined;
+      }
+      if (!t.resolution && doneColumn?.id === resolvedColumnId) {
+        completedAt ??= t.resolvedAt ?? t.columnChangedAt ?? t.updatedAt;
+      }
       repo.upsertTicket({
         id: t.id,
         project_id: t.projectId,
@@ -302,9 +320,8 @@ export function migrateFromJson(repo: ProjectsRepo, db: DatabaseSync, data: Json
         priority: t.priority,
         branch: t.branch ?? null,
         blocked_by: JSON.stringify(t.blockedBy ?? []),
-        resolution: t.resolution ?? null,
-        resolved_at: isoOpt(t.resolvedAt),
-        archived_at: isoOpt(t.archivedAt),
+        completed_at: isoOpt(completedAt),
+        archived_at: isoOpt(archivedAt),
         column_changed_at: isoOpt(t.columnChangedAt),
         use_worktree: t.useWorktree ? 1 : 0,
         worktree_path: t.worktreePath ?? null,

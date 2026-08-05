@@ -1,13 +1,12 @@
-import { useStore } from '@nanostores/react';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
+import { cn } from '@/renderer/ds/cn';
+import { Button } from '@/renderer/ds/ui/button';
+import { Card } from '@/renderer/ds/ui/card';
+import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '@/renderer/ds/ui/input-group';
 import { RealtimeRPCClient } from '@/renderer/omniagents-ui/rpc/realtime';
 import { useUiConfig } from '@/renderer/omniagents-ui/ui-config';
-import { persistedStoreApi } from '@/renderer/services/store';
-import { getThemeBuiltinGlassTone } from '@/renderer/theme/fluent-themes';
-import { getGlassVars } from '@/renderer/theme/glass-vars';
-import { $glassEnabled } from '@/renderer/theme/use-glass';
 import type { AudioSettings } from '@/shared/types';
 
 import Orb from './Orb';
@@ -37,13 +36,6 @@ export function VoiceModal({
   onSessionCreated?: (id: string) => void;
 }) {
   const { debug, wsRealtimeUrl, token } = useUiConfig();
-  const store = useStore(persistedStoreApi.$atom);
-  const isGlass = useStore($glassEnabled);
-  const glassVars = isGlass
-    ? getGlassVars(
-        store.codeDeckBackground ? (store.glassTone ?? 'dark') : getThemeBuiltinGlassTone(store.theme ?? 'omni')
-      )
-    : undefined;
   const [isMuted, setIsMuted] = useState(true);
   const [audioLevel, setAudioLevel] = useState(0);
   const [orbState, setOrbState] = useState<OrbState>(OrbState.IDLE);
@@ -1130,23 +1122,17 @@ export function VoiceModal({
   }
 
   // Portal to document.body so `position: fixed` is viewport-relative. Any
-  // ancestor with `transform`, `filter`, `backdrop-filter`, or `will-change`
+  // ancestor with `transform`, `filter`, or `will-change`
   // creates a new containing block and would otherwise trap a `fixed` child
   // inside the composer's flow, clipping the overlay to the chat input area.
   const modal = (
-    <div className="fixed inset-0 z-[9999] bg-background flex flex-col" style={glassVars}>
+    <div className="fixed inset-0 z-50 flex flex-col bg-background">
       {/* Hidden audio sink for TTS playback. Lets us route output to a chosen
           device via setSinkId(); fed by a MediaStreamAudioDestinationNode. */}
-      <audio ref={audioOutElRef} autoPlay style={{ display: 'none' }} />
+      <audio ref={audioOutElRef} autoPlay className="hidden" />
 
       {/* ── Top bar ── */}
-      <div
-        className="flex items-center justify-between px-5 py-3 border-b border-border"
-        style={{
-          background: 'color-mix(in srgb, var(--color-card) 85%, transparent)',
-          backdropFilter: 'blur(40px) saturate(1.4)',
-        }}
-      >
+      <div className="flex items-center justify-between border-b border-border bg-card px-5 py-3">
         <div className="flex items-center gap-3">
           <span className="text-sm font-semibold text-foreground tracking-tight">Omni Voice</span>
           <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -1158,17 +1144,19 @@ export function VoiceModal({
           </span>
           <span className="text-xs text-muted-foreground/60 font-mono tabular-nums">{formattedTime}</span>
           {errorMessage && (
-            <span className="text-xs text-destructive max-w-[360px] truncate" title={errorMessage}>
+            <span className="max-w-90 truncate text-xs text-destructive" title={errorMessage}>
               Voice error: {errorMessage}
             </span>
           )}
         </div>
         <div className="flex items-center gap-2">
           {/* Toggle sidebar */}
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="icon"
             onClick={() => setSidebarOpen((o) => !o)}
-            className="h-9 w-9 rounded-lg flex items-center justify-center text-muted-foreground/80 hover:text-foreground/70 hover:bg-accent transition-colors"
+            className="text-muted-foreground"
             aria-label={sidebarOpen ? 'Hide activity' : 'Show activity'}
           >
             <svg
@@ -1184,12 +1172,14 @@ export function VoiceModal({
               <rect x="3" y="3" width="18" height="18" rx="2" />
               <line x1="15" y1="3" x2="15" y2="21" />
             </svg>
-          </button>
+          </Button>
           {/* Close */}
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="icon"
             onClick={onClose}
-            className="h-9 w-9 rounded-lg flex items-center justify-center text-muted-foreground/80 hover:text-foreground/70 hover:bg-accent transition-colors"
+            className="text-muted-foreground"
             aria-label="Close voice mode"
           >
             <svg
@@ -1204,7 +1194,7 @@ export function VoiceModal({
             >
               <path d="M18 6L6 18M6 6l12 12" />
             </svg>
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -1215,7 +1205,7 @@ export function VoiceModal({
           {/* Orb */}
           <div className="flex-1 flex items-center justify-center w-full max-w-2xl px-8">
             <div
-              className="w-full h-full max-h-[500px] transition-transform duration-300 ease-out"
+              className="h-full max-h-128 w-full transition-transform duration-300 ease-out"
               style={{ transform: `scale(${scale})` }}
             >
               <Orb
@@ -1242,17 +1232,22 @@ export function VoiceModal({
                   {toolOverlayActive && <span className="text-accent-foreground"> | Tool Overlay: ON</span>}
                 </div>
                 <div className="flex flex-wrap gap-2 justify-center max-w-xl">
-                  <button
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="xs"
                     onClick={() => {
                       setOrbState(OrbState.IDLE);
                       setIsActuallyPlayingAudio(false);
                       toolUseEndTimeRef.current = 0;
                     }}
-                    className="px-3 py-1 text-xs bg-secondary hover:bg-secondary/80 text-foreground rounded"
                   >
                     → IDLE
-                  </button>
-                  <button
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="xs"
                     onClick={() => {
                       setOrbState(OrbState.LISTENING);
                       setIsMuted(false);
@@ -1260,65 +1255,83 @@ export function VoiceModal({
                       setIsActuallyPlayingAudio(false);
                       toolUseEndTimeRef.current = 0;
                     }}
-                    className="px-3 py-1 text-xs bg-success hover:bg-success/80 text-foreground rounded"
+                    className="bg-success text-success-foreground hover:bg-success/80"
                   >
                     → LISTENING
-                  </button>
-                  <button
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="xs"
                     onClick={() => {
                       setOrbState(OrbState.THINKING);
                       setIsActuallyPlayingAudio(false);
                       toolUseEndTimeRef.current = 0;
                     }}
-                    className="px-3 py-1 text-xs bg-info hover:bg-info/80 text-foreground rounded"
+                    className="bg-accent text-accent-foreground hover:bg-accent/80"
                   >
                     → THINKING
-                  </button>
-                  <button
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="xs"
                     onClick={() => {
                       setIsActuallyPlayingAudio(true);
                       toolUseEndTimeRef.current = 0;
                     }}
-                    className="px-3 py-1 text-xs bg-warning hover:bg-warning/80 text-foreground rounded"
+                    className="bg-warning text-warning-foreground hover:bg-warning/80"
                   >
                     → SPEAKING (start)
-                  </button>
-                  <button
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="xs"
                     onClick={() => {
                       setIsActuallyPlayingAudio(false);
                     }}
-                    className="px-3 py-1 text-xs bg-warning/80 hover:bg-warning/70 text-foreground rounded"
+                    className="bg-warning text-warning-foreground hover:bg-warning/80"
                   >
                     SPEAKING (stop)
-                  </button>
-                  <button
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="xs"
                     onClick={() => {
                       setIsUsingTool(true);
                       toolUseEndTimeRef.current = 0;
                     }}
-                    className="px-3 py-1 text-xs bg-accent hover:bg-accent/80 text-foreground rounded"
                   >
                     Tool Overlay ON
-                  </button>
-                  <button
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="xs"
                     onClick={() => {
                       setIsUsingTool(true);
                       toolUseEndTimeRef.current = Date.now();
                     }}
-                    className="px-3 py-1 text-xs bg-accent/80 hover:bg-accent/70 text-foreground rounded"
                   >
                     Tool Overlay (linger)
-                  </button>
-                  <button
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="xs"
                     onClick={() => {
                       setIsUsingTool(false);
                       toolUseEndTimeRef.current = 0;
                     }}
-                    className="px-3 py-1 text-xs bg-secondary hover:bg-secondary/80 text-foreground rounded"
                   >
                     Tool Overlay OFF
-                  </button>
-                  <button
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="xs"
                     onClick={() => {
                       const fluctuate = () => setAudioLevel(Math.random() * 0.8 + 0.2);
                       const iv = setInterval(fluctuate, 100);
@@ -1327,18 +1340,19 @@ export function VoiceModal({
                         setAudioLevel(0);
                       }, 3000);
                     }}
-                    className="px-3 py-1 text-xs bg-warning hover:bg-warning/80 text-foreground rounded"
+                    className="bg-warning text-warning-foreground hover:bg-warning/80"
                   >
                     Simulate Audio (3s)
-                  </button>
+                  </Button>
                 </div>
               </div>
             )}
 
             <div className="flex items-center gap-6">
               {/* Mute/Unmute button */}
-              <button
+              <Button
                 type="button"
+                size="icon-lg"
                 onClick={async () => {
                   const next = !isMuted;
                   setIsMuted(next);
@@ -1354,7 +1368,7 @@ export function VoiceModal({
                     } catch {}
                   }
                 }}
-                className="h-16 w-16 rounded-full bg-primary hover:brightness-110 flex items-center justify-center shadow-lg"
+                className="size-16 rounded-full shadow-lg"
                 aria-label={isMuted ? 'Unmute' : 'Mute'}
               >
                 {isMuted ? (
@@ -1393,13 +1407,15 @@ export function VoiceModal({
                     />
                   </svg>
                 )}
-              </button>
+              </Button>
 
               {/* Close button */}
-              <button
+              <Button
                 type="button"
+                variant="secondary"
+                size="icon-lg"
                 onClick={onClose}
-                className="h-16 w-16 rounded-full bg-bgCardAlt hover:bg-bgCard flex items-center justify-center shadow-lg"
+                className="size-16 rounded-full shadow-lg"
                 aria-label="Close voice mode"
               >
                 <svg width="24" height="24" viewBox="0 0 24 24" className="text-foreground" aria-hidden="true">
@@ -1412,20 +1428,17 @@ export function VoiceModal({
                     fill="none"
                   />
                 </svg>
-              </button>
+              </Button>
             </div>
           </div>
         </div>
 
         {/* ── Right sidebar: Chat + Activity ── */}
         <div
-          className="border-l border-border flex flex-col transition-[width,opacity] duration-200 ease-out overflow-hidden"
-          style={{
-            width: sidebarOpen ? 340 : 0,
-            opacity: sidebarOpen ? 1 : 0,
-            background: 'color-mix(in srgb, var(--color-card) 65%, transparent)',
-            backdropFilter: 'blur(40px) saturate(1.4)',
-          }}
+          className={cn(
+            'flex flex-col overflow-hidden border-l border-border bg-card transition-all duration-200 ease-out',
+            sidebarOpen ? 'w-85 opacity-100' : 'w-0 opacity-0'
+          )}
         >
           {/* Sidebar header */}
           <div className="px-4 py-3 border-b border-border flex-shrink-0">
@@ -1470,22 +1483,22 @@ export function VoiceModal({
                 e.preventDefault();
                 handleSendText(chatInput);
               }}
-              className="flex gap-2"
+              className="flex"
             >
-              <input
-                type="text"
-                value={chatInput}
-                onChange={(e) => setChatInput(e.target.value)}
-                placeholder="Type a message..."
-                className="flex-1 bg-muted/60 border border-border rounded-lg px-3 py-2 text-xs text-foreground placeholder-muted-foreground/50 outline-none focus:border-ring transition-colors"
-              />
-              <button
-                type="submit"
-                disabled={!chatInput.trim()}
-                className="px-3 py-2 rounded-lg bg-primary text-primary-foreground text-xs font-medium disabled:opacity-30 hover:brightness-110 transition-all flex-shrink-0"
-              >
-                Send
-              </button>
+              <InputGroup>
+                <InputGroupInput
+                  type="text"
+                  value={chatInput}
+                  onChange={(e) => setChatInput(e.target.value)}
+                  placeholder="Type a message..."
+                  className="text-xs"
+                />
+                <InputGroupAddon align="inline-end">
+                  <InputGroupButton type="submit" variant="default" disabled={!chatInput.trim()}>
+                    Send
+                  </InputGroupButton>
+                </InputGroupAddon>
+              </InputGroup>
             </form>
           </div>
         </div>
@@ -1511,7 +1524,7 @@ function SidebarTranscriptBubble({
   return (
     <div className={`flex flex-col ${isUser ? 'items-end' : 'items-start'}`}>
       <div
-        className={`max-w-[85%] rounded-lg px-3 py-2 text-xs leading-relaxed ${
+        className={`max-w-5/6 rounded-lg px-3 py-2 text-xs leading-relaxed ${
           isUser ? 'bg-primary/20 text-foreground rounded-br-sm' : 'bg-muted/60 text-foreground/80 rounded-bl-sm'
         }`}
       >
@@ -1559,9 +1572,8 @@ function SidebarActivityCard({
   };
 
   return (
-    <div
-      className="rounded-lg border border-border px-3 py-2.5 transition-colors hover:bg-accent/40"
-      style={{ background: 'color-mix(in srgb, var(--color-muted) 35%, transparent)' }}
+    <Card
+      className="gap-0 rounded-lg bg-muted px-3 py-2.5 shadow-none transition-colors hover:bg-accent"
       onClick={() => n.type !== 'tool_approval' && onDismiss?.(n.id)}
     >
       <div className="flex items-center gap-2 mb-0.5">
@@ -1595,28 +1607,34 @@ function SidebarActivityCard({
             </div>
           )}
           <div className="flex gap-2 mt-2.5">
-            <button
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
               onClick={(e) => {
                 e.stopPropagation();
                 onApprove?.(n.request_id!);
               }}
-              className="flex-1 text-xs font-medium py-1.5 rounded-lg bg-success/20 text-success hover:bg-success/30 border border-success/20 transition-colors"
+              className="flex-1 border-success/30 text-success hover:bg-success/10 hover:text-success"
             >
               Approve
-            </button>
-            <button
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="destructive"
               onClick={(e) => {
                 e.stopPropagation();
                 onReject?.(n.request_id!);
               }}
-              className="flex-1 text-xs font-medium py-1.5 rounded-lg bg-destructive/20 text-destructive hover:bg-destructive/30 border border-destructive/20 transition-colors"
+              className="flex-1"
             >
               Reject
-            </button>
+            </Button>
           </div>
         </>
       )}
-    </div>
+    </Card>
   );
 }
 

@@ -1,9 +1,9 @@
-import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
-import { ChevronRight20Regular } from '@fluentui/react-icons';
 import { motion } from 'framer-motion';
+import { ChevronRight } from 'lucide-react';
 import { memo, useCallback, useEffect, useState } from 'react';
 
-import { Body1Strong, Caption1, Spinner } from '@/renderer/ds';
+import { cn } from '@/renderer/ds/cn';
+import { Spinner } from '@/renderer/ds/ui/spinner';
 import { localEmitter } from '@/renderer/services/ipc';
 import type { WslDistro } from '@/shared/types';
 
@@ -11,44 +11,6 @@ type Props = {
   /** Advance to the next step — chosen Windows, or WSL turned out unavailable. */
   onSkip: () => void;
 };
-
-const useStyles = makeStyles({
-  root: { display: 'flex', flexDirection: 'column', gap: '16px' },
-  header: { display: 'flex', flexDirection: 'column', gap: '4px' },
-  list: { display: 'flex', flexDirection: 'column', gap: '8px' },
-  option: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '12px',
-    width: '100%',
-    textAlign: 'left',
-    padding: '14px 16px',
-    borderRadius: tokens.borderRadiusLarge,
-    border: `1px solid ${tokens.colorNeutralStroke1}`,
-    backgroundColor: tokens.colorNeutralBackground1,
-    cursor: 'pointer',
-    transitionProperty: 'border-color, background-color, transform, box-shadow',
-    transitionDuration: '120ms',
-    transitionTimingFunction: 'ease-out',
-    ':hover': {
-      ...shorthands.borderColor(tokens.colorBrandStroke1),
-      backgroundColor: tokens.colorSubtleBackgroundHover,
-      boxShadow: tokens.shadow4,
-    },
-    ':focus-visible': {
-      outlineWidth: '2px',
-      outlineStyle: 'solid',
-      outlineColor: tokens.colorBrandStroke1,
-      outlineOffset: '1px',
-    },
-    ':disabled': { cursor: 'default', opacity: 0.6 },
-  },
-  optionBody: { display: 'flex', flexDirection: 'column', gap: '2px', flex: '1 1 auto', minWidth: 0 },
-  chevron: { color: tokens.colorNeutralForeground3, flexShrink: 0 },
-  pendingRow: { display: 'flex', alignItems: 'center', gap: '8px' },
-  error: { color: tokens.colorPaletteRedForeground1, fontSize: tokens.fontSizeBase200 },
-  ok: { color: tokens.colorPaletteGreenForeground1 },
-});
 
 /**
  * Windows-only, skippable: offer running the Omni backend inside WSL before
@@ -58,7 +20,6 @@ const useStyles = makeStyles({
  * docs/windows-wsl-backend-plan.md).
  */
 export const OnboardingWslStep = memo(({ onSkip }: Props) => {
-  const styles = useStyles();
   const [defaultDistro, setDefaultDistro] = useState<WslDistro | null>(null);
   // WSL is present but has zero distros — offer registering Ubuntu inline
   // (`wsl:install` needs no elevation once the platform exists).
@@ -144,10 +105,10 @@ export const OnboardingWslStep = memo(({ onSkip }: Props) => {
   if (!defaultDistro) {
     if (!needsDistro) {
       return (
-        <div className={styles.root}>
-          <div className={styles.pendingRow}>
-            <Spinner size="sm" />
-            <Caption1>Checking for WSL…</Caption1>
+        <div className="flex flex-col gap-4">
+          <div className="flex items-center gap-2">
+            <Spinner />
+            <span className="text-xs text-muted-foreground">Checking for WSL…</span>
           </div>
         </div>
       );
@@ -155,109 +116,113 @@ export const OnboardingWslStep = memo(({ onSkip }: Props) => {
     // Zero-distro machine: same two-way choice, but the WSL path first
     // registers Ubuntu; success re-detects and lands in the normal choice.
     return (
-      <div className={styles.root}>
-        <div className={styles.header}>
-          <Body1Strong>Where should the Omni backend run?</Body1Strong>
-          <Caption1>You can switch later from Settings.</Caption1>
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-1">
+          <span className="text-sm font-semibold">Where should the Omni backend run?</span>
+          <span className="text-xs text-muted-foreground">You can switch later from Settings.</span>
         </div>
 
-        <div className={styles.list}>
+        <div className="flex flex-col gap-2">
           <motion.button
             type="button"
-            className={styles.option}
+            className="flex items-center gap-3 w-full text-left px-4 py-3.5 rounded-xl border border-border bg-background cursor-pointer transition-all duration-150 ease-out hover:border-primary hover:bg-accent hover:shadow-sm focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-primary focus-visible:outline-offset-1 disabled:cursor-default disabled:opacity-60"
             onClick={handleInstallUbuntu}
             disabled={installing}
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.25, ease: 'easeOut' }}
           >
-            <span className={styles.optionBody}>
-              <Body1Strong>Install Ubuntu in WSL (recommended)</Body1Strong>
-              <Caption1>WSL 2 is installed but has no Linux distribution — Ubuntu runs sandboxes natively</Caption1>
+            <span className="flex flex-col gap-0.5 flex-auto min-w-0">
+              <span className="text-sm font-semibold">Install Ubuntu in WSL (recommended)</span>
+              <span className="text-xs text-muted-foreground">
+                WSL 2 is installed but has no Linux distribution — Ubuntu runs sandboxes natively
+              </span>
             </span>
-            <ChevronRight20Regular className={styles.chevron} />
+            <ChevronRight className="text-muted-foreground shrink-0" />
           </motion.button>
 
           <motion.button
             type="button"
-            className={styles.option}
+            className="flex items-center gap-3 w-full text-left px-4 py-3.5 rounded-xl border border-border bg-background cursor-pointer transition-all duration-150 ease-out hover:border-primary hover:bg-accent hover:shadow-sm focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-primary focus-visible:outline-offset-1 disabled:cursor-default disabled:opacity-60"
             onClick={onSkip}
             disabled={installing}
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.25, delay: 0.05, ease: 'easeOut' }}
           >
-            <span className={styles.optionBody}>
-              <Body1Strong>Run everything on Windows</Body1Strong>
-              <Caption1>Keep the backend on this machine — no WSL involved</Caption1>
+            <span className="flex flex-col gap-0.5 flex-auto min-w-0">
+              <span className="text-sm font-semibold">Run everything on Windows</span>
+              <span className="text-xs text-muted-foreground">Keep the backend on this machine — no WSL involved</span>
             </span>
-            <ChevronRight20Regular className={styles.chevron} />
+            <ChevronRight className="text-muted-foreground shrink-0" />
           </motion.button>
         </div>
 
         {installing && (
-          <div className={styles.pendingRow}>
-            <Spinner size="sm" />
-            <Caption1>Installing Ubuntu — this downloads a few hundred MB…</Caption1>
+          <div className="flex items-center gap-2">
+            <Spinner />
+            <span className="text-xs text-muted-foreground">Installing Ubuntu — this downloads a few hundred MB…</span>
           </div>
         )}
 
-        {error && <span className={styles.error}>{error}</span>}
+        {error && <span className="text-destructive text-xs">{error}</span>}
       </div>
     );
   }
 
   return (
-    <div className={styles.root}>
-      <div className={styles.header}>
-        <Body1Strong>Where should the Omni backend run?</Body1Strong>
-        <Caption1>You can switch later from Settings.</Caption1>
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-1">
+        <span className="text-sm font-semibold">Where should the Omni backend run?</span>
+        <span className="text-xs text-muted-foreground">You can switch later from Settings.</span>
       </div>
 
-      <div className={styles.list}>
+      <div className="flex flex-col gap-2">
         <motion.button
           type="button"
-          className={styles.option}
+          className="flex items-center gap-3 w-full text-left px-4 py-3.5 rounded-xl border border-border bg-background cursor-pointer transition-all duration-150 ease-out hover:border-primary hover:bg-accent hover:shadow-sm focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-primary focus-visible:outline-offset-1 disabled:cursor-default disabled:opacity-60"
           onClick={handleUseWsl}
           disabled={linking || restarting}
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.25, ease: 'easeOut' }}
         >
-          <span className={styles.optionBody}>
-            <Body1Strong>Run the Omni backend in WSL (recommended)</Body1Strong>
-            <Caption1>Sandboxes run natively in Linux — uses your {defaultDistro.name} distro</Caption1>
+          <span className="flex flex-col gap-0.5 flex-auto min-w-0">
+            <span className="text-sm font-semibold">Run the Omni backend in WSL (recommended)</span>
+            <span className="text-xs text-muted-foreground">
+              Sandboxes run natively in Linux — uses your {defaultDistro.name} distro
+            </span>
           </span>
-          <ChevronRight20Regular className={styles.chevron} />
+          <ChevronRight className="text-muted-foreground shrink-0" />
         </motion.button>
 
         <motion.button
           type="button"
-          className={styles.option}
+          className="flex items-center gap-3 w-full text-left px-4 py-3.5 rounded-xl border border-border bg-background cursor-pointer transition-all duration-150 ease-out hover:border-primary hover:bg-accent hover:shadow-sm focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-primary focus-visible:outline-offset-1 disabled:cursor-default disabled:opacity-60"
           onClick={onSkip}
           disabled={linking || restarting}
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.25, delay: 0.05, ease: 'easeOut' }}
         >
-          <span className={styles.optionBody}>
-            <Body1Strong>Run everything on Windows</Body1Strong>
-            <Caption1>Keep the backend on this machine — no WSL involved</Caption1>
+          <span className="flex flex-col gap-0.5 flex-auto min-w-0">
+            <span className="text-sm font-semibold">Run everything on Windows</span>
+            <span className="text-xs text-muted-foreground">Keep the backend on this machine — no WSL involved</span>
           </span>
-          <ChevronRight20Regular className={styles.chevron} />
+          <ChevronRight className="text-muted-foreground shrink-0" />
         </motion.button>
       </div>
 
       {linking && (
-        <div className={styles.pendingRow}>
-          <Spinner size="sm" />
-          <Caption1>Setting up the WSL backend in {defaultDistro.name}…</Caption1>
+        <div className="flex items-center gap-2">
+          <Spinner />
+          <span className="text-xs text-muted-foreground">Setting up the WSL backend in {defaultDistro.name}…</span>
         </div>
       )}
 
-      {restarting && <Caption1 className={styles.ok}>Restarting Omni Code…</Caption1>}
+      {restarting && <span className={cn('text-xs text-muted-foreground', 'text-success')}>Restarting Omni Code…</span>}
 
-      {error && <span className={styles.error}>{error}</span>}
+      {error && <span className="text-destructive text-xs">{error}</span>}
     </div>
   );
 });

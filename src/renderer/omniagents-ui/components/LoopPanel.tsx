@@ -1,5 +1,8 @@
 import React from 'react';
 
+import { Button } from '@/renderer/ds/ui/button';
+import { Card } from '@/renderer/ds/ui/card';
+
 export type LoopTaskSnapshot = {
   id: string;
   prompt: string;
@@ -73,12 +76,12 @@ export function LoopPanel({ tasks, onDismiss }: { tasks: LoopTaskSnapshot[]; onD
 
   return (
     <div className="px-3 pt-2">
-      <div className="rounded-md border border-bgCardAlt bg-bgCardAlt/60 px-2.5 py-1.5">
-        <div className="flex items-center gap-2 text-xs text-textSubtle">
+      <Card className="gap-0 rounded-md border-accent bg-accent/60 px-2.5 py-1.5 shadow-none">
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <span className="inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 bg-primary animate-pulse" aria-hidden />
-          <span className="font-medium text-textPrimary">loop</span>
+          <span className="font-medium text-foreground">loop</span>
           <span aria-hidden>·</span>
-          <span className="truncate min-w-0 text-textPrimary" title={next.prompt}>
+          <span className="truncate min-w-0 text-foreground" title={next.prompt}>
             {shortPrompt(next.prompt, PROMPT_TRUNCATE)}
           </span>
           {tail.map((part, idx) => (
@@ -88,18 +91,19 @@ export function LoopPanel({ tasks, onDismiss }: { tasks: LoopTaskSnapshot[]; onD
             </React.Fragment>
           ))}
           {onDismiss ? (
-            <button
-              type="button"
+            <Button
+              variant="ghost"
+              size="xs"
               onClick={onDismiss}
-              className="ml-auto text-textSubtle hover:text-textPrimary transition-colors px-1.5 py-0.5 rounded hover:bg-bgCardAlt"
+              className="ml-auto"
               title="Dismiss loop status"
               aria-label="Dismiss loop status"
             >
               dismiss
-            </button>
+            </Button>
           ) : null}
         </div>
-      </div>
+      </Card>
     </div>
   );
 }

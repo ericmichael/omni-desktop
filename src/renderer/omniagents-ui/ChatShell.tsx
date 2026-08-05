@@ -2,6 +2,12 @@ import { AnimatePresence, motion } from 'framer-motion';
 import type { ReactNode } from 'react';
 import { memo, useCallback, useState } from 'react';
 
+import { Alert, AlertDescription, AlertTitle } from '@/renderer/ds/ui/alert';
+import { Badge } from '@/renderer/ds/ui/badge';
+import { Button } from '@/renderer/ds/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/renderer/ds/ui/card';
+import { Spinner } from '@/renderer/ds/ui/spinner';
+
 import { Input } from './components/Input';
 import { getGreeting } from './greeting';
 import { OmniAgentsHeaderActionsProvider } from './header-actions';
@@ -62,41 +68,20 @@ export const ChatShell = memo(
 
     const launchStatus =
       phase === 'error' ? (
-        <div role="alert" className="rounded-xl border border-errorRed/30 bg-errorRed/5 px-4 py-3 text-left">
-          <div className="text-sm font-medium text-textHeading">Couldn’t start {sandboxLabel}</div>
-          {error && <div className="mt-1 text-sm text-errorRed">{error}</div>}
+        <Alert variant="destructive" className="text-left">
+          <AlertTitle>Couldn’t start {sandboxLabel}</AlertTitle>
+          {error && <AlertDescription>{error}</AlertDescription>}
           {onRetry && (
-            <button
-              type="button"
-              onClick={onRetry}
-              className="mt-3 h-9 rounded-full bg-primary px-4 text-sm font-medium text-primary-foreground hover:brightness-110 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
-            >
+            <Button type="button" onClick={onRetry} className="col-start-2 mt-2 justify-self-start rounded-full">
               Retry
-            </button>
+            </Button>
           )}
-        </div>
+        </Alert>
       ) : isConnecting ? (
-        <div
-          role="status"
-          aria-live="polite"
-          className="inline-flex items-center gap-2 rounded-full bg-bgCardAlt px-3 py-1.5 text-xs text-textSubtle"
-        >
-          <svg
-            className="h-3 w-3 animate-spin"
-            xmlns="http://www.w3.org/2000/svg"
-            fill="none"
-            viewBox="0 0 24 24"
-            aria-hidden="true"
-          >
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-            <path
-              className="opacity-75"
-              fill="currentColor"
-              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-            />
-          </svg>
+        <Badge variant="secondary" role="status" aria-live="polite" className="gap-2 px-3 py-1.5 font-normal">
+          <Spinner className="size-3" aria-hidden="true" />
           Starting {sandboxLabel}…
-        </div>
+        </Badge>
       ) : null;
 
     return (
@@ -118,23 +103,23 @@ export const ChatShell = memo(
                           animate={{ opacity: 1, x: 0 }}
                           transition={{ duration: 0.3, ease: 'easeOut' }}
                         >
-                          <div className="max-w-[80%] rounded-2xl bg-primary/10 px-4 py-2.5 text-sm text-textHeading">
+                          <div className="max-w-4/5 rounded-2xl bg-primary/10 px-4 py-2.5 text-sm text-foreground">
                             {m.text}
                             {m.files && m.files.length > 0 && (
-                              <div className="mt-1 text-xs text-textSubtle">
+                              <div className="mt-1 text-xs text-muted-foreground">
                                 {m.files.length} file{m.files.length > 1 ? 's' : ''} attached
                               </div>
                             )}
                           </div>
                         </motion.div>
                       ))}
-                      {launchStatus && <div className="ml-auto max-w-[80%] text-right">{launchStatus}</div>}
+                      {launchStatus && <div className="ml-auto max-w-4/5 text-right">{launchStatus}</div>}
                     </div>
                   ) : (
                     <div className="flex-1 relative">
                       <div className="absolute inset-0 flex items-center justify-center pointer-events-none [&_button]:pointer-events-auto">
                         <div className="mx-auto max-w-full sm:max-w-2xl text-center px-6">
-                          <div className="text-2xl sm:text-4xl font-normal tracking-tight text-textHeading font-serif">
+                          <div className="text-2xl sm:text-4xl font-normal tracking-tight text-foreground font-serif">
                             {greeting}
                           </div>
                           <AnimatePresence>
@@ -149,58 +134,57 @@ export const ChatShell = memo(
                                 {workspaceReady ? (
                                   <>
                                     {!onLaunch && (
-                                      <p className="text-sm text-textSubtle">
+                                      <p className="text-sm text-muted-foreground">
                                         Your first message starts a session in {sandboxLabel}.
                                       </p>
                                     )}
                                     {onLaunch && (
-                                      <button
+                                      <Button
                                         type="button"
                                         onClick={onLaunch}
                                         disabled={launchDisabled}
-                                        className="min-h-9 rounded-full bg-primary px-5 py-2 text-sm font-medium text-primary-foreground hover:brightness-110 disabled:opacity-50"
+                                        className="rounded-full px-5"
                                       >
                                         Launch workspace
-                                      </button>
+                                      </Button>
                                     )}
                                     {!!suggestions?.length && (
                                       <div className="mt-4 grid grid-cols-1 gap-2 sm:flex sm:flex-wrap sm:justify-center">
                                         {suggestions.map((suggestion) => (
-                                          <button
+                                          <Button
                                             key={suggestion.label}
                                             type="button"
+                                            variant="outline"
                                             onClick={() => onSubmit({ text: suggestion.prompt })}
-                                            className="min-h-9 rounded-full border border-border bg-bgCard px-4 py-2 text-sm font-medium text-textHeading hover:bg-bgCardAlt focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                                            className="rounded-full px-4"
                                           >
                                             {suggestion.label}
-                                          </button>
+                                          </Button>
                                         ))}
                                       </div>
                                     )}
                                   </>
                                 ) : (
-                                  <section
-                                    aria-labelledby="workspace-setup-heading"
-                                    className="rounded-2xl border border-border bg-bgCard px-5 py-4"
-                                  >
-                                    <h2
-                                      id="workspace-setup-heading"
-                                      className="text-base font-semibold text-textHeading"
-                                    >
-                                      Choose a workspace folder to start chatting
-                                    </h2>
-                                    <p className="mt-1 text-sm text-textSubtle">
-                                      Omni uses it to create an isolated workspace for each session.
-                                    </p>
-                                    <button
-                                      type="button"
-                                      onClick={onOpenWorkspaceSettings}
-                                      disabled={!onOpenWorkspaceSettings}
-                                      className="mt-4 min-h-9 rounded-full bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:brightness-110 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
-                                    >
-                                      Open workspace settings
-                                    </button>
-                                  </section>
+                                  <Card className="gap-3 py-4 text-left shadow-none">
+                                    <CardHeader className="gap-1 px-5">
+                                      <CardTitle className="text-base">
+                                        Choose a workspace folder to start chatting
+                                      </CardTitle>
+                                    </CardHeader>
+                                    <CardContent className="px-5">
+                                      <p className="text-sm text-muted-foreground">
+                                        Omni uses it to create an isolated workspace for each session.
+                                      </p>
+                                      <Button
+                                        type="button"
+                                        onClick={onOpenWorkspaceSettings}
+                                        disabled={!onOpenWorkspaceSettings}
+                                        className="mt-4 rounded-full"
+                                      >
+                                        Open workspace settings
+                                      </Button>
+                                    </CardContent>
+                                  </Card>
                                 )}
                                 {prelaunchExtras && (
                                   <div className="mt-4 flex flex-wrap items-center justify-center gap-2">

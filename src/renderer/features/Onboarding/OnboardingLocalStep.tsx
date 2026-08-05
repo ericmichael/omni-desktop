@@ -1,8 +1,9 @@
-import { makeStyles, tokens } from '@fluentui/react-components';
 import type { ChangeEvent } from 'react';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 
-import { Body1Strong, Button, Caption1, Input, Spinner } from '@/renderer/ds';
+import { Button } from '@/renderer/ds/ui/button';
+import { Input } from '@/renderer/ds/ui/input';
+import { Spinner } from '@/renderer/ds/ui/spinner';
 import { probeFailureCopy } from '@/renderer/features/Onboarding/probe-copy';
 import { emitter } from '@/renderer/services/ipc';
 
@@ -14,27 +15,7 @@ type Props = {
   onBack: () => void;
 };
 
-const useStyles = makeStyles({
-  root: { display: 'flex', flexDirection: 'column', gap: '20px' },
-  header: { display: 'flex', flexDirection: 'column', gap: '4px' },
-  probing: { display: 'flex', alignItems: 'center', gap: '8px', color: tokens.colorNeutralForeground2 },
-  instructions: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '8px',
-    padding: '12px 14px',
-    borderRadius: tokens.borderRadiusLarge,
-    border: `1px dashed ${tokens.colorNeutralStroke1}`,
-    color: tokens.colorNeutralForeground2,
-  },
-  field: { display: 'flex', flexDirection: 'column', gap: '6px' },
-  error: { color: tokens.colorPaletteRedForeground1, fontSize: tokens.fontSizeBase200 },
-  actions: { display: 'flex', justifyContent: 'space-between' },
-  actionsRight: { display: 'flex', gap: '8px' },
-});
-
 export const OnboardingLocalStep = memo(({ onDetected, onBack }: Props) => {
-  const styles = useStyles();
   const [probing, setProbing] = useState(true);
   const [customUrl, setCustomUrl] = useState('');
   const [busy, setBusy] = useState(false);
@@ -98,56 +79,57 @@ export const OnboardingLocalStep = memo(({ onDetected, onBack }: Props) => {
 
   if (probing) {
     return (
-      <div className={styles.root}>
-        <div className={styles.probing}>
-          <Spinner size="sm" />
-          <Caption1>Looking for models on this computer…</Caption1>
+      <div className="flex flex-col gap-5">
+        <div className="flex items-center gap-2 text-muted-foreground">
+          <Spinner />
+          <span className="text-xs text-muted-foreground">Looking for models on this computer…</span>
         </div>
       </div>
     );
   }
 
   return (
-    <div className={styles.root}>
-      <div className={styles.header}>
-        <Body1Strong>No local models found yet</Body1Strong>
-        <Caption1>
+    <div className="flex flex-col gap-5">
+      <div className="flex flex-col gap-1">
+        <span className="text-sm font-semibold">No local models found yet</span>
+        <span className="text-xs text-muted-foreground">
           The easiest way to run models on this computer is{' '}
           <a href="https://ollama.com" target="_blank" rel="noopener noreferrer">
             Ollama
           </a>{' '}
           — install it, download a model, then retry.
-        </Caption1>
+        </span>
       </div>
 
-      <div className={styles.instructions}>
-        <Caption1>Already running something else (vLLM, LM Studio)? Enter its address:</Caption1>
-        <div className={styles.field}>
+      <div className="flex flex-col gap-2 px-3.5 py-3 rounded-xl border border-dashed border-border text-muted-foreground">
+        <span className="text-xs text-muted-foreground">
+          Already running something else (vLLM, LM Studio)? Enter its address:
+        </span>
+        <div className="flex flex-col gap-1.5">
           <Input
-            size="sm"
-            mono
             value={customUrl}
             onChange={handleCustomUrlChange}
             placeholder="http://localhost:1234"
             disabled={busy}
           />
-          <Caption1>The address your local server prints when it starts.</Caption1>
+
+          <span className="text-xs text-muted-foreground">The address your local server prints when it starts.</span>
         </div>
         <div>
-          <Button variant="ghost" size="sm" onClick={handleConnectCustom} isDisabled={!customUrl.trim() || busy}>
+          <Button variant="ghost" size="sm" onClick={handleConnectCustom} disabled={!customUrl.trim() || busy}>
             {busy ? 'Checking…' : 'Connect'}
           </Button>
         </div>
       </div>
 
-      {error && <span className={styles.error}>{error}</span>}
+      {error && <span className="text-destructive text-xs">{error}</span>}
 
-      <div className={styles.actions}>
+      <div className="flex justify-between">
         <Button variant="ghost" size="sm" onClick={onBack}>
           Back
         </Button>
-        <div className={styles.actionsRight}>
-          <Button variant="primary" size="sm" onClick={handleRetry} isDisabled={busy}>
+        <div className="flex gap-2">
+          <Button variant="default" size="sm" onClick={handleRetry} disabled={busy}>
             Retry
           </Button>
         </div>

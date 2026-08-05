@@ -3,7 +3,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { migrateLayoutMode, migrateThemeForGlass } from '@/lib/store-init';
+import { migrateLayoutMode } from '@/lib/store-init';
 
 // ---------------------------------------------------------------------------
 // migrateLayoutMode
@@ -76,25 +76,5 @@ describe('migrateLayoutMode', () => {
 
   it('returns null for valid "sandboxes" mode', () => {
     expect(migrateLayoutMode('sandboxes')).toBeNull();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// migrateThemeForGlass (Phase 10 one-knob migration)
-// ---------------------------------------------------------------------------
-
-describe('migrateThemeForGlass', () => {
-  it('moves a wallpaper user on a flat theme to the glass theme', () => {
-    expect(migrateThemeForGlass('tokyo-night', true)).toBe('omni');
-    expect(migrateThemeForGlass('teams-light', true)).toBe('omni');
-  });
-
-  it('leaves a wallpaper user already on the glass theme alone', () => {
-    expect(migrateThemeForGlass('omni', true)).toBeNull();
-  });
-
-  it('leaves users without a wallpaper on their theme', () => {
-    expect(migrateThemeForGlass('tokyo-night', false)).toBeNull();
-    expect(migrateThemeForGlass('omni', false)).toBeNull();
   });
 });

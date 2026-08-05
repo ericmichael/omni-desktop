@@ -48,8 +48,7 @@ describe('needsAttention', () => {
     expect(needsAttention(ticket({ phase: 'completed' }), pipeline)).toBe('agent_done');
   });
 
-  it('never flags resolved, archived, or shipped tasks', () => {
-    expect(needsAttention(ticket({ phase: 'error', resolution: 'completed' }), pipeline)).toBeNull();
+  it('never flags archived or done tasks', () => {
     expect(needsAttention(ticket({ phase: 'error', archivedAt: 1 }), pipeline)).toBeNull();
     expect(needsAttention(ticket({ phase: 'completed', columnId: 'done' }), pipeline)).toBeNull();
   });
@@ -65,14 +64,14 @@ describe('groupTasks', () => {
     const doing = ticket({ columnId: 'impl' });
     const todo = ticket({ columnId: 'backlog' });
     const shipped = ticket({ columnId: 'done' });
-    const resolved = ticket({ columnId: 'impl', resolution: 'completed', resolvedAt: 5000 });
+    const completed = ticket({ columnId: 'done', completedAt: 5000 });
 
-    const g = groupTasks([errored, doing, todo, shipped, resolved], pipelineFor);
+    const g = groupTasks([errored, doing, todo, shipped, completed], pipelineFor);
 
     expect(g.needsYou.map((e) => e.ticket.id)).toEqual([errored.id]);
     expect(g.doing.map((t) => t.id)).toEqual([doing.id]);
     expect(g.todo.map((t) => t.id)).toEqual([todo.id]);
-    expect(new Set(g.done.map((t) => t.id))).toEqual(new Set([shipped.id, resolved.id]));
+    expect(new Set(g.done.map((t) => t.id))).toEqual(new Set([shipped.id, completed.id]));
 
     // Overlay: the errored task appears exactly once across all groups.
     const all = [...g.needsYou.map((e) => e.ticket.id), ...g.doing, ...g.todo, ...g.done].flat();
@@ -104,8 +103,10 @@ describe('groupTasks', () => {
     expect(g.doing.map((t) => t.id)).toEqual([active.id, idle.id]);
   });
 
-  it('treats resolution as done even when the column is not', () => {
-    const g = groupTasks([ticket({ columnId: 'impl', resolution: 'wont_do' })], pipelineFor);
-    expect(g.done).toHaveLength(1);
+  it('uses the column as authoritative even if a stale completion timestamp exists', () => {
+    const active = ticket({ columnId: 'impl', completedAt: 5000 });
+    const g = groupTasks([active], pipelineFor);
+    expect(g.doing.map((item) => item.id)).toEqual([active.id]);
+    expect(g.done).toHaveLength(0);
   });
 });

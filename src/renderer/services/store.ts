@@ -2,7 +2,7 @@ import type { ReadableAtom } from 'nanostores';
 import { atom } from 'nanostores';
 
 import { emptyMcpConfig, emptyModelsConfig, emptyNetworkConfig } from '@/lib/agent-config';
-import { migrateLayoutMode, migrateThemeForGlass } from '@/lib/store-init';
+import { migrateLayoutMode } from '@/lib/store-init';
 import { loadTeams, loadWhoami } from '@/renderer/features/Teams/state';
 import { initComputeBridge } from '@/renderer/services/compute';
 import { emitter, ipc } from '@/renderer/services/ipc';
@@ -52,8 +52,6 @@ const getDefaults = (): StoreData => ({
   chatConversations: [],
   activeCodeTabId: null,
   codeLayoutMode: 'focus',
-  codeDeckBackground: null,
-  glassTone: 'dark',
   activeTicketId: null,
   wipLimit: 3,
   scheduledTasks: [],
@@ -167,13 +165,6 @@ const init = async () => {
   const layoutReset = migrateLayoutMode(store.layoutMode as string);
   if (layoutReset) {
     await persistedStoreApi.setKey('layoutMode', layoutReset);
-  }
-
-  // One-knob glass migration: a wallpaper on a flat theme moves the user to
-  // the glass theme (wallpaper and tone preserved).
-  const themeReset = migrateThemeForGlass(store.theme as string, !!store.codeDeckBackground);
-  if (themeReset) {
-    await persistedStoreApi.setKey('theme', themeReset);
   }
 
   // Apply default workspace dir if user has never picked one

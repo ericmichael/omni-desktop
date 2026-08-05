@@ -189,8 +189,7 @@ export function buildTicket({
   columnId,
   priority = 'medium',
   createdAt,
-  resolvedAt,
-  resolution,
+  completedAt,
   phase,
   id = newId(),
   blockedBy = [],
@@ -209,8 +208,7 @@ export function buildTicket({
     columnChangedAt: createdAt,
     seedKey,
   };
-  if (resolution) ticket.resolution = resolution;
-  if (resolvedAt !== undefined) ticket.resolvedAt = resolvedAt;
+  if (completedAt !== undefined) ticket.completedAt = completedAt;
   if (phase) ticket.phase = phase;
   manifest.entities.tickets.push({ id, seedKey });
   return ticket;

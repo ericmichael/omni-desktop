@@ -11,18 +11,13 @@
  *     Idempotent + scoped strictly to paths the migration recorded.
  *   - Dismiss: clears the notice without touching anything on disk.
  */
-import {
-  Button,
-  MessageBar,
-  MessageBarActions,
-  MessageBarBody,
-  MessageBarTitle,
-  tokens,
-} from '@fluentui/react-components';
-import { ChevronDown16Regular, ChevronUp16Regular, Delete16Regular, Dismiss16Regular } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
+import { ChevronDown, ChevronUp, Trash2, X } from 'lucide-react';
 import { memo, useCallback, useState } from 'react';
 
+import { Alert, AlertDescription } from '@/renderer/ds/ui/alert';
+import { Button } from '@/renderer/ds/ui/button';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/renderer/ds/ui/collapsible';
 import { $pendingMigrationNotice, migrationApi } from '@/renderer/features/MigrationNotice/state';
 
 const formatCount = (n: number, singular: string, plural = `${singular}s`): string =>
@@ -32,10 +27,6 @@ export const MigrationNotice = memo(() => {
   const state = useStore($pendingMigrationNotice);
   const [expanded, setExpanded] = useState(false);
   const [busy, setBusy] = useState(false);
-
-  const onToggleExpanded = useCallback(() => {
-    setExpanded((v) => !v);
-  }, []);
 
   const onDismiss = useCallback(() => {
     setBusy(true);
@@ -57,57 +48,40 @@ export const MigrationNotice = memo(() => {
   const legacy = state.legacyPaths.length;
 
   return (
-    <div
-      style={{
-        padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalL}`,
-        backgroundColor: tokens.colorNeutralBackground1,
-        borderBottom: `1px solid ${tokens.colorNeutralStroke1}`,
-      }}
-    >
-      <MessageBar intent="info" layout="multiline">
-        <MessageBarBody>
-          <MessageBarTitle>Pages moved to a shared location</MessageBarTitle>
-          {moved} Your pages now live in a single tree so the launcher and external tools (Claude Desktop, Cursor, MCP)
-          read and write the same files. The originals on your old paths weren&apos;t touched —{' '}
-          {formatCount(legacy, 'legacy location')} can be removed when you&apos;re ready.
-          {expanded && (
-            <ul
-              style={{
-                marginTop: tokens.spacingVerticalS,
-                paddingLeft: tokens.spacingHorizontalL,
-                fontFamily: tokens.fontFamilyMonospace,
-                fontSize: tokens.fontSizeBase200,
-              }}
-            >
-              {state.legacyPaths.map((p) => (
-                <li key={p}>{p}</li>
-              ))}
-            </ul>
-          )}
-        </MessageBarBody>
-        <MessageBarActions>
-          <Button
-            size="small"
-            appearance="subtle"
-            icon={expanded ? <ChevronUp16Regular /> : <ChevronDown16Regular />}
-            onClick={onToggleExpanded}
-          >
-            {expanded ? 'Hide details' : `Show details (${legacy})`}
-          </Button>
-          <Button
-            size="small"
-            appearance="primary"
-            icon={<Delete16Regular />}
-            disabled={busy || legacy === 0}
-            onClick={onCleanup}
-          >
-            Clean up legacy files
-          </Button>
-          <Button size="small" appearance="subtle" icon={<Dismiss16Regular />} disabled={busy} onClick={onDismiss}>
-            Dismiss
-          </Button>
-        </MessageBarActions>
-      </MessageBar>
+    <div className="border-b bg-background px-5 py-2">
+      <Collapsible open={expanded} onOpenChange={setExpanded} asChild>
+        <Alert>
+          <AlertDescription>
+            <div className="font-medium">Pages moved to a shared location</div>
+            {moved} Your pages now live in a single tree so the launcher and external tools (Claude Desktop, Cursor,
+            MCP) read and write the same files. The originals on your old paths weren&apos;t touched —{' '}
+            {formatCount(legacy, 'legacy location')} can be removed when you&apos;re ready.
+            <CollapsibleContent asChild>
+              <ul className="mt-2 pl-5 font-mono text-xs">
+                {state.legacyPaths.map((p) => (
+                  <li key={p}>{p}</li>
+                ))}
+              </ul>
+            </CollapsibleContent>
+          </AlertDescription>
+          <div className="col-start-2 flex gap-2">
+            <CollapsibleTrigger asChild>
+              <Button size="sm" variant="ghost">
+                {expanded ? <ChevronUp /> : <ChevronDown />}
+                {expanded ? 'Hide details' : `Show details (${legacy})`}
+              </Button>
+            </CollapsibleTrigger>
+            <Button size="sm" variant="default" disabled={busy || legacy === 0} onClick={onCleanup}>
+              <Trash2 />
+              Clean up legacy files
+            </Button>
+            <Button size="sm" variant="ghost" disabled={busy} onClick={onDismiss}>
+              <X />
+              Dismiss
+            </Button>
+          </div>
+        </Alert>
+      </Collapsible>
     </div>
   );
 });

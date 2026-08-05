@@ -58,7 +58,6 @@ import type {
   TicketComment,
   TicketId,
   TicketPriority,
-  TicketResolution,
   TokenUsage,
 } from '@/shared/types';
 
@@ -201,11 +200,8 @@ export function rowToTicket(row: TicketRow, comments?: CommentRow[]): Ticket {
   if (row.branch) {
     ticket.branch = row.branch;
   }
-  if (row.resolution) {
-    ticket.resolution = row.resolution as TicketResolution;
-  }
-  if (row.resolved_at) {
-    ticket.resolvedAt = fromIso(row.resolved_at);
+  if (row.completed_at) {
+    ticket.completedAt = fromIso(row.completed_at);
   }
   if (row.archived_at) {
     ticket.archivedAt = fromIso(row.archived_at);
@@ -440,8 +436,7 @@ export function ticketToRow(t: Ticket): TicketRow {
     priority: t.priority,
     branch: t.branch ?? null,
     blocked_by: JSON.stringify(t.blockedBy ?? []),
-    resolution: t.resolution ?? null,
-    resolved_at: isoOrNull(t.resolvedAt),
+    completed_at: isoOrNull(t.completedAt),
     archived_at: isoOrNull(t.archivedAt),
     column_changed_at: isoOrNull(t.columnChangedAt),
     use_worktree: t.useWorktree ? 1 : 0,

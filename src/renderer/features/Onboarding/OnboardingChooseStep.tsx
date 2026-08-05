@@ -1,9 +1,6 @@
-import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
-import { ChevronRight20Regular } from '@fluentui/react-icons';
 import { motion } from 'framer-motion';
+import { ChevronRight } from 'lucide-react';
 import { memo, useCallback } from 'react';
-
-import { Body1Strong, Caption1 } from '@/renderer/ds';
 
 /** User-facing identity, not runtime provider type — the wizard maps it later. */
 export type IdentityKind = 'chatgpt' | 'openai' | 'anthropic' | 'local' | 'advanced';
@@ -26,40 +23,6 @@ const OPTIONS: IdentityOption[] = [
   { value: 'advanced', label: 'Something else', description: 'Azure, LiteLLM, or any custom setup' },
 ];
 
-const useStyles = makeStyles({
-  root: { display: 'flex', flexDirection: 'column', gap: '16px' },
-  header: { display: 'flex', flexDirection: 'column', gap: '4px' },
-  list: { display: 'flex', flexDirection: 'column', gap: '8px' },
-  option: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '12px',
-    width: '100%',
-    textAlign: 'left',
-    padding: '14px 16px',
-    borderRadius: tokens.borderRadiusLarge,
-    border: `1px solid ${tokens.colorNeutralStroke1}`,
-    backgroundColor: tokens.colorNeutralBackground1,
-    cursor: 'pointer',
-    transitionProperty: 'border-color, background-color, transform, box-shadow',
-    transitionDuration: '120ms',
-    transitionTimingFunction: 'ease-out',
-    ':hover': {
-      ...shorthands.borderColor(tokens.colorBrandStroke1),
-      backgroundColor: tokens.colorSubtleBackgroundHover,
-      boxShadow: tokens.shadow4,
-    },
-    ':focus-visible': {
-      outlineWidth: '2px',
-      outlineStyle: 'solid',
-      outlineColor: tokens.colorBrandStroke1,
-      outlineOffset: '1px',
-    },
-  },
-  optionBody: { display: 'flex', flexDirection: 'column', gap: '2px', flex: '1 1 auto', minWidth: 0 },
-  chevron: { color: tokens.colorNeutralForeground3, flexShrink: 0 },
-});
-
 type Props = {
   /** Hide the local option where there is no local machine (hosted/server mode). */
   showLocal: boolean;
@@ -67,34 +30,35 @@ type Props = {
 };
 
 export const OnboardingChooseStep = memo(({ showLocal, onSelect }: Props) => {
-  const styles = useStyles();
   const options = showLocal ? OPTIONS : OPTIONS.filter((o) => o.value !== 'local');
 
   const handleSelect = useCallback((kind: IdentityKind) => () => onSelect(kind), [onSelect]);
 
   return (
-    <div className={styles.root}>
-      <div className={styles.header}>
-        <Body1Strong>Which AI do you use?</Body1Strong>
-        <Caption1>Omni works with the account you already have. Your keys stay on this machine.</Caption1>
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-1">
+        <span className="text-sm font-semibold">Which AI do you use?</span>
+        <span className="text-xs text-muted-foreground">
+          Omni works with the account you already have. Your keys stay on this machine.
+        </span>
       </div>
 
-      <div className={styles.list}>
+      <div className="flex flex-col gap-2">
         {options.map((option, index) => (
           <motion.button
             key={option.value}
             type="button"
-            className={styles.option}
+            className="flex items-center gap-3 w-full text-left px-4 py-3.5 rounded-xl border border-border bg-background cursor-pointer transition-all duration-150 ease-out hover:border-primary hover:bg-accent hover:shadow-sm focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-primary focus-visible:outline-offset-1"
             onClick={handleSelect(option.value)}
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.25, delay: index * 0.05, ease: 'easeOut' }}
           >
-            <span className={styles.optionBody}>
-              <Body1Strong>{option.label}</Body1Strong>
-              <Caption1>{option.description}</Caption1>
+            <span className="flex flex-col gap-0.5 flex-auto min-w-0">
+              <span className="text-sm font-semibold">{option.label}</span>
+              <span className="text-xs text-muted-foreground">{option.description}</span>
             </span>
-            <ChevronRight20Regular className={styles.chevron} />
+            <ChevronRight className="text-muted-foreground shrink-0" />
           </motion.button>
         ))}
       </div>

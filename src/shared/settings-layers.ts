@@ -57,8 +57,6 @@ export const SETTINGS_LAYERS: Partial<Record<StoreKey, KeyClass>> = {
 
   // ---- user, global (follow the user across teams) ----
   theme: { layer: 'user', scope: 'global' },
-  glassTone: { layer: 'user', scope: 'global' },
-  codeDeckBackground: { layer: 'user', scope: 'global' },
   layoutMode: { layer: 'user', scope: 'global' },
   codeLayoutMode: { layer: 'user', scope: 'global' },
   audioSettings: { layer: 'user', scope: 'global' },

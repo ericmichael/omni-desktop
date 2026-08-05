@@ -44,8 +44,7 @@ export type TicketRow = {
   priority: string;
   branch: string | null;
   blocked_by: string; // JSON array
-  resolution: string | null;
-  resolved_at: string | null;
+  completed_at: string | null;
   archived_at: string | null;
   column_changed_at: string | null;
   // Launcher-specific (v2)

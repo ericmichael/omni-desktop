@@ -1,94 +1,14 @@
 import { useDroppable } from '@dnd-kit/core';
-import { makeStyles, mergeClasses, shorthands, tokens } from '@fluentui/react-components';
-import { Add16Regular } from '@fluentui/react-icons';
+import { Plus } from 'lucide-react';
 import { memo, useCallback, useMemo } from 'react';
 
-import { Body1 } from '@/renderer/ds';
+import { cn } from '@/renderer/ds/cn';
+import { Badge } from '@/renderer/ds/ui/badge';
+import { Button } from '@/renderer/ds/ui/button';
 import type { Column, ColumnId, Ticket } from '@/shared/types';
 
 import { KanbanCard } from './KanbanCard';
 import { getColumnColors } from './ticket-constants';
-
-const useStyles = makeStyles({
-  column: {
-    display: 'flex',
-    flexDirection: 'column',
-    width: '224px',
-    flexShrink: 0,
-    height: '100%',
-    borderRadius: tokens.borderRadiusMedium,
-    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
-    borderTopWidth: '2px',
-    transitionProperty: 'background-color',
-    transitionDuration: '150ms',
-    '@media (min-width: 640px)': {
-      width: '264px',
-    },
-  },
-  dropHighlight: {
-    backgroundColor: tokens.colorBrandBackground2,
-  },
-  header: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingLeft: tokens.spacingHorizontalM,
-    paddingRight: tokens.spacingHorizontalM,
-    paddingTop: tokens.spacingVerticalS,
-    paddingBottom: tokens.spacingVerticalS,
-    flexShrink: 0,
-  },
-  headerLabel: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '6px',
-  },
-  gateIcon: {
-    fontSize: tokens.fontSizeBase200,
-    color: tokens.colorNeutralForeground2,
-  },
-  countBadge: {
-    fontSize: tokens.fontSizeBase200,
-    fontWeight: tokens.fontWeightMedium,
-    paddingLeft: tokens.spacingHorizontalSNudge,
-    paddingRight: tokens.spacingHorizontalSNudge,
-    paddingTop: '2px',
-    paddingBottom: '2px',
-    borderRadius: '9999px',
-  },
-  cards: {
-    flex: '1 1 0',
-    overflowY: 'auto',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalS,
-    paddingLeft: tokens.spacingHorizontalS,
-    paddingRight: tokens.spacingHorizontalS,
-    paddingBottom: tokens.spacingVerticalS,
-  },
-  newBtn: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '4px',
-    width: '100%',
-    paddingLeft: tokens.spacingHorizontalM,
-    paddingRight: tokens.spacingHorizontalM,
-    paddingTop: '6px',
-    paddingBottom: '6px',
-    border: 'none',
-    backgroundColor: 'transparent',
-    borderRadius: tokens.borderRadiusMedium,
-    cursor: 'pointer',
-    color: tokens.colorNeutralForeground3,
-    fontSize: tokens.fontSizeBase200,
-    transitionProperty: 'background-color, color',
-    transitionDuration: tokens.durationFaster,
-    ':hover': {
-      backgroundColor: tokens.colorSubtleBackgroundHover,
-      color: tokens.colorNeutralForeground1,
-    },
-  },
-});
 
 type KanbanColumnProps = {
   column: Column;
@@ -97,7 +17,6 @@ type KanbanColumnProps = {
 };
 
 export const KanbanColumn = memo(({ column, tickets, onNewTicket }: KanbanColumnProps) => {
-  const styles = useStyles();
   const { isOver, setNodeRef } = useDroppable({
     id: column.id,
   });
@@ -111,29 +30,32 @@ export const KanbanColumn = memo(({ column, tickets, onNewTicket }: KanbanColumn
   return (
     <div
       ref={setNodeRef}
-      className={mergeClasses(styles.column, isOver && styles.dropHighlight)}
-      style={{
-        borderTopColor: colors.borderTop,
-        backgroundColor: isOver ? undefined : colors.background,
-      }}
+      className={cn(
+        'flex flex-col w-56 shrink-0 h-full rounded-lg border border-border border-t-2 transition-colors duration-150 sm:w-64',
+        !isOver && colors.columnClassName,
+        isOver && 'bg-primary/10'
+      )}
     >
       {/* Column header */}
-      <div className={styles.header}>
-        <div className={styles.headerLabel}>
-          <Body1>{column.label}</Body1>
+      <div className="flex items-center justify-between pl-4 pr-4 pt-2 pb-2 shrink-0">
+        <div className="flex items-center gap-1.5">
+          <span className="text-sm">{column.label}</span>
           {column.gate && (
-            <span className={styles.gateIcon} title="Gated — only a human can advance tasks past this column">
+            <span
+              className="text-xs text-muted-foreground"
+              title="Gated — only a human can advance tasks past this column"
+            >
               &#x1F512;
             </span>
           )}
         </div>
-        <span className={styles.countBadge} style={{ color: colors.badgeColor, backgroundColor: colors.badgeBg }}>
+        <Badge variant="secondary" className={colors.badgeClassName}>
           {tickets.length}
-        </span>
+        </Badge>
       </div>
 
       {/* Cards */}
-      <div className={styles.cards}>
+      <div className="flex-1 overflow-y-auto flex flex-col gap-2 pl-2 pr-2 pb-2">
         {tickets.map((ticket) => (
           <KanbanCard key={ticket.id} ticket={ticket} />
         ))}
@@ -141,10 +63,15 @@ export const KanbanColumn = memo(({ column, tickets, onNewTicket }: KanbanColumn
 
       {/* + New */}
       {onNewTicket && (
-        <button type="button" className={styles.newBtn} onClick={handleNew}>
-          <Add16Regular />
+        <Button
+          type="button"
+          variant="ghost"
+          className="flex items-center gap-1 w-full pl-4 pr-4 pt-1.5 pb-1.5 border-0 bg-transparent rounded-lg cursor-pointer text-muted-foreground text-xs transition-colors duration-100 hover:bg-accent hover:text-foreground"
+          onClick={handleNew}
+        >
+          <Plus />
           New
-        </button>
+        </Button>
       )}
     </div>
   );

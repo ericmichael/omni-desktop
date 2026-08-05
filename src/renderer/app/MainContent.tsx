@@ -1,8 +1,9 @@
-import { makeStyles, mergeClasses } from '@fluentui/react-components';
 import { useStore } from '@nanostores/react';
-import { memo, useEffect, useState } from 'react';
+import { memo, useCallback, useEffect, useState } from 'react';
 
 import { AppSidebar } from '@/renderer/app/AppSidebar';
+import { cn } from '@/renderer/ds/cn';
+import { SidebarInset, SidebarProvider } from '@/renderer/ds/ui/sidebar';
 import { Code } from '@/renderer/features/Code/Code';
 import { Dashboards } from '@/renderer/features/Dashboards/Dashboards';
 import { Gallery } from '@/renderer/features/Gallery/Gallery';
@@ -13,39 +14,25 @@ import { SandboxesTabContent } from '@/renderer/features/Sandboxes/SandboxesTabC
 import { SettingsPage } from '@/renderer/features/SettingsModal/SettingsPage';
 import { Tickets } from '@/renderer/features/Tickets/Tickets';
 import { persistedStoreApi } from '@/renderer/services/store';
-import { getThemeBackdrop, getThemeBuiltinGlassTone } from '@/renderer/theme/fluent-themes';
-import { getGlassVars } from '@/renderer/theme/glass-vars';
-import { $glassEnabled } from '@/renderer/theme/use-glass';
 import type { LayoutMode } from '@/shared/types';
 
-const useStyles = makeStyles({
-  /* Mobile: the sidebar is an overlay drawer, so the content plane is the
-     only in-flow child and the same row layout serves both breakpoints. */
-  root: {
-    display: 'flex',
-    flexDirection: 'row',
-    width: '100%',
-    height: '100%',
-  },
-  rootWithDeckBg: {
-    backgroundSize: 'cover',
-    backgroundPosition: 'center',
-    backgroundRepeat: 'no-repeat',
-  },
-  content: {
-    flex: '1 1 0',
-    minWidth: 0,
-    minHeight: 0,
-    position: 'relative',
-  },
-  panel: {
-    width: '100%',
-    height: '100%',
-  },
-  hidden: {
-    display: 'none',
-  },
-});
+const SIDEBAR_OPEN_STORAGE_KEY = 'omni.sidebarOpen';
+
+function loadSidebarOpen(): boolean {
+  try {
+    const stored = localStorage.getItem(SIDEBAR_OPEN_STORAGE_KEY);
+    if (stored !== null) {
+      return stored !== 'false';
+    }
+    const cookie = document.cookie
+      .split('; ')
+      .find((entry) => entry.startsWith('sidebar_state='))
+      ?.split('=')[1];
+    return cookie === undefined ? true : cookie === 'true';
+  } catch {
+    return true;
+  }
+}
 
 /**
  * Lazy-mount, never-unmount layout.
@@ -55,29 +42,17 @@ const useStyles = makeStyles({
  * Docker container connections, and component state across tab switches.
  */
 export const MainContent = memo(() => {
-  const styles = useStyles();
   const store = useStore(persistedStoreApi.$atom);
   const active: LayoutMode = store.layoutMode;
-  // Glass follows the THEME (one knob). The user's wallpaper, when set, only
-  // overrides the glass theme's built-in backdrop — it never activates glass.
-  const isGlass = useStore($glassEnabled);
-  const theme = store.theme ?? 'omni';
-  const userBackdrop = store.codeDeckBackground ?? null;
-  const backdropStyle: React.CSSProperties | undefined = isGlass
-    ? userBackdrop
-      ? { backgroundImage: `url(${userBackdrop})` }
-      : { background: getThemeBackdrop(theme) ?? undefined }
-    : undefined;
-  // User wallpapers carry their luminance-detected tone; the built-in
-  // backdrop uses the theme's declared tone.
-  const glassTone = userBackdrop ? (store.glassTone ?? 'dark') : getThemeBuiltinGlassTone(theme);
-
-  // The mobile nav drawer mounts INSIDE this element rather than in
-  // document.body: the glass vars and the `omni-glass` class live here, and
-  // CSS inheritance follows the DOM tree — a body-portaled drawer would fall
-  // back to the opaque theme surface and drop the blur.
-  const [glassRoot, setGlassRoot] = useState<HTMLDivElement | null>(null);
-
+  const [sidebarOpen, setSidebarOpen] = useState(loadSidebarOpen);
+  const handleSidebarOpenChange = useCallback((open: boolean) => {
+    setSidebarOpen(open);
+    try {
+      localStorage.setItem(SIDEBAR_OPEN_STORAGE_KEY, String(open));
+    } catch {
+      /* Ignore unavailable renderer storage. */
+    }
+  }, []);
   const [mounted, setMounted] = useState<Set<LayoutMode>>(() => new Set([active]));
 
   useEffect(() => {
@@ -99,7 +74,7 @@ export const MainContent = memo(() => {
     // Work owns the inbox, projects, tasks, pages, and milestones.
     { key: 'work', Component: Tickets },
     // Chat IS the deck since the tab merge: chat columns and work sessions
-    // share one surface (Tile/Focus), so there's a single panel for both.
+    // share one surface (Spaces/Focus), so there's a single panel for both.
     { key: 'chat', Component: Code },
     { key: 'dashboards', Component: Dashboards },
     // Agents hosts the resident roster, channels/DMs, and the Routines surface.
@@ -111,31 +86,27 @@ export const MainContent = memo(() => {
   ];
 
   return (
-    <div
-      ref={setGlassRoot}
-      className={mergeClasses(styles.root, isGlass && styles.rootWithDeckBg, isGlass && 'omni-glass')}
-      style={
-        isGlass
-          ? {
-              ...backdropStyle,
-              ...getGlassVars(glassTone),
-            }
-          : undefined
-      }
-    >
-      {/* The unified sidebar — a persistent column on desktop, an overlay
-          drawer on mobile. */}
-      <AppSidebar mountNode={glassRoot} />
-      <div className={styles.content}>
-        {panels.map(
-          ({ key, Component }) =>
-            mounted.has(key) && (
-              <div key={key} className={mergeClasses(styles.panel, active !== key && styles.hidden)}>
-                <Component />
-              </div>
-            )
-        )}
-      </div>
+    <div className="flex size-full flex-row">
+      <SidebarProvider
+        open={sidebarOpen}
+        onOpenChange={handleSidebarOpenChange}
+        className="app-sidebar-provider h-full min-h-0!"
+      >
+        {/* Stock shadcn Sidebar owns both the persistent desktop column and
+            the mobile Sheet. One provider means every trigger controls the
+            same sidebar state. */}
+        <AppSidebar />
+        <SidebarInset className="relative min-h-0 min-w-0 flex-1">
+          {panels.map(
+            ({ key, Component }) =>
+              mounted.has(key) && (
+                <div key={key} className={cn('size-full', active !== key && 'hidden')}>
+                  <Component />
+                </div>
+              )
+          )}
+        </SidebarInset>
+      </SidebarProvider>
     </div>
   );
 });

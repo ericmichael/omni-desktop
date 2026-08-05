@@ -3,7 +3,7 @@ import { memo, useMemo } from 'react';
 
 import utrgvLogo from '@/renderer/assets/logo-uthealthrgv.jpg';
 import { OmniMark } from '@/renderer/common/OmniMark';
-import { cn } from '@/renderer/ds';
+import { cn } from '@/renderer/ds/cn';
 import { persistedStoreApi } from '@/renderer/services/store';
 
 const ASCII_CHARS: Record<string, [string, string, string]> = {
@@ -72,7 +72,11 @@ export const AsciiLogo = memo(({ text = 'OMNI', className }: { text?: string; cl
     return (
       <div className={cn('flex items-center gap-3 select-none', className)}>
         <img src={utrgvLogo} alt="UTHealth RGV" className="h-8" />
-        <pre role="img" aria-label={text} className="leading-none text-[8px] font-mono text-white/70 translate-y-px">
+        <pre
+          role="img"
+          aria-label={text}
+          className="ascii-logo-text translate-y-px font-mono leading-none text-foreground/70"
+        >
           {lines.join('\n')}
         </pre>
       </div>
@@ -84,7 +88,7 @@ export const AsciiLogo = memo(({ text = 'OMNI', className }: { text?: string; cl
       role="img"
       aria-label={text}
       className={cn(
-        'leading-none text-[8px] font-mono select-none bg-gradient-to-r from-[#bb9af7] to-[#7aa2f7] bg-clip-text text-transparent',
+        'ascii-logo-text omni-ascii-gradient bg-clip-text font-mono leading-none text-transparent select-none',
         className
       )}
     >
@@ -99,13 +103,13 @@ const OMNI_LINES = createASCIIArt('OMNI');
 export const OmniLogo = memo(({ className }: { className?: string }) => {
   const store = useStore(persistedStoreApi.$atom);
 
-  // Branded (UTRGV) rail keeps the white wordmark against the brand fill.
+  // Branded (UTRGV) wordmark follows the active surface foreground.
   if (store.theme === 'utrgv') {
     return (
       <pre
         role="img"
         aria-label="Omni"
-        className={cn('leading-none text-[6px] font-mono select-none text-white/80', className)}
+        className={cn('omni-logo-text font-mono leading-none text-foreground/80 select-none', className)}
       >
         {OMNI_LINES.join('\n')}
       </pre>

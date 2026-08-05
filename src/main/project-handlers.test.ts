@@ -20,11 +20,9 @@ const EXPECTED_CHANNELS = [
   'project:check-git-repo',
   'project:add-ticket',
   'project:update-ticket',
-  'project:remove-ticket',
   'project:get-tickets',
   'project:get-next-ticket',
   'project:move-ticket-to-column',
-  'project:resolve-ticket',
   'project:assign-ticket',
   'project:get-pipeline',
   'project:list-artifacts',
@@ -46,11 +44,9 @@ const makeManager = () => ({
   getProjectDir: vi.fn(() => '/tmp/project'),
   addTicket: vi.fn(() => ({ id: 't1' })),
   updateTicket: vi.fn(),
-  removeTicket: vi.fn(),
   getTicketsByProject: vi.fn(() => []),
   getNextTicket: vi.fn(() => null),
   moveTicketToColumn: vi.fn(),
-  resolveTicket: vi.fn(),
   getPipeline: vi.fn(() => ({ columns: [] })),
   listArtifacts: vi.fn(() => []),
   readArtifact: vi.fn(() => ({ relativePath: '', mimeType: '', textContent: null, size: 0 })),
@@ -120,14 +116,6 @@ describe('registerProjectHandlers', () => {
     registerProjectHandlers(ipc, () => mgr as never);
     ipc.invoke('project:move-ticket-to-column', 't1', 'in_progress');
     expect(mgr.moveTicketToColumn).toHaveBeenCalledWith('t1', 'in_progress');
-  });
-
-  it('project:resolve-ticket delegates with ticketId and resolution', () => {
-    const ipc = new StubIpc();
-    const mgr = makeManager();
-    registerProjectHandlers(ipc, () => mgr as never);
-    ipc.invoke('project:resolve-ticket', 't1', 'completed');
-    expect(mgr.resolveTicket).toHaveBeenCalledWith('t1', 'completed');
   });
 
   it('project:get-pipeline delegates with projectId', async () => {

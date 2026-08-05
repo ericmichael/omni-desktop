@@ -1,10 +1,10 @@
-import { makeStyles, tokens } from '@fluentui/react-components';
 import { AnimatePresence, motion } from 'framer-motion';
 import { memo, useCallback, useState } from 'react';
 
 import { buildProviderConfig, maskApiKey } from '@/lib/provider-config';
 import { OmniMark } from '@/renderer/common/OmniMark';
-import { Caption1, Card, ProgressBar } from '@/renderer/ds';
+import { Card } from '@/renderer/ds/ui/card';
+import { Progress } from '@/renderer/ds/ui/progress';
 import { OnboardingChatGptStep } from '@/renderer/features/Onboarding/OnboardingChatGptStep';
 import type { IdentityKind } from '@/renderer/features/Onboarding/OnboardingChooseStep';
 import { OnboardingChooseStep } from '@/renderer/features/Onboarding/OnboardingChooseStep';
@@ -69,37 +69,6 @@ type ConnectedInfo = { providerLabel: string; modelLabel: string; maskedKey?: st
 // Windows Electron that isn't already linked to a remote backend.
 const WSL_STEP_ELIGIBLE = isElectron && bootstrapPlatform === 'win32' && !isCloudLinked && !isWslLinked;
 
-const useStyles = makeStyles({
-  root: {
-    display: 'flex',
-    height: '100%',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: tokens.colorNeutralBackground1,
-  },
-  card: {
-    width: '100%',
-    maxWidth: '480px',
-    padding: '32px',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '24px',
-    overflow: 'hidden',
-  },
-  header: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '8px',
-  },
-  brandRow: { display: 'flex', alignItems: 'center', gap: '10px' },
-  title: {
-    fontFamily: 'var(--font-display)',
-    fontSize: tokens.fontSizeBase500,
-    fontWeight: tokens.fontWeightSemibold,
-    color: tokens.colorNeutralForeground1,
-  },
-});
-
 const stepVariants = {
   initial: { opacity: 0, x: 24 },
   animate: { opacity: 1, x: 0 },
@@ -107,7 +76,6 @@ const stepVariants = {
 };
 
 export const OnboardingWizard = memo(() => {
-  const styles = useStyles();
   const [step, setStep] = useState<Step>(WSL_STEP_ELIGIBLE ? 'wsl' : 'choose');
   const [identity, setIdentity] = useState<IdentityKind | null>(null);
 
@@ -272,22 +240,22 @@ export const OnboardingWizard = memo(() => {
       : resolveModelChoices(localKind, liveModels);
 
   return (
-    <div className={styles.root}>
-      <Card className={styles.card}>
-        <div className={styles.header}>
-          <div className={styles.brandRow}>
+    <div className="flex h-full items-center justify-center bg-background">
+      <Card className="w-full max-w-lg p-8 flex flex-col gap-6 overflow-hidden">
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center gap-2.5">
             <OmniMark size={28} />
-            <span className={styles.title}>Welcome to Omni</span>
+            <span className="font-display text-xl font-semibold text-foreground">Welcome to Omni</span>
           </div>
           {step === 'choose' && (
-            <Caption1>
+            <span className="text-xs text-muted-foreground">
               Omni runs AI agents securely on your computer — they chat, write code, browse, and get real work done.
               Connect the AI you already use to power them.
-            </Caption1>
+            </span>
           )}
         </div>
 
-        {showProgress && branch && <ProgressBar value={(stepIndex + 1) / branch.length} thickness="large" />}
+        {showProgress && branch && <Progress value={((stepIndex + 1) / branch.length) * 100} />}
 
         <AnimatePresence mode="wait" initial={false}>
           <motion.div
@@ -296,7 +264,10 @@ export const OnboardingWizard = memo(() => {
             initial="initial"
             animate="animate"
             exit="exit"
-            transition={{ duration: 0.2, ease: 'easeOut' }}
+            transition={{
+              duration: 0.2,
+              ease: 'easeOut',
+            }}
           >
             {step === 'wsl' && <OnboardingWslStep onSkip={handleWslSkip} />}
 

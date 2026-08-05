@@ -1,166 +1,31 @@
-/**
- * History panel overlay — opens via `Cmd+Shift+H` in a BrowserView. Searchable,
- * click-to-navigate, clear-all. Reads history lazily through `browserApi` so
- * the large history blob isn't duplicated in the browser-state atom.
- */
-import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
-import { Delete16Regular, Dismiss20Regular, Globe16Regular, Search16Regular } from '@fluentui/react-icons';
+/** Searchable browser history presented as a shadcn dialog and item list. */
+import './HistoryPanel.css';
+
+import { Globe, Search, Trash2 } from 'lucide-react';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 
 import { fallbackTitle } from '@/lib/url';
+import { Button } from '@/renderer/ds/ui/button';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/renderer/ds/ui/dialog';
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/renderer/ds/ui/empty';
+import { InputGroup, InputGroupAddon, InputGroupInput } from '@/renderer/ds/ui/input-group';
+import { Item, ItemContent, ItemDescription, ItemGroup, ItemMedia, ItemTitle } from '@/renderer/ds/ui/item';
+import { ScrollArea } from '@/renderer/ds/ui/scroll-area';
 import { browserApi } from '@/renderer/features/Browser/state';
 import type { BrowserHistoryEntry, BrowserProfileId } from '@/shared/types';
 
-const useStyles = makeStyles({
-  backdrop: {
-    position: 'absolute',
-    inset: 0,
-    zIndex: 30,
-    backgroundColor: 'rgba(0, 0, 0, 0.25)',
-    display: 'flex',
-    alignItems: 'flex-start',
-    justifyContent: 'center',
-    paddingTop: '48px',
-  },
-  panel: {
-    width: 'min(640px, 90%)',
-    maxHeight: '70%',
-    display: 'flex',
-    flexDirection: 'column',
-    backgroundColor: tokens.colorNeutralBackground1,
-    borderRadius: tokens.borderRadiusLarge,
-    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
-    boxShadow: tokens.shadow28,
-    overflow: 'hidden',
-  },
-  header: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-    padding: '10px 14px',
-    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
-  },
-  title: {
-    fontSize: tokens.fontSizeBase300,
-    fontWeight: tokens.fontWeightSemibold,
-    color: tokens.colorNeutralForeground1,
-    flex: '1 1 0',
-  },
-  inputWrap: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-    padding: '8px 14px',
-    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
-  },
-  input: {
-    flex: '1 1 0',
-    minWidth: 0,
-    height: '26px',
-    padding: '0 6px',
-    fontSize: tokens.fontSizeBase200,
-    color: tokens.colorNeutralForeground1,
-    backgroundColor: 'transparent',
-    border: 'none',
-    outline: 'none',
-  },
-  list: {
-    flex: '1 1 0',
-    minHeight: 0,
-    overflowY: 'auto',
-    padding: '4px',
-  },
-  row: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '10px',
-    padding: '8px 10px',
-    borderRadius: tokens.borderRadiusSmall,
-    cursor: 'pointer',
-    color: tokens.colorNeutralForeground1,
-    fontSize: tokens.fontSizeBase200,
-    ':hover': { backgroundColor: tokens.colorSubtleBackgroundHover },
-  },
-  rowTitle: {
-    flex: '1 1 0',
-    minWidth: 0,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-  },
-  rowUrl: {
-    fontSize: tokens.fontSizeBase100,
-    color: tokens.colorNeutralForeground3,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    maxWidth: '40%',
-  },
-  rowTime: {
-    fontSize: tokens.fontSizeBase100,
-    color: tokens.colorNeutralForeground4,
-    flexShrink: 0,
-  },
-  footer: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: '8px 14px',
-    ...shorthands.borderTop('1px', 'solid', tokens.colorNeutralStroke1),
-    fontSize: tokens.fontSizeBase100,
-    color: tokens.colorNeutralForeground3,
-  },
-  btn: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: '4px',
-    height: '26px',
-    paddingLeft: '8px',
-    paddingRight: '8px',
-    borderRadius: tokens.borderRadiusMedium,
-    border: 'none',
-    backgroundColor: 'transparent',
-    color: tokens.colorNeutralForeground2,
-    cursor: 'pointer',
-    fontSize: tokens.fontSizeBase200,
-    ':hover': { backgroundColor: tokens.colorSubtleBackgroundHover, color: tokens.colorNeutralForeground1 },
-  },
-  empty: {
-    padding: '32px',
-    textAlign: 'center',
-    color: tokens.colorNeutralForeground4,
-    fontSize: tokens.fontSizeBase200,
-  },
-  destructiveBtn: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: '4px',
-    height: '26px',
-    paddingLeft: '8px',
-    paddingRight: '8px',
-    borderRadius: tokens.borderRadiusMedium,
-    border: 'none',
-    backgroundColor: 'transparent',
-    color: tokens.colorPaletteRedForeground1,
-    cursor: 'pointer',
-    fontSize: tokens.fontSizeBase200,
-    ':hover': { backgroundColor: 'rgba(255, 80, 80, 0.08)' },
-  },
-});
-
-function formatTime(ts: number): string {
-  const now = Date.now();
-  const diff = now - ts;
-  if (diff < 60_000) {
+function formatTime(timestamp: number): string {
+  const difference = Date.now() - timestamp;
+  if (difference < 60_000) {
     return 'just now';
   }
-  if (diff < 3_600_000) {
-    return `${Math.round(diff / 60_000)}m ago`;
+  if (difference < 3_600_000) {
+    return `${Math.round(difference / 60_000)}m ago`;
   }
-  if (diff < 86_400_000) {
-    return `${Math.round(diff / 3_600_000)}h ago`;
+  if (difference < 86_400_000) {
+    return `${Math.round(difference / 3_600_000)}h ago`;
   }
-  return new Date(ts).toLocaleDateString();
+  return new Date(timestamp).toLocaleDateString();
 }
 
 export const HistoryPanel = memo(
@@ -173,53 +38,36 @@ export const HistoryPanel = memo(
     onOpen: (url: string) => void;
     onClose: () => void;
   }) => {
-    const styles = useStyles();
     const [query, setQuery] = useState('');
     const [entries, setEntries] = useState<BrowserHistoryEntry[]>([]);
-    const inputRef = useRef<HTMLInputElement>(null);
-    const seqRef = useRef(0);
+    const sequenceRef = useRef(0);
 
     const refresh = useCallback(
-      async (q: string) => {
-        const seq = ++seqRef.current;
-        const out = await browserApi.listHistory({
-          query: q,
+      async (nextQuery: string) => {
+        const sequence = ++sequenceRef.current;
+        const result = await browserApi.listHistory({
+          query: nextQuery,
           limit: 200,
           ...(profileId ? { profileId } : {}),
         });
-        if (seq === seqRef.current) {
-          setEntries(out);
+        if (sequence === sequenceRef.current) {
+          setEntries(result);
         }
       },
       [profileId]
     );
 
     useEffect(() => {
-      inputRef.current?.focus();
       void refresh('');
     }, [refresh]);
 
     const handleChange = useCallback(
-      (e: React.ChangeEvent<HTMLInputElement>) => {
-        const next = e.target.value;
-        setQuery(next);
-        void refresh(next);
+      (event: React.ChangeEvent<HTMLInputElement>) => {
+        const nextQuery = event.target.value;
+        setQuery(nextQuery);
+        void refresh(nextQuery);
       },
       [refresh]
-    );
-
-    const handleKeyDown = useCallback(
-      (e: React.KeyboardEvent<HTMLInputElement>) => {
-        if (e.key === 'Escape') {
-          e.preventDefault();
-          onClose();
-        } else if (e.key === 'Enter' && entries.length > 0) {
-          e.preventDefault();
-          onOpen(entries[0]!.url);
-          onClose();
-        }
-      },
-      [entries, onClose, onOpen]
     );
 
     const handleClear = useCallback(async () => {
@@ -236,59 +84,81 @@ export const HistoryPanel = memo(
     );
 
     return (
-      <div
-        className={styles.backdrop}
-        onClick={(e) => {
-          if (e.target === e.currentTarget) {
-            onClose();
-          }
-        }}
-      >
-        <div className={styles.panel} role="dialog" aria-label="History">
-          <div className={styles.header}>
-            <span className={styles.title}>History</span>
-            <button type="button" className={styles.btn} onClick={onClose} aria-label="Close">
-              <Dismiss20Regular style={{ width: 14, height: 14 }} />
-            </button>
+      <Dialog open onOpenChange={(nextOpen) => !nextOpen && onClose()}>
+        <DialogContent className="omni-browser-history-dialog flex max-w-160 flex-col gap-0 overflow-hidden p-0">
+          <DialogHeader className="px-4 py-3 text-left">
+            <DialogTitle>History</DialogTitle>
+            <DialogDescription>Search pages visited in this browser profile.</DialogDescription>
+          </DialogHeader>
+          <div className="border-b p-3">
+            <InputGroup>
+              <InputGroupAddon>
+                <Search />
+              </InputGroupAddon>
+              <InputGroupInput
+                value={query}
+                onChange={handleChange}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' && entries[0]) {
+                    event.preventDefault();
+                    handleOpen(entries[0].url);
+                  }
+                }}
+                placeholder="Search history"
+                spellCheck={false}
+                autoComplete="off"
+                autoFocus
+              />
+            </InputGroup>
           </div>
-          <div className={styles.inputWrap}>
-            <Search16Regular />
-            <input
-              ref={inputRef}
-              type="text"
-              className={styles.input}
-              value={query}
-              onChange={handleChange}
-              onKeyDown={handleKeyDown}
-              placeholder="Search history"
-              spellCheck={false}
-              autoComplete="off"
-            />
-          </div>
-          <div className={styles.list}>
+          <ScrollArea className="min-h-0 flex-1">
             {entries.length === 0 ? (
-              <div className={styles.empty}>{query ? 'No matches' : 'Your history will appear here.'}</div>
+              <Empty className="border-0 py-10">
+                <EmptyHeader>
+                  <EmptyMedia variant="icon">
+                    <Globe />
+                  </EmptyMedia>
+                  <EmptyTitle>{query ? 'No matches' : 'No history yet'}</EmptyTitle>
+                  <EmptyDescription>
+                    {query ? 'Try a different search.' : 'Pages you visit will appear here.'}
+                  </EmptyDescription>
+                </EmptyHeader>
+              </Empty>
             ) : (
-              entries.map((e) => (
-                <div key={e.id} className={styles.row} onClick={() => handleOpen(e.url)} role="button" tabIndex={0}>
-                  <Globe16Regular />
-                  <span className={styles.rowTitle}>{e.title ?? fallbackTitle(e.url)}</span>
-                  <span className={styles.rowUrl}>{e.url}</span>
-                  <span className={styles.rowTime}>{formatTime(e.visitedAt)}</span>
-                </div>
-              ))
+              <ItemGroup className="p-1">
+                {entries.map((entry) => (
+                  <Item
+                    key={entry.id}
+                    asChild
+                    size="sm"
+                    className="w-full cursor-pointer flex-nowrap text-left hover:bg-accent/50"
+                  >
+                    <button type="button" onClick={() => handleOpen(entry.url)}>
+                      <ItemMedia>
+                        <Globe />
+                      </ItemMedia>
+                      <ItemContent className="min-w-0">
+                        <ItemTitle className="max-w-full truncate">{entry.title ?? fallbackTitle(entry.url)}</ItemTitle>
+                        <ItemDescription className="truncate text-left">{entry.url}</ItemDescription>
+                      </ItemContent>
+                      <span className="shrink-0 text-xs text-muted-foreground">{formatTime(entry.visitedAt)}</span>
+                    </button>
+                  </Item>
+                ))}
+              </ItemGroup>
             )}
-          </div>
-          <div className={styles.footer}>
+          </ScrollArea>
+          <div className="flex items-center justify-between border-t px-4 py-2 text-xs text-muted-foreground">
             <span>{entries.length} entries</span>
-            <button type="button" className={styles.destructiveBtn} onClick={handleClear}>
-              <Delete16Regular style={{ width: 12, height: 12 }} />
+            <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" onClick={handleClear}>
+              <Trash2 />
               Clear history
-            </button>
+            </Button>
           </div>
-        </div>
-      </div>
+        </DialogContent>
+      </Dialog>
     );
   }
 );
+
 HistoryPanel.displayName = 'HistoryPanel';

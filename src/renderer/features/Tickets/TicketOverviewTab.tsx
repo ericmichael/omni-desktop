@@ -1,10 +1,13 @@
-import { makeStyles, mergeClasses, shorthands, tokens } from '@fluentui/react-components';
-import { Dismiss20Regular, Edit20Regular, Warning20Filled } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
+import { Edit, TriangleAlert, X } from 'lucide-react';
 import { memo, useCallback, useMemo, useState } from 'react';
 import Markdown from 'react-markdown';
 
-import { Badge, Button, IconButton, SectionLabel, Select, Textarea } from '@/renderer/ds';
+import { cn } from '@/renderer/ds/cn';
+import { Badge } from '@/renderer/ds/ui/badge';
+import { Button } from '@/renderer/ds/ui/button';
+import { NativeSelect as Select } from '@/renderer/ds/ui/native-select';
+import { Textarea } from '@/renderer/ds/ui/textarea';
 import { $milestones } from '@/renderer/features/Initiatives/state';
 import { $members } from '@/renderer/features/Teams/state';
 import { AssigneePicker } from '@/renderer/features/Tickets/AssigneePicker';
@@ -12,163 +15,8 @@ import { persistedStoreApi } from '@/renderer/services/store';
 import type { MilestoneId, Ticket, TicketPriority } from '@/shared/types';
 
 import { $pipeline, $tickets, ticketApi } from './state';
-import { getColumnColors, PHASE_LABELS, RESOLUTION_COLORS, RESOLUTION_LABELS } from './ticket-constants';
+import { getColumnColors, PHASE_LABELS } from './ticket-constants';
 import { TicketDiscussion } from './TicketDiscussion';
-
-const useStyles = makeStyles({
-  /* Content + properties split (the Linear/GitHub issue idiom): the
-     description is the star in the main column; every field lives in a
-     compact rail on the right. Stacks on narrow panes. */
-  root: {
-    display: 'flex',
-    alignItems: 'flex-start',
-    gap: tokens.spacingHorizontalXXL,
-    width: '100%',
-    maxWidth: '56rem',
-    marginLeft: 'auto',
-    marginRight: 'auto',
-    '@media (max-width: 760px)': {
-      flexDirection: 'column',
-    },
-  },
-  rootStacked: {
-    flexDirection: 'column',
-    maxWidth: '42rem',
-  },
-  main: {
-    flex: '1 1 0',
-    minWidth: 0,
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalXXL,
-    '@media (max-width: 760px)': {
-      width: '100%',
-      flex: '0 0 auto',
-    },
-  },
-  aside: {
-    width: '240px',
-    flexShrink: 0,
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalL,
-    '@media (max-width: 760px)': {
-      width: '100%',
-    },
-  },
-  asideStacked: {
-    width: '100%',
-  },
-  prop: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '4px',
-  },
-  propControl: {
-    width: '100%',
-  },
-  section: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalS,
-  },
-  labelRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '6px',
-  },
-  editActions: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-  },
-  descriptionMarkdown: {
-    fontSize: tokens.fontSizeBase300,
-    color: tokens.colorNeutralForeground2,
-  },
-  tapToAdd: {
-    fontSize: tokens.fontSizeBase300,
-    color: tokens.colorNeutralForeground3,
-    fontStyle: 'italic',
-    textAlign: 'left',
-    cursor: 'pointer',
-    transitionProperty: 'color',
-    transitionDuration: '150ms',
-    backgroundColor: 'transparent',
-    border: 'none',
-    ':hover': {
-      color: tokens.colorNeutralForeground2,
-    },
-  },
-  blockerRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-  },
-  cleanupBanner: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalS,
-    ...shorthands.border('1px', 'solid', tokens.colorPaletteYellowBorder2),
-    backgroundColor: tokens.colorPaletteYellowBackground1,
-    color: tokens.colorPaletteYellowForeground2,
-    borderRadius: tokens.borderRadiusMedium,
-    padding: tokens.spacingVerticalM,
-  },
-  cleanupBannerHeader: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '6px',
-    fontWeight: tokens.fontWeightSemibold,
-  },
-  cleanupBannerBody: {
-    fontSize: tokens.fontSizeBase300,
-  },
-  cleanupBannerPath: {
-    fontFamily: tokens.fontFamilyMonospace,
-    fontSize: tokens.fontSizeBase200,
-    color: tokens.colorNeutralForeground3,
-    wordBreak: 'break-all',
-  },
-  cleanupBannerActions: {
-    display: 'flex',
-    gap: tokens.spacingHorizontalS,
-  },
-  blockerTitle: {
-    fontSize: tokens.fontSizeBase300,
-    color: tokens.colorNeutralForeground2,
-    flex: '1 1 0',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-  },
-  blockerList: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '6px',
-  },
-  noBlockers: {
-    fontSize: tokens.fontSizeBase200,
-    color: tokens.colorNeutralForeground3,
-  },
-  infoText: {
-    fontSize: tokens.fontSizeBase200,
-    color: tokens.colorNeutralForeground2,
-  },
-  metaRow: {
-    display: 'flex',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-  },
-  detailRow: {
-    display: 'flex',
-    flexDirection: 'column',
-    rowGap: '2px',
-    fontSize: tokens.fontSizeBase200,
-    color: tokens.colorNeutralForeground3,
-  },
-});
 
 type TicketOverviewTabProps = {
   ticket: Ticket;
@@ -177,7 +25,6 @@ type TicketOverviewTabProps = {
 };
 
 export const TicketOverviewTab = memo(({ ticket, compact }: TicketOverviewTabProps) => {
-  const styles = useStyles();
   const tickets = useStore($tickets);
   const pipeline = useStore($pipeline);
   const milestones = useStore($milestones);
@@ -185,13 +32,6 @@ export const TicketOverviewTab = memo(({ ticket, compact }: TicketOverviewTabPro
   const residents = useStore(persistedStoreApi.$atom).residentAgents;
   const [editingDescription, setEditingDescription] = useState(false);
   const [editDescription, setEditDescription] = useState('');
-
-  const currentColumn = useMemo(() => {
-    if (!ticket.columnId || !pipeline) {
-      return undefined;
-    }
-    return pipeline.columns.find((c) => c.id === ticket.columnId);
-  }, [ticket, pipeline]);
 
   const projectMilestones = useMemo(
     () =>
@@ -298,57 +138,109 @@ export const TicketOverviewTab = memo(({ ticket, compact }: TicketOverviewTabPro
   }, [ticket.id]);
 
   return (
-    <div className={mergeClasses(styles.root, compact && styles.rootStacked)}>
+    <div className={cn('flex w-full min-w-0 max-w-none flex-col gap-8', compact && 'max-w-2xl')}>
+      <aside
+        className={cn('grid grid-cols-2 gap-4 rounded-xl border bg-card p-4', compact && 'grid-cols-1')}
+        aria-label="Task properties"
+      >
+        <div className="flex flex-col gap-1">
+          <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Status</span>
+          {pipeline && (
+            <Select value={ticket.columnId ?? ''} onChange={handleColumnChange} className="w-full">
+              {pipeline.columns.map((col) => (
+                <option key={col.id} value={col.id}>
+                  {col.label}
+                </option>
+              ))}
+            </Select>
+          )}
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Priority</span>
+          <Select value={ticket.priority} onChange={handlePriorityChange} className="w-full">
+            <option value="low">Low</option>
+            <option value="medium">Medium</option>
+            <option value="high">High</option>
+            <option value="critical">Critical</option>
+          </Select>
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Milestone</span>
+          <Select value={ticket.milestoneId ?? ''} onChange={handleMilestoneChange} className="w-full">
+            <option value="">No milestone</option>
+            {projectMilestones.map((milestone) => (
+              <option key={milestone.id} value={milestone.id}>
+                {milestone.title || 'Untitled milestone'}
+              </option>
+            ))}
+          </Select>
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Assignee</span>
+          {members.length > 0 || residents.some((agent) => agent.enabled) ? (
+            <AssigneePicker ticketId={ticket.id} assignee={ticket.assignee} />
+          ) : (
+            <span className="text-sm text-muted-foreground">Unassigned</span>
+          )}
+        </div>
+      </aside>
+
       {/* ── Main column: the ticket's content ── */}
-      <div className={styles.main}>
+      <div className="flex-1 min-w-0 flex flex-col gap-8 [@media(max-width:760px)]:w-full [@media(max-width:760px)]:flex-none">
         {ticket.cleanupPending && ticket.worktreePath && (
-          <div className={styles.cleanupBanner}>
-            <div className={styles.cleanupBannerHeader}>
-              <Warning20Filled />
+          <div className="flex flex-col gap-2 rounded-lg border border-warning bg-warning/10 p-4 text-warning">
+            <div className="flex items-center gap-1.5 font-semibold">
+              <TriangleAlert />
               Worktree has uncommitted changes — cleanup deferred
             </div>
-            <div className={styles.cleanupBannerBody}>
-              This task is resolved, but its worktree still has unsaved work. Commit or discard the changes, then click
+            <div className="text-sm">
+              This task is complete, but its worktree still has unsaved work. Commit or discard the changes, then click
               below to remove the worktree.
             </div>
-            <div className={styles.cleanupBannerPath}>{ticket.worktreePath}</div>
+            <div className="font-mono text-xs text-muted-foreground break-all">{ticket.worktreePath}</div>
             {cleanupError && (
-              <div className={styles.cleanupBannerBody} role="alert">
+              <div className="text-sm" role="alert">
                 {cleanupError}
               </div>
             )}
-            <div className={styles.cleanupBannerActions}>
-              <Button size="sm" onClick={handleFinalizeCleanup} isDisabled={cleanupBusy}>
+            <div className="flex gap-2">
+              <Button size="sm" onClick={handleFinalizeCleanup} disabled={cleanupBusy}>
                 {cleanupBusy ? 'Cleaning up…' : 'Clean up worktree'}
               </Button>
             </div>
           </div>
         )}
 
-        <div className={styles.section}>
-          <div className={styles.labelRow}>
-            <SectionLabel>Description</SectionLabel>
+        <div className="flex flex-col min-w-0 max-w-full gap-2">
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Notes</span>
             {!editingDescription && (
-              <IconButton
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
                 aria-label="Edit description"
-                icon={<Edit20Regular />}
-                size="sm"
                 onClick={handleStartEditDescription}
-              />
+              >
+                <Edit />
+              </Button>
             )}
           </div>
           {editingDescription ? (
-            <div className={styles.section}>
+            <div className="flex flex-col min-w-0 max-w-full gap-2">
               <Textarea
                 value={editDescription}
                 onChange={handleEditDescriptionChange}
                 onKeyDown={handleDescriptionKeyDown}
                 autoFocus
                 rows={5}
-                maxHeight={400}
-                placeholder="Task description..."
+                placeholder="Add notes, details, or a checklist..."
               />
-              <div className={styles.editActions}>
+
+              <div className="flex items-center gap-2">
                 <Button size="sm" onClick={handleSaveDescription}>
                   Save
                 </Button>
@@ -359,165 +251,109 @@ export const TicketOverviewTab = memo(({ ticket, compact }: TicketOverviewTabPro
             </div>
           ) : ticket.description ? (
             <div
-              className={`prose prose-invert prose-sm max-w-none ${styles.descriptionMarkdown} prose-code:before:content-none prose-code:after:content-none [&_code]:bg-surface-raised [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_pre]:bg-surface-raised [&_pre]:rounded-lg [&_pre]:p-3 [&_pre_code]:bg-transparent [&_pre_code]:px-0 [&_pre_code]:py-0`}
+              className={`prose prose-sm max-w-none dark:prose-invert ${'min-w-0 max-w-full wrap-anywhere text-sm text-muted-foreground'} prose-code:before:content-none prose-code:after:content-none [&_code]:rounded [&_code]:bg-card [&_code]:px-1.5 [&_code]:py-0.5 [&_pre]:rounded-lg [&_pre]:bg-card [&_pre]:p-3 [&_pre_code]:bg-transparent [&_pre_code]:px-0 [&_pre_code]:py-0`}
             >
               <Markdown>{ticket.description}</Markdown>
             </div>
           ) : (
-            <button onClick={handleStartEditDescription} className={styles.tapToAdd}>
-              Tap to add description
-            </button>
+            <Button
+              variant="ghost"
+              onClick={handleStartEditDescription}
+              className="text-sm text-muted-foreground italic text-left cursor-pointer transition-colors duration-150 bg-transparent border-0 hover:text-muted-foreground"
+            >
+              Add notes or details
+            </Button>
           )}
         </div>
 
-        <div className={styles.section}>
-          <SectionLabel>Discussion</SectionLabel>
+        <div className="flex flex-col min-w-0 max-w-full gap-2">
+          <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Activity</span>
           <TicketDiscussion ticket={ticket} />
         </div>
       </div>
 
-      {/* ── Properties rail ── */}
-      <aside className={mergeClasses(styles.aside, compact && styles.asideStacked)} aria-label="Task properties">
-        <div className={styles.prop}>
-          <SectionLabel>Status</SectionLabel>
-          {pipeline && (
-            <Select
-              size="sm"
-              value={ticket.columnId ?? ''}
-              onChange={handleColumnChange}
-              className={styles.propControl}
-            >
-              {pipeline.columns.map((col) => (
-                <option key={col.id} value={col.id}>
-                  {col.label}
-                </option>
-              ))}
-            </Select>
-          )}
-          {/* Skip the resolution badge when it would just repeat the column
-              dropdown's label (e.g. "Completed" next to "Completed"). */}
-          {ticket.resolution && RESOLUTION_LABELS[ticket.resolution] !== currentColumn?.label && (
-            <div className={styles.metaRow}>
-              <Badge color={RESOLUTION_COLORS[ticket.resolution]}>{RESOLUTION_LABELS[ticket.resolution]}</Badge>
+      <details className="rounded-xl border px-4 py-3">
+        <summary className="cursor-pointer text-sm font-medium text-muted-foreground hover:text-foreground">
+          Dependencies and technical details
+        </summary>
+        <aside className={cn('mt-4 grid gap-5 sm:grid-cols-2', compact && 'grid-cols-1')} aria-label="Task details">
+          <div className="flex flex-col gap-1">
+            <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Dependencies</span>
+            {blockerTickets.length > 0 && (
+              <div className="flex flex-col gap-1.5">
+                {blockerTickets.map((blocker) => (
+                  <div key={blocker.id} className="flex items-center gap-2">
+                    <Badge
+                      variant="secondary"
+                      className={getColumnColors(blocker.columnId ?? 'backlog').badgeClassName}
+                    >
+                      {blocker.columnId ?? 'backlog'}
+                    </Badge>
+                    <span className="text-sm text-muted-foreground flex-1 overflow-hidden text-ellipsis whitespace-nowrap">
+                      {blocker.title}
+                    </span>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label={`Remove blocker ${blocker.title}`}
+                      onClick={() => handleRemoveBlocker(blocker.id)}
+                    >
+                      <X />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+            {availableBlockers.length > 0 && (
+              <Select value="" onChange={handleAddBlocker} className="w-full">
+                <option value="">Add dependency...</option>
+                {availableBlockers.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.title}
+                  </option>
+                ))}
+              </Select>
+            )}
+            {blockerTickets.length === 0 && availableBlockers.length === 0 && (
+              <p className="text-xs text-muted-foreground">No tasks available to block on</p>
+            )}
+          </div>
+
+          {/* Autopilot status — hidden entirely when idle; raw phase values never
+             render (PHASE_LABELS holds the human wording). */}
+          {(ticket.autopilot || (ticket.phase && ticket.phase !== 'idle')) && (
+            <div className="flex flex-col gap-1">
+              <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Omni</span>
+              <div className="text-xs text-muted-foreground">
+                {ticket.autopilot && <p>On</p>}
+                {ticket.phase && ticket.phase !== 'idle' && PHASE_LABELS[ticket.phase] && (
+                  <p>{PHASE_LABELS[ticket.phase]}</p>
+                )}
+              </div>
             </div>
           )}
-        </div>
 
-        <div className={styles.prop}>
-          <SectionLabel>Priority</SectionLabel>
-          <Select size="sm" value={ticket.priority} onChange={handlePriorityChange} className={styles.propControl}>
-            <option value="low">Low</option>
-            <option value="medium">Medium</option>
-            <option value="high">High</option>
-            <option value="critical">Critical</option>
-          </Select>
-        </div>
-
-        {(projectMilestones.length > 0 || ticket.milestoneId) && (
-          <div className={styles.prop}>
-            <SectionLabel>Milestone</SectionLabel>
-            <Select
-              size="sm"
-              value={ticket.milestoneId ?? ''}
-              onChange={handleMilestoneChange}
-              className={styles.propControl}
-            >
-              <option value="">No milestone</option>
-              {projectMilestones.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.title || 'Untitled milestone'}
-                </option>
-              ))}
-            </Select>
-          </div>
-        )}
-
-        {/* Anyone to assign: human members (teams) or resident agents —
-            local single-user mode has an empty member list but may still
-            have a roster of agents. */}
-        {(members.length > 0 || residents.some((a) => a.enabled)) && (
-          <div className={styles.prop}>
-            <SectionLabel>Assignee</SectionLabel>
-            <div className={styles.metaRow}>
-              <AssigneePicker ticketId={ticket.id} assignee={ticket.assignee} />
-            </div>
-          </div>
-        )}
-
-        <div className={styles.prop}>
-          <SectionLabel>Blocked By</SectionLabel>
-          {blockerTickets.length > 0 && (
-            <div className={styles.blockerList}>
-              {blockerTickets.map((blocker) => (
-                <div key={blocker.id} className={styles.blockerRow}>
-                  <Badge
-                    color="default"
-                    style={{
-                      color: getColumnColors(blocker.columnId ?? 'backlog').badgeColor,
-                      backgroundColor: getColumnColors(blocker.columnId ?? 'backlog').badgeBg,
-                    }}
-                  >
-                    {blocker.columnId ?? 'backlog'}
-                  </Badge>
-                  <span className={styles.blockerTitle}>{blocker.title}</span>
-                  <IconButton
-                    aria-label={`Remove blocker ${blocker.title}`}
-                    icon={<Dismiss20Regular />}
-                    size="sm"
-                    onClick={() => handleRemoveBlocker(blocker.id)}
-                  />
-                </div>
-              ))}
+          {ticket.tokenUsage && (
+            <div className="flex flex-col gap-1">
+              <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Token Usage</span>
+              <div className="flex flex-col gap-y-0.5 text-xs text-muted-foreground">
+                <span>In: {ticket.tokenUsage.inputTokens.toLocaleString()}</span>
+                <span>Out: {ticket.tokenUsage.outputTokens.toLocaleString()}</span>
+                <span>Total: {ticket.tokenUsage.totalTokens.toLocaleString()}</span>
+              </div>
             </div>
           )}
-          {availableBlockers.length > 0 && (
-            <Select size="sm" value="" onChange={handleAddBlocker} className={styles.propControl}>
-              <option value="">Add dependency...</option>
-              {availableBlockers.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.title}
-                </option>
-              ))}
-            </Select>
-          )}
-          {blockerTickets.length === 0 && availableBlockers.length === 0 && (
-            <p className={styles.noBlockers}>No tasks available to block on</p>
-          )}
-        </div>
 
-        {/* Autopilot status — hidden entirely when idle; raw phase values never
-            render (PHASE_LABELS holds the human wording). */}
-        {(ticket.autopilot || (ticket.phase && ticket.phase !== 'idle')) && (
-          <div className={styles.prop}>
-            <SectionLabel>Autopilot</SectionLabel>
-            <div className={styles.infoText}>
-              {ticket.autopilot && <p>On</p>}
-              {ticket.phase && ticket.phase !== 'idle' && PHASE_LABELS[ticket.phase] && (
-                <p>{PHASE_LABELS[ticket.phase]}</p>
-              )}
+          <div className="flex flex-col gap-1">
+            <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Details</span>
+            <div className="flex flex-col gap-y-0.5 text-xs text-muted-foreground">
+              <span>Created {new Date(ticket.createdAt).toLocaleDateString()}</span>
+              <span>Updated {new Date(ticket.updatedAt).toLocaleDateString()}</span>
             </div>
           </div>
-        )}
-
-        {ticket.tokenUsage && (
-          <div className={styles.prop}>
-            <SectionLabel>Token Usage</SectionLabel>
-            <div className={styles.detailRow}>
-              <span>In: {ticket.tokenUsage.inputTokens.toLocaleString()}</span>
-              <span>Out: {ticket.tokenUsage.outputTokens.toLocaleString()}</span>
-              <span>Total: {ticket.tokenUsage.totalTokens.toLocaleString()}</span>
-            </div>
-          </div>
-        )}
-
-        <div className={styles.prop}>
-          <SectionLabel>Details</SectionLabel>
-          <div className={styles.detailRow}>
-            <span>Created {new Date(ticket.createdAt).toLocaleDateString()}</span>
-            <span>Updated {new Date(ticket.updatedAt).toLocaleDateString()}</span>
-          </div>
-        </div>
-      </aside>
+        </aside>
+      </details>
     </div>
   );
 });

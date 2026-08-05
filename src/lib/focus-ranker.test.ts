@@ -39,13 +39,13 @@ describe('rankFocus', () => {
     expect(rankFocus({ tickets: [], milestones: {}, now: NOW })).toEqual([]);
   });
 
-  it('skips resolved tickets', () => {
-    const tickets = [makeTicket({ id: 't1', resolution: 'completed', resolvedAt: NOW - DAY_MS })];
+  it('skips archived tickets', () => {
+    const tickets = [makeTicket({ id: 't1', archivedAt: NOW - DAY_MS })];
     expect(rankFocus({ tickets, milestones: {}, now: NOW })).toEqual([]);
   });
 
   it('skips tickets in a terminal column even without resolution', () => {
-    // Simulates dragging a card into Done without clicking "Close as completed".
+    // Simulates dragging a card into Done without explicitly marking it completed.
     const tickets = [makeTicket({ id: 't1', columnId: 'done', priority: 'critical' })];
     const result = rankFocus({
       tickets,
@@ -163,12 +163,12 @@ describe('rankFocus', () => {
     expect(result[result.length - 1]?.reason).toContain('blocked');
   });
 
-  it('treats tickets blocked only by resolved tickets as unblocked', () => {
+  it('treats tickets blocked only by done tickets as unblocked', () => {
     const tickets = [
-      makeTicket({ id: 'done', resolution: 'completed', resolvedAt: NOW - DAY_MS }),
+      makeTicket({ id: 'done', columnId: 'done', completedAt: NOW - DAY_MS }),
       makeTicket({ id: 'free', blockedBy: ['done'] }),
     ];
-    const result = rankFocus({ tickets, milestones: {}, now: NOW });
+    const result = rankFocus({ tickets, milestones: {}, terminalColumnIds: new Set(['done']), now: NOW });
     expect(result[0]?.ticket.id).toBe('free');
     expect(result[0]?.reason).toContain('unblocked');
   });

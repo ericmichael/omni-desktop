@@ -4,6 +4,19 @@ import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } 
 import { waitFor } from 'xstate';
 
 import { MAX_CHAT_CONVERSATIONS } from '@/lib/chat-conversations';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/renderer/ds/ui/alert-dialog';
+import { Button } from '@/renderer/ds/ui/button';
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/renderer/ds/ui/resizable';
+import { Spinner } from '@/renderer/ds/ui/spinner';
 import { clearColumnActivity, publishColumnActivity } from '@/renderer/services/column-activity';
 import { forwardRoutineEvent, registerRoutineActor } from '@/renderer/services/routine-bridge';
 import {
@@ -30,7 +43,6 @@ import { ArtifactPortalProvider, type Attachment, MessageList } from './componen
 import { type NotificationInfo, Notifications } from './components/Notifications';
 import { QueuedMessages } from './components/QueuedMessages';
 import { type RecapInfo, RecapPanel } from './components/RecapPanel';
-import { ResizableDivider } from './components/ResizableDivider';
 import { type SessionItem, SessionList } from './components/SessionList';
 import { Sidebar } from './components/Sidebar';
 import { Tasks, type TaskSummary } from './components/Tasks';
@@ -143,6 +155,7 @@ export function App({
   const urlSessionHandledRef = useRef(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [artifactsPanelOpen, setArtifactsPanelOpen] = useState(false);
+  const [pendingSandboxProfile, setPendingSandboxProfile] = useState<string | null>(null);
   const [artifactsPanelWidth, setArtifactsPanelWidth] = useState(() => {
     try {
       const stored = localStorage.getItem('artifacts-panel-width');
@@ -1603,8 +1616,8 @@ export function App({
         return handleApprovalRef.current(requestId, decision === 'approve' ? 'yes' : 'no', pending?.kind ?? 'function');
       },
       newSession: () => newSessionRef.current(),
-      // Feeds the Focus sidebar's Recent section — cap at its display size
-      // so a long server-side history isn't serialized on every poll.
+      // Feeds the launcher's Projects and Recents sections — cap the server
+      // response so a long history isn't serialized on every poll.
       listSessions: () => client.listSessions({ limit: MAX_CHAT_CONVERSATIONS }),
       notify: (content: string, source: string) =>
         // Deliver as a role="assistant" history item that triggers a run — the
@@ -1807,21 +1820,6 @@ export function App({
     handleSelectSession(undefined);
   }, [handleSelectSession]);
 
-  const handleDeleteSession = useCallback(
-    async (id: string) => {
-      try {
-        await client.deleteSession(id);
-        setSessions((prev) => prev.filter((s) => s.id !== id));
-        if (sessionId === id) {
-          handleSelectSession(undefined);
-        }
-      } catch (e) {
-        console.error('Failed to delete session:', e);
-      }
-    },
-    [client, sessionId, handleSelectSession]
-  );
-
   const handleReaction = useCallback(
     async (type: 'like' | 'dislike', text?: string) => {
       try {
@@ -1852,18 +1850,18 @@ export function App({
   const handleSandboxChange = useCallback(
     (value: string) => {
       if (workspaceLocked && currentSandboxProfile !== 'host' && value === 'host') {
-        const ok = window.confirm(
-          "Switching to Host will apply the agent's container workspace back to your host files. " +
-            'Any uncommitted local changes in your host workspace may be overwritten. Continue?'
-        );
-        if (!ok) {
-          return;
-        }
+        setPendingSandboxProfile(value);
+        return;
       }
       onSandboxChange?.(value);
     },
     [workspaceLocked, currentSandboxProfile, onSandboxChange]
   );
+  const confirmSandboxChange = useCallback(() => {
+    if (pendingSandboxProfile) {
+      onSandboxChange?.(pendingSandboxProfile);
+    }
+  }, [onSandboxChange, pendingSandboxProfile]);
   const headerActions = {
     showArtifactsButton: hasArtifacts,
     onArtifactsToggle: hasArtifacts ? () => setArtifactsPanelOpen((v) => !v) : undefined,
@@ -1890,7 +1888,6 @@ export function App({
             onClose={() => setSidebarOpen(false)}
             onNewChat={onNewChat}
             onSelect={(id) => handleSelectSession(id)}
-            onDelete={handleDeleteSession}
           />
         )}
         <div className="flex-1 flex flex-col min-h-0 min-w-0">
@@ -1902,169 +1899,164 @@ export function App({
               showArtifactsButton={headerActions.showArtifactsButton}
             />
           )}
-          <div className="flex-1 flex flex-row min-h-0 min-w-0">
-            <div className="flex-1 flex flex-col min-h-0 min-w-0">
-              <div ref={setChatColumnEl} className="flex-1 min-h-0 min-w-0 overflow-x-hidden relative flex flex-col">
-                <ArtifactPortalProvider target={chatColumnEl}>
-                  <MessageList
-                    items={items}
-                    greeting={greeting}
-                    suggestions={suggestions}
-                    statusText={status}
-                    thinking={thinking}
-                    statusSpinner={statusSpinner}
-                    preambleText={preamble}
-                    welcomeText={welcomeText}
-                    onApprovalDecision={handleApprovalDecision}
-                    pendingPlan={pendingPlan}
-                    onPlanDecision={onPlanDecision}
-                    statusItalic={statusItalic}
-                    onReaction={handleReaction}
-                    currentRunId={runId}
-                    toolStatusText={toolStatus}
-                    onSubmitMessage={(text) => {
-                      void handleSubmit(text);
-                    }}
-                    onStageContext={stageContext}
-                  />
-                </ArtifactPortalProvider>
-                <AnimatePresence>
-                  {!connected && (
-                    <motion.div
-                      className="absolute bottom-2 left-0 right-0 flex justify-center pointer-events-none z-10"
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 0 }}
-                      transition={{ duration: 0.3, ease: 'easeOut' }}
-                    >
-                      <div className="inline-flex items-center gap-1.5 rounded-full bg-bgCardAlt px-3 py-1">
-                        <svg
-                          className="animate-spin h-3 w-3 text-textSubtle"
-                          xmlns="http://www.w3.org/2000/svg"
-                          fill="none"
-                          viewBox="0 0 24 24"
-                        >
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                          <path
-                            className="opacity-75"
-                            fill="currentColor"
-                            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                          />
-                        </svg>
-                        <span className="text-xs text-textSubtle">Connecting…</span>
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </div>
-              <GoalPanel snapshot={goalSnapshot} onDismiss={handleGoalDismiss} />
-              <WakeupPanel snapshot={wakeupSnapshot} onDismiss={handleWakeupDismiss} />
-              <LoopPanel tasks={loopTasks} onDismiss={handleLoopDismiss} />
-              <Tasks tasks={tasks} />
-              <WorkersPanel workers={visibleWorkers} onKill={handleWorkerKill} onDismiss={handleWorkerDismiss} />
-              <BashJobs
-                jobs={bashJobs}
-                onKill={handleBashKill}
-                onTail={handleBashTail}
-                onWarmup={handleBashWarmup}
-                onDismiss={handleBashDismiss}
-              />
-              <QueuedMessages
-                items={queuedMessages}
-                onCancel={(id) => {
-                  if (!sessionId) {
-                    return;
-                  }
-                  // Optimistic remove — the server's queue_changed broadcast
-                  // is the source of truth and will overwrite this if the
-                  // cancel raced with a drainer pop (cancel returns not_found).
-                  setQueuedMessages((prev) => prev.filter((it) => it.id !== id));
-                  client.cancelQueuedMessage(sessionId, id).catch(() => {});
-                }}
-              />
-              <Notifications
-                notifications={notifications}
-                onDismiss={(id) => setNotifications((prev) => prev.filter((n) => n.id !== id))}
-                onDismissAll={() => setNotifications([])}
-              />
-              <RecapPanel recap={recap} onDismiss={() => setRecap(null)} />
-              <EscalationBanner escalation={escalation} />
-              {stagedContext.length > 0 && (
-                // MCP-Apps staged context chips. Each ``ui/update-model-context``
-                // entry shows up here so the user knows what'll be sent on the
-                // next turn; clicking × removes that entry (passing empty text
-                // to ``stageContext`` clears the source).
-                <div className="flex flex-wrap gap-1 px-3 py-1 text-[11px]">
-                  {stagedContext.map((c) => (
-                    <span
-                      key={c.source}
-                      className="inline-flex items-center gap-1 rounded-full border border-border bg-secondary px-2 py-0.5 text-muted-foreground"
-                      title={c.text}
-                    >
-                      <span className="truncate max-w-[240px]">
-                        📎 {c.text.slice(0, 60)}
-                        {c.text.length > 60 ? '…' : ''}
-                      </span>
-                      <button
-                        type="button"
-                        className="text-muted-foreground hover:text-foreground"
-                        onClick={() => stageContext(c.source, '')}
-                        aria-label="Remove staged context"
+          <ResizablePanelGroup orientation="horizontal" className="min-h-0 min-w-0 flex-1">
+            <ResizablePanel minSize="50%">
+              <div className="flex h-full min-h-0 min-w-0 flex-col">
+                <div ref={setChatColumnEl} className="flex-1 min-h-0 min-w-0 overflow-x-hidden relative flex flex-col">
+                  <ArtifactPortalProvider target={chatColumnEl}>
+                    <MessageList
+                      items={items}
+                      greeting={greeting}
+                      suggestions={suggestions}
+                      statusText={status}
+                      thinking={thinking}
+                      statusSpinner={statusSpinner}
+                      preambleText={preamble}
+                      welcomeText={welcomeText}
+                      onApprovalDecision={handleApprovalDecision}
+                      pendingPlan={pendingPlan}
+                      onPlanDecision={onPlanDecision}
+                      statusItalic={statusItalic}
+                      onReaction={handleReaction}
+                      currentRunId={runId}
+                      toolStatusText={toolStatus}
+                      onSubmitMessage={(text) => {
+                        void handleSubmit(text);
+                      }}
+                      onStageContext={stageContext}
+                    />
+                  </ArtifactPortalProvider>
+                  <AnimatePresence>
+                    {!connected && (
+                      <motion.div
+                        className="absolute bottom-2 left-0 right-0 flex justify-center pointer-events-none z-10"
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        transition={{ duration: 0.3, ease: 'easeOut' }}
                       >
-                        ×
-                      </button>
-                    </span>
-                  ))}
+                        <div className="inline-flex items-center gap-1.5 rounded-full bg-accent px-3 py-1">
+                          <Spinner className="size-3 text-muted-foreground" aria-hidden="true" />
+                          <span className="text-xs text-muted-foreground">Connecting…</span>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </div>
-              )}
-              <Input
-                disabled={!connected || !bootState.ready}
-                thinking={thinking}
-                onStop={handleStop}
-                onSubmit={(text, files) => {
-                  void handleSubmit(text, files);
-                }}
-                onVoiceSubmit={handleVoiceSubmit}
-                voiceEnabled={voiceEnabled}
-                speakRepliesEnabled={!!voiceVariables && speakRepliesEnabled}
-                onSpeakRepliesChange={setSpeakRepliesEnabled}
-                workspacePath={workspaceSupported ? workspacePath : undefined}
-                workspaceLocked={workspaceLocked}
-                onWorkspaceClick={() => setWorkspacePickerOpen(true)}
-                sandboxLabel={sandboxLabel}
-                sandboxOptions={sandboxOptions}
-                currentSandboxProfile={currentSandboxProfile}
-                onSandboxChange={handleSandboxChange}
-                sandboxLoading={!connected}
-                sessionId={sessionId}
-                onVoiceSessionCreated={(id: string) => setSessionId(id)}
-                onVoiceClose={() => {
-                  const sid = actor.getSnapshot().context.sessionId;
-                  if (sid) {
-                    handleSelectSession(sid);
-                  }
-                  refreshSessions();
-                }}
-              />
-            </div>
+                <GoalPanel snapshot={goalSnapshot} onDismiss={handleGoalDismiss} />
+                <WakeupPanel snapshot={wakeupSnapshot} onDismiss={handleWakeupDismiss} />
+                <LoopPanel tasks={loopTasks} onDismiss={handleLoopDismiss} />
+                <Tasks tasks={tasks} />
+                <WorkersPanel workers={visibleWorkers} onKill={handleWorkerKill} onDismiss={handleWorkerDismiss} />
+                <BashJobs
+                  jobs={bashJobs}
+                  onKill={handleBashKill}
+                  onTail={handleBashTail}
+                  onWarmup={handleBashWarmup}
+                  onDismiss={handleBashDismiss}
+                />
+                <QueuedMessages
+                  items={queuedMessages}
+                  onCancel={(id) => {
+                    if (!sessionId) {
+                      return;
+                    }
+                    // Optimistic remove — the server's queue_changed broadcast
+                    // is the source of truth and will overwrite this if the
+                    // cancel raced with a drainer pop (cancel returns not_found).
+                    setQueuedMessages((prev) => prev.filter((it) => it.id !== id));
+                    client.cancelQueuedMessage(sessionId, id).catch(() => {});
+                  }}
+                />
+                <Notifications
+                  notifications={notifications}
+                  onDismiss={(id) => setNotifications((prev) => prev.filter((n) => n.id !== id))}
+                  onDismissAll={() => setNotifications([])}
+                />
+                <RecapPanel recap={recap} onDismiss={() => setRecap(null)} />
+                <EscalationBanner escalation={escalation} />
+                {stagedContext.length > 0 && (
+                  // MCP-Apps staged context chips. Each ``ui/update-model-context``
+                  // entry shows up here so the user knows what'll be sent on the
+                  // next turn; clicking × removes that entry (passing empty text
+                  // to ``stageContext`` clears the source).
+                  <div className="flex flex-wrap gap-1 px-3 py-1 text-xs">
+                    {stagedContext.map((c) => (
+                      <span
+                        key={c.source}
+                        className="inline-flex items-center gap-1 rounded-full border border-border bg-secondary px-2 py-0.5 text-muted-foreground"
+                        title={c.text}
+                      >
+                        <span className="max-w-60 truncate">
+                          📎 {c.text.slice(0, 60)}
+                          {c.text.length > 60 ? '…' : ''}
+                        </span>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-xs"
+                          onClick={() => stageContext(c.source, '')}
+                          aria-label="Remove staged context"
+                        >
+                          ×
+                        </Button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <Input
+                  disabled={!connected || !bootState.ready}
+                  thinking={thinking}
+                  onStop={handleStop}
+                  onSubmit={(text, files) => {
+                    void handleSubmit(text, files);
+                  }}
+                  onVoiceSubmit={handleVoiceSubmit}
+                  voiceEnabled={voiceEnabled}
+                  speakRepliesEnabled={!!voiceVariables && speakRepliesEnabled}
+                  onSpeakRepliesChange={setSpeakRepliesEnabled}
+                  workspacePath={workspaceSupported ? workspacePath : undefined}
+                  workspaceLocked={workspaceLocked}
+                  onWorkspaceClick={() => setWorkspacePickerOpen(true)}
+                  sandboxLabel={sandboxLabel}
+                  sandboxOptions={sandboxOptions}
+                  currentSandboxProfile={currentSandboxProfile}
+                  onSandboxChange={handleSandboxChange}
+                  sandboxLoading={!connected}
+                  sessionId={sessionId}
+                  onVoiceSessionCreated={(id: string) => setSessionId(id)}
+                  onVoiceClose={() => {
+                    const sid = actor.getSnapshot().context.sessionId;
+                    if (sid) {
+                      handleSelectSession(sid);
+                    }
+                    refreshSessions();
+                  }}
+                />
+              </div>
+            </ResizablePanel>
             {isLargeScreen && artifactsPanelOpen && hasArtifacts && (
               <>
-                <ResizableDivider
-                  onResize={setArtifactsPanelWidth}
-                  currentWidth={artifactsPanelWidth}
-                  minWidth={180}
-                  maxWidth={400}
-                />
-                <div className="flex-shrink-0 min-h-0 border-l border-bgCardAlt" style={{ width: artifactsPanelWidth }}>
-                  <ArtifactsPanel
-                    artifacts={visibleArtifacts}
-                    onClose={() => setArtifactsPanelOpen(false)}
-                    onScrollTo={handleScrollToArtifact}
-                  />
-                </div>
+                <ResizableHandle />
+                <ResizablePanel
+                  id="artifacts"
+                  defaultSize={artifactsPanelWidth}
+                  minSize={180}
+                  maxSize={400}
+                  groupResizeBehavior="preserve-pixel-size"
+                  onResize={(size) => setArtifactsPanelWidth(size.inPixels)}
+                >
+                  <div className="h-full min-h-0 border-l border-border">
+                    <ArtifactsPanel
+                      artifacts={visibleArtifacts}
+                      onClose={() => setArtifactsPanelOpen(false)}
+                      onScrollTo={handleScrollToArtifact}
+                    />
+                  </div>
+                </ResizablePanel>
               </>
             )}
-          </div>
+          </ResizablePanelGroup>
         </div>
         {!isLargeScreen && artifactsPanelOpen && hasArtifacts && (
           <ArtifactsPanel
@@ -2086,6 +2078,26 @@ export function App({
             onClose={() => setWorkspacePickerOpen(false)}
           />
         )}
+        <AlertDialog
+          open={pendingSandboxProfile !== null}
+          onOpenChange={(open) => !open && setPendingSandboxProfile(null)}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Switch to Host?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Switching to Host applies the agent&apos;s container workspace back to your host files. Any uncommitted
+                local changes in your host workspace may be overwritten.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction variant="destructive" onClick={confirmSandboxChange}>
+                Switch to Host
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     );
   }

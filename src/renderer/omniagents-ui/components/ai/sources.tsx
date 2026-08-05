@@ -1,12 +1,8 @@
 import { BookIcon, ChevronDownIcon } from 'lucide-react';
 import type { ComponentProps } from 'react';
 
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from '@/renderer/omniagents-ui/components/ui/collapsible';
-import { cn } from '@/renderer/omniagents-ui/lib/utils';
+import { cn } from '@/renderer/ds/cn';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/renderer/ds/ui/collapsible';
 
 export type SourcesProps = ComponentProps<'div'>;
 
@@ -23,7 +19,7 @@ export const SourcesTrigger = ({ className, count, children, ...props }: Sources
     {children ?? (
       <>
         <p className="font-medium">Used {count} sources</p>
-        <ChevronDownIcon className="h-4 w-4" />
+        <ChevronDownIcon className="size-4" />
       </>
     )}
   </CollapsibleTrigger>
@@ -48,7 +44,7 @@ export const Source = ({ href, title, children, ...props }: SourceProps) => (
   <a className="flex items-center gap-2" href={href} rel="noreferrer" target="_blank" {...props}>
     {children ?? (
       <>
-        <BookIcon className="h-4 w-4" />
+        <BookIcon className="size-4" />
         <span className="block font-medium">{title}</span>
       </>
     )}

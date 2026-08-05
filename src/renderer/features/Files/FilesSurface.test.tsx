@@ -101,14 +101,6 @@ vi.mock('./WorkspaceFileTree', () => ({
   },
 }));
 
-vi.mock('@fluentui/react-components', () => ({
-  Button: ({ children }: { children?: ReactNode }) => <button>{children}</button>,
-  makeStyles: () => () => new Proxy({}, { get: (_target, key) => String(key) }),
-  mergeClasses: (...classes: Array<string | false | undefined>) => classes.filter(Boolean).join(' '),
-  tokens: new Proxy({}, { get: (_target, key) => String(key) }),
-}));
-
-vi.mock('@fluentui/react-icons', () => ({ Warning20Regular: () => null }));
 vi.mock('@/renderer/ds', () => ({
   Button: ({ children }: { children?: ReactNode }) => <button>{children}</button>,
   Spinner: () => <span>loading</span>,

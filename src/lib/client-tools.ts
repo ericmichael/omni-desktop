@@ -92,7 +92,7 @@ export const CODE_UI_TOOLS = [
  * Workspace-superuser-only tools. Registered for superuser residents — agents
  * that own no column but observe and drive every one. `list_workspace` is the
  * map; `column_*` reach into another column's agent (send / approve / cancel)
- * via the renderer's per-column RPC clients; `open_column` / `close_column`
+ * via the renderer's per-column RPC clients; `open_column` / `archive_session`
  * manage the deck itself.
  *
  * Autopilot start/stop is NOT here — that's the shared `start_ticket` /
@@ -123,9 +123,9 @@ export const WORKSPACE_CLIENT_TOOLS = [
     },
   },
   {
-    name: 'close_column',
+    name: 'archive_session',
     description:
-      'Close a workspace column and stop its sandbox. Destructive — the conversation and any unsaved in-sandbox state go away. Confirm with the user before calling.',
+      'Archive an active session. Its workspace column and sandbox are removed from the deck, while the conversation remains restorable from Archived Sessions.',
     parameters: {
       type: 'object',
       properties: { tab_id: { type: 'string', description: 'Column id from `list_workspace`.' } },

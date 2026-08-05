@@ -3,8 +3,8 @@ import { CheckIcon, CopyIcon, TerminalIcon, Trash2Icon } from 'lucide-react';
 import type { ComponentProps, HTMLAttributes } from 'react';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 
-import { Button } from '@/renderer/omniagents-ui/components/ui/button';
-import { cn } from '@/renderer/omniagents-ui/lib/utils';
+import { cn } from '@/renderer/ds/cn';
+import { Button } from '@/renderer/ds/ui/button';
 
 interface TerminalContextType {
   output: string;
@@ -108,7 +108,7 @@ export const TerminalCopyButton = ({
       variant="ghost"
       {...props}
     >
-      {children ?? <Icon size={14} />}
+      {children ?? <Icon className="size-4" />}
     </Button>
   );
 };
@@ -128,7 +128,7 @@ export const TerminalClearButton = ({ children, className, ...props }: TerminalC
       variant="ghost"
       {...props}
     >
-      {children ?? <Trash2Icon size={14} />}
+      {children ?? <Trash2Icon className="size-4" />}
     </Button>
   );
 };

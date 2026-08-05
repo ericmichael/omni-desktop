@@ -1,8 +1,11 @@
-import { makeStyles } from '@fluentui/react-components';
 import type { ChangeEvent } from 'react';
 import { memo, useCallback, useMemo, useState } from 'react';
 
-import { Badge, Body1Strong, Button, Caption1, Input, Radio, RadioGroup } from '@/renderer/ds';
+import { Badge } from '@/renderer/ds/ui/badge';
+import { Button } from '@/renderer/ds/ui/button';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/renderer/ds/ui/collapsible';
+import { Input } from '@/renderer/ds/ui/input';
+import { RadioGroup, RadioGroupItem } from '@/renderer/ds/ui/radio-group';
 import type { ModelChoice } from '@/shared/model-catalog';
 import { DEFAULT_MAX_INPUT_TOKENS, DEFAULT_MAX_OUTPUT_TOKENS } from '@/shared/model-catalog';
 
@@ -18,17 +21,7 @@ type Props = {
 
 const CUSTOM_VALUE = '__custom__';
 
-const useStyles = makeStyles({
-  root: { display: 'flex', flexDirection: 'column', gap: '20px' },
-  header: { display: 'flex', flexDirection: 'column', gap: '4px' },
-  choiceLabel: { display: 'flex', alignItems: 'center', gap: '8px' },
-  more: { display: 'flex', flexDirection: 'column', gap: '8px' },
-  customField: { display: 'flex', flexDirection: 'column', gap: '6px', paddingLeft: '28px' },
-  actions: { display: 'flex', justifyContent: 'space-between' },
-});
-
 export const OnboardingModelPickStep = memo(({ choices, liveModels, onContinue, onBack }: Props) => {
-  const styles = useStyles();
   const recommended = choices.find((c) => c.recommended) ?? choices[0];
   const [selected, setSelected] = useState<string>(recommended?.id ?? CUSTOM_VALUE);
   const [showMore, setShowMore] = useState(false);
@@ -39,8 +32,7 @@ export const OnboardingModelPickStep = memo(({ choices, liveModels, onContinue, 
     return liveModels.filter((id) => !curated.has(id));
   }, [choices, liveModels]);
 
-  const handleChange = useCallback((_e: unknown, data: { value: string }) => setSelected(data.value), []);
-  const handleShowMore = useCallback(() => setShowMore(true), []);
+  const handleChange = useCallback((value: string) => setSelected(value), []);
   const handleCustomChange = useCallback((e: ChangeEvent<HTMLInputElement>) => setCustomId(e.target.value), []);
 
   const handleContinue = useCallback(() => {
@@ -69,60 +61,69 @@ export const OnboardingModelPickStep = memo(({ choices, liveModels, onContinue, 
   const canContinue = selected === CUSTOM_VALUE ? customId.trim().length > 0 : selected.length > 0;
 
   return (
-    <div className={styles.root}>
-      <div className={styles.header}>
-        <Body1Strong>Pick a model</Body1Strong>
-        <Caption1>You can switch models any time — this is just the starting default.</Caption1>
+    <div className="flex flex-col gap-5">
+      <div className="flex flex-col gap-1">
+        <span className="text-sm font-semibold">Pick a model</span>
+        <span className="text-xs text-muted-foreground">
+          You can switch models any time — this is just the starting default.
+        </span>
       </div>
 
-      <RadioGroup value={selected} onChange={handleChange}>
-        {choices.map((choice) => (
-          <Radio
-            key={choice.id}
-            value={choice.id}
-            label={
+      <Collapsible open={showMore} onOpenChange={setShowMore}>
+        <RadioGroup value={selected} onValueChange={handleChange}>
+          {choices.map((choice) => (
+            <label key={choice.id} className="inline-flex items-center gap-2 text-sm">
+              <RadioGroupItem value={choice.id} />
               <div>
-                <span className={styles.choiceLabel}>
-                  <Body1Strong>{choice.label}</Body1Strong>
-                  {choice.recommended && <Badge color="purple">Recommended</Badge>}
+                <span className="flex items-center gap-2">
+                  <span className="text-sm font-semibold">{choice.label}</span>
+                  {choice.recommended && <Badge variant="secondary">Recommended</Badge>}
                 </span>
-                {choice.blurb && <Caption1 block>{choice.blurb}</Caption1>}
+                {choice.blurb && <span className="text-xs text-muted-foreground block">{choice.blurb}</span>}
               </div>
-            }
-          />
-        ))}
+            </label>
+          ))}
 
-        {showMore && (
-          <>
+          <CollapsibleContent>
             {extraLive.map((id) => (
-              <Radio key={id} value={id} label={<Caption1>{id}</Caption1>} />
+              <label key={id} className="inline-flex items-center gap-2 text-sm">
+                <RadioGroupItem value={id} />
+                <span className="text-xs text-muted-foreground">{id}</span>
+              </label>
             ))}
-            <Radio value={CUSTOM_VALUE} label={<Caption1>Enter a model ID…</Caption1>} />
-          </>
-        )}
-      </RadioGroup>
+            <label className="inline-flex items-center gap-2 text-sm">
+              <RadioGroupItem value={CUSTOM_VALUE} />
+              <span className="text-xs text-muted-foreground">Enter a model ID…</span>
+            </label>
+          </CollapsibleContent>
+        </RadioGroup>
 
-      {showMore && selected === CUSTOM_VALUE && (
-        <div className={styles.customField}>
-          <Input size="sm" mono value={customId} onChange={handleCustomChange} placeholder="model-id" autoFocus />
-        </div>
-      )}
+        <CollapsibleContent>
+          {selected === CUSTOM_VALUE && (
+            <div className="flex flex-col gap-1.5 pl-7">
+              <Input value={customId} onChange={handleCustomChange} placeholder="model-id" autoFocus />
+            </div>
+          )}
+        </CollapsibleContent>
 
-      {!showMore && (
-        <div className={styles.more}>
-          <div>
-            <Button variant="ghost" size="sm" onClick={handleShowMore}>
-              More models
-            </Button>
+        {!showMore && (
+          <div className="flex flex-col gap-2">
+            <div>
+              <CollapsibleTrigger asChild>
+                <Button variant="ghost" size="sm">
+                  More models
+                </Button>
+              </CollapsibleTrigger>
+            </div>
           </div>
-        </div>
-      )}
+        )}
+      </Collapsible>
 
-      <div className={styles.actions}>
+      <div className="flex justify-between">
         <Button variant="ghost" size="sm" onClick={onBack}>
           Back
         </Button>
-        <Button variant="primary" size="sm" onClick={handleContinue} isDisabled={!canContinue}>
+        <Button variant="default" size="sm" onClick={handleContinue} disabled={!canContinue}>
           Continue
         </Button>
       </div>

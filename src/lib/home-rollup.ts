@@ -37,21 +37,25 @@ export function rankFocusForProject(args: {
 
 export function milestoneProgress(
   milestone: Milestone,
-  tickets: Ticket[]
-): { resolved: number; total: number; pct: number } {
-  let resolved = 0;
+  tickets: Ticket[],
+  doneColumnIds: ReadonlySet<ColumnId>
+): { completed: number; total: number; pct: number } {
+  let completed = 0;
   let total = 0;
   for (const ticket of tickets) {
     if (ticket.milestoneId !== milestone.id) {
       continue;
     }
+    if (ticket.archivedAt) {
+      continue;
+    }
     total++;
-    if (ticket.resolution !== undefined) {
-      resolved++;
+    if (doneColumnIds.has(ticket.columnId)) {
+      completed++;
     }
   }
-  const pct = total === 0 ? 1 : resolved / total;
-  return { resolved, total, pct };
+  const pct = total === 0 ? 1 : completed / total;
+  return { completed, total, pct };
 }
 
 /** Count of unresolved, non-terminal tickets belonging to a project. */
@@ -65,10 +69,7 @@ export function projectOpenTicketCount(args: {
     if (ticket.projectId !== args.project.id) {
       continue;
     }
-    if (ticket.resolution !== undefined) {
-      continue;
-    }
-    if (args.terminalColumnIds?.has(ticket.columnId)) {
+    if (ticket.archivedAt || args.terminalColumnIds?.has(ticket.columnId)) {
       continue;
     }
     count++;

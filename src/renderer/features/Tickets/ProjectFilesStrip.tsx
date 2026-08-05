@@ -1,67 +1,12 @@
-import { makeStyles, tokens } from '@fluentui/react-components';
-import { Document20Regular, Folder20Regular } from '@fluentui/react-icons';
+import { File, Folder } from 'lucide-react';
 import { memo, useEffect, useState } from 'react';
 
-import { Caption1 } from '@/renderer/ds';
+import { cn } from '@/renderer/ds/cn';
+import { Button } from '@/renderer/ds/ui/button';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { ArtifactFileEntry, ProjectId } from '@/shared/types';
 
 import { ticketApi } from './state';
-
-const useStyles = makeStyles({
-  root: {
-    display: 'flex',
-    alignItems: 'stretch',
-    gap: tokens.spacingHorizontalS,
-    paddingLeft: tokens.spacingHorizontalL,
-    paddingRight: tokens.spacingHorizontalL,
-    paddingTop: tokens.spacingVerticalS,
-    paddingBottom: tokens.spacingVerticalS,
-    overflowX: 'auto',
-    flexWrap: 'nowrap',
-    height: '80px',
-    flexShrink: 0,
-  },
-  fileCard: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: '4px',
-    minWidth: '100px',
-    maxWidth: '100px',
-    padding: tokens.spacingHorizontalS,
-    backgroundColor: tokens.colorNeutralBackground3,
-    borderRadius: tokens.borderRadiusMedium,
-    cursor: 'pointer',
-    border: 'none',
-    color: tokens.colorNeutralForeground2,
-    transitionProperty: 'background-color',
-    transitionDuration: tokens.durationFaster,
-    ':hover': {
-      backgroundColor: tokens.colorNeutralBackground3Hover,
-    },
-  },
-  fileName: {
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    width: '100%',
-    textAlign: 'center',
-    color: tokens.colorNeutralForeground2,
-  },
-  size: {
-    color: tokens.colorNeutralForeground3,
-  },
-  emptyHint: {
-    display: 'flex',
-    alignItems: 'center',
-    color: tokens.colorNeutralForeground3,
-    fontStyle: 'italic',
-    fontSize: tokens.fontSizeBase200,
-    whiteSpace: 'nowrap',
-  },
-});
 
 function formatSize(bytes: number): string {
   if (bytes < 1024) {
@@ -74,7 +19,6 @@ function formatSize(bytes: number): string {
 }
 
 export const ProjectFilesStrip = memo(({ projectId }: { projectId: ProjectId }) => {
-  const styles = useStyles();
   const [files, setFiles] = useState<ArtifactFileEntry[]>([]);
 
   useEffect(() => {
@@ -86,29 +30,39 @@ export const ProjectFilesStrip = memo(({ projectId }: { projectId: ProjectId }) 
 
   if (files.length === 0) {
     return (
-      <div className={styles.root}>
-        <span className={styles.emptyHint}>Add files to ~/Omni/Workspace/Projects/{slug}/</span>
+      <div className="flex items-stretch gap-2 pl-5 pr-5 pt-2 pb-2 overflow-x-auto flex-nowrap h-20 shrink-0">
+        <span className="flex items-center text-muted-foreground italic text-xs whitespace-nowrap">
+          Add files to ~/Omni/Workspace/Projects/{slug}/
+        </span>
       </div>
     );
   }
 
   return (
-    <div className={styles.root}>
+    <div className="flex items-stretch gap-2 pl-5 pr-5 pt-2 pb-2 overflow-x-auto flex-nowrap h-20 shrink-0">
       {files.map((entry) => (
-        <button
+        <Button
           key={entry.relativePath}
           type="button"
-          className={styles.fileCard}
+          variant="secondary"
+          className="flex flex-col items-center justify-center gap-1 min-w-25 max-w-25 p-2 bg-muted rounded-lg cursor-pointer border-0 text-muted-foreground transition-colors duration-100 hover:bg-accent"
           onClick={() => void ticketApi.openProjectFile(projectId, entry.relativePath)}
         >
-          {entry.isDirectory ? (
-            <Folder20Regular style={{ width: 20, height: 20 }} />
-          ) : (
-            <Document20Regular style={{ width: 20, height: 20 }} />
+          {entry.isDirectory ? <Folder className="size-5" /> : <File className="size-5" />}
+          <span
+            className={cn(
+              'text-xs text-muted-foreground',
+              'overflow-hidden text-ellipsis whitespace-nowrap w-full text-center text-muted-foreground'
+            )}
+          >
+            {entry.name}
+          </span>
+          {!entry.isDirectory && (
+            <span className={cn('text-xs text-muted-foreground', 'text-muted-foreground')}>
+              {formatSize(entry.size)}
+            </span>
           )}
-          <Caption1 className={styles.fileName}>{entry.name}</Caption1>
-          {!entry.isDirectory && <Caption1 className={styles.size}>{formatSize(entry.size)}</Caption1>}
-        </button>
+        </Button>
       ))}
     </div>
   );

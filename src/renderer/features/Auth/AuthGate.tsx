@@ -1,85 +1,9 @@
-import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
 import { memo, useCallback, useEffect, useState } from 'react';
 
-import { Button, Spinner } from '@/renderer/ds';
+import { Button } from '@/renderer/ds/ui/button';
+import { Spinner } from '@/renderer/ds/ui/spinner';
 import { emitter, ipc } from '@/renderer/services/ipc';
 import type { PlatformCredentials } from '@/shared/types';
-
-const useStyles = makeStyles({
-  center: { display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', height: '100%' },
-  gate: {
-    width: '100%',
-    maxWidth: '384px',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalXXL,
-    padding: '32px',
-  },
-  header: { textAlign: 'center' },
-  title: {
-    fontSize: tokens.fontSizeBase400,
-    fontWeight: tokens.fontWeightSemibold,
-    color: tokens.colorNeutralForeground1,
-  },
-  subtitle: {
-    fontSize: tokens.fontSizeBase200,
-    color: tokens.colorNeutralForeground2,
-    marginTop: tokens.spacingVerticalS,
-  },
-  card: {
-    backgroundColor: tokens.colorNeutralBackground2,
-    borderRadius: tokens.borderRadiusLarge,
-    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
-    padding: tokens.spacingHorizontalXL,
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalL,
-  },
-  fullWidthBtn: { width: '100%' },
-  pendingHint: { fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground2, textAlign: 'center' },
-  codeRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalM,
-    padding: tokens.spacingHorizontalM,
-    backgroundColor: tokens.colorNeutralBackground1,
-    borderRadius: tokens.borderRadiusMedium,
-    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
-  },
-  codeText: {
-    fontSize: '20px',
-    fontFamily: 'monospace',
-    fontWeight: tokens.fontWeightBold,
-    letterSpacing: '0.1em',
-    color: tokens.colorNeutralForeground1,
-    flex: '1 1 0',
-    textAlign: 'center',
-  },
-  verifyLink: {
-    fontSize: tokens.fontSizeBase200,
-    color: tokens.colorBrandForeground1,
-    textDecoration: 'underline',
-    textAlign: 'center',
-    display: 'block',
-  },
-  waitingRow: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: tokens.spacingHorizontalS,
-    fontSize: tokens.fontSizeBase200,
-    color: tokens.colorNeutralForeground2,
-  },
-  errorBox: {
-    borderRadius: tokens.borderRadiusMedium,
-    ...shorthands.border('1px', 'solid', 'rgba(239, 68, 68, 0.3)'),
-    backgroundColor: 'rgba(239, 68, 68, 0.1)',
-    padding: tokens.spacingHorizontalM,
-    fontSize: tokens.fontSizeBase200,
-    color: tokens.colorPaletteRedForeground1,
-    textAlign: 'center',
-  },
-});
 
 type AuthFlowState =
   | { step: 'idle' }
@@ -146,12 +70,10 @@ export const AuthGate = memo(({ children }: { children: React.ReactNode }) => {
     setTimeout(() => setCopied(false), 2000);
   }, [flow]);
 
-  const styles = useStyles();
-
   // Still loading
   if (isEnterprise === null || auth === undefined) {
     return (
-      <div className={styles.center}>
+      <div className="flex items-center justify-center w-full h-full">
         <Spinner />
       </div>
     );
@@ -169,33 +91,42 @@ export const AuthGate = memo(({ children }: { children: React.ReactNode }) => {
 
   // Enterprise build, not signed in — show gate
   return (
-    <div className={styles.center}>
-      <div className={styles.gate}>
-        <div className={styles.header}>
-          <h1 className={styles.title}>Sign in to Omni Code</h1>
-          <p className={styles.subtitle}>Sign in with your institutional account to continue.</p>
+    <div className="flex items-center justify-center w-full h-full">
+      <div className="w-full max-w-96 flex flex-col gap-8 p-8">
+        <div className="text-center">
+          <h1 className="text-base font-semibold text-foreground">Sign in to Omni Code</h1>
+          <p className="text-xs text-muted-foreground mt-2">Sign in with your institutional account to continue.</p>
         </div>
 
-        <div className={styles.card}>
+        <div className="bg-card rounded-xl border border-border p-6 flex flex-col gap-5">
           {flow.step === 'idle' && (
-            <Button variant="primary" onClick={handleSignIn} className={styles.fullWidthBtn}>
+            <Button variant="default" onClick={handleSignIn} className="w-full">
               Sign in with your institution
             </Button>
           )}
 
           {flow.step === 'pending' && (
             <>
-              <p className={styles.pendingHint}>{flow.message || 'Enter this code at the verification URL:'}</p>
-              <div className={styles.codeRow}>
-                <code className={styles.codeText}>{flow.userCode}</code>
+              <p className="text-xs text-muted-foreground text-center">
+                {flow.message || 'Enter this code at the verification URL:'}
+              </p>
+              <div className="flex items-center gap-4 p-4 bg-background rounded-lg border border-border">
+                <code className="text-xl font-mono font-bold tracking-widest text-foreground flex-1 text-center">
+                  {flow.userCode}
+                </code>
                 <Button size="sm" variant="ghost" onClick={handleCopyCode}>
                   {copied ? 'Copied' : 'Copy'}
                 </Button>
               </div>
-              <a href={flow.verificationUri} target="_blank" rel="noopener noreferrer" className={styles.verifyLink}>
+              <a
+                href={flow.verificationUri}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs text-primary underline text-center block"
+              >
                 {flow.verificationUri}
               </a>
-              <div className={styles.waitingRow}>
+              <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground">
                 <Spinner />
                 <span>Waiting for authentication...</span>
               </div>
@@ -204,8 +135,10 @@ export const AuthGate = memo(({ children }: { children: React.ReactNode }) => {
 
           {flow.step === 'error' && (
             <>
-              <div className={styles.errorBox}>{flow.error}</div>
-              <Button variant="primary" onClick={handleSignIn} className={styles.fullWidthBtn}>
+              <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-4 text-center text-xs text-destructive">
+                {flow.error}
+              </div>
+              <Button variant="default" onClick={handleSignIn} className="w-full">
                 Try again
               </Button>
             </>

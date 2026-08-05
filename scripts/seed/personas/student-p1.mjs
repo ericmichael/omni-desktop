@@ -142,9 +142,8 @@ Small — one week max. Late penalty kicks in after Friday.
       description: 'Array-backed binary heap with push / pop / peek. Sift up/down in-place.',
       columnId: 'completed',
       priority: 'high',
-      resolution: 'completed',
       createdAgo: 6 * day,
-      resolvedAgo: 2 * day,
+      completedAgo: 2 * day,
       phase: 'completed',
     },
     {
@@ -200,8 +199,7 @@ Small — one week max. Late penalty kicks in after Friday.
         columnId: t.columnId,
         priority: t.priority,
         createdAt: now - t.createdAgo,
-        resolvedAt: t.resolvedAgo !== undefined ? now - t.resolvedAgo : undefined,
-        resolution: t.resolution,
+        completedAt: t.completedAgo !== undefined ? now - t.completedAgo : undefined,
         phase: t.phase,
       })
     );

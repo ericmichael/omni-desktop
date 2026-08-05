@@ -1,121 +1,37 @@
 import { useDraggable } from '@dnd-kit/core';
-import { makeStyles, mergeClasses, shorthands, tokens, Tooltip } from '@fluentui/react-components';
-import {
-  ArrowSync20Regular,
-  BranchFork16Regular,
-  LockClosed16Regular,
-  Open20Regular,
-  Play20Filled,
-  ReOrderDotsVertical20Regular,
-} from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
+import { ExternalLink, GitFork, GripVertical, Lock, Play, RefreshCw } from 'lucide-react';
 import { memo, useCallback, useMemo } from 'react';
 
-import { Badge, IconButton } from '@/renderer/ds';
+import { isDoneColumn } from '@/lib/pipeline-category';
+import { cn } from '@/renderer/ds/cn';
+import { Badge } from '@/renderer/ds/ui/badge';
+import { Button } from '@/renderer/ds/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/renderer/ds/ui/tooltip';
 import { openTicketInCode } from '@/renderer/services/navigation';
 import { isActivePhase } from '@/shared/ticket-phase';
 import type { Ticket, TicketPhase } from '@/shared/types';
 
-import { $tickets, ticketApi } from './state';
-import { PHASE_COLORS, PHASE_LABELS, TICKET_PRIORITY_COLORS, TICKET_PRIORITY_LABELS } from './ticket-constants';
+import { $pipeline, $tickets, ticketApi } from './state';
+import { PHASE_LABELS, TICKET_PRIORITY_LABELS } from './ticket-constants';
 
 const canStart = (phase: TicketPhase | undefined) => !phase || !isActivePhase(phase);
 
-const useStyles = makeStyles({
-  card: {
-    borderRadius: tokens.borderRadiusMedium,
-    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
-    backgroundColor: tokens.colorNeutralBackground2,
-    padding: '10px',
-    transitionProperty: 'box-shadow',
-    transitionDuration: '150ms',
-  },
-  overlay: {
-    boxShadow: tokens.shadow16,
-  },
-  dragging: {
-    opacity: 0.3,
-  },
-  titleRow: {
-    display: 'flex',
-    alignItems: 'flex-start',
-    gap: '6px',
-  },
-  dragHandle: {
-    flexShrink: 0,
-    marginTop: '2px',
-    cursor: 'grab',
-    color: tokens.colorNeutralForeground3,
-    touchAction: 'none',
-    ':active': { cursor: 'grabbing' },
-    ':hover': { color: tokens.colorNeutralForeground1 },
-  },
-  titleBtn: {
-    flex: '1 1 0',
-    minWidth: 0,
-    textAlign: 'left',
-    cursor: 'pointer',
-    border: 'none',
-    backgroundColor: 'transparent',
-    padding: 0,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-  },
-  badgeRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '6px',
-    marginTop: '6px',
-  },
-  badges: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '6px',
-    flexWrap: 'wrap',
-    flex: '1 1 0',
-    minWidth: 0,
-  },
-  actions: {
-    display: 'flex',
-    alignItems: 'center',
-    flexShrink: 0,
-  },
-  branchBadge: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: '3px',
-    maxWidth: '18ch',
-    fontSize: tokens.fontSizeBase200,
-    color: tokens.colorNeutralForeground3,
-    minWidth: 0,
-  },
-  branchLabel: {
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    minWidth: 0,
-  },
-  blockedBadge: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: '3px',
-    color: tokens.colorPaletteRedForeground1,
-    fontSize: tokens.fontSizeBase200,
-  },
-});
-
 export const KanbanCard = memo(({ ticket, isOverlay }: { ticket: Ticket; isOverlay?: boolean }) => {
-  const styles = useStyles();
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: ticket.id,
     disabled: isOverlay,
   });
 
   const allTickets = useStore($tickets);
+  const pipeline = useStore($pipeline);
   const unresolvedBlockers = useMemo(
-    () => ticket.blockedBy.filter((id) => allTickets[id] && !allTickets[id]!.resolution).length,
-    [ticket.blockedBy, allTickets]
+    () =>
+      ticket.blockedBy.filter((id) => {
+        const blocker = allTickets[id];
+        return blocker && !blocker.archivedAt && !isDoneColumn(pipeline, blocker.columnId);
+      }).length,
+    [ticket.blockedBy, allTickets, pipeline]
   );
 
   const handleClick = useCallback(() => {
@@ -135,66 +51,99 @@ export const KanbanCard = memo(({ ticket, isOverlay }: { ticket: Ticket; isOverl
   const titleText = ticket.title?.trim() ? ticket.title : 'Untitled';
   const hasTitle = Boolean(ticket.title?.trim());
   const branch = ticket.branch?.trim();
+  const done = isDoneColumn(pipeline, ticket.columnId);
 
   return (
     <div
       ref={isOverlay ? undefined : setNodeRef}
-      className={mergeClasses(styles.card, isOverlay && styles.overlay, isDragging && !isOverlay && styles.dragging)}
+      className={cn(
+        'rounded-lg border border-border bg-card p-2.5 transition-shadow duration-150',
+        isOverlay && 'shadow-lg',
+        isDragging && !isOverlay && 'opacity-30'
+      )}
     >
-      <div className={styles.titleRow}>
+      <div className="flex items-start gap-1.5">
         {!isOverlay && (
-          <div {...listeners} {...attributes} className={styles.dragHandle}>
-            <ReOrderDotsVertical20Regular style={{ width: 16, height: 16 }} />
+          <div
+            {...listeners}
+            {...attributes}
+            className="shrink-0 mt-0.5 cursor-grab text-muted-foreground touch-none active:cursor-grabbing hover:text-foreground"
+          >
+            <GripVertical className="size-4" />
           </div>
         )}
         {hasTitle ? (
-          <Tooltip content={titleText} relationship="label" withArrow>
-            <button type="button" onClick={handleClick} className={styles.titleBtn}>
-              {titleText}
-            </button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                onClick={handleClick}
+                className="h-auto min-w-0 flex-1 justify-start overflow-hidden rounded-none border-0 bg-transparent p-0 text-left font-normal hover:bg-transparent"
+              >
+                <span className="block min-w-0 max-w-full flex-1 overflow-hidden text-ellipsis whitespace-nowrap">
+                  {titleText}
+                </span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{titleText}</TooltipContent>
           </Tooltip>
         ) : (
-          <button type="button" onClick={handleClick} className={styles.titleBtn}>
-            {titleText}
-          </button>
+          <Button
+            variant="ghost"
+            onClick={handleClick}
+            className="h-auto min-w-0 flex-1 justify-start overflow-hidden rounded-none border-0 bg-transparent p-0 text-left font-normal hover:bg-transparent"
+          >
+            <span className="block min-w-0 max-w-full flex-1 overflow-hidden text-ellipsis whitespace-nowrap">
+              {titleText}
+            </span>
+          </Button>
         )}
       </div>
 
-      <div className={styles.badgeRow}>
-        <div className={styles.badges}>
-          <Badge color={TICKET_PRIORITY_COLORS[ticket.priority]}>{TICKET_PRIORITY_LABELS[ticket.priority]}</Badge>
-          {/* Resolution badge omitted — column placement already conveys resolved status. */}
-          {phase && phase !== 'idle' && !ticket.resolution && (
-            <Badge color={PHASE_COLORS[phase] ?? 'default'}>
-              {isActivePhase(phase) && <ArrowSync20Regular style={{ width: 16, height: 16 }} />}
+      <div className="flex items-center gap-1.5 mt-1.5">
+        <div className="flex items-center gap-1.5 flex-wrap flex-1 min-w-0">
+          <Badge variant="secondary">{TICKET_PRIORITY_LABELS[ticket.priority]}</Badge>
+          {phase && phase !== 'idle' && !done && !ticket.archivedAt && (
+            <Badge variant="secondary">
+              {isActivePhase(phase) && <RefreshCw className="size-3" />}
               {PHASE_LABELS[phase]}
             </Badge>
           )}
           {branch && (
-            <Tooltip content={branch} relationship="label" withArrow>
-              <span className={styles.branchBadge}>
-                <BranchFork16Regular />
-                <span className={styles.branchLabel}>{branch}</span>
-              </span>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Badge variant="outline" className="min-w-0 max-w-48 text-muted-foreground">
+                  <GitFork />
+                  <span className="overflow-hidden text-ellipsis whitespace-nowrap min-w-0">{branch}</span>
+                </Badge>
+              </TooltipTrigger>
+              <TooltipContent>{branch}</TooltipContent>
             </Tooltip>
           )}
           {unresolvedBlockers > 0 && (
-            <Tooltip
-              content={`Blocked by ${unresolvedBlockers} task${unresolvedBlockers === 1 ? '' : 's'}`}
-              relationship="label"
-              withArrow
-            >
-              <span className={styles.blockedBadge} aria-label={`Blocked by ${unresolvedBlockers}`}>
-                <LockClosed16Regular />
-                {unresolvedBlockers}
-              </span>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Badge
+                  variant="outline"
+                  className="border-destructive/30 text-destructive"
+                  aria-label={`Blocked by ${unresolvedBlockers}`}
+                >
+                  <Lock />
+                  {unresolvedBlockers}
+                </Badge>
+              </TooltipTrigger>
+              <TooltipContent>{`Blocked by ${unresolvedBlockers} task${unresolvedBlockers === 1 ? '' : 's'}`}</TooltipContent>
             </Tooltip>
           )}
         </div>
-        {canStart(phase) && (
-          <div className={styles.actions}>
-            <IconButton icon={<Open20Regular />} size="sm" onClick={handleOpen} aria-label="Chat" />
-            <IconButton icon={<Play20Filled />} size="sm" onClick={handleStart} aria-label="Start agent" />
+        {!done && !ticket.archivedAt && canStart(phase) && (
+          <div className="flex items-center shrink-0">
+            <Button type="button" variant="ghost" size="icon-sm" onClick={handleOpen} aria-label="Chat">
+              <ExternalLink />
+            </Button>
+            <Button type="button" variant="ghost" size="icon-sm" onClick={handleStart} aria-label="Ask Omni">
+              <Play />
+            </Button>
           </div>
         )}
       </div>

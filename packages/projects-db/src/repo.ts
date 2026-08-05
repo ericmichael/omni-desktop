@@ -324,6 +324,11 @@ export class ProjectsRepo {
         }
       }
 
+      // Column category is the sole task status. Keep the internal timestamp
+      // aligned even when a pipeline edit changes a column's category without
+      // moving its tickets.
+      this.stmts.normalizeTicketCompletionForProject.run(projectId, projectId);
+
       this.bumpChangeSeq();
     });
 
@@ -355,8 +360,7 @@ export class ProjectsRepo {
       row.priority,
       row.branch,
       row.blocked_by,
-      row.resolution,
-      row.resolved_at,
+      row.completed_at,
       row.archived_at,
       row.column_changed_at,
       row.use_worktree,
@@ -408,8 +412,7 @@ export class ProjectsRepo {
           row.priority,
           row.branch,
           row.blocked_by,
-          row.resolution,
-          row.resolved_at,
+          row.completed_at,
           row.archived_at,
           row.column_changed_at,
           row.use_worktree,
@@ -931,6 +934,16 @@ function prepareStatements(db: DatabaseSync) {
       UPDATE tickets SET column_id = ?, column_changed_at = datetime('now'), updated_at = datetime('now')
       WHERE id = ?
     `),
+    normalizeTicketCompletionForProject: db.prepare(`
+      UPDATE tickets
+      SET completed_at = CASE
+        WHEN column_id IN (
+          SELECT id FROM pipeline_columns WHERE project_id = ? AND category = 'done'
+        ) THEN COALESCE(completed_at, column_changed_at, updated_at)
+        ELSE NULL
+      END
+      WHERE project_id = ?
+    `),
 
     // Tickets
     listAllTickets: db.prepare('SELECT * FROM tickets ORDER BY created_at'),
@@ -939,18 +952,18 @@ function prepareStatements(db: DatabaseSync) {
     upsertTicket: db.prepare(`
       INSERT INTO tickets (
         id, project_id, milestone_id, column_id, title, description, priority, branch,
-        blocked_by, resolution, resolved_at, archived_at, column_changed_at,
+        blocked_by, completed_at, archived_at, column_changed_at,
         use_worktree, worktree_path, worktree_name, supervisor_session_id,
         phase, phase_changed_at, supervisor_task_id, token_usage, runs,
         pr_review, pr_merged_at, assignee,
         created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         project_id = excluded.project_id, milestone_id = excluded.milestone_id,
         column_id = excluded.column_id, title = excluded.title, description = excluded.description,
         priority = excluded.priority, branch = excluded.branch, blocked_by = excluded.blocked_by,
-        resolution = excluded.resolution, resolved_at = excluded.resolved_at,
-        archived_at = excluded.archived_at, column_changed_at = excluded.column_changed_at,
+        completed_at = excluded.completed_at, archived_at = excluded.archived_at,
+        column_changed_at = excluded.column_changed_at,
         use_worktree = excluded.use_worktree, worktree_path = excluded.worktree_path,
         worktree_name = excluded.worktree_name, supervisor_session_id = excluded.supervisor_session_id,
         phase = excluded.phase, phase_changed_at = excluded.phase_changed_at,

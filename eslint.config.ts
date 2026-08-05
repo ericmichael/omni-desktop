@@ -245,6 +245,38 @@ export default [
     files: ['src/renderer/**/*', 'scripts/seed/content/**/*'],
     rules: {
       'react/jsx-no-bind': 'off',
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: 'CallExpression[callee.name="setActiveTab"]',
+          message:
+            'setActiveTab() can only be called from use-navigation-api.tsx. Use navigationApi.switchToTab() instead.',
+        },
+        {
+          selector:
+            "JSXAttribute[name.name='style'] > JSXExpressionContainer > ObjectExpression > Property[key.name=/^(background|backgroundColor|color|border|borderColor|borderRadius|boxShadow|outline|outlineColor)$/]",
+          message:
+            'Static paint belongs in shadcn variants or semantic Tailwind classes, not React inline styles. Generated user colors and third-party integrations require a scoped ESLint exception.',
+        },
+      ],
+    },
+  },
+
+  {
+    files: ['src/renderer/features/Residents/agent-avatar.tsx', 'src/renderer/features/Tickets/ContextEditor.tsx'],
+    rules: {
+      // These two components render generated user-selected colors: stable
+      // agent identity hues and editor highlight colors respectively.
+      'no-restricted-syntax': 'off',
+    },
+  },
+
+  {
+    files: ['src/renderer/ds/ui/field.tsx'],
+    rules: {
+      // This file is registry-owned and pinned byte-for-byte to shadcn. Keep
+      // upstream's intentional loose comparison without weakening app code.
+      eqeqeq: 'off',
     },
   },
 

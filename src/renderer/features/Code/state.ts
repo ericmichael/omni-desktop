@@ -118,7 +118,6 @@ export const codeApi = {
   removeTab: async (tabId: CodeTabId) => {
     const all = persistedStoreApi.getKey('codeTabs') ?? [];
     const tab = all.find((t) => t.id === tabId);
-    const archiveAsChat = Boolean(tab && isChatColumn(tab) && tab.activatedAt && tab.sessionId);
 
     // Remove the tab from the store FIRST so the column unmounts immediately
     // and its chat WebSocket drops — omni serve's graceful SIGTERM drain
@@ -131,22 +130,11 @@ export const codeApi = {
       await persistedStoreApi.setKey('activeCodeTabId', tabs[tabs.length - 1]?.id ?? null);
     }
 
-    if (archiveAsChat && tab?.sessionId) {
-      // Closing a live chat column archives the TRANSCRIPT to the sidebar's
-      // Recent list (title + profile). The sandbox itself is terminal, same
-      // as a code column: resume relaunches fresh, reseeded from the
-      // conversation's `Sessions/<sessionId>` scratch dir, with the chat
-      // history loaded from omni serve's host-side session store.
-      await codeApi.recordConversation(tab.sessionId, {
-        ...(tab.profileName ? { profileName: tab.profileName } : {}),
-      });
-    }
-
     try {
       // Terminal sockets are also connections into omni serve — close them
       // BEFORE the stop so the drain doesn't wait on them either.
       await destroyAllTerminalsForTab(tabId);
-      // Closing is terminal for the sandbox (chat and code alike) — the
+      // Removing the column is terminal for its sandbox — the
       // snapshot is deleted below, so tell serve to skip persisting one.
       await codeApi.stopSandbox(tabId, { discardSnapshot: true });
     } finally {
@@ -161,9 +149,9 @@ export const codeApi = {
       delete errors[tabId];
       $codeTabErrors.set(errors);
 
-      // Cascade: delete the tab's Workspace snapshot — no closed tab is a
-      // rehydrate target (archived chat resumes fresh; code tabs are gone
-      // for good), so the tar is dead weight.
+      // Cascade: delete the tab's Workspace snapshot. Archived sessions
+      // resume into fresh columns instead of rehydrating the old tab, so the
+      // tar is dead weight.
       if (tab?.snapshotRef) {
         void emitter.invoke('snapshot:delete', tab.snapshotRef);
       }
@@ -176,6 +164,42 @@ export const codeApi = {
 
   setLayoutMode: (mode: CodeLayoutMode) => {
     persistedStoreApi.setKey('codeLayoutMode', mode);
+  },
+
+  setSpacesColumnLayouts: async (
+    layouts: Record<string, { width?: number | null; expanded?: boolean }>
+  ): Promise<void> => {
+    const tabs = (persistedStoreApi.getKey('codeTabs') ?? []).map((tab) => {
+      const column = layouts[tab.id];
+      const sidecar = layouts[`sidecar:${tab.id}`];
+      if (!column && !sidecar) {
+        return tab;
+      }
+
+      const next = { ...tab };
+      if (column) {
+        if (column.width === null) {
+          delete next.spacesWidth;
+        } else if (column.width !== undefined) {
+          next.spacesWidth = column.width;
+        }
+        if (column.expanded !== undefined) {
+          next.spacesExpanded = column.expanded;
+        }
+      }
+      if (sidecar) {
+        if (sidecar.width === null) {
+          delete next.spacesSidecarWidth;
+        } else if (sidecar.width !== undefined) {
+          next.spacesSidecarWidth = sidecar.width;
+        }
+        if (sidecar.expanded !== undefined) {
+          next.spacesSidecarExpanded = sidecar.expanded;
+        }
+      }
+      return next;
+    });
+    await persistedStoreApi.setKey('codeTabs', tabs);
   },
 
   reorderTabs: async (nextTabs: CodeTab[]) => {
@@ -205,6 +229,15 @@ export const codeApi = {
       return { ...t, projectId, profileName, ...activated, ...workspaceIdentity };
     });
     await persistedStoreApi.setKey('codeTabs', tabs);
+    const attached = tabs.find((tab) => tab.id === tabId);
+    if (
+      attached?.sessionId &&
+      (persistedStoreApi.getKey('chatConversations') ?? []).some(
+        (conversation) => conversation.sessionId === attached.sessionId
+      )
+    ) {
+      await codeApi.recordConversation(attached.sessionId, { projectId });
+    }
   },
 
   /**
@@ -219,7 +252,7 @@ export const codeApi = {
   },
 
   /**
-   * Reopen an archived conversation as a column. If a column already shows
+   * Reopen a retained conversation as a column. If a column already shows
    * this sessionId, it is activated instead of duplicated. The sessionId
    * deterministically keys the scratch dir and agent session, so the
    * transcript and scratch-dir files resume; the sandbox itself launches
@@ -234,10 +267,12 @@ export const codeApi = {
     }
     const tab: CodeTab = {
       id: nanoid(),
-      projectId: null,
+      projectId: conversation.projectId ?? null,
+      ...(conversation.ticketId ? { ticketId: conversation.ticketId } : {}),
+      ...(conversation.ticketTitle ? { ticketTitle: conversation.ticketTitle } : {}),
       sessionId: conversation.sessionId,
       snapshotRef: uuidv4(),
-      profileName: conversation.profileName ?? resolveCodeTabProfileName(null),
+      profileName: conversation.profileName ?? resolveCodeTabProfileName(conversation.projectId),
       profileNameExplicit: Boolean(conversation.profileName),
       createdAt: Date.now(),
       activatedAt: Date.now(),
@@ -254,16 +289,65 @@ export const codeApi = {
   /** Upsert a conversation-history entry (newest-first, capped). */
   recordConversation: async (sessionId: string, patch?: Partial<ChatConversation>) => {
     const list = persistedStoreApi.getKey('chatConversations') ?? [];
-    const { kept } = pruneConversations(upsertConversation(list, { sessionId, lastActiveAt: Date.now(), ...patch }));
+    const tab = (persistedStoreApi.getKey('codeTabs') ?? []).find((candidate) => candidate.sessionId === sessionId);
+    const inferredContext: Partial<ChatConversation> = tab
+      ? {
+          ...(tab.profileName ? { profileName: tab.profileName } : {}),
+          ...(tab.projectId ? { projectId: tab.projectId } : {}),
+          ...(tab.ticketId ? { ticketId: tab.ticketId } : {}),
+          ...(tab.ticketTitle ? { ticketTitle: tab.ticketTitle } : {}),
+        }
+      : {};
+    const { kept } = pruneConversations(
+      upsertConversation(list, { sessionId, lastActiveAt: Date.now(), ...inferredContext, ...patch })
+    );
     await persistedStoreApi.setKey('chatConversations', kept);
   },
 
-  /** Permanently delete an archived conversation entry. */
-  deleteConversation: async (sessionId: string) => {
+  /** Hide a retained conversation from Projects/Recents until restored. */
+  archiveConversation: async (conversation: ChatConversation) => {
+    const list = persistedStoreApi.getKey('chatConversations') ?? [];
+    const { kept } = pruneConversations(
+      upsertConversation(list, {
+        ...conversation,
+        archivedAt: Date.now(),
+      })
+    );
+    await persistedStoreApi.setKey('chatConversations', kept);
+  },
+
+  /** Archive an active session, then remove its column from the deck. */
+  archiveTab: async (tabId: CodeTabId, title?: string) => {
+    const tab = (persistedStoreApi.getKey('codeTabs') ?? []).find((candidate) => candidate.id === tabId);
+    if (tab?.sessionId && !tab.customAppId) {
+      const indexed = (persistedStoreApi.getKey('chatConversations') ?? []).find(
+        (candidate) => candidate.sessionId === tab.sessionId
+      );
+      await codeApi.recordConversation(tab.sessionId, {
+        title: title ?? indexed?.title ?? tab.ticketTitle ?? tab.routineName ?? 'New chat',
+        ...(tab.profileName ? { profileName: tab.profileName } : {}),
+        ...(tab.projectId ? { projectId: tab.projectId } : {}),
+        ...(tab.ticketId ? { ticketId: tab.ticketId } : {}),
+        ...(tab.ticketTitle ? { ticketTitle: tab.ticketTitle } : {}),
+      });
+      const conversation = (persistedStoreApi.getKey('chatConversations') ?? []).find(
+        (candidate) => candidate.sessionId === tab.sessionId
+      );
+      if (conversation) {
+        await codeApi.archiveConversation(conversation);
+      }
+    }
+    await codeApi.removeTab(tabId);
+  },
+
+  /** Return an archived conversation to its project or Recents. */
+  restoreConversation: async (sessionId: string) => {
     const list = persistedStoreApi.getKey('chatConversations') ?? [];
     await persistedStoreApi.setKey(
       'chatConversations',
-      list.filter((c) => c.sessionId !== sessionId)
+      list.map((conversation) =>
+        conversation.sessionId === sessionId ? { ...conversation, archivedAt: undefined } : conversation
+      )
     );
   },
 
@@ -327,7 +411,69 @@ export const codeApi = {
     await persistedStoreApi.setKey('codeTabs', tabs);
   },
 
+  openSidecarApp: async (tabId: CodeTabId, appId: string) => {
+    if (appId === 'chat') {
+      return;
+    }
+    const tabs = (persistedStoreApi.getKey('codeTabs') ?? []).map((tab) => {
+      if (tab.id !== tabId) {
+        return tab;
+      }
+      const sidecarAppIds = tab.sidecarAppIds?.includes(appId)
+        ? tab.sidecarAppIds
+        : [...(tab.sidecarAppIds ?? []), appId];
+      return { ...tab, sidecarOpen: true, sidecarAppIds, activeSidecarAppId: appId };
+    });
+    await persistedStoreApi.setKey('codeTabs', tabs);
+  },
+
+  setSidecarOpen: async (tabId: CodeTabId, sidecarOpen: boolean) => {
+    const tabs = (persistedStoreApi.getKey('codeTabs') ?? []).map((tab) =>
+      tab.id === tabId ? { ...tab, sidecarOpen } : tab
+    );
+    await persistedStoreApi.setKey('codeTabs', tabs);
+  },
+
+  setActiveSidecarApp: async (tabId: CodeTabId, appId: string) => {
+    const tabs = (persistedStoreApi.getKey('codeTabs') ?? []).map((tab) =>
+      tab.id === tabId && tab.sidecarAppIds?.includes(appId) ? { ...tab, activeSidecarAppId: appId } : tab
+    );
+    await persistedStoreApi.setKey('codeTabs', tabs);
+  },
+
+  closeSidecarApp: async (tabId: CodeTabId, appId: string) => {
+    const tabs = (persistedStoreApi.getKey('codeTabs') ?? []).map((tab) => {
+      if (tab.id !== tabId || !tab.sidecarAppIds?.includes(appId)) {
+        return tab;
+      }
+      const closedIndex = tab.sidecarAppIds.indexOf(appId);
+      const sidecarAppIds = tab.sidecarAppIds.filter((id) => id !== appId);
+      if (sidecarAppIds.length === 0) {
+        const { sidecarAppIds: _open, activeSidecarAppId: _active, ...withoutSidecar } = tab;
+        void _open;
+        void _active;
+        return { ...withoutSidecar, sidecarOpen: tab.sidecarOpen ?? true };
+      }
+      const activeSidecarAppId =
+        tab.activeSidecarAppId !== appId && sidecarAppIds.includes(tab.activeSidecarAppId ?? '')
+          ? tab.activeSidecarAppId
+          : sidecarAppIds[Math.min(closedIndex, sidecarAppIds.length - 1)];
+      return { ...tab, sidecarAppIds, activeSidecarAppId };
+    });
+    await persistedStoreApi.setKey('codeTabs', tabs);
+  },
+
   setTabSessionId: async (tabId: CodeTabId, sessionId: string | undefined) => {
+    const current = (persistedStoreApi.getKey('codeTabs') ?? []).find((tab) => tab.id === tabId);
+    if (
+      current?.projectId &&
+      current.sessionId &&
+      current.sessionId !== sessionId &&
+      !current.customAppId &&
+      !current.routineId
+    ) {
+      await codeApi.recordConversation(current.sessionId);
+    }
     const tabs = (persistedStoreApi.getKey('codeTabs') ?? []).map((t) => {
       if (t.id !== tabId) {
         return t;

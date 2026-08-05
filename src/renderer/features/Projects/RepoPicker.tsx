@@ -1,3 +1,4 @@
+import { Lock } from 'lucide-react';
 /**
  * Provider-agnostic repository picker: a scope (owner/org) + debounced search +
  * results, fed by injected `searchRepos`. Scales to large accounts by scoping
@@ -10,50 +11,19 @@
  *     where listing orgs needs broader PAT scopes than repo read, so the user
  *     types their org.
  */
-import { makeStyles, tokens } from '@fluentui/react-components';
-import { LockClosed16Regular } from '@fluentui/react-icons';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 
-import { Caption1, Input, Select, Spinner } from '@/renderer/ds';
+import { cn } from '@/renderer/ds/cn';
+import { Command, CommandEmpty, CommandGroup, CommandItem, CommandList } from '@/renderer/ds/ui/command';
+import { Input } from '@/renderer/ds/ui/input';
+import { NativeSelect as Select } from '@/renderer/ds/ui/native-select';
+import { Spinner } from '@/renderer/ds/ui/spinner';
 import type { RemoteRepo } from '@/shared/types';
 
 const SEARCH_DEBOUNCE_MS = 350;
 
 /** A discovery scope (a GitHub owner, an Azure org). `kind` is GitHub-only. */
 export type RepoScope = { id: string; label: string; kind?: 'user' | 'org' };
-
-const useStyles = makeStyles({
-  root: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalS, minHeight: '300px' },
-  controls: { display: 'flex', gap: tokens.spacingHorizontalS },
-  scope: { flex: '0 0 40%' },
-  search: { flex: '1 1 0' },
-  list: { display: 'flex', flexDirection: 'column', gap: '2px', overflowY: 'auto', maxHeight: '42vh' },
-  item: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
-    borderRadius: tokens.borderRadiusMedium,
-    cursor: 'pointer',
-    textAlign: 'left',
-    backgroundColor: 'transparent',
-    border: 'none',
-    width: '100%',
-    ':hover': { backgroundColor: tokens.colorNeutralBackground1Hover },
-  },
-  itemName: { flex: '1 1 0', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-  itemMeta: { color: tokens.colorNeutralForeground3, flexShrink: 0 },
-  center: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: tokens.spacingHorizontalS,
-    padding: tokens.spacingVerticalL,
-  },
-  hint: { color: tokens.colorNeutralForeground3, padding: tokens.spacingVerticalS },
-  error: { color: tokens.colorPaletteRedForeground1 },
-  privateIcon: { color: tokens.colorNeutralForeground3, flexShrink: 0 },
-});
 
 type RepoPickerProps = {
   /** When true the picker is visible and (re)loads scopes. */
@@ -70,7 +40,6 @@ type RepoPickerProps = {
 
 export const RepoPicker = memo(
   ({ active, loadScopes, manualScope, searchRepos, onSelect, emptyHint }: RepoPickerProps) => {
-    const styles = useStyles();
     const [scopes, setScopes] = useState<RepoScope[] | null>(null);
     const [scopeId, setScopeId] = useState('');
     const [manualScopeId, setManualScopeId] = useState('');
@@ -174,18 +143,23 @@ export const RepoPicker = memo(
     const loadingScopes = !manualScope && !scopes;
 
     return (
-      <div className={styles.root}>
-        <div className={styles.controls}>
+      <div className="flex flex-col gap-2 min-h-72">
+        <div className="flex gap-2">
           {manualScope ? (
             <Input
-              className={styles.scope}
+              className="basis-2/5 shrink-0 grow-0"
               type="text"
               value={manualScopeId}
               onChange={handleManualScopeChange}
               placeholder={manualScope.placeholder}
             />
           ) : (
-            <Select className={styles.scope} value={scopeId} onChange={handleScopeChange} aria-label="Owner">
+            <Select
+              className="basis-2/5 shrink-0 grow-0"
+              value={scopeId}
+              onChange={handleScopeChange}
+              aria-label="Owner"
+            >
               {(scopes ?? []).map((s) => (
                 <option key={s.id} value={s.id}>
                   {s.label}
@@ -194,7 +168,7 @@ export const RepoPicker = memo(
             </Select>
           )}
           <Input
-            className={styles.search}
+            className="flex-1"
             type="text"
             value={query}
             onChange={handleQueryChange}
@@ -203,25 +177,27 @@ export const RepoPicker = memo(
         </div>
 
         {error ? (
-          <Caption1 className={styles.error}>{error}</Caption1>
+          <span className={cn('text-xs text-muted-foreground', 'text-destructive')}>{error}</span>
         ) : manualScope && !selectedScope ? (
-          <Caption1 className={styles.hint}>
+          <span className={cn('text-xs text-muted-foreground', 'text-muted-foreground p-2')}>
             Enter your {manualScope.placeholder.toLowerCase()} to list repositories.
-          </Caption1>
+          </span>
         ) : loadingScopes || (loading && !repos) ? (
-          <div className={styles.center}>
-            <Spinner size="sm" />
-            <Caption1>{loadingScopes ? 'Loading account…' : 'Searching…'}</Caption1>
+          <div className="flex items-center justify-center gap-2 p-5">
+            <Spinner />
+            <span className="text-xs text-muted-foreground">{loadingScopes ? 'Loading account…' : 'Searching…'}</span>
           </div>
         ) : (
-          <div className={styles.list}>
-            {(repos ?? []).map((repo) => (
-              <RepoRow key={repo.fullName} repo={repo} styles={styles} onSelect={onSelect} />
-            ))}
-            {repos && repos.length === 0 && (
-              <Caption1 className={styles.hint}>{emptyHint?.(selectedScope) ?? 'No repositories found.'}</Caption1>
-            )}
-          </div>
+          <Command shouldFilter={false} className="bg-transparent">
+            <CommandList className="max-h-2/5">
+              <CommandEmpty>{emptyHint?.(selectedScope) ?? 'No repositories found.'}</CommandEmpty>
+              <CommandGroup>
+                {(repos ?? []).map((repo) => (
+                  <RepoRow key={repo.fullName} repo={repo} onSelect={onSelect} />
+                ))}
+              </CommandGroup>
+            </CommandList>
+          </Command>
         )}
       </div>
     );
@@ -231,18 +207,19 @@ RepoPicker.displayName = 'RepoPicker';
 
 type RepoRowProps = {
   repo: RemoteRepo;
-  styles: ReturnType<typeof useStyles>;
   onSelect: (repo: RemoteRepo) => void;
 };
 
-const RepoRow = memo(({ repo, styles, onSelect }: RepoRowProps) => {
+const RepoRow = memo(({ repo, onSelect }: RepoRowProps) => {
   const handleClick = useCallback(() => onSelect(repo), [repo, onSelect]);
   return (
-    <button type="button" className={styles.item} onClick={handleClick}>
-      {repo.private && <LockClosed16Regular className={styles.privateIcon} />}
-      <span className={styles.itemName}>{repo.fullName}</span>
-      <Caption1 className={styles.itemMeta}>{repo.defaultBranch}</Caption1>
-    </button>
+    <CommandItem value={repo.fullName} onSelect={handleClick}>
+      {repo.private && <Lock className="text-muted-foreground shrink-0" />}
+      <span className="flex-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">{repo.fullName}</span>
+      <span className={cn('text-xs text-muted-foreground', 'text-muted-foreground shrink-0')}>
+        {repo.defaultBranch}
+      </span>
+    </CommandItem>
   );
 });
 RepoRow.displayName = 'RepoRow';

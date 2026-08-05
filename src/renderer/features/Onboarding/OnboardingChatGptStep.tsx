@@ -1,8 +1,8 @@
-import { makeStyles, tokens } from '@fluentui/react-components';
 import { memo, useCallback, useEffect, useState } from 'react';
 
 import { buildCodexConfig } from '@/lib/provider-config';
-import { Body1Strong, Button, Caption1, Spinner } from '@/renderer/ds';
+import { Button } from '@/renderer/ds/ui/button';
+import { Spinner } from '@/renderer/ds/ui/spinner';
 import { agentConfigApi } from '@/renderer/services/config';
 import { emitter, ipc } from '@/renderer/services/ipc';
 import type { CodexDeviceCode } from '@/shared/types';
@@ -13,31 +13,7 @@ type Props = {
   onBack: () => void;
 };
 
-const useStyles = makeStyles({
-  root: { display: 'flex', flexDirection: 'column', gap: '20px' },
-  header: { display: 'flex', flexDirection: 'column', gap: '4px' },
-  codeBox: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '8px',
-    padding: '14px 16px',
-    borderRadius: tokens.borderRadiusLarge,
-    border: `1px solid ${tokens.colorNeutralStroke1}`,
-    backgroundColor: tokens.colorNeutralBackground2,
-  },
-  codeText: {
-    fontFamily: tokens.fontFamilyMonospace,
-    fontSize: tokens.fontSizeBase600,
-    fontWeight: tokens.fontWeightSemibold,
-    letterSpacing: '0.12em',
-  },
-  pendingRow: { display: 'flex', alignItems: 'center', gap: '8px' },
-  error: { color: tokens.colorPaletteRedForeground1, fontSize: tokens.fontSizeBase200 },
-  actions: { display: 'flex', justifyContent: 'space-between' },
-});
-
 export const OnboardingChatGptStep = memo(({ onConnected, onBack }: Props) => {
-  const styles = useStyles();
   const [busy, setBusy] = useState(false);
   const [deviceCode, setDeviceCode] = useState<CodexDeviceCode | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -69,39 +45,41 @@ export const OnboardingChatGptStep = memo(({ onConnected, onBack }: Props) => {
   }, [onConnected]);
 
   return (
-    <div className={styles.root}>
-      <div className={styles.header}>
-        <Body1Strong>Sign in with ChatGPT</Body1Strong>
-        <Caption1>Use your ChatGPT Plus, Pro, or Team subscription — no API key needed.</Caption1>
+    <div className="flex flex-col gap-5">
+      <div className="flex flex-col gap-1">
+        <span className="text-sm font-semibold">Sign in with ChatGPT</span>
+        <span className="text-xs text-muted-foreground">
+          Use your ChatGPT Plus, Pro, or Team subscription — no API key needed.
+        </span>
       </div>
 
       {busy && deviceCode ? (
-        <div className={styles.codeBox}>
-          <Caption1>
+        <div className="flex flex-col gap-2 px-4 py-3.5 rounded-xl border border-border bg-card">
+          <span className="text-xs text-muted-foreground">
             Open{' '}
             <a href={deviceCode.verificationUri} target="_blank" rel="noopener noreferrer">
               {deviceCode.verificationUri}
             </a>{' '}
             and enter this code:
-          </Caption1>
-          <span className={styles.codeText}>{deviceCode.userCode}</span>
-          <div className={styles.pendingRow}>
-            <Spinner size="sm" />
-            <Caption1>Waiting for you to authorize…</Caption1>
+          </span>
+          <span className="font-mono text-2xl font-semibold tracking-widest">{deviceCode.userCode}</span>
+          <div className="flex items-center gap-2">
+            <Spinner />
+            <span className="text-xs text-muted-foreground">Waiting for you to authorize…</span>
           </div>
         </div>
       ) : (
         <div>
-          <Button variant="primary" size="sm" onClick={handleSignIn} isDisabled={busy}>
+          <Button variant="default" size="sm" onClick={handleSignIn} disabled={busy}>
             {busy ? 'Starting sign-in…' : 'Sign in with ChatGPT'}
           </Button>
         </div>
       )}
 
-      {error && <span className={styles.error}>{error}</span>}
+      {error && <span className="text-destructive text-xs">{error}</span>}
 
-      <div className={styles.actions}>
-        <Button variant="ghost" size="sm" onClick={onBack} isDisabled={busy}>
+      <div className="flex justify-between">
+        <Button variant="ghost" size="sm" onClick={onBack} disabled={busy}>
           Back
         </Button>
       </div>

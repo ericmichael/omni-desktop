@@ -5,37 +5,28 @@
  * snapshots — still claimed by a resumable tab/conversation — get the same
  * disabled-with-reason treatment as protected containers in RunningPane.
  */
-
-import { makeStyles, tokens } from '@fluentui/react-components';
-import { ArrowClockwise16Regular, Delete16Regular } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
+import { RefreshCw, Trash2 } from 'lucide-react';
 import { memo, useCallback, useEffect, useState } from 'react';
 
-import { Badge, Body1, Caption1, Card, ConfirmDialog, IconButton, SectionLabel } from '@/renderer/ds';
+import { cn } from '@/renderer/ds/cn';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/renderer/ds/ui/alert-dialog';
+import { Badge } from '@/renderer/ds/ui/badge';
+import { Button } from '@/renderer/ds/ui/button';
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/renderer/ds/ui/card';
 import { formatBytes } from '@/renderer/features/Sandboxes/format-bytes';
 import { $sandboxesError, $sandboxSnapshots, refreshSandboxSnapshots } from '@/renderer/features/Sandboxes/state';
 import { formatRelativeTime } from '@/renderer/omniagents-ui/lib/utils';
 import { emitter } from '@/renderer/services/ipc';
-
-const useStyles = makeStyles({
-  root: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalM },
-  toolbar: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS },
-  list: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalXS },
-  row: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalM,
-    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalS}`,
-    borderRadius: tokens.borderRadiusMedium,
-    backgroundColor: tokens.colorNeutralBackground2,
-  },
-  main: { flex: '1 1 0', minWidth: 0, display: 'flex', flexDirection: 'column', gap: '2px' },
-  chips: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalXS, flexShrink: 0 },
-  summary: { color: tokens.colorNeutralForeground2 },
-  error: { color: tokens.colorPaletteRedForeground1 },
-  mono: { fontFamily: tokens.fontFamilyMonospace },
-  truncated: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-});
 
 /**
  * Session ids are opaque and only differ at the edges — middle-truncate so
@@ -51,7 +42,6 @@ const middleTruncate = (text: string, max = 28): string => {
 };
 
 export const SnapshotsPane = memo(() => {
-  const styles = useStyles();
   const snapshots = useStore($sandboxSnapshots);
   const fetchError = useStore($sandboxesError);
 
@@ -83,59 +73,101 @@ export const SnapshotsPane = memo(() => {
   const pendingSnapshot = snapshots.find((s) => s.snapshotRef === pendingDeleteId) ?? null;
 
   return (
-    <div className={styles.root}>
-      <SectionLabel>Snapshots</SectionLabel>
-      <div className={styles.toolbar}>
-        <Caption1 className={styles.summary}>{`Total on disk: ${formatBytes(totalBytes)}`}</Caption1>
-        <IconButton
-          aria-label="Refresh snapshots"
-          icon={<ArrowClockwise16Regular />}
-          size="sm"
-          tooltip="Refresh"
-          onClick={onRefresh}
-        />
-      </div>
+    <div className="flex flex-col gap-4">
       <Card>
-        <div className={styles.list}>
-          {snapshots.length === 0 && <Caption1 className={styles.summary}>No workspace snapshots.</Caption1>}
-          {snapshots.map((snapshot) => (
-            <div key={snapshot.snapshotRef} className={styles.row}>
-              <div className={styles.main}>
-                <Body1 className={styles.truncated}>{snapshot.label ?? middleTruncate(snapshot.snapshotRef)}</Body1>
-                <Caption1 className={`${styles.summary} ${styles.truncated}`}>
-                  {`${formatBytes(snapshot.sizeBytes)} · modified ${formatRelativeTime(new Date(snapshot.modifiedAt))}`}
-                </Caption1>
-                {snapshot.label !== null && (
-                  <Caption1 className={`${styles.summary} ${styles.mono} ${styles.truncated}`}>
-                    {middleTruncate(snapshot.snapshotRef)}
-                  </Caption1>
-                )}
+        <CardHeader>
+          <CardTitle>Workspace snapshots</CardTitle>
+          <CardDescription>{`${formatBytes(totalBytes)} stored on disk for restoring sandbox workspaces.`}</CardDescription>
+          <CardAction>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Refresh snapshots"
+              onClick={onRefresh}
+              title="Refresh"
+            >
+              <RefreshCw />
+            </Button>
+          </CardAction>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="flex flex-col gap-1">
+            {snapshots.length === 0 && (
+              <span className={cn('text-xs text-muted-foreground', 'text-muted-foreground')}>
+                No workspace snapshots.
+              </span>
+            )}
+            {snapshots.map((snapshot) => (
+              <div
+                key={snapshot.snapshotRef}
+                className="flex min-w-0 flex-wrap items-center gap-3 p-2 rounded-lg bg-card"
+              >
+                <div className="flex-1 min-w-0 flex flex-col gap-0.5">
+                  <span className={cn('text-sm', 'overflow-hidden text-ellipsis whitespace-nowrap')}>
+                    {snapshot.label ?? middleTruncate(snapshot.snapshotRef)}
+                  </span>
+                  <span
+                    className={cn(
+                      'text-xs text-muted-foreground',
+                      `${'text-muted-foreground'} ${'overflow-hidden text-ellipsis whitespace-nowrap'}`
+                    )}
+                  >
+                    {`${formatBytes(snapshot.sizeBytes)} · modified ${formatRelativeTime(new Date(snapshot.modifiedAt))}`}
+                  </span>
+                  {snapshot.label !== null && (
+                    <span
+                      className={cn(
+                        'text-xs text-muted-foreground',
+                        `${'text-muted-foreground'} ${'font-mono'} ${'overflow-hidden text-ellipsis whitespace-nowrap'}`
+                      )}
+                    >
+                      {middleTruncate(snapshot.snapshotRef)}
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  {snapshot.inUse && <Badge variant="secondary">in use</Badge>}
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={snapshot.inUse ? 'In use — an open tab owns this Workspace snapshot' : 'Delete snapshot'}
+                  disabled={snapshot.inUse}
+                  onClick={() => setPendingDeleteId(snapshot.snapshotRef)}
+                  title={snapshot.inUse ? 'In use — an open tab owns this Workspace snapshot' : 'Delete snapshot'}
+                >
+                  <Trash2 />
+                </Button>
               </div>
-              <div className={styles.chips}>{snapshot.inUse && <Badge color="blue">in use</Badge>}</div>
-              <IconButton
-                aria-label={snapshot.inUse ? 'In use — an open tab owns this Workspace snapshot' : 'Delete snapshot'}
-                icon={<Delete16Regular />}
-                size="sm"
-                isDisabled={snapshot.inUse}
-                tooltip={snapshot.inUse ? 'In use — an open tab owns this Workspace snapshot' : 'Delete snapshot'}
-                onClick={() => setPendingDeleteId(snapshot.snapshotRef)}
-              />
-            </div>
-          ))}
-        </div>
-        {actionError && <Caption1 className={styles.error}>{actionError}</Caption1>}
-        {fetchError && <Caption1 className={styles.error}>{fetchError}</Caption1>}
+            ))}
+          </div>
+          {actionError && (
+            <span className={cn('text-xs text-muted-foreground', 'text-destructive')}>{actionError}</span>
+          )}
+          {fetchError && <span className={cn('text-xs text-muted-foreground', 'text-destructive')}>{fetchError}</span>}
+        </CardContent>
       </Card>
 
-      <ConfirmDialog
-        open={pendingDeleteId !== null}
-        onClose={closeConfirm}
-        onConfirm={onConfirmDelete}
-        title="Delete snapshot?"
-        description={`Delete the Workspace snapshot for ${pendingSnapshot?.label ?? middleTruncate(pendingSnapshot?.snapshotRef ?? '')}. Future environments can no longer hydrate from it.`}
-        confirmLabel="Delete"
-        destructive
-      />
+      <AlertDialog open={pendingDeleteId !== null} onOpenChange={(open) => !open && closeConfirm()}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete snapshot?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Delete the Workspace snapshot for{' '}
+              {pendingSnapshot?.label ?? middleTruncate(pendingSnapshot?.snapshotRef ?? '')}. Future environments can no
+              longer hydrate from it.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={onConfirmDelete}>
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 });

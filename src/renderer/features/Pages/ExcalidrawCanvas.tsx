@@ -85,7 +85,7 @@ export function ExcalidrawCanvas({ initialScene, onChangeScene }: ExcalidrawCanv
   );
 
   return (
-    <div style={{ height: '100%', width: '100%', position: 'relative' }}>
+    <div className="relative size-full">
       <Excalidraw initialData={initialData} onChange={handleChange} />
     </div>
   );

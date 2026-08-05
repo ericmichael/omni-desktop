@@ -1,51 +1,12 @@
-import { makeStyles, mergeClasses, shorthands, tokens } from '@fluentui/react-components';
 import { memo, useCallback, useEffect, useState } from 'react';
 
+import { cn } from '@/renderer/ds/cn';
 import { emitter } from '@/renderer/services/ipc';
 import type { ContainerPullRequest } from '@/shared/types';
 
 import { PullRequestBadge } from './PullRequestBadge';
 
 const POLL_INTERVAL_MS = 8_000;
-
-const useStyles = makeStyles({
-  // Neutral surface so the (purple) PR badge chips stand out and the label keeps
-  // matched neutral contrast in every theme. A purple left accent stripe makes
-  // the strip read as a distinct callout rather than blending into the content.
-  banner: {
-    display: 'flex',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: tokens.spacingHorizontalS,
-    flex: '0 0 auto',
-    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke2),
-    ...shorthands.borderLeft('3px', 'solid', tokens.colorPalettePurpleBorderActive),
-    backgroundColor: tokens.colorNeutralBackground2,
-    padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalM}`,
-  },
-  // Chat view content fills its container absolutely, so the banner floats over
-  // the top edge (like SessionStatusBanner) instead of taking a row in flow.
-  // zIndex sits just below SessionStatusBanner (100) so a transient warning wins.
-  floating: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    zIndex: 90,
-    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
-    ...shorthands.borderLeft('3px', 'solid', tokens.colorPalettePurpleBorderActive),
-    borderRadius: tokens.borderRadiusMedium,
-    margin: tokens.spacingVerticalS,
-    boxShadow: tokens.shadow8,
-  },
-  label: {
-    fontSize: tokens.fontSizeBase200,
-    fontWeight: tokens.fontWeightSemibold,
-    color: tokens.colorNeutralForeground2,
-    // Absorb the free space so the badges sit at the right edge.
-    marginRight: 'auto',
-  },
-});
 
 /**
  * Which surface's container to probe for pull requests — a deck column's tab
@@ -90,7 +51,6 @@ export const mergePollResult = (prev: ContainerPullRequest[], next: ContainerPul
  * deck columns, which stack header → banner → content).
  */
 export const PullRequestBanner = memo(({ scope, floating }: { scope: PullRequestBannerScope; floating?: boolean }) => {
-  const styles = useStyles();
   const [prs, setPrs] = useState<ContainerPullRequest[]>([]);
 
   const key = scope.tabId;
@@ -119,8 +79,16 @@ export const PullRequestBanner = memo(({ scope, floating }: { scope: PullRequest
   }
   const tabId = scope.tabId;
   return (
-    <div className={mergeClasses(styles.banner, floating && styles.floating)}>
-      <span className={styles.label}>Pull request{prs.length > 1 ? 's' : ''}</span>
+    <div
+      className={cn(
+        'flex flex-none flex-wrap items-center gap-2 border-b border-l-4 border-border border-l-chart-5 bg-card px-4 py-1',
+        floating &&
+          'absolute inset-x-0 top-0 z-90 m-2 rounded-lg border border-l-4 border-border border-l-chart-5 shadow-md'
+      )}
+    >
+      <span className="text-xs font-semibold text-muted-foreground mr-auto">
+        Pull request{prs.length > 1 ? 's' : ''}
+      </span>
       {prs.map((pr) => (
         <PullRequestBadge key={pr.url} pr={pr} tabId={tabId} />
       ))}

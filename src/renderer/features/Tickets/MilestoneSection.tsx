@@ -1,170 +1,18 @@
-import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
-import {
-  Add20Regular,
-  ArchiveRegular,
-  BranchFork20Regular,
-  Checkmark12Regular,
-  ChevronDown12Regular,
-  ChevronRight12Regular,
-} from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
+import { Archive, Check, ChevronDown, ChevronRight, GitFork, Plus } from 'lucide-react';
 import { memo, useCallback, useMemo, useState } from 'react';
 
-import { Badge, Button, Caption1, IconButton, Input, ProgressBar, SectionLabel, Textarea } from '@/renderer/ds';
+import { isDoneColumn } from '@/lib/pipeline-category';
+import { Badge } from '@/renderer/ds/ui/badge';
+import { Button } from '@/renderer/ds/ui/button';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/renderer/ds/ui/collapsible';
+import { Input } from '@/renderer/ds/ui/input';
+import { Progress } from '@/renderer/ds/ui/progress';
+import { Textarea } from '@/renderer/ds/ui/textarea';
 import { $milestones, milestoneApi } from '@/renderer/features/Initiatives/state';
 import type { Milestone, MilestoneId, ProjectId } from '@/shared/types';
 
-import { $activeMilestoneId, $tickets } from './state';
-
-const useStyles = makeStyles({
-  root: {
-    display: 'flex',
-    flexDirection: 'column',
-    flexShrink: 0,
-  },
-  header: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-    paddingLeft: tokens.spacingHorizontalL,
-    paddingRight: tokens.spacingHorizontalL,
-    paddingTop: tokens.spacingVerticalS,
-    paddingBottom: tokens.spacingVerticalS,
-    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
-  },
-  flex1: {
-    flex: '1 1 0',
-  },
-  list: {
-    display: 'flex',
-    flexDirection: 'column',
-  },
-  milestoneRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-    paddingLeft: tokens.spacingHorizontalL,
-    paddingRight: tokens.spacingHorizontalL,
-    paddingTop: '8px',
-    paddingBottom: '8px',
-    cursor: 'pointer',
-    border: 'none',
-    backgroundColor: 'transparent',
-    width: '100%',
-    textAlign: 'left',
-    color: tokens.colorNeutralForeground1,
-    transitionProperty: 'background-color',
-    transitionDuration: tokens.durationFaster,
-    ':hover': {
-      backgroundColor: tokens.colorSubtleBackgroundHover,
-    },
-  },
-  milestoneRowSelected: {
-    backgroundColor: tokens.colorSubtleBackgroundSelected,
-    ':hover': {
-      backgroundColor: tokens.colorSubtleBackgroundSelected,
-    },
-  },
-  chevron: {
-    flexShrink: 0,
-    color: tokens.colorNeutralForeground3,
-  },
-  titleArea: {
-    flex: '1 1 0',
-    minWidth: 0,
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '2px',
-  },
-  titleText: {
-    fontSize: tokens.fontSizeBase300,
-    fontWeight: tokens.fontWeightMedium,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-  },
-  descText: {
-    fontSize: tokens.fontSizeBase200,
-    color: tokens.colorNeutralForeground3,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-  },
-  progressWrap: {
-    width: '80px',
-    flexShrink: 0,
-  },
-  progressLabel: {
-    fontSize: tokens.fontSizeBase100,
-    color: tokens.colorNeutralForeground3,
-    textAlign: 'right',
-    marginBottom: '2px',
-  },
-  branchBadge: {
-    display: 'none',
-    '@media (min-width: 640px)': {
-      display: 'flex',
-      alignItems: 'center',
-      gap: '3px',
-      borderRadius: '9999px',
-      backgroundColor: tokens.colorPalettePurpleBackground2,
-      paddingLeft: '6px',
-      paddingRight: '6px',
-      paddingTop: '2px',
-      paddingBottom: '2px',
-      fontSize: tokens.fontSizeBase100,
-      fontWeight: tokens.fontWeightMedium,
-      color: tokens.colorPalettePurpleForeground2,
-      flexShrink: 0,
-    },
-  },
-  expandedPanel: {
-    paddingLeft: tokens.spacingHorizontalXXL,
-    paddingRight: tokens.spacingHorizontalL,
-    paddingTop: tokens.spacingVerticalXS,
-    paddingBottom: tokens.spacingVerticalM,
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalS,
-    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
-    backgroundColor: tokens.colorNeutralBackground2,
-  },
-  expandedDesc: {
-    fontSize: tokens.fontSizeBase200,
-    color: tokens.colorNeutralForeground2,
-    whiteSpace: 'pre-wrap',
-  },
-  expandedActions: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-  },
-  inlineForm: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalS,
-    paddingLeft: tokens.spacingHorizontalL,
-    paddingRight: tokens.spacingHorizontalL,
-    paddingTop: tokens.spacingVerticalS,
-    paddingBottom: tokens.spacingVerticalS,
-    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
-    backgroundColor: tokens.colorNeutralBackground2,
-  },
-  formRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-  },
-  emptyHint: {
-    paddingLeft: tokens.spacingHorizontalL,
-    paddingRight: tokens.spacingHorizontalL,
-    paddingTop: tokens.spacingVerticalS,
-    paddingBottom: tokens.spacingVerticalS,
-    fontSize: tokens.fontSizeBase200,
-    color: tokens.colorNeutralForeground3,
-    fontStyle: 'italic',
-  },
-});
+import { $activeMilestoneId, $pipeline, $tickets } from './state';
 
 type MilestoneRowProps = {
   milestone: Milestone;
@@ -176,16 +24,11 @@ type MilestoneRowProps = {
 };
 
 const MilestoneRow = memo(({ milestone, isSelected, isExpanded, progress, onSelect, onToggle }: MilestoneRowProps) => {
-  const styles = useStyles();
   const pct = progress.total > 0 ? progress.done / progress.total : 0;
 
-  const handleChevronClick = useCallback(
-    (e: React.MouseEvent) => {
-      e.stopPropagation();
-      onToggle();
-    },
-    [onToggle]
-  );
+  const handleChevronClick = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+  }, []);
 
   const handleCompleteMilestone = useCallback(() => {
     void milestoneApi.updateMilestone(milestone.id, { status: 'completed' });
@@ -204,46 +47,75 @@ const MilestoneRow = memo(({ milestone, isSelected, isExpanded, progress, onSele
   }, [milestone.id]);
 
   return (
-    <>
-      <button
-        type="button"
-        className={`${styles.milestoneRow} ${isSelected ? styles.milestoneRowSelected : ''}`}
-        onClick={onSelect}
+    <Collapsible
+      open={isExpanded}
+      onOpenChange={(open) => {
+        if (open !== isExpanded) {
+          onToggle();
+        }
+      }}
+    >
+      <div
+        className={`${'flex items-center gap-2 pl-5 pr-5 pt-2 pb-2 cursor-pointer border-0 bg-transparent w-full text-left text-foreground transition-colors duration-100 hover:bg-accent'} ${isSelected ? 'bg-accent hover:bg-accent' : ''}`}
       >
-        <span className={styles.chevron} onClick={handleChevronClick} role="button" tabIndex={-1}>
-          {isExpanded ? <ChevronDown12Regular /> : <ChevronRight12Regular />}
-        </span>
-        <div className={styles.titleArea}>
-          <span className={styles.titleText}>{milestone.title}</span>
-          {!isExpanded && milestone.description && <span className={styles.descText}>{milestone.description}</span>}
-        </div>
-        {milestone.branch && (
-          <span className={styles.branchBadge}>
-            <BranchFork20Regular style={{ width: 12, height: 12 }} />
-            {milestone.branch}
-          </span>
-        )}
-        {milestone.status !== 'active' && (
-          <Badge color={milestone.status === 'completed' ? 'green' : 'default'}>{milestone.status}</Badge>
-        )}
-        <div className={styles.progressWrap}>
-          <p className={styles.progressLabel}>
-            {progress.done}/{progress.total}
-          </p>
-          <ProgressBar value={pct} thickness="medium" color={pct >= 1 ? 'success' : 'brand'} />
-        </div>
-      </button>
+        <CollapsibleTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            className="shrink-0 text-muted-foreground"
+            onClick={handleChevronClick}
+            aria-label={isExpanded ? 'Collapse milestone' : 'Expand milestone'}
+          >
+            {isExpanded ? <ChevronDown /> : <ChevronRight />}
+          </Button>
+        </CollapsibleTrigger>
+        <Button
+          type="button"
+          variant="ghost"
+          className="h-auto min-w-0 flex-1 justify-start gap-2 p-0"
+          onClick={onSelect}
+        >
+          <div className="flex-1 min-w-0 flex flex-col gap-0.5">
+            <span className="text-sm font-medium overflow-hidden text-ellipsis whitespace-nowrap">
+              {milestone.title}
+            </span>
+            {!isExpanded && milestone.description && (
+              <span className="text-xs text-muted-foreground overflow-hidden text-ellipsis whitespace-nowrap">
+                {milestone.description}
+              </span>
+            )}
+          </div>
+          {milestone.branch && (
+            <span className="hidden sm:flex sm:shrink-0 sm:items-center sm:gap-1 sm:rounded-full sm:bg-chart-5/15 sm:px-1.5 sm:py-0.5 sm:text-xs sm:font-medium sm:text-chart-5">
+              <GitFork className="size-3" />
+              {milestone.branch}
+            </span>
+          )}
+          {milestone.status !== 'active' && <Badge variant="secondary">{milestone.status}</Badge>}
+          <div className="w-20 shrink-0">
+            <p className="text-xs text-muted-foreground text-right mb-0.5">
+              {progress.done}/{progress.total}
+            </p>
+            <Progress value={pct * 100} />
+          </div>
+        </Button>
+      </div>
 
-      {isExpanded && (
-        <div className={styles.expandedPanel}>
-          {milestone.description && <p className={styles.expandedDesc}>{milestone.description}</p>}
-          <div className={styles.expandedActions}>
+      <CollapsibleContent>
+        <div className="pl-8 pr-5 pt-1 pb-4 flex flex-col gap-2 border-b border-border bg-card">
+          {milestone.description && (
+            <p className="text-xs text-muted-foreground whitespace-pre-wrap">{milestone.description}</p>
+          )}
+          <div className="flex items-center gap-2">
             {milestone.status === 'active' && (
               <>
-                <Button size="sm" variant="ghost" leftIcon={<Checkmark12Regular />} onClick={handleCompleteMilestone}>
+                <Button size="sm" variant="ghost" onClick={handleCompleteMilestone}>
+                  <Check />
                   Complete
                 </Button>
-                <Button size="sm" variant="ghost" leftIcon={<ArchiveRegular />} onClick={handleArchiveMilestone}>
+                <Button size="sm" variant="ghost" onClick={handleArchiveMilestone}>
+                  <Archive />
                   Archive
                 </Button>
               </>
@@ -258,16 +130,16 @@ const MilestoneRow = memo(({ milestone, isSelected, isExpanded, progress, onSele
             </Button>
           </div>
         </div>
-      )}
-    </>
+      </CollapsibleContent>
+    </Collapsible>
   );
 });
 MilestoneRow.displayName = 'MilestoneRow';
 
 export const MilestoneSection = memo(({ projectId }: { projectId: ProjectId }) => {
-  const styles = useStyles();
   const milestones = useStore($milestones);
   const tickets = useStore($tickets);
+  const pipeline = useStore($pipeline);
   const activeMilestoneId = useStore($activeMilestoneId);
   const [expandedId, setExpandedId] = useState<MilestoneId | null>(null);
   const [creating, setCreating] = useState(false);
@@ -295,11 +167,11 @@ export const MilestoneSection = memo(({ projectId }: { projectId: ProjectId }) =
     const allTickets = Object.values(tickets).filter((t) => t.projectId === projectId);
     for (const milestone of projectMilestones) {
       const milestoneTickets = allTickets.filter((t) => t.milestoneId === milestone.id);
-      const done = milestoneTickets.filter((t) => t.resolution != null).length;
+      const done = milestoneTickets.filter((t) => isDoneColumn(pipeline, t.columnId)).length;
       map[milestone.id] = { done, total: milestoneTickets.length };
     }
     return map;
-  }, [tickets, projectId, projectMilestones]);
+  }, [tickets, pipeline, projectId, projectMilestones]);
 
   const handleSelect = useCallback(
     (id: MilestoneId) => {
@@ -344,21 +216,29 @@ export const MilestoneSection = memo(({ projectId }: { projectId: ProjectId }) =
   );
 
   return (
-    <div className={styles.root}>
-      <div className={styles.header}>
-        <SectionLabel>Milestones</SectionLabel>
-        <Caption1 style={{ color: tokens.colorNeutralForeground3 }}>({projectMilestones.length})</Caption1>
-        <div className={styles.flex1} />
+    <div className="flex flex-col shrink-0">
+      <div className="flex items-center gap-2 pl-5 pr-5 pt-2 pb-2 border-b border-border">
+        <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Milestones</span>
+        <span className="text-xs text-muted-foreground text-muted-foreground">({projectMilestones.length})</span>
+        <div className="flex-1" />
         {activeMilestoneId !== 'all' && (
           <Button size="sm" variant="ghost" onClick={() => $activeMilestoneId.set('all')}>
             Show all
           </Button>
         )}
-        <IconButton aria-label="New milestone" icon={<Add20Regular />} size="sm" onClick={() => setCreating(true)} />
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          aria-label="New milestone"
+          onClick={() => setCreating(true)}
+        >
+          <Plus />
+        </Button>
       </div>
 
       {creating && (
-        <div className={styles.inlineForm}>
+        <div className="flex flex-col gap-2 pl-5 pr-5 pt-2 pb-2 border-b border-border bg-card">
           <Input
             value={newTitle}
             onChange={(e) => setNewTitle(e.target.value)}
@@ -366,14 +246,16 @@ export const MilestoneSection = memo(({ projectId }: { projectId: ProjectId }) =
             placeholder="Milestone title..."
             autoFocus
           />
+
           <Textarea
             value={newDesc}
             onChange={(e) => setNewDesc(e.target.value)}
             placeholder="What is this milestone delivering? (optional)"
             rows={2}
           />
-          <div className={styles.formRow}>
-            <Button size="sm" onClick={() => void handleCreate()} isDisabled={!newTitle.trim()}>
+
+          <div className="flex items-center gap-2">
+            <Button size="sm" onClick={() => void handleCreate()} disabled={!newTitle.trim()}>
               Create
             </Button>
             <Button
@@ -391,9 +273,11 @@ export const MilestoneSection = memo(({ projectId }: { projectId: ProjectId }) =
         </div>
       )}
 
-      <div className={styles.list}>
+      <div className="flex flex-col">
         {projectMilestones.length === 0 && !creating && (
-          <p className={styles.emptyHint}>No milestones yet. Add one to organize your work.</p>
+          <p className="pl-5 pr-5 pt-2 pb-2 text-xs text-muted-foreground italic">
+            No milestones yet. Add one to organize your work.
+          </p>
         )}
         {projectMilestones.map((milestone) => (
           <MilestoneRow

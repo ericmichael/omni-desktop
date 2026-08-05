@@ -8,27 +8,6 @@ import type { ContainerPullRequest } from '@/shared/types';
 import { requestPreviewOpen } from './preview-bridge';
 import { mergePollResult, PullRequestBanner } from './PullRequestBanner';
 
-vi.mock('@fluentui/react-components', () => ({
-  makeStyles: () => () => ({
-    banner: 'banner',
-    floating: 'floating',
-    label: 'label',
-    prBadge: 'prBadge',
-  }),
-  mergeClasses: (...classes: Array<string | false | undefined>) => classes.filter(Boolean).join(' '),
-  shorthands: {
-    border: () => ({}),
-    borderBottom: () => ({}),
-    borderLeft: () => ({}),
-  },
-  tokens: new Proxy({}, { get: (_target, prop) => String(prop) }),
-}));
-
-vi.mock('@fluentui/react-icons', () => ({
-  Open16Regular: () => <span data-testid="open-icon" />,
-  CheckmarkCircle16Regular: () => <span data-testid="merged-icon" />,
-}));
-
 vi.mock('@/renderer/services/ipc', () => ({
   emitter: {
     invoke: vi.fn(),
@@ -69,16 +48,16 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-async function renderBanner(scope: { kind: 'code-tab'; tabId: string }): Promise<HTMLSpanElement> {
+async function renderBanner(scope: { kind: 'code-tab'; tabId: string }): Promise<HTMLButtonElement> {
   await act(async () => {
     root.render(<PullRequestBanner scope={scope} />);
     await Promise.resolve();
   });
-  const badge = container.querySelector('[role="button"]');
+  const badge = container.querySelector('button');
   if (!badge) {
     throw new Error('PR badge not found');
   }
-  return badge as HTMLSpanElement;
+  return badge;
 }
 
 describe('PullRequestBanner PR links', () => {

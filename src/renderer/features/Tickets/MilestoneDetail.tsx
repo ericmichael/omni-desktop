@@ -1,60 +1,22 @@
-import { makeStyles, tokens } from '@fluentui/react-components';
-import {
-  ArchiveRegular,
-  Checkmark12Regular,
-  Delete20Regular,
-  Edit20Regular,
-  MoreHorizontal20Filled,
-  PlayCircle20Regular,
-} from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
+import { Archive, Check, Edit, Ellipsis, PlayCircle, Trash2 } from 'lucide-react';
 import React, { memo, useCallback, useMemo, useState } from 'react';
 
+import { Button } from '@/renderer/ds/ui/button';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/renderer/ds/ui/dialog';
 import {
-  AnimatedDialog,
-  DialogBody,
-  DialogContent,
-  DialogHeader,
-  IconButton,
-  Menu,
-  MenuDivider,
-  MenuItem,
-  MenuList,
-  MenuPopover,
-  MenuTrigger,
-} from '@/renderer/ds';
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/renderer/ds/ui/dropdown-menu';
 import { $milestones, milestoneApi } from '@/renderer/features/Initiatives/state';
 import type { MilestoneId, ProjectId } from '@/shared/types';
 
 import { MilestoneForm } from './MilestoneForm';
 import { $activeMilestoneId, ticketApi } from './state';
 import { WorkItemsList } from './WorkItemsList';
-
-const useStyles = makeStyles({
-  root: {
-    display: 'flex',
-    flexDirection: 'column',
-    height: '100%',
-    width: '100%',
-  },
-  /**
-   * Eyebrow content passed into WorkItemsList's `contextLabel` slot. Renders
-   * the project label + milestone metadata (status / branch / due) inline
-   * with bullet separators, so the milestone detail page reuses the Board's
-   * 2-line title block (eyebrow Caption1 + Subtitle2 title) instead of
-   * stacking a separate header above it.
-   */
-  eyebrow: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalXS,
-  },
-  eyebrowSep: {
-    color: tokens.colorNeutralForeground4,
-  },
-  dueSoon: { color: tokens.colorPaletteYellowForeground1 },
-  dueOverdue: { color: tokens.colorPaletteRedForeground1 },
-});
 
 type MilestoneDetailProps = {
   milestoneId: MilestoneId;
@@ -64,7 +26,6 @@ type MilestoneDetailProps = {
 };
 
 export const MilestoneDetail = memo(({ milestoneId, projectId, hideChrome }: MilestoneDetailProps) => {
-  const styles = useStyles();
   const milestones = useStore($milestones);
   const milestone = milestones[milestoneId];
 
@@ -76,10 +37,6 @@ export const MilestoneDetail = memo(({ milestoneId, projectId, hideChrome }: Mil
   useMemo(() => {
     $activeMilestoneId.set(milestoneId);
   }, [milestoneId]);
-
-  const handleBack = useCallback(() => {
-    ticketApi.goToProject(projectId, 'board');
-  }, [projectId]);
 
   const handleComplete = useCallback(() => {
     void milestoneApi.updateMilestone(milestoneId, { status: 'completed' });
@@ -95,7 +52,7 @@ export const MilestoneDetail = memo(({ milestoneId, projectId, hideChrome }: Mil
 
   const handleDelete = useCallback(() => {
     void milestoneApi.removeMilestone(milestoneId);
-    ticketApi.goToProject(projectId, 'board');
+    ticketApi.goToProject(projectId, 'tasks');
   }, [milestoneId, projectId]);
 
   if (!milestone) {
@@ -115,7 +72,7 @@ export const MilestoneDetail = memo(({ milestoneId, projectId, hideChrome }: Mil
           : days === 1
             ? 'Due tomorrow'
             : `Due in ${days}d`;
-    const cls = days < 0 ? styles.dueOverdue : days <= 7 ? styles.dueSoon : undefined;
+    const cls = days < 0 ? '[color:var(--destructive)]' : days <= 7 ? 'text-warning' : undefined;
     return { text, cls };
   })();
 
@@ -138,10 +95,10 @@ export const MilestoneDetail = memo(({ milestoneId, projectId, hideChrome }: Mil
 
   const eyebrow =
     eyebrowParts.length > 0 ? (
-      <span className={styles.eyebrow}>
+      <span className="inline-flex items-center gap-1">
         {eyebrowParts.map((part, i) => (
           <React.Fragment key={i}>
-            {i > 0 && <span className={styles.eyebrowSep}>·</span>}
+            {i > 0 && <span className="text-muted-foreground">·</span>}
             {part}
           </React.Fragment>
         ))}
@@ -149,58 +106,66 @@ export const MilestoneDetail = memo(({ milestoneId, projectId, hideChrome }: Mil
     ) : undefined;
 
   const overflowMenu = (
-    <Menu positioning={{ position: 'below', align: 'end' }}>
-      <MenuTrigger disableButtonEnhancement>
-        <IconButton aria-label="Milestone actions" icon={<MoreHorizontal20Filled />} size="sm" />
-      </MenuTrigger>
-      <MenuPopover>
-        <MenuList>
-          <MenuItem icon={<Edit20Regular />} onClick={openEdit}>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button type="button" variant="ghost" size="icon-sm" aria-label="Milestone actions">
+          <Ellipsis />
+        </Button>
+      </DropdownMenuTrigger>
+      <>
+        <DropdownMenuContent>
+          <DropdownMenuItem onClick={openEdit}>
+            <Edit />
             Edit milestone
-          </MenuItem>
-          <MenuDivider />
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
           {milestone.status === 'active' ? (
             <>
-              <MenuItem icon={<Checkmark12Regular />} onClick={handleComplete}>
+              <DropdownMenuItem onClick={handleComplete}>
+                <Check />
                 Complete
-              </MenuItem>
-              <MenuItem icon={<ArchiveRegular />} onClick={handleArchive}>
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleArchive}>
+                <Archive />
                 Archive
-              </MenuItem>
+              </DropdownMenuItem>
             </>
           ) : (
-            <MenuItem icon={<PlayCircle20Regular />} onClick={handleReactivate}>
+            <DropdownMenuItem onClick={handleReactivate}>
+              <PlayCircle />
               Reactivate
-            </MenuItem>
+            </DropdownMenuItem>
           )}
-          <MenuDivider />
-          <MenuItem icon={<Delete20Regular />} onClick={handleDelete}>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onClick={handleDelete}>
+            <Trash2 />
             Delete milestone
-          </MenuItem>
-        </MenuList>
-      </MenuPopover>
-    </Menu>
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </>
+    </DropdownMenu>
   );
 
   return (
-    <div className={styles.root}>
+    <div className="flex flex-col h-full w-full">
       <WorkItemsList
         projectId={projectId}
         pageTitle={milestone.title}
-        crumbMiddle={[{ label: 'Tasks', onClick: handleBack }]}
         contextLabel={eyebrow}
         rightActions={overflowMenu}
         hideChrome={hideChrome}
       />
 
-      <AnimatedDialog open={editOpen} onClose={closeEdit}>
+      <Dialog open={editOpen} onOpenChange={(open) => !open && closeEdit()}>
         <DialogContent>
-          <DialogHeader>Edit Milestone</DialogHeader>
-          <DialogBody>
+          <DialogHeader>
+            <DialogTitle>Edit Milestone</DialogTitle>
+          </DialogHeader>
+          <div className="min-h-0 overflow-y-auto">
             <MilestoneForm projectId={projectId} editMilestone={milestone} onClose={closeEdit} />
-          </DialogBody>
+          </div>
         </DialogContent>
-      </AnimatedDialog>
+      </Dialog>
     </div>
   );
 });

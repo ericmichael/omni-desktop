@@ -14,37 +14,19 @@
  * Renders nothing in standalone Electron (no WS transport) and while the
  * connection is healthy.
  */
-import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
-import { Warning20Filled } from '@fluentui/react-icons';
+import './Banner.css';
+
 import { useStore } from '@nanostores/react';
+import { TriangleAlert } from 'lucide-react';
 import { memo, useCallback } from 'react';
 
-import { Button, Caption1 } from '@/renderer/ds';
+import { Alert, AlertDescription, AlertTitle } from '@/renderer/ds/ui/alert';
+import { Button } from '@/renderer/ds/ui/button';
 import { WS_CLOSE_FORBIDDEN, WS_CLOSE_UNAUTHENTICATED } from '@/shared/lifecycle';
 
 import { $wsConnectionState } from './state';
 
-const useStyles = makeStyles({
-  root: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
-    backgroundColor: tokens.colorPaletteYellowBackground1,
-    color: tokens.colorPaletteYellowForeground1,
-    ...shorthands.borderBottom('1px', 'solid', tokens.colorPaletteYellowBorder1),
-    flexShrink: 0,
-  },
-  terminal: {
-    backgroundColor: tokens.colorPaletteRedBackground1,
-    color: tokens.colorPaletteRedForeground1,
-    ...shorthands.borderBottom('1px', 'solid', tokens.colorPaletteRedBorder1),
-  },
-  body: { flex: '1 1 0', minWidth: 0 },
-});
-
 export const ConnectionStatusBanner = memo(() => {
-  const styles = useStyles();
   const state = useStore($wsConnectionState);
   const handleReload = useCallback(() => {
     location.reload();
@@ -57,35 +39,37 @@ export const ConnectionStatusBanner = memo(() => {
   // on momentary blips (dev-server restarts, laptop lid, etc.).
   if (state.state === 'reconnecting' && state.attempt >= 2) {
     return (
-      <div className={styles.root} role="status">
-        <Warning20Filled />
-        <div className={styles.body}>
-          <strong>Connection to the backend lost.</strong>{' '}
-          <Caption1 as="span">Reconnecting (attempt {state.attempt})…</Caption1>
-        </div>
-      </div>
+      <Alert
+        className="shrink-0 rounded-none border-x-0 border-t-0 border-warning/50 bg-warning/10 text-warning"
+        role="status"
+      >
+        <TriangleAlert />
+        <AlertTitle>Connection to the backend lost.</AlertTitle>
+        <AlertDescription>Reconnecting (attempt {state.attempt})…</AlertDescription>
+      </Alert>
     );
   }
   // Terminal: the transport gave up and will not redial on its own.
   if (state.state === 'closed' && state.permanent) {
     const authRejected = state.closeCode === WS_CLOSE_UNAUTHENTICATED || state.closeCode === WS_CLOSE_FORBIDDEN;
     return (
-      <div className={`${styles.root} ${styles.terminal}`} role="alert">
-        <Warning20Filled />
-        <div className={styles.body}>
-          <strong>Disconnected from the backend.</strong>{' '}
-          <Caption1 as="span">
-            {authRejected
-              ? `Your session was rejected (code ${state.closeCode}). Sign in again, then reload.`
-              : state.closeCode !== undefined
-                ? `The server refused the connection (code ${state.closeCode}).`
-                : 'Gave up after repeated connection failures.'}
-          </Caption1>
-        </div>
-        <Button size="sm" variant="ghost" onClick={handleReload}>
+      <Alert
+        variant="destructive"
+        className="omni-status-banner-grid rounded-none border-x-0 border-t-0 border-destructive/50"
+      >
+        <TriangleAlert />
+        <AlertTitle>Disconnected from the backend.</AlertTitle>
+        <AlertDescription>
+          {authRejected
+            ? `Your session was rejected (code ${state.closeCode}). Sign in again, then reload.`
+            : state.closeCode !== undefined
+              ? `The server refused the connection (code ${state.closeCode}).`
+              : 'Gave up after repeated connection failures.'}
+        </AlertDescription>
+        <Button className="col-start-3 row-span-2 row-start-1" size="sm" variant="ghost" onClick={handleReload}>
           Reload
         </Button>
-      </div>
+      </Alert>
     );
   }
   return null;

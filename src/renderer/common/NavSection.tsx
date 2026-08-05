@@ -1,11 +1,13 @@
-import { makeStyles, tokens } from '@fluentui/react-components';
-import { ChevronDown12Regular, ChevronRight12Regular } from '@fluentui/react-icons';
+import './NavSection.css';
+
 import { useStore } from '@nanostores/react';
+import { ChevronDown, ChevronRight } from 'lucide-react';
 import { atom } from 'nanostores';
 import { memo, type ReactNode, useCallback } from 'react';
 
-import { useNavTreeStyles } from '@/renderer/common/nav-tree';
-import { CounterBadge, SectionLabel } from '@/renderer/ds';
+import { Badge } from '@/renderer/ds/ui/badge';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/renderer/ds/ui/collapsible';
+import { SidebarGroup, SidebarGroupContent } from '@/renderer/ds/ui/sidebar';
 
 /**
  * Collapsible nav-section shell for the sidebar's container sections
@@ -49,36 +51,6 @@ function toggleNavSection(id: string): void {
   }
 }
 
-const useStyles = makeStyles({
-  /* The label IS the toggle: a bare button that inherits the section-header
-     typography, with the chevron in front. Takes the label's flex role so
-     the action buttons keep hugging the right edge. */
-  toggle: {
-    flex: '1 1 0',
-    minWidth: 0,
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalXS,
-    padding: 0,
-    border: 'none',
-    backgroundColor: 'transparent',
-    font: 'inherit',
-    color: 'inherit',
-    textAlign: 'left',
-    cursor: 'pointer',
-    ':hover': { color: tokens.colorNeutralForeground1 },
-    ':focus-visible': {
-      outline: `2px solid ${tokens.colorBrandStroke1}`,
-      outlineOffset: '2px',
-      borderRadius: tokens.borderRadiusSmall,
-    },
-  },
-  chevron: {
-    display: 'inline-flex',
-    flexShrink: 0,
-  },
-});
-
 export const NavSection = memo(function NavSection({
   id,
   label,
@@ -95,22 +67,34 @@ export const NavSection = memo(function NavSection({
   collapsedBadge?: number;
   children: ReactNode;
 }): React.JSX.Element {
-  const styles = useStyles();
-  const nav = useNavTreeStyles();
   const collapsed = Boolean(useStore($collapsedNavSections)[id]);
   const handleToggle = useCallback(() => toggleNavSection(id), [id]);
 
   return (
-    <>
-      <div className={nav.sectionHeader}>
-        <button type="button" className={styles.toggle} aria-expanded={!collapsed} onClick={handleToggle}>
-          <span className={styles.chevron}>{collapsed ? <ChevronRight12Regular /> : <ChevronDown12Regular />}</span>
-          <SectionLabel>{label}</SectionLabel>
-        </button>
-        {collapsed && collapsedBadge > 0 && <CounterBadge count={collapsedBadge} size="small" color="brand" />}
-        {actions}
-      </div>
-      {!collapsed && children}
-    </>
+    <Collapsible open={!collapsed} onOpenChange={handleToggle}>
+      <SidebarGroup className="nav-section">
+        <div data-sidebar="section-header" className="nav-section-header">
+          <CollapsibleTrigger className="nav-section-trigger text-sidebar-foreground/70 hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring">
+            <span className="truncate">{label}</span>
+            {collapsed ? <ChevronRight className="size-3" /> : <ChevronDown className="size-3" />}
+          </CollapsibleTrigger>
+          {collapsed && collapsedBadge > 0 && (
+            <span data-sidebar="group-status" className="pointer-events-none transition-opacity">
+              <Badge variant="secondary" className="h-4 min-w-4 rounded-full px-1 text-xs tabular-nums">
+                {collapsedBadge}
+              </Badge>
+            </span>
+          )}
+          {actions && (
+            <div data-sidebar="section-actions" className="nav-section-actions">
+              {actions}
+            </div>
+          )}
+        </div>
+        <CollapsibleContent>
+          <SidebarGroupContent>{children}</SidebarGroupContent>
+        </CollapsibleContent>
+      </SidebarGroup>
+    </Collapsible>
   );
 });

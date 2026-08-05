@@ -9,7 +9,7 @@ export type PageListEntry = {
 /**
  * Flatten a project's page hierarchy into a depth-annotated list for indented
  * rendering (Pages tab, Home Pages section). The project's root page itself is
- * excluded — it's the Context doc, surfaced separately. Children of the root
+ * excluded — it's the project Home page, surfaced separately. Children of the root
  * page (and legacy pages with `parentId === null`) are depth 0; each nesting
  * level below adds 1. Siblings sort by `sortOrder`. Pages whose parent chain
  * is missing (orphans) are tolerated and appended at depth 0 so nothing

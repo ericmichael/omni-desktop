@@ -44,30 +44,28 @@ describe('computeShippedDigest', () => {
     expect(result.byProject).toEqual({});
   });
 
-  it('excludes unresolved tickets', () => {
-    const tickets = [makeTicket({ id: 't1', resolvedAt: START_OF_TODAY + 1000 })];
+  it('excludes tickets without a completion timestamp', () => {
+    const tickets = [makeTicket({ id: 't1' })];
     const result = computeShippedDigest({ tickets, milestones: [], ...baseBoundaries });
     expect(result.week.items).toHaveLength(0);
   });
 
-  it('excludes tickets resolved before the week started', () => {
+  it('excludes tickets completed before the week started', () => {
     const tickets = [
       makeTicket({
         id: 't1',
-        resolution: 'completed',
-        resolvedAt: START_OF_WEEK - DAY_MS,
+        completedAt: START_OF_WEEK - DAY_MS,
       }),
     ];
     const result = computeShippedDigest({ tickets, milestones: [], ...baseBoundaries });
     expect(result.week.items).toHaveLength(0);
   });
 
-  it('buckets tickets resolved today into both today and week', () => {
+  it('buckets tickets completed today into both today and week', () => {
     const tickets = [
       makeTicket({
         id: 't1',
-        resolution: 'completed',
-        resolvedAt: START_OF_TODAY + 60 * 60 * 1000,
+        completedAt: START_OF_TODAY + 60 * 60 * 1000,
       }),
     ];
     const result = computeShippedDigest({ tickets, milestones: [], ...baseBoundaries });
@@ -75,12 +73,11 @@ describe('computeShippedDigest', () => {
     expect(result.week.ticketCount).toBe(1);
   });
 
-  it('buckets tickets resolved earlier this week into week only', () => {
+  it('buckets tickets completed earlier this week into week only', () => {
     const tickets = [
       makeTicket({
         id: 't1',
-        resolution: 'completed',
-        resolvedAt: START_OF_WEEK + DAY_MS,
+        completedAt: START_OF_WEEK + DAY_MS,
       }),
     ];
     const result = computeShippedDigest({ tickets, milestones: [], ...baseBoundaries });
@@ -112,20 +109,17 @@ describe('computeShippedDigest', () => {
       makeTicket({
         id: 't1',
         projectId: 'pA',
-        resolution: 'completed',
-        resolvedAt: START_OF_TODAY + 100,
+        completedAt: START_OF_TODAY + 100,
       }),
       makeTicket({
         id: 't2',
         projectId: 'pA',
-        resolution: 'completed',
-        resolvedAt: START_OF_WEEK + DAY_MS,
+        completedAt: START_OF_WEEK + DAY_MS,
       }),
       makeTicket({
         id: 't3',
         projectId: 'pB',
-        resolution: 'completed',
-        resolvedAt: START_OF_TODAY + 200,
+        completedAt: START_OF_TODAY + 200,
       }),
     ];
     const result = computeShippedDigest({ tickets, milestones: [], ...baseBoundaries });
@@ -139,13 +133,11 @@ describe('computeShippedDigest', () => {
     const tickets = [
       makeTicket({
         id: 'older',
-        resolution: 'completed',
-        resolvedAt: START_OF_WEEK + DAY_MS,
+        completedAt: START_OF_WEEK + DAY_MS,
       }),
       makeTicket({
         id: 'newer',
-        resolution: 'completed',
-        resolvedAt: START_OF_WEEK + 2 * DAY_MS,
+        completedAt: START_OF_WEEK + 2 * DAY_MS,
       }),
     ];
     const result = computeShippedDigest({ tickets, milestones: [], ...baseBoundaries });

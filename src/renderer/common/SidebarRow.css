@@ -1,0 +1,95 @@
+.sidebar-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 0;
+  align-items: center;
+  border-radius: var(--radius-md);
+  transition: grid-template-columns 150ms ease;
+}
+
+.sidebar-row:has(> [data-sidebar='menu-badge']) {
+  grid-template-columns: minmax(0, 1fr) max-content;
+}
+
+.sidebar-row:hover,
+.sidebar-row:has(> [data-sidebar='menu-button']:focus-visible),
+.sidebar-row:has(> [data-sidebar-row-actions] :focus-visible),
+.sidebar-row:has(> [data-sidebar-row-actions][data-state='open']) {
+  grid-template-columns: minmax(0, 1fr) max-content;
+}
+
+.sidebar-row > [data-sidebar='menu-button'] {
+  grid-column: 1;
+  grid-row: 1;
+  min-width: 0;
+  padding-right: 0.5rem;
+}
+
+.sidebar-row > [data-sidebar='menu-badge'] {
+  position: relative;
+  top: auto;
+  right: auto;
+  grid-column: 2;
+  grid-row: 1;
+  margin-right: 0.25rem;
+  justify-self: end;
+  transition: opacity 150ms ease;
+}
+
+.sidebar-row > [data-sidebar-row-actions] {
+  position: relative;
+  z-index: 10;
+  grid-column: 2;
+  grid-row: 1;
+  width: max-content;
+  margin-right: 0.25rem;
+  justify-self: end;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 150ms ease;
+}
+
+.sidebar-row:hover > [data-sidebar-row-actions],
+.sidebar-row:has(> [data-sidebar='menu-button']:focus-visible) > [data-sidebar-row-actions],
+.sidebar-row:has(> [data-sidebar-row-actions] :focus-visible) > [data-sidebar-row-actions],
+.sidebar-row > [data-sidebar-row-actions][data-state='open'] {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.sidebar-row:hover > [data-sidebar='menu-badge'],
+.sidebar-row:has(> [data-sidebar='menu-button']:focus-visible) > [data-sidebar='menu-badge'],
+.sidebar-row:has(> [data-sidebar-row-actions] :focus-visible) > [data-sidebar='menu-badge'],
+.sidebar-row:has(> [data-sidebar-row-actions][data-state='open']) > [data-sidebar='menu-badge'] {
+  opacity: 0;
+}
+
+.sidebar-row [data-sidebar='menu-action'] {
+  position: relative;
+  top: auto;
+  right: auto;
+  width: 1.25rem;
+  flex-shrink: 0;
+}
+
+@media (hover: none) {
+  .sidebar-row {
+    grid-template-columns: minmax(0, 1fr) max-content;
+  }
+
+  .sidebar-row > [data-sidebar-row-actions] {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .sidebar-row > [data-sidebar='menu-badge'] {
+    opacity: 0;
+  }
+}
+
+.sidebar-status-spinner {
+  animation-duration: 3s;
+}
+
+.sidebar-archive-list {
+  height: min(60vh, 28rem);
+}

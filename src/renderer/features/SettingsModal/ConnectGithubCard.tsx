@@ -6,41 +6,19 @@
  * Connecting also populates the `github.com` git credential, so once linked the
  * credential list shows it and private clone/push work — no manual PAT needed.
  */
-import { Avatar, makeStyles, shorthands, tokens } from '@fluentui/react-components';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useState } from 'react';
 
-import { Body1, Button, Caption1, Card, Spinner } from '@/renderer/ds';
+import { cn } from '@/renderer/ds/cn';
+import { Avatar, AvatarFallback, AvatarImage } from '@/renderer/ds/ui/avatar';
+import { Button } from '@/renderer/ds/ui/button';
+import { Card, CardContent } from '@/renderer/ds/ui/card';
+import { Spinner } from '@/renderer/ds/ui/spinner';
 import { emitter, ipc } from '@/renderer/services/ipc';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { GithubDeviceCode } from '@/shared/types';
 
-const useStyles = makeStyles({
-  card: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalS },
-  row: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalM },
-  main: { flex: '1 1 0', minWidth: 0, display: 'flex', flexDirection: 'column', gap: '2px' },
-  summary: { color: tokens.colorNeutralForeground2 },
-  error: { color: tokens.colorPaletteRedForeground1 },
-  codeBox: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '2px',
-    padding: tokens.spacingVerticalS,
-    borderRadius: tokens.borderRadiusMedium,
-    backgroundColor: tokens.colorNeutralBackground1,
-    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke2),
-  },
-  code: {
-    fontFamily: tokens.fontFamilyMonospace,
-    fontSize: tokens.fontSizeBase500,
-    fontWeight: tokens.fontWeightSemibold,
-    letterSpacing: '0.1em',
-  },
-  pending: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS },
-});
-
 export const ConnectGithubCard = memo(() => {
-  const styles = useStyles();
   const storeData = useStore(persistedStoreApi.$atom);
   const account = storeData.githubAccount;
 
@@ -76,46 +54,53 @@ export const ConnectGithubCard = memo(() => {
 
   return (
     <Card>
-      <div className={styles.card}>
-        <div className={styles.row}>
-          {account && <Avatar name={account.login} image={{ src: account.avatarUrl }} size={36} />}
-          <div className={styles.main}>
-            <Body1>{account ? `Connected as @${account.login}` : 'Connect your GitHub account'}</Body1>
-            <Caption1 className={error ? styles.error : styles.summary}>
+      <CardContent className="flex flex-col gap-2">
+        <div className="flex items-center gap-4">
+          {account && (
+            <Avatar className="size-9">
+              <AvatarImage src={account.avatarUrl} alt="" />
+              <AvatarFallback>{account.login.slice(0, 2).toUpperCase()}</AvatarFallback>
+            </Avatar>
+          )}
+          <div className="flex-1 min-w-0 flex flex-col gap-0.5">
+            <span className="text-sm">
+              {account ? `Connected as @${account.login}` : 'Connect your GitHub account'}
+            </span>
+            <span className={cn('text-xs text-muted-foreground', error ? 'text-destructive' : 'text-muted-foreground')}>
               {error ??
                 (account
                   ? `${account.host} · clone/push private repos and pick from your repositories`
                   : 'Authenticate once to clone private repos and pick sources from a list — no token to paste.')}
-            </Caption1>
+            </span>
           </div>
           {account ? (
             <Button size="sm" variant="ghost" onClick={onDisconnect}>
               Disconnect
             </Button>
           ) : (
-            <Button size="sm" onClick={onConnect} isDisabled={connecting}>
+            <Button size="sm" onClick={onConnect} disabled={connecting}>
               {connecting ? 'Connecting…' : 'Connect GitHub'}
             </Button>
           )}
         </div>
 
         {connecting && deviceCode && (
-          <div className={styles.codeBox}>
-            <Caption1>
+          <div className="flex flex-col gap-0.5 p-2 rounded-lg bg-background border border-border">
+            <span className="text-xs text-muted-foreground">
               Open{' '}
               <a href={deviceCode.verificationUri} target="_blank" rel="noopener noreferrer">
                 {deviceCode.verificationUri}
               </a>{' '}
               and enter this code:
-            </Caption1>
-            <span className={styles.code}>{deviceCode.userCode}</span>
-            <div className={styles.pending}>
-              <Spinner size="sm" />
-              <Caption1>Waiting for authorization…</Caption1>
+            </span>
+            <span className="font-mono text-xl font-semibold tracking-widest">{deviceCode.userCode}</span>
+            <div className="flex items-center gap-2">
+              <Spinner />
+              <span className="text-xs text-muted-foreground">Waiting for authorization…</span>
             </div>
           </div>
         )}
-      </div>
+      </CardContent>
     </Card>
   );
 });

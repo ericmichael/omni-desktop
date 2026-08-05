@@ -1,89 +1,9 @@
-import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
 import { memo, useCallback, useMemo, useState } from 'react';
 
+import { Empty, EmptyDescription, EmptyHeader } from '@/renderer/ds/ui/empty';
+import { Input } from '@/renderer/ds/ui/input';
+import { Item, ItemContent, ItemGroup, ItemMedia, ItemTitle } from '@/renderer/ds/ui/item';
 import type { Page, PageId } from '@/shared/types';
-
-/**
- * Generic page browser. Pure list view over a slice of pages — no status
- * filtering, no property cells, no grouping. Inbox lifecycle lives on
- * `InboxItem`, not on pages; this component is for browsing knowledge
- * pages (docs, notes, briefs) inside a project.
- *
- * Callers provide the pre-filtered list (e.g. "children of parent X" or
- * "all pages in project Y") and handle opening / creating via callbacks.
- */
-
-const useStyles = makeStyles({
-  root: {
-    display: 'flex',
-    flexDirection: 'column',
-    width: '100%',
-    height: '100%',
-  },
-  empty: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: tokens.spacingVerticalXXL,
-    color: tokens.colorNeutralForeground3,
-    fontSize: tokens.fontSizeBase300,
-  },
-  row: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalM,
-    paddingLeft: tokens.spacingHorizontalL,
-    paddingRight: tokens.spacingHorizontalM,
-    paddingTop: '8px',
-    paddingBottom: '8px',
-    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke2),
-    backgroundColor: 'transparent',
-    border: 'none',
-    width: '100%',
-    textAlign: 'left',
-    cursor: 'pointer',
-    ':hover': { backgroundColor: tokens.colorSubtleBackgroundHover },
-  },
-  icon: {
-    flexShrink: 0,
-    fontSize: tokens.fontSizeBase400,
-    width: '20px',
-    textAlign: 'center',
-  },
-  title: {
-    flex: '1 1 0',
-    minWidth: 0,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    fontSize: tokens.fontSizeBase300,
-    color: tokens.colorNeutralForeground1,
-  },
-  time: {
-    flexShrink: 0,
-    fontSize: tokens.fontSizeBase200,
-    color: tokens.colorNeutralForeground3,
-  },
-  createRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-    paddingLeft: tokens.spacingHorizontalL,
-    paddingRight: tokens.spacingHorizontalM,
-    paddingTop: '10px',
-    paddingBottom: '10px',
-    ...shorthands.borderTop('1px', 'solid', tokens.colorNeutralStroke2),
-  },
-  createInput: {
-    flex: '1 1 0',
-    backgroundColor: 'transparent',
-    border: 'none',
-    fontSize: tokens.fontSizeBase300,
-    color: tokens.colorNeutralForeground1,
-    ':focus': { outline: 'none' },
-    '::placeholder': { color: tokens.colorNeutralForeground3 },
-  },
-});
 
 export type DatabaseViewMode = 'table' | 'list';
 
@@ -98,7 +18,6 @@ export type DatabaseViewProps = {
 
 export const DatabaseView = memo(
   ({ pages, onOpen, onCreate, createPlaceholder = 'New page…', emptyState = 'No pages yet.' }: DatabaseViewProps) => {
-    const styles = useStyles();
     const [draft, setDraft] = useState('');
 
     const sorted = useMemo(() => [...pages].sort((a, b) => b.updatedAt - a.updatedAt), [pages]);
@@ -113,23 +32,38 @@ export const DatabaseView = memo(
     }, [draft, onCreate]);
 
     return (
-      <div className={styles.root}>
+      <div className="flex flex-col w-full h-full">
         {sorted.length === 0 ? (
-          <div className={styles.empty}>{emptyState}</div>
+          <Empty className="border-0 py-8">
+            <EmptyHeader>
+              <EmptyDescription>{emptyState}</EmptyDescription>
+            </EmptyHeader>
+          </Empty>
         ) : (
-          sorted.map((page) => (
-            <button key={page.id} type="button" className={styles.row} onClick={() => onOpen?.(page.id)}>
-              <span className={styles.icon}>{page.icon ?? '📄'}</span>
-              <span className={styles.title}>{page.title || 'Untitled'}</span>
-              <span className={styles.time}>{formatRelative(page.updatedAt)}</span>
-            </button>
-          ))
+          <ItemGroup>
+            {sorted.map((page) => (
+              <Item
+                key={page.id}
+                asChild
+                size="sm"
+                className="w-full cursor-pointer rounded-none border-b hover:bg-accent"
+              >
+                <button type="button" onClick={() => onOpen?.(page.id)}>
+                  <ItemMedia>{page.icon ?? '📄'}</ItemMedia>
+                  <ItemContent>
+                    <ItemTitle className="truncate">{page.title || 'Untitled'}</ItemTitle>
+                  </ItemContent>
+                  <span className="shrink-0 text-xs text-muted-foreground">{formatRelative(page.updatedAt)}</span>
+                </button>
+              </Item>
+            ))}
+          </ItemGroup>
         )}
         {onCreate && (
-          <div className={styles.createRow}>
-            <span className={styles.icon}>＋</span>
-            <input
-              className={styles.createInput}
+          <div className="flex items-center gap-2 pl-5 pr-4 pt-2.5 pb-2.5 border-t border-border">
+            <span className="shrink-0 text-base w-5 text-center">＋</span>
+            <Input
+              className="h-8 flex-1 border-0 bg-transparent shadow-none focus-visible:ring-0"
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={(e) => {

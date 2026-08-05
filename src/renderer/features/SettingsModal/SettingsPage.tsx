@@ -1,24 +1,32 @@
-import { makeStyles, mergeClasses, shorthands, tokens } from '@fluentui/react-components';
-import {
-  ArrowLeft20Regular,
-  Branch20Regular,
-  Color20Regular,
-  Cube20Regular,
-  Globe20Regular,
-  Keyboard20Regular,
-  LineHorizontal320Regular,
-  MicSettings20Regular,
-  Person20Regular,
-  PuzzlePiece20Regular,
-  Rocket20Regular,
-  Settings20Regular,
-  WindowConsole20Regular,
-} from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
+import {
+  ArrowLeft,
+  Box,
+  GitBranch,
+  Globe,
+  Keyboard,
+  Palette,
+  Puzzle,
+  Rocket,
+  Settings,
+  SlidersHorizontal,
+  SquareTerminal,
+  User,
+} from 'lucide-react';
 import { memo, useCallback, useEffect, useState } from 'react';
 
-import { openMobileNav } from '@/renderer/app/mobile-nav';
-import { IconButton, ListItem, SectionLabel, Subtitle2 } from '@/renderer/ds';
+import { cn } from '@/renderer/ds/cn';
+import { Button } from '@/renderer/ds/ui/button';
+import {
+  SidebarContent,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarGroupLabel,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarTrigger,
+} from '@/renderer/ds/ui/sidebar';
 import { openPlugins } from '@/renderer/features/Plugins/plugins-nav';
 import { $settingsInitialTab } from '@/renderer/features/SettingsModal/settings-nav';
 import { SettingsModalAccountTab } from '@/renderer/features/SettingsModal/SettingsModalAccountTab';
@@ -34,9 +42,6 @@ import { SettingsModalProjectsTab } from '@/renderer/features/SettingsModal/Sett
 import { SettingsModalResetButton } from '@/renderer/features/SettingsModal/SettingsModalResetButton';
 import { SettingsModalTeamsTab } from '@/renderer/features/SettingsModal/SettingsModalTeamsTab';
 import { SettingsModalWorkspaceTab } from '@/renderer/features/SettingsModal/SettingsModalWorkspaceTab';
-import { $glassEnabled } from '@/renderer/theme/use-glass';
-
-const iconStyle = { width: 18, height: 18 };
 
 type SettingsTab =
   | 'General'
@@ -63,214 +68,30 @@ const TAB_GROUPS: ReadonlyArray<{ label: string | null; tabs: ReadonlyArray<TabD
   {
     label: null,
     tabs: [
-      { value: 'General', label: 'General', icon: <Settings20Regular style={iconStyle} /> },
-      { value: 'AI', label: 'AI', icon: <Cube20Regular style={iconStyle} /> },
-      { value: 'Appearance', label: 'Appearance', icon: <Color20Regular style={iconStyle} /> },
-      { value: 'Projects', label: 'Projects', icon: <Rocket20Regular style={iconStyle} /> },
-      { value: 'Audio', label: 'Voice & Audio', icon: <MicSettings20Regular style={iconStyle} /> },
-      { value: 'Hotkeys', label: 'Hotkeys', icon: <Keyboard20Regular style={iconStyle} /> },
-      { value: 'Account', label: 'Account', icon: <Person20Regular style={iconStyle} /> },
-      { value: 'Teams', label: 'Teams', icon: <Person20Regular style={iconStyle} /> },
+      { value: 'General', label: 'General', icon: <Settings /> },
+      { value: 'AI', label: 'AI', icon: <Box /> },
+      { value: 'Appearance', label: 'Appearance', icon: <Palette /> },
+      { value: 'Projects', label: 'Projects', icon: <Rocket /> },
+      { value: 'Audio', label: 'Voice & Audio', icon: <SlidersHorizontal /> },
+      { value: 'Hotkeys', label: 'Hotkeys', icon: <Keyboard /> },
+      { value: 'Account', label: 'Account', icon: <User /> },
+      { value: 'Teams', label: 'Teams', icon: <User /> },
     ],
   },
   {
     label: 'Developer',
     tabs: [
-      { value: 'Workspace', label: 'Workspace & Sandbox', icon: <Cube20Regular style={iconStyle} /> },
-      { value: 'Environment', label: 'Environment', icon: <WindowConsole20Regular style={iconStyle} /> },
-      { value: 'Git', label: 'Git', icon: <Branch20Regular style={iconStyle} /> },
-      { value: 'Network', label: 'Network', icon: <Globe20Regular style={iconStyle} /> },
+      { value: 'Workspace', label: 'Workspace & Sandbox', icon: <Box /> },
+      { value: 'Environment', label: 'Environment', icon: <SquareTerminal /> },
+      { value: 'Git', label: 'Git', icon: <GitBranch /> },
+      { value: 'Network', label: 'Network', icon: <Globe /> },
     ],
   },
 ];
 
 const TABS: ReadonlyArray<TabDef> = TAB_GROUPS.flatMap((g) => [...g.tabs]);
 
-const useStyles = makeStyles({
-  root: {
-    display: 'flex',
-    flexDirection: 'column',
-    width: '100%',
-    height: '100%',
-    minHeight: 0,
-    overflowY: 'auto',
-    backgroundColor: tokens.colorNeutralBackground1,
-    '@media (min-width: 640px)': {
-      flexDirection: 'row',
-      overflowY: 'visible',
-    },
-  },
-  rootGlass: {
-    backgroundColor: 'transparent',
-  },
-  navGlass: {
-    backgroundColor: tokens.colorNeutralBackground1,
-    backdropFilter: 'var(--glass-blur)',
-    WebkitBackdropFilter: 'var(--glass-blur)',
-  },
-  contentGlass: {
-    backgroundColor: tokens.colorNeutralBackground1,
-    backdropFilter: 'var(--glass-blur)',
-    WebkitBackdropFilter: 'var(--glass-blur)',
-  },
-  mobileHeaderGlass: {
-    backgroundColor: tokens.colorNeutralBackground1,
-    backdropFilter: 'var(--glass-blur)',
-    WebkitBackdropFilter: 'var(--glass-blur)',
-  },
-  /* ── Left nav ── */
-  nav: {
-    display: 'none',
-    '@media (min-width: 640px)': {
-      display: 'flex',
-      flexDirection: 'column',
-      width: '220px',
-      flexShrink: 0,
-      ...shorthands.borderRight('1px', 'solid', tokens.colorNeutralStroke1),
-      paddingTop: '24px',
-      paddingBottom: '24px',
-      overflowY: 'auto',
-    },
-  },
-  navHeader: {
-    paddingLeft: '24px',
-    paddingRight: '24px',
-    paddingBottom: '16px',
-  },
-  navList: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '2px',
-    paddingLeft: '12px',
-    paddingRight: '12px',
-  },
-  navGroup: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '2px',
-  },
-  navGroupLabel: {
-    paddingLeft: '12px',
-    paddingTop: '4px',
-    paddingBottom: '2px',
-  },
-  navGroupDivider: {
-    height: '1px',
-    backgroundColor: tokens.colorNeutralStroke2,
-    marginTop: '10px',
-    marginBottom: '10px',
-    marginLeft: '12px',
-    marginRight: '12px',
-  },
-  mobileGroupLabel: {
-    paddingLeft: '20px',
-    paddingTop: '16px',
-    paddingBottom: '4px',
-  },
-  navItem: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '10px',
-    paddingLeft: '12px',
-    paddingRight: '12px',
-    paddingTop: '8px',
-    paddingBottom: '8px',
-    borderRadius: tokens.borderRadiusMedium,
-    border: 'none',
-    backgroundColor: 'transparent',
-    color: tokens.colorNeutralForeground2,
-    cursor: 'pointer',
-    fontSize: tokens.fontSizeBase300,
-    fontWeight: tokens.fontWeightRegular,
-    width: '100%',
-    textAlign: 'left',
-    transitionProperty: 'color, background-color',
-    transitionDuration: '100ms',
-    ':hover': {
-      backgroundColor: tokens.colorSubtleBackgroundHover,
-      color: tokens.colorNeutralForeground1,
-    },
-  },
-  navItemActive: {
-    backgroundColor: tokens.colorSubtleBackgroundSelected,
-    color: tokens.colorNeutralForeground1,
-    fontWeight: tokens.fontWeightSemibold,
-  },
-  /* ── Right content ── */
-  content: {
-    flex: '1 1 0',
-    minWidth: 0,
-    paddingTop: '24px',
-    paddingBottom: '24px',
-    paddingLeft: '32px',
-    paddingRight: '32px',
-    '@media (min-width: 640px)': {
-      overflowY: 'auto',
-    },
-    '@media (max-width: 639px)': {
-      paddingLeft: '16px',
-      paddingRight: '16px',
-    },
-  },
-  contentInner: {
-    maxWidth: '640px',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '24px',
-  },
-  /* ── Mobile: grouped list + drill-in panel instead of side nav ── */
-  mobileList: {
-    display: 'flex',
-    flexDirection: 'column',
-    paddingBottom: tokens.spacingVerticalL,
-    '@media (min-width: 640px)': {
-      display: 'none',
-    },
-  },
-  mobileListHeader: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-    /* Pulled in on the left: the drawer handle carries its own optical
-       padding, so the title still lands on the 20px list gutter. */
-    paddingLeft: '8px',
-    paddingRight: '20px',
-    paddingTop: '24px',
-    paddingBottom: '12px',
-  },
-  mobilePanelHeader: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-    paddingLeft: '8px',
-    paddingRight: '16px',
-    paddingTop: '8px',
-    paddingBottom: '8px',
-    flexShrink: 0,
-    position: 'sticky',
-    top: 0,
-    zIndex: 1,
-    backgroundColor: tokens.colorNeutralBackground1,
-    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
-    '@media (min-width: 640px)': {
-      display: 'none',
-    },
-  },
-  /* The selected panel only renders on mobile after a drill-in. */
-  contentHiddenMobile: {
-    '@media (max-width: 639px)': {
-      display: 'none',
-    },
-  },
-  footer: {
-    paddingTop: '16px',
-    ...shorthands.borderTop('1px', 'solid', tokens.colorNeutralStroke1),
-  },
-});
-
 export const SettingsPage = memo(() => {
-  const styles = useStyles();
-  const isGlass = useStore($glassEnabled);
   // null = no drill-in yet. Desktop always shows a panel (defaults to
   // General); mobile shows the grouped list until a row is tapped.
   const [activeTab, setActiveSettingsTab] = useState<SettingsTab | null>(null);
@@ -292,83 +113,92 @@ export const SettingsPage = memo(() => {
   const shownTabLabel = TABS.find((t) => t.value === shownTab)?.label ?? shownTab;
 
   return (
-    <div className={mergeClasses(styles.root, isGlass && styles.rootGlass)}>
+    <div className="flex flex-col w-full h-full min-h-0 overflow-y-auto bg-background sm:flex-row sm:overflow-y-visible">
       {/* Desktop: left nav */}
-      <nav className={mergeClasses(styles.nav, isGlass && styles.navGlass)}>
-        <div className={styles.navHeader}>
-          <Subtitle2>Settings</Subtitle2>
+      <nav className="hidden sm:flex sm:flex-col sm:w-56 sm:shrink-0 sm:border-r border-border sm:pt-6 sm:pb-6 sm:overflow-y-auto">
+        <div className="pl-6 pr-6 pb-4">
+          <h2 className="font-display text-lg font-semibold tracking-tight">Settings</h2>
         </div>
-        <div className={styles.navList}>
+        <SidebarContent>
           {TAB_GROUPS.map((group, groupIndex) => (
-            <div key={group.label ?? 'personal'} className={styles.navGroup}>
-              {group.label && (
-                <div className={styles.navGroupLabel}>
-                  <SectionLabel>{group.label}</SectionLabel>
-                </div>
-              )}
-              {group.tabs.map((tab) => (
-                <button
-                  key={tab.value}
-                  onClick={handleNav(tab.value)}
-                  className={mergeClasses(styles.navItem, shownTab === tab.value && styles.navItemActive)}
-                >
-                  {tab.icon}
-                  {tab.label}
-                </button>
-              ))}
-              {groupIndex < TAB_GROUPS.length - 1 && <div className={styles.navGroupDivider} />}
-            </div>
+            <SidebarGroup key={group.label ?? 'personal'} className={cn(groupIndex > 0 && 'pt-0')}>
+              {group.label && <SidebarGroupLabel>{group.label}</SidebarGroupLabel>}
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  {group.tabs.map((tab) => (
+                    <SidebarMenuItem key={tab.value}>
+                      <SidebarMenuButton type="button" isActive={shownTab === tab.value} onClick={handleNav(tab.value)}>
+                        {tab.icon}
+                        <span>{tab.label}</span>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  ))}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </SidebarGroup>
           ))}
-        </div>
+        </SidebarContent>
       </nav>
 
       {/* Mobile: grouped list (drill-in root) */}
       {activeTab === null && (
-        <div className={styles.mobileList}>
-          <div className={styles.mobileListHeader}>
-            <IconButton
-              aria-label="Open navigation"
-              icon={<LineHorizontal320Regular />}
-              size="sm"
-              onClick={openMobileNav}
-            />
-            <Subtitle2>Settings</Subtitle2>
+        <div className="flex flex-col pb-5 sm:hidden">
+          <div className="flex items-center gap-2 pl-2 pr-5 pt-6 pb-3">
+            <SidebarTrigger size="icon-sm" aria-label="Open navigation" />
+            <h2 className="font-display text-lg font-semibold tracking-tight">Settings</h2>
           </div>
           {TAB_GROUPS.map((group) => (
-            <div key={group.label ?? 'personal'}>
-              {group.label && (
-                <div className={styles.mobileGroupLabel}>
-                  <SectionLabel>{group.label}</SectionLabel>
-                </div>
-              )}
-              {group.tabs.map((tab) => (
-                <ListItem key={tab.value} icon={tab.icon} label={tab.label} onClick={handleNav(tab.value)} />
-              ))}
-            </div>
+            <SidebarGroup key={group.label ?? 'personal'}>
+              {group.label && <SidebarGroupLabel>{group.label}</SidebarGroupLabel>}
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  {group.tabs.map((tab) => (
+                    <SidebarMenuItem key={tab.value}>
+                      <SidebarMenuButton type="button" onClick={handleNav(tab.value)}>
+                        {tab.icon}
+                        <span>{tab.label}</span>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  ))}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </SidebarGroup>
           ))}
           {/* Plugins is configuration too — kept alongside the settings
-              groups so it's reachable without walking back out to Home. */}
-          <ListItem icon={<PuzzlePiece20Regular style={iconStyle} />} label="Plugins" onClick={() => openPlugins()} />
+            groups so it's reachable without walking back out to Home. */}
+          <SidebarGroup className="pt-0">
+            <SidebarGroupContent>
+              <SidebarMenu>
+                <SidebarMenuItem>
+                  <SidebarMenuButton type="button" onClick={() => openPlugins()}>
+                    <Puzzle />
+                    <span>Plugins</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
         </div>
       )}
 
       {/* Mobile: drill-in panel header */}
       {activeTab !== null && (
-        <div className={mergeClasses(styles.mobilePanelHeader, isGlass && styles.mobileHeaderGlass)}>
-          <IconButton aria-label="Back to settings" icon={<ArrowLeft20Regular />} size="sm" onClick={handleBack} />
-          <Subtitle2>{shownTabLabel}</Subtitle2>
+        <div className="sticky top-0 z-10 flex shrink-0 items-center gap-2 border-b border-border bg-background py-2 pl-2 pr-4 sm:hidden">
+          <Button type="button" variant="ghost" size="icon-sm" aria-label="Back to settings" onClick={handleBack}>
+            <ArrowLeft />
+          </Button>
+          <h2 className="font-display text-lg font-semibold tracking-tight">{shownTabLabel}</h2>
         </div>
       )}
 
       {/* Content */}
       <div
-        className={mergeClasses(
-          styles.content,
-          isGlass && styles.contentGlass,
-          activeTab === null && styles.contentHiddenMobile
+        className={cn(
+          'flex-1 min-w-0 pt-6 pb-6 pl-8 pr-8 sm:overflow-y-auto max-sm:pl-4 max-sm:pr-4',
+          activeTab === null && 'max-sm:hidden'
         )}
       >
-        <div className={styles.contentInner}>
+        <div className="max-w-2xl flex flex-col gap-6">
           {shownTab === 'General' && <SettingsModalGeneralTab />}
           {shownTab === 'AI' && <SettingsModalAiTab />}
           {shownTab === 'Appearance' && <SettingsModalAppearanceTab />}
@@ -382,7 +212,7 @@ export const SettingsPage = memo(() => {
           {shownTab === 'Git' && <SettingsModalGitTab />}
           {shownTab === 'Network' && <SettingsModalNetworkTab />}
           {shownTab === 'General' && (
-            <div className={styles.footer}>
+            <div className="pt-4 border-t border-border">
               <SettingsModalResetButton />
             </div>
           )}

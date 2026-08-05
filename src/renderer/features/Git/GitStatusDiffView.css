@@ -1,0 +1,11 @@
+.omni-git-diff-line {
+  grid-template-columns: 3.5rem 3.5rem 1rem minmax(max-content, 1fr);
+}
+
+.omni-git-diff-layout {
+  grid-template-columns: minmax(14rem, 0.8fr) minmax(20rem, 2fr);
+}
+
+.omni-git-file-row {
+  grid-template-columns: 2.5rem minmax(0, 1fr);
+}

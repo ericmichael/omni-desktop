@@ -4,9 +4,11 @@
  * record, click again to transcribe-and-send. Enabling voice mode registers the
  * agent's `speak` tool so the reply comes back as speech.
  */
-import { Loader2Icon, MicIcon, SquareIcon } from 'lucide-react';
+import { MicIcon, SquareIcon } from 'lucide-react';
 import { useContext, useEffect, useRef } from 'react';
 
+import { Button } from '@/renderer/ds/ui/button';
+import { Spinner } from '@/renderer/ds/ui/spinner';
 import { useVoiceCapture } from '@/renderer/services/use-voice-capture';
 import { getVoiceClient } from '@/renderer/services/voice-client';
 import { $recordingScope, registerVoiceMic, VoiceScopeContext } from '@/renderer/services/voice-recording';
@@ -98,22 +100,22 @@ export function LocalVoiceButton({ onSubmit }: { onSubmit: (text: string) => voi
   const label = cap.busy ? 'Transcribing…' : cap.recording ? 'Stop and send' : 'Voice input';
 
   return (
-    <button
+    <Button
       type="button"
+      variant="ghost"
+      size="icon-sm"
       onClick={onClick}
-      className={`flex h-8 w-8 items-center justify-center rounded-2xl ${
-        cap.recording ? 'bg-destructive/15' : 'hover:bg-accent/50'
-      }`}
+      className={cap.recording ? 'rounded-2xl bg-destructive/15 hover:bg-destructive/20' : 'rounded-2xl'}
       aria-label={label}
       title={label}
     >
       {cap.busy ? (
-        <Loader2Icon size={20} className="animate-spin text-foreground" />
+        <Spinner className="size-4 text-foreground" />
       ) : cap.recording ? (
-        <SquareIcon size={20} className="text-destructive" />
+        <SquareIcon className="size-4 text-destructive" />
       ) : (
-        <MicIcon size={20} className="text-foreground" />
+        <MicIcon className="size-4 text-foreground" />
       )}
-    </button>
+    </Button>
   );
 }

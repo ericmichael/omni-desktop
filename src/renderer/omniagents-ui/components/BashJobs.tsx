@@ -1,5 +1,19 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/renderer/ds/ui/alert-dialog';
+import { Button } from '@/renderer/ds/ui/button';
+import { Card } from '@/renderer/ds/ui/card';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/renderer/ds/ui/dialog';
+
 export type BashJobSummary = {
   job_id: string;
   pid: number;
@@ -66,12 +80,8 @@ function dotClass(job: BashJobSummary): string {
   if (job.running) {
     return 'bg-primary animate-pulse';
   }
-  return job.exit_code === 0 ? 'bg-successGreen' : 'bg-errorRed';
+  return job.exit_code === 0 ? 'bg-success' : 'bg-destructive';
 }
-
-const stopPropagation: React.MouseEventHandler = (e) => {
-  e.stopPropagation();
-};
 
 type BashJobRowProps = {
   job: BashJobSummary;
@@ -91,49 +101,52 @@ function BashJobRow({ job, nowMs, isKilling, onShowLogs, onKill, onDismiss }: Ba
   return (
     <li className="flex items-center gap-2 text-xs leading-5">
       <span className={['inline-block w-1.5 h-1.5 rounded-full flex-shrink-0', dotClass(job)].join(' ')} aria-hidden />
-      <span className="text-textSubtle font-mono">{job.job_id}</span>
+      <span className="text-muted-foreground font-mono">{job.job_id}</span>
       <span
         className={[
           'min-w-0 truncate font-mono',
-          job.running ? 'text-textPrimary' : 'text-textSubtle line-through',
+          job.running ? 'text-foreground' : 'text-muted-foreground line-through',
         ].join(' ')}
         title={job.command}
       >
         {shortCommand(job.command)}
       </span>
-      <span className="ml-auto text-textSubtle whitespace-nowrap">{tail}</span>
+      <span className="ml-auto text-muted-foreground whitespace-nowrap">{tail}</span>
       {onShowLogs ? (
-        <button
-          type="button"
+        <Button
+          variant="ghost"
+          size="xs"
           onClick={onShowLogs.bind(null, job.job_id)}
-          className="text-textSubtle hover:text-textPrimary transition-colors px-1.5 py-0.5 rounded hover:bg-bgCardAlt"
+          className="text-muted-foreground"
           title="View recent log output"
         >
           logs
-        </button>
+        </Button>
       ) : null}
       {onKill && job.running ? (
-        <button
-          type="button"
+        <Button
+          variant="ghost"
+          size="icon-xs"
           disabled={isKilling}
           onClick={onKill.bind(null, job.job_id)}
-          className="text-textSubtle hover:text-errorRed transition-colors px-1.5 py-0.5 rounded hover:bg-bgCardAlt disabled:opacity-50 disabled:cursor-not-allowed"
+          className="text-muted-foreground hover:text-destructive"
           title={`Terminate ${job.job_id} (SIGTERM, then SIGKILL)`}
           aria-label={`Terminate job ${job.job_id}`}
         >
           {isKilling ? '…' : '✕'}
-        </button>
+        </Button>
       ) : null}
       {onDismiss && !job.running ? (
-        <button
-          type="button"
+        <Button
+          variant="ghost"
+          size="xs"
           onClick={onDismiss.bind(null, job.job_id)}
-          className="text-textSubtle hover:text-textPrimary transition-colors px-1.5 py-0.5 rounded hover:bg-bgCardAlt"
+          className="text-muted-foreground"
           title={`Dismiss job ${job.job_id}`}
           aria-label={`Dismiss job ${job.job_id}`}
         >
           dismiss
-        </button>
+        </Button>
       ) : null}
     </li>
   );
@@ -180,40 +193,36 @@ export function BashJobs({ jobs, onKill, onTail, onWarmup, onDismiss }: Props) {
   }, [anyRunning, onWarmup]);
 
   const [killing, setKilling] = useState<Set<string>>(new Set());
+  const [pendingKillJobId, setPendingKillJobId] = useState<string | null>(null);
   const [logsModalJobId, setLogsModalJobId] = useState<string | null>(null);
   const [killError, setKillError] = useState<string | null>(null);
 
-  const handleKill = useCallback(
-    async (job_id: string) => {
-      if (!onKill) {
-        return;
+  const confirmKill = useCallback(async () => {
+    const job_id = pendingKillJobId;
+    if (!job_id || !onKill) {
+      return;
+    }
+    setKillError(null);
+    setKilling((prev) => {
+      const next = new Set(prev);
+      next.add(job_id);
+      return next;
+    });
+    try {
+      const res = await onKill(job_id);
+      if (!res.ok) {
+        setKillError(`Failed to kill ${job_id}: ${res.error ?? 'unknown error'}`);
       }
-      if (!window.confirm(`Terminate background job ${job_id}?`)) {
-        return;
-      }
-      setKillError(null);
+    } catch (e) {
+      setKillError(`Failed to kill ${job_id}: ${(e as Error).message ?? String(e)}`);
+    } finally {
       setKilling((prev) => {
         const next = new Set(prev);
-        next.add(job_id);
+        next.delete(job_id);
         return next;
       });
-      try {
-        const res = await onKill(job_id);
-        if (!res.ok) {
-          setKillError(`Failed to kill ${job_id}: ${res.error ?? 'unknown error'}`);
-        }
-      } catch (e) {
-        setKillError(`Failed to kill ${job_id}: ${(e as Error).message ?? String(e)}`);
-      } finally {
-        setKilling((prev) => {
-          const next = new Set(prev);
-          next.delete(job_id);
-          return next;
-        });
-      }
-    },
-    [onKill]
-  );
+    }
+  }, [onKill, pendingKillJobId]);
 
   const handleShowLogs = useCallback((jobId: string) => setLogsModalJobId(jobId), []);
   const handleCloseLogs = useCallback(() => setLogsModalJobId(null), []);
@@ -233,27 +242,27 @@ export function BashJobs({ jobs, onKill, onTail, onWarmup, onDismiss }: Props) {
   const nowMs = Date.now();
 
   const rowShowLogs = onTail ? handleShowLogs : undefined;
-  const rowKill = onKill ? handleKill : undefined;
+  const rowKill = onKill ? setPendingKillJobId : undefined;
 
   return (
     <div className="px-3 pt-2">
-      <div className="rounded-md border border-bgCardAlt bg-bgCardAlt/60 p-2.5">
-        <div className="flex items-center gap-2 text-xs text-textSubtle">
-          <span className="font-medium text-textPrimary">Bash jobs</span>
+      <Card className="gap-0 rounded-md border-accent bg-accent/60 p-2.5 shadow-none">
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <span className="font-medium text-foreground">Bash jobs</span>
           <span aria-hidden>·</span>
           <span>
-            <span className="text-brand">{running.length}</span> running
+            <span className="text-primary">{running.length}</span> running
           </span>
           <span aria-hidden>·</span>
           <span>
-            <span className="text-successGreen">{succeeded}</span> done
+            <span className="text-success">{succeeded}</span> done
           </span>
           <span aria-hidden>·</span>
           <span>
-            <span className="text-errorRed">{failed.length}</span> failed
+            <span className="text-destructive">{failed.length}</span> failed
           </span>
         </div>
-        {killError ? <div className="mt-1 text-[11px] text-errorRed">{killError}</div> : null}
+        {killError ? <div className="mt-1 text-xs text-destructive">{killError}</div> : null}
         {visible.length > 0 ? (
           <ul className="mt-1.5 space-y-1">
             {visible.map((j) => (
@@ -269,12 +278,28 @@ export function BashJobs({ jobs, onKill, onTail, onWarmup, onDismiss }: Props) {
             ))}
           </ul>
         ) : null}
-        {overflow > 0 ? <div className="mt-1 text-[11px] text-textSubtle">… +{overflow} more</div> : null}
-      </div>
+        {overflow > 0 ? <div className="mt-1 text-xs text-muted-foreground">… +{overflow} more</div> : null}
+      </Card>
 
       {logsModalJobId && onTail ? (
         <BashJobLogsModal jobId={logsModalJobId} onClose={handleCloseLogs} onTail={onTail} />
       ) : null}
+      <AlertDialog open={pendingKillJobId !== null} onOpenChange={(open) => !open && setPendingKillJobId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Terminate background job?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Terminate background job {pendingKillJobId}? Any in-progress work from this process will stop.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={() => void confirmKill()}>
+              Terminate
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
@@ -314,76 +339,46 @@ function BashJobLogsModal({ jobId, onClose, onTail }: ModalProps) {
     load();
   }, [load]);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onClose();
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
-
   const job = meta?.job;
   const total = meta?.total_lines ?? 0;
   const shown = text ? text.split('\n').length : 0;
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-background/70"
-      onClick={onClose}
-      role="dialog"
-      aria-modal="true"
-    >
-      <div
-        className="bg-bgCard border border-bgCardAlt rounded-lg shadow-xl w-[min(900px,90vw)] max-h-[80vh] flex flex-col"
-        onClick={stopPropagation}
-      >
-        <div className="flex items-center gap-3 px-4 py-2.5 border-b border-bgCardAlt text-xs">
-          <span className="font-mono text-textPrimary">{jobId}</span>
-          {job ? (
-            <span className="text-textSubtle">
-              {job.running ? 'running' : `exited(${job.exit_code})`} · {formatElapsed(job.wall_time_ms)}
-            </span>
-          ) : null}
-          <span className="ml-auto text-textSubtle">
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-h-dialog flex max-w-4xl flex-col gap-0 overflow-hidden p-0">
+        <DialogHeader className="flex-row items-center gap-3 border-b px-4 py-2.5 pr-12 text-left">
+          <div className="min-w-0 flex-1">
+            <DialogTitle className="truncate font-mono text-sm">{jobId}</DialogTitle>
+            <DialogDescription className="text-xs">
+              {job
+                ? `${job.running ? 'running' : `exited(${job.exit_code})`} · ${formatElapsed(job.wall_time_ms)}`
+                : 'Job logs'}
+            </DialogDescription>
+          </div>
+          <span className="ml-auto text-muted-foreground">
             {shown} of {total} lines
           </span>
-          <button
-            type="button"
-            onClick={load}
-            disabled={loading}
-            className="text-textSubtle hover:text-textPrimary px-2 py-0.5 rounded hover:bg-bgCardAlt disabled:opacity-50"
-            title="Refresh"
-          >
-            refresh
-          </button>
-          <button
-            type="button"
-            onClick={onClose}
-            className="text-textSubtle hover:text-textPrimary px-2 py-0.5 rounded hover:bg-bgCardAlt"
-            aria-label="Close"
-          >
-            ✕
-          </button>
-        </div>
-        <div className="flex-1 overflow-auto px-4 py-3 font-mono text-xs whitespace-pre text-textPrimary">
+          <Button type="button" variant="ghost" size="sm" onClick={load} disabled={loading} title="Refresh">
+            Refresh
+          </Button>
+        </DialogHeader>
+        <div className="flex-1 overflow-auto px-4 py-3 font-mono text-xs whitespace-pre text-foreground">
           {loading ? (
-            <span className="text-textSubtle italic">Loading…</span>
+            <span className="text-muted-foreground italic">Loading…</span>
           ) : error ? (
-            <span className="text-errorRed">{error}</span>
+            <span className="text-destructive">{error}</span>
           ) : text ? (
             text
           ) : (
-            <span className="text-textSubtle italic">(no log output)</span>
+            <span className="text-muted-foreground italic">(no log output)</span>
           )}
         </div>
         {job?.log_path ? (
-          <div className="px-4 py-2 border-t border-bgCardAlt text-[11px] text-textSubtle font-mono truncate">
+          <div className="truncate border-t border-accent px-4 py-2 font-mono text-xs text-muted-foreground">
             {job.log_path}
           </div>
         ) : null}
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

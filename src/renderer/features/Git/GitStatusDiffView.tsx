@@ -1,6 +1,11 @@
-import { makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
+import './GitStatusDiffView.css';
+
 import { memo } from 'react';
 
+import { cn } from '@/renderer/ds/cn';
+import { Button } from '@/renderer/ds/ui/button';
+import { ButtonGroup } from '@/renderer/ds/ui/button-group';
+import { Toggle } from '@/renderer/ds/ui/toggle';
 import type {
   GitDiffFile,
   GitDiffHunk,
@@ -10,65 +15,6 @@ import type {
   GitStatusResult,
 } from '@/renderer/omniagents-ui/rpc/git';
 
-const useStyles = makeStyles({
-  root: {
-    display: 'grid',
-    gridTemplateColumns: 'minmax(14rem, 0.8fr) minmax(20rem, 2fr)',
-    minHeight: 0,
-    color: tokens.colorNeutralForeground1,
-    backgroundColor: tokens.colorNeutralBackground1,
-  },
-  rootGlass: { backgroundColor: 'transparent' },
-  status: {
-    overflowY: 'auto',
-    borderRight: `1px solid ${tokens.colorNeutralStroke2}`,
-    padding: tokens.spacingVerticalM,
-  },
-  diff: { overflow: 'auto', padding: tokens.spacingVerticalM },
-  heading: { margin: `0 0 ${tokens.spacingVerticalS}`, fontSize: tokens.fontSizeBase400 },
-  summary: { color: tokens.colorNeutralForeground2, fontSize: tokens.fontSizeBase200 },
-  list: { listStyle: 'none', margin: 0, padding: 0 },
-  statusRow: {
-    display: 'grid',
-    gridTemplateColumns: '2.5rem minmax(0, 1fr)',
-    gap: tokens.spacingHorizontalS,
-    padding: `${tokens.spacingVerticalXS} 0`,
-  },
-  statusRowSelected: { backgroundColor: tokens.colorSubtleBackgroundSelected },
-  path: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'monospace' },
-  file: { marginBottom: tokens.spacingVerticalL },
-  fileHeader: { display: 'flex', alignItems: 'baseline', gap: tokens.spacingHorizontalS },
-  actions: { display: 'flex', gap: tokens.spacingHorizontalXS, marginLeft: 'auto' },
-  button: {
-    border: `1px solid ${tokens.colorNeutralStroke1}`,
-    borderRadius: tokens.borderRadiusMedium,
-    background: tokens.colorNeutralBackground1,
-    color: tokens.colorNeutralForeground1,
-    cursor: 'pointer',
-    ':disabled': { cursor: 'default', opacity: 0.6 },
-  },
-  hunk: {
-    marginTop: tokens.spacingVerticalS,
-    border: `1px solid ${tokens.colorNeutralStroke2}`,
-    borderRadius: tokens.borderRadiusMedium,
-    overflow: 'hidden',
-  },
-  hunkHeader: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-    padding: tokens.spacingVerticalXS,
-    backgroundColor: tokens.colorNeutralBackground3,
-    fontFamily: 'monospace',
-  },
-  code: { margin: 0, fontFamily: 'monospace', fontSize: tokens.fontSizeBase200 },
-  line: { display: 'grid', gridTemplateColumns: '3.5rem 3.5rem 1rem minmax(max-content, 1fr)', whiteSpace: 'pre' },
-  lineNumber: { color: tokens.colorNeutralForeground3, textAlign: 'right', paddingRight: tokens.spacingHorizontalS },
-  add: { backgroundColor: tokens.colorPaletteGreenBackground1 },
-  delete: { backgroundColor: tokens.colorPaletteRedBackground1 },
-  empty: { color: tokens.colorNeutralForeground3, padding: tokens.spacingVerticalL, textAlign: 'center' },
-});
-
 export type GitStatusDiffViewProps = {
   status: GitStatusResult;
   diff: GitDiffResult;
@@ -77,7 +23,6 @@ export type GitStatusDiffViewProps = {
   onSelectFile?: (path: string) => void;
   selectedPath?: string | null;
   actionsDisabled?: boolean;
-  isGlass?: boolean;
   onStage?: (selection: {
     paths?: string[];
     hunks?: GitHunkRef[];
@@ -147,59 +92,61 @@ const HunkView = ({
   onDiscard: GitStatusDiffViewProps['onDiscard'];
   actionsDisabled: boolean;
 }) => {
-  const styles = useStyles();
   const ref = { path: file.path, hunk_id: hunk.hunk_id };
   const stageMode = mode === 'head' ? 'head' : 'worktree';
   return (
-    <section className={styles.hunk} aria-label={`Changes in ${file.path}, hunk ${hunk.index + 1}`}>
-      <header className={styles.hunkHeader}>
+    <section
+      className="mt-2 border border-border rounded-lg overflow-hidden"
+      aria-label={`Changes in ${file.path}, hunk ${hunk.index + 1}`}
+    >
+      <header className="flex items-center gap-2 p-1 bg-muted font-mono">
         <span>{hunk.header}</span>
         {hunk.section_heading && <span>{hunk.section_heading}</span>}
         {mode !== 'range' && (onStage || onUnstage || onDiscard) && (
-          <span className={styles.actions}>
+          <ButtonGroup className="ml-auto">
             {mode === 'staged' && onUnstage ? (
-              <button
-                className={styles.button}
-                type="button"
+              <Button
+                variant="outline"
+                size="xs"
                 disabled={actionsDisabled}
                 onClick={() => onUnstage?.({ hunks: [ref], contextLines })}
               >
                 Unstage hunk
-              </button>
+              </Button>
             ) : onStage ? (
-              <button
-                className={styles.button}
-                type="button"
+              <Button
+                variant="outline"
+                size="xs"
                 disabled={actionsDisabled}
                 onClick={() => onStage?.({ hunks: [ref], contextLines, mode: stageMode })}
               >
                 Stage hunk
-              </button>
+              </Button>
             ) : null}
             {mode === 'worktree' && onDiscard && (
-              <button
-                className={styles.button}
-                type="button"
+              <Button
+                variant="outline"
+                size="xs"
                 disabled={actionsDisabled}
                 onClick={() => onDiscard?.({ hunks: [ref], contextLines })}
               >
                 Discard hunk
-              </button>
+              </Button>
             )}
-          </span>
+          </ButtonGroup>
         )}
       </header>
-      <pre className={styles.code} aria-label={`Diff lines for ${file.path}`}>
+      <pre className="m-0 font-mono text-xs" aria-label={`Diff lines for ${file.path}`}>
         {hunk.lines.map((line, index) => (
           <span
-            className={`${styles.line} ${line.origin === 'add' ? styles.add : ''} ${line.origin === 'delete' ? styles.delete : ''}`}
+            className={`omni-git-diff-line grid whitespace-pre ${line.origin === 'add' ? 'bg-success/10' : ''} ${line.origin === 'delete' ? 'bg-destructive/10' : ''}`}
             data-origin={line.origin}
             key={`${hunk.hunk_id}:${index}`}
           >
-            <span className={styles.lineNumber} aria-hidden="true">
+            <span className="text-muted-foreground text-right pr-2" aria-hidden="true">
               {line.old_lineno ?? ''}
             </span>
-            <span className={styles.lineNumber} aria-hidden="true">
+            <span className="text-muted-foreground text-right pr-2" aria-hidden="true">
               {line.new_lineno ?? ''}
             </span>
             <span aria-hidden="true">{linePrefix(line.origin)}</span>
@@ -220,12 +167,10 @@ export const GitStatusDiffView = memo(
     onSelectFile,
     selectedPath,
     actionsDisabled = false,
-    isGlass,
     onStage,
     onUnstage,
     onDiscard,
   }: GitStatusDiffViewProps) => {
-    const styles = useStyles();
     const changed = [...status.entries];
     const known = new Set(changed.map((entry) => entry.path));
     for (const path of status.untracked) {
@@ -248,39 +193,38 @@ export const GitStatusDiffView = memo(
 
     return (
       <div
-        className={mergeClasses(styles.root, isGlass && styles.rootGlass)}
+        className="omni-git-diff-layout grid min-h-0 bg-card text-foreground"
         role="region"
         aria-label="Source control changes"
       >
-        <section className={styles.status} aria-labelledby="git-changes-heading">
-          <h2 className={styles.heading} id="git-changes-heading">
+        <section className="overflow-y-auto border-r border-border p-4" aria-labelledby="git-changes-heading">
+          <h2 className="mb-2 text-base" id="git-changes-heading">
             Changes
           </h2>
-          <p className={styles.summary} aria-live="polite">
+          <p className="text-muted-foreground text-xs" aria-live="polite">
             {branch} · {changed.length} changed {changed.length === 1 ? 'file' : 'files'}
             {status.upstream ? ` · ${status.upstream.ahead} ahead, ${status.upstream.behind} behind` : ''}
           </p>
           {changed.length === 0 ? (
-            <p className={styles.empty}>Working tree clean</p>
+            <p className="text-muted-foreground p-5 text-center">Working tree clean</p>
           ) : (
-            <ul className={styles.list} aria-label="Changed files">
+            <ul className="list-none m-0 p-0" aria-label="Changed files">
               {changed.map((entry) => (
                 <li
-                  className={mergeClasses(styles.statusRow, selectedPath === entry.path && styles.statusRowSelected)}
+                  className={cn('omni-git-file-row grid gap-2 py-1', selectedPath === entry.path && 'bg-accent')}
                   key={`${entry.xy}:${entry.path}`}
                 >
                   <span aria-label={`Status: ${statusLabel(entry)}`}>{entry.xy}</span>
                   {onSelectFile || onOpenFile ? (
-                    <button
-                      className={`${styles.button} ${styles.path}`}
-                      type="button"
-                      aria-pressed={selectedPath === entry.path}
+                    <Toggle
+                      className={`${'border border-border rounded-lg bg-background text-foreground cursor-pointer disabled:cursor-default disabled:opacity-60'} ${'overflow-hidden text-ellipsis whitespace-nowrap font-mono'}`}
+                      pressed={selectedPath === entry.path}
                       onClick={() => (onSelectFile ?? onOpenFile)?.(entry.path)}
                     >
                       {entry.path}
-                    </button>
+                    </Toggle>
                   ) : (
-                    <span className={styles.path}>{entry.path}</span>
+                    <span className="overflow-hidden text-ellipsis whitespace-nowrap font-mono">{entry.path}</span>
                   )}
                 </li>
               ))}
@@ -288,8 +232,8 @@ export const GitStatusDiffView = memo(
           )}
         </section>
 
-        <section className={styles.diff} aria-labelledby="git-diff-heading">
-          <h2 className={styles.heading} id="git-diff-heading">
+        <section className="overflow-auto p-4" aria-labelledby="git-diff-heading">
+          <h2 className="mb-2 text-base" id="git-diff-heading">
             {diffHeading ??
               (diff.mode === 'staged'
                 ? 'Staged diff'
@@ -299,38 +243,38 @@ export const GitStatusDiffView = memo(
           </h2>
           {diff.context_lines_clamped && <p role="status">Diff context was limited to {diff.context_lines} lines.</p>}
           {diff.files.length === 0 ? (
-            <p className={styles.empty}>No changes in this view</p>
+            <p className="text-muted-foreground p-5 text-center">No changes in this view</p>
           ) : (
             diff.files.map((file) => (
-              <article className={styles.file} key={file.path} aria-label={`Diff for ${file.path}`}>
-                <header className={styles.fileHeader}>
-                  <h3 className={styles.path}>{file.path}</h3>
+              <article className="mb-5" key={file.path} aria-label={`Diff for ${file.path}`}>
+                <header className="flex items-baseline gap-2">
+                  <h3 className="overflow-hidden text-ellipsis whitespace-nowrap font-mono">{file.path}</h3>
                   <span>{file.binary ? 'Binary' : `+${file.added_lines ?? 0} −${file.deleted_lines ?? 0}`}</span>
                   {(onOpenFile || (diff.mode !== 'range' && (onStage || onUnstage || onDiscard))) && (
-                    <span className={styles.actions}>
+                    <ButtonGroup className="ml-auto">
                       {onOpenFile && (
-                        <button
+                        <Button
                           aria-label={`Open ${file.path}`}
-                          className={styles.button}
-                          type="button"
+                          variant="outline"
+                          size="xs"
                           onClick={() => onOpenFile(file.path, firstChangedLine(file))}
                         >
                           Open
-                        </button>
+                        </Button>
                       )}
                       {diff.mode === 'staged' && onUnstage ? (
-                        <button
-                          className={styles.button}
-                          type="button"
+                        <Button
+                          variant="outline"
+                          size="xs"
                           disabled={actionsDisabled}
                           onClick={() => onUnstage?.({ paths: [file.path], contextLines: diff.context_lines })}
                         >
                           Unstage file
-                        </button>
+                        </Button>
                       ) : diff.mode !== 'range' && onStage ? (
-                        <button
-                          className={styles.button}
-                          type="button"
+                        <Button
+                          variant="outline"
+                          size="xs"
                           disabled={actionsDisabled}
                           onClick={() =>
                             onStage?.({
@@ -341,19 +285,19 @@ export const GitStatusDiffView = memo(
                           }
                         >
                           Stage file
-                        </button>
+                        </Button>
                       ) : null}
                       {diff.mode === 'worktree' && onDiscard && (
-                        <button
-                          className={styles.button}
-                          type="button"
+                        <Button
+                          variant="outline"
+                          size="xs"
                           disabled={actionsDisabled}
                           onClick={() => onDiscard?.({ paths: [file.path], contextLines: diff.context_lines })}
                         >
                           Discard file
-                        </button>
+                        </Button>
                       )}
-                    </span>
+                    </ButtonGroup>
                   )}
                 </header>
                 {file.unmerged && <p role="alert">This file has unresolved merge conflicts.</p>}

@@ -1,212 +1,29 @@
-import {
-  Button as FluentButton,
-  makeStyles,
-  mergeClasses,
-  shorthands,
-  Subtitle2,
-  tokens,
-} from '@fluentui/react-components';
-import {
-  ArrowMaximize20Regular,
-  ArrowMinimize20Regular,
-  BranchFork20Regular,
-  Chat20Regular,
-  Delete20Regular,
-  Dismiss20Regular,
-  Edit20Regular,
-  MoreHorizontal20Filled,
-  Play20Filled,
-  ReOrderDotsVertical20Regular,
-} from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
+import { Edit, Ellipsis, GitFork, GripVertical, Maximize2, MessageCircle, Minimize2, Play, X } from 'lucide-react';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { isDoneColumn } from '@/lib/pipeline-category';
-import type { SelectTabData } from '@/renderer/ds';
+import { cn } from '@/renderer/ds/cn';
+import { Badge } from '@/renderer/ds/ui/badge';
+import { Button } from '@/renderer/ds/ui/button';
 import {
-  Badge,
-  Body1,
-  Button,
-  Caption1,
-  ConfirmDialog,
-  IconButton,
-  Input,
-  Menu,
-  MenuDivider,
-  MenuItem,
-  MenuList,
-  MenuPopover,
-  MenuTrigger,
-  Select,
-  Switch,
-  Tab,
-  TabList,
-} from '@/renderer/ds';
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/renderer/ds/ui/dropdown-menu';
+import { Input } from '@/renderer/ds/ui/input';
+import { NativeSelect as Select } from '@/renderer/ds/ui/native-select';
+import { Switch } from '@/renderer/ds/ui/switch';
 import { openTicketInCode } from '@/renderer/services/navigation';
 import { persistedStoreApi } from '@/renderer/services/store';
-import type { GitRepoInfo, TicketId, TicketPhase, TicketResolution } from '@/shared/types';
+import type { GitRepoInfo, TicketId, TicketPhase } from '@/shared/types';
 import { firstSource } from '@/shared/types';
 
 import { ProjectPageHeader } from './ProjectPageHeader';
-import { $pipeline, $tickets, ticketApi } from './state';
-import { RESOLUTION_LABELS } from './ticket-constants';
-import { TicketArtifactsTab } from './TicketArtifactsTab';
+import { $tickets, ticketApi } from './state';
 import { TicketOverviewTab } from './TicketOverviewTab';
-
-const useStyles = makeStyles({
-  root: {
-    display: 'flex',
-    flexDirection: 'column',
-    width: '100%',
-    height: '100%',
-  },
-  /* ── Row 1: Title ── */
-  titleBar: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-    paddingLeft: tokens.spacingHorizontalM,
-    paddingRight: tokens.spacingHorizontalS,
-    paddingTop: tokens.spacingVerticalS,
-    paddingBottom: tokens.spacingVerticalS,
-    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
-    flexShrink: 0,
-  },
-  dragHandle: {
-    cursor: 'grab',
-    ':active': { cursor: 'grabbing' },
-  },
-  titleBtn: {
-    minWidth: 0,
-    flex: '1 1 0',
-    justifyContent: 'flex-start',
-    ':hover > .editIcon': { opacity: 1 },
-  },
-  /* Page-context editable title (matches ProjectPageHeader's Title3 scale). */
-  pageTitleBtn: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-    flex: '0 1 auto',
-    minWidth: 0,
-    padding: 0,
-    border: 'none',
-    backgroundColor: 'transparent',
-    cursor: 'pointer',
-    textAlign: 'left',
-    color: tokens.colorNeutralForeground1,
-    ':hover > .editIcon': { opacity: 1 },
-  },
-  pageTitleText: {
-    fontSize: tokens.fontSizeBase600,
-    fontWeight: tokens.fontWeightSemibold,
-    lineHeight: tokens.lineHeightBase600,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-  },
-  pageTitleInput: {
-    flex: '1 1 0',
-    minWidth: 0,
-    padding: 0,
-    border: 'none',
-    backgroundColor: 'transparent',
-    fontSize: tokens.fontSizeBase600,
-    fontWeight: tokens.fontWeightSemibold,
-    lineHeight: tokens.lineHeightBase600,
-    color: tokens.colorNeutralForeground1,
-    fontFamily: 'inherit',
-    ':focus': { outline: 'none' },
-  },
-  titleText: {
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-  },
-  editIcon: {
-    flexShrink: 0,
-    color: tokens.colorNeutralForeground3,
-    opacity: 0,
-    transitionProperty: 'opacity',
-    transitionDuration: tokens.durationFaster,
-  },
-  titleInput: {
-    flex: '1 1 0',
-    minWidth: 0,
-  },
-  actionGroup: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalXS,
-    flexShrink: 0,
-  },
-  /* ── Mobile action bar (replaces the title bar under the TopAppBar) ── */
-  mobileActionBar: {
-    display: 'flex',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: tokens.spacingHorizontalXS,
-    paddingLeft: tokens.spacingHorizontalM,
-    paddingRight: tokens.spacingHorizontalS,
-    paddingTop: tokens.spacingVerticalXS,
-    paddingBottom: tokens.spacingVerticalXS,
-    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
-    flexShrink: 0,
-  },
-  mobileActionSpacer: {
-    flex: '1 1 0',
-  },
-  /* ── Row 2: Tabs + overflow ── */
-  tabRow: {
-    display: 'flex',
-    alignItems: 'center',
-    paddingLeft: tokens.spacingHorizontalS,
-    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
-    flexShrink: 0,
-  },
-  tabList: {
-    flex: '1 1 0',
-  },
-  /* ── Branch edit bar (conditional) ── */
-  branchEditBar: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalS,
-    paddingLeft: tokens.spacingHorizontalM,
-    paddingRight: tokens.spacingHorizontalM,
-    paddingTop: tokens.spacingVerticalS,
-    paddingBottom: tokens.spacingVerticalS,
-    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
-    backgroundColor: tokens.colorNeutralBackground2,
-    flexShrink: 0,
-  },
-  branchGroup: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-  },
-  /* ── Content ── */
-  overviewScroll: {
-    flex: '1 1 0',
-    minHeight: 0,
-    overflowY: 'auto',
-    padding: tokens.spacingVerticalXXL,
-  },
-  tabPane: {
-    flex: '1 1 0',
-    minHeight: 0,
-  },
-  notFound: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    height: '100%',
-  },
-});
-
-/* Discussion lives inline in the Overview (GitHub issue shape), not a tab. */
-type TicketTab = 'Overview' | 'Artifacts';
-const TABS: TicketTab[] = ['Overview', 'Artifacts'];
+import { TicketResults } from './TicketResults';
 
 type DragHandleProps = {
   attributes: Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -235,16 +52,13 @@ export const TicketDetail = memo(
     isExpanded,
     onToggleExpand,
   }: TicketDetailProps) => {
-    const styles = useStyles();
     const tickets = useStore($tickets);
-    const pipeline = useStore($pipeline);
     const store = useStore(persistedStoreApi.$atom);
     const ticket = tickets[ticketId];
     const project = useMemo(
       () => store.projects.find((p) => p.id === ticket?.projectId) ?? null,
       [store.projects, ticket?.projectId]
     );
-    const [activeTab, setCurrentTab] = useState<TicketTab>('Overview');
     const [editingTitle, setEditingTitle] = useState(false);
     const [editTitle, setEditTitle] = useState('');
     const [gitInfo, setGitInfo] = useState<GitRepoInfo | null>(null);
@@ -320,12 +134,6 @@ export const TicketDetail = memo(
       [handleSaveTitle]
     );
 
-    const handleGoToBoard = useCallback(() => {
-      if (ticket?.projectId) {
-        ticketApi.goToProject(ticket.projectId, 'board');
-      }
-    }, [ticket?.projectId]);
-
     const handleOpenChat = useCallback(() => {
       void openTicketInCode(ticketId);
     }, [ticketId]);
@@ -334,27 +142,6 @@ export const TicketDetail = memo(
       ticketApi.requestStartSupervisor(ticketId);
     }, [ticketId]);
 
-    const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
-    const handleRequestDelete = useCallback(() => setDeleteConfirmOpen(true), []);
-    const handleCloseDelete = useCallback(() => setDeleteConfirmOpen(false), []);
-    const handleDelete = useCallback(() => {
-      void ticketApi.removeTicket(ticketId);
-    }, [ticketId]);
-
-    const isTerminalColumn = useMemo(() => {
-      if (!pipeline || !ticket) {
-        return false;
-      }
-      return isDoneColumn(pipeline, ticket.columnId);
-    }, [pipeline, ticket]);
-
-    const handleResolve = useCallback(
-      (resolution: TicketResolution) => {
-        ticketApi.resolveTicket(ticketId, resolution);
-      },
-      [ticketId]
-    );
-
     const handleArchive = useCallback(() => {
       void ticketApi.updateTicket(ticketId, { archivedAt: Date.now() });
     }, [ticketId]);
@@ -362,10 +149,6 @@ export const TicketDetail = memo(
     const handleUnarchive = useCallback(() => {
       void ticketApi.updateTicket(ticketId, { archivedAt: undefined });
     }, [ticketId]);
-
-    const handleTabSelect = useCallback((_e: unknown, data: SelectTabData) => {
-      setCurrentTab(data.value as TicketTab);
-    }, []);
 
     const handleBranchChange = useCallback((event: React.ChangeEvent<HTMLSelectElement>) => {
       setEditBranch(event.target.value);
@@ -403,30 +186,57 @@ export const TicketDetail = memo(
 
     if (!ticket) {
       return (
-        <div className={styles.notFound}>
-          <Body1>Task not found</Body1>
+        <div className="flex items-center justify-center h-full">
+          <span className="text-sm">Task not found</span>
         </div>
       );
     }
 
     const phase = ticket.phase;
+    const taskMenu = !compact && (
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button type="button" variant="ghost" size="icon-sm" aria-label="Task menu">
+            <Ellipsis />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          {hideTitleBar && (
+            <DropdownMenuItem onClick={handleStartEditTitle}>
+              <Edit />
+              Rename task
+            </DropdownMenuItem>
+          )}
+          {gitInfo?.isGitRepo && (
+            <DropdownMenuItem onClick={handleStartEditBranch}>
+              <GitFork />
+              Technical details
+            </DropdownMenuItem>
+          )}
+          <DropdownMenuSeparator />
+          {ticket.archivedAt ? (
+            <DropdownMenuItem onClick={handleUnarchive}>Unarchive task</DropdownMenuItem>
+          ) : (
+            <DropdownMenuItem onClick={handleArchive}>Archive task</DropdownMenuItem>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    );
 
     return (
-      <div className={styles.root}>
+      <div className="flex flex-col w-full max-w-full min-w-0 h-full overflow-hidden">
         {!hideTitleBar &&
           (onClose && closeBehavior === 'back' && ticket.projectId ? (
-            /* Work-tab page context: the standard sub-page header — small
-               ancestors-only breadcrumb (Project › Tasks) above the real,
-               click-to-rename page title, with the ticket controls on the
-               title row. */
+            /* Project task context: the standard sub-page header — small
+        ancestors-only breadcrumb (Project › Tasks) above the real,
+        click-to-rename page title, with the ticket controls on the
+        title row. */
             <ProjectPageHeader
-              projectId={ticket.projectId}
-              middle={[{ label: 'Tasks', onClick: handleGoToBoard }]}
               title={
                 editingTitle ? (
-                  <input
+                  <Input
                     aria-label="Task title"
-                    className={styles.pageTitleInput}
+                    className={`${'flex-1 min-w-0 p-0 border-0 bg-transparent text-2xl font-semibold leading-8 text-foreground font-inherit focus:outline-none'} h-auto`}
                     value={editTitle}
                     onChange={handleEditTitleChange}
                     onBlur={handleSaveTitle}
@@ -434,33 +244,52 @@ export const TicketDetail = memo(
                     autoFocus
                   />
                 ) : (
-                  <button
+                  <Button
                     type="button"
-                    className={styles.pageTitleBtn}
+                    variant="ghost"
+                    className="flex items-center justify-start gap-2 w-full max-w-full min-w-0 overflow-hidden p-0 border-0 bg-transparent cursor-pointer text-left text-foreground [&:hover_>_.editIcon]:opacity-100"
                     onClick={handleStartEditTitle}
                     title="Rename task"
                   >
-                    <span className={styles.pageTitleText}>{ticket.title}</span>
-                    <Edit20Regular className={mergeClasses(styles.editIcon, 'editIcon')} />
-                  </button>
+                    <span className="flex-1 min-w-0 text-2xl font-semibold leading-8 wrap-anywhere">
+                      {ticket.title}
+                    </span>
+                    <Edit
+                      className={cn(
+                        'shrink-0 text-muted-foreground opacity-0 transition-opacity duration-100',
+                        'editIcon'
+                      )}
+                    />
+                  </Button>
                 )
               }
-              actions={<PhaseStatus phase={phase} onChat={handleOpenChat} onAutopilot={handleStartAutopilot} />}
+              actions={
+                <>
+                  <PhaseStatus phase={phase} onChat={handleOpenChat} onAutopilot={handleStartAutopilot} />
+                  {taskMenu}
+                </>
+              }
             />
           ) : (
             /* Panel context (Code deck side panel): compact single row. */
-            <div className={styles.titleBar}>
+            <div
+              className={cn(
+                'flex items-center gap-2 pl-4 pr-2 pt-2 pb-2 shrink-0',
+                !editingBranch && 'border-b border-border'
+              )}
+            >
               {dragHandleProps && (
-                <FluentButton
-                  appearance="subtle"
-                  shape="circular"
-                  size="small"
-                  icon={<ReOrderDotsVertical20Regular />}
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
                   aria-label="Reorder"
-                  className={styles.dragHandle}
+                  className="cursor-grab active:cursor-grabbing"
                   {...dragHandleProps.attributes}
                   {...dragHandleProps.listeners}
-                />
+                >
+                  <GripVertical />
+                </Button>
               )}
 
               {editingTitle ? (
@@ -471,42 +300,64 @@ export const TicketDetail = memo(
                   onBlur={handleSaveTitle}
                   onKeyDown={handleTitleKeyDown}
                   autoFocus
-                  size="sm"
-                  className={styles.titleInput}
+                  className="flex-1 min-w-0"
                 />
               ) : (
-                <FluentButton
-                  appearance="transparent"
-                  size="small"
+                <Button
+                  variant="ghost"
+                  size="sm"
                   onClick={handleStartEditTitle}
-                  className={styles.titleBtn}
+                  className="min-w-0 flex-1 justify-start [&:hover_>_.editIcon]:opacity-100"
                 >
-                  <Subtitle2 className={styles.titleText}>{ticket.title}</Subtitle2>
-                  <Edit20Regular className={mergeClasses(styles.editIcon, 'editIcon')} />
-                </FluentButton>
+                  <h2
+                    className={cn(
+                      'font-display text-lg font-semibold tracking-tight',
+                      'overflow-hidden text-ellipsis whitespace-nowrap'
+                    )}
+                  >
+                    {ticket.title}
+                  </h2>
+                  <Edit
+                    className={cn(
+                      'shrink-0 text-muted-foreground opacity-0 transition-opacity duration-100',
+                      'editIcon'
+                    )}
+                  />
+                </Button>
               )}
 
               <PhaseStatus phase={phase} onChat={handleOpenChat} onAutopilot={handleStartAutopilot} />
+              {taskMenu}
 
               {onToggleExpand && (
-                <IconButton
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
                   aria-label={isExpanded ? 'Collapse' : 'Expand'}
-                  icon={isExpanded ? <ArrowMinimize20Regular /> : <ArrowMaximize20Regular />}
-                  size="sm"
                   onClick={onToggleExpand}
-                />
+                >
+                  {isExpanded ? <Minimize2 /> : <Maximize2 />}
+                </Button>
               )}
               {onClose && closeBehavior === 'close' && (
-                <IconButton aria-label="Close" icon={<Dismiss20Regular />} size="sm" onClick={onClose} />
+                <Button type="button" variant="ghost" size="icon-sm" aria-label="Close" onClick={onClose}>
+                  <X />
+                </Button>
               )}
             </div>
           ))}
 
         {/* Mobile: the TopAppBar owns back + title; this row carries the
-            agent actions (fields live in the Overview's properties rail).
-            Rename swaps the row for the title input. */}
+                Omni actions (additional fields live under More details).
+                Rename swaps the row for the title input. */}
         {hideTitleBar && (
-          <div className={styles.mobileActionBar}>
+          <div
+            className={cn(
+              'flex items-center flex-wrap gap-1 pl-4 pr-2 pt-1 pb-1 shrink-0',
+              !editingBranch && 'border-b border-border'
+            )}
+          >
             {editingTitle ? (
               <Input
                 type="text"
@@ -515,80 +366,23 @@ export const TicketDetail = memo(
                 onBlur={handleSaveTitle}
                 onKeyDown={handleTitleKeyDown}
                 autoFocus
-                size="sm"
-                className={styles.titleInput}
+                className="flex-1 min-w-0"
               />
             ) : (
               <>
-                <div className={styles.mobileActionSpacer} />
+                <div className="flex-1" />
                 <PhaseStatus phase={phase} onChat={handleOpenChat} onAutopilot={handleStartAutopilot} />
+                {taskMenu}
               </>
             )}
           </div>
         )}
 
-        {/* ── Row 2: Tabs + overflow menu ── */}
-        <div className={styles.tabRow}>
-          <TabList size="small" selectedValue={activeTab} onTabSelect={handleTabSelect} className={styles.tabList}>
-            {TABS.map((tab) => (
-              <Tab key={tab} value={tab}>
-                {tab}
-              </Tab>
-            ))}
-          </TabList>
-
-          {!compact && (
-            <Menu positioning={{ position: 'below', align: 'end', fallbackPositions: ['above-end'] }}>
-              <MenuTrigger>
-                <IconButton aria-label="Task menu" icon={<MoreHorizontal20Filled />} size="sm" />
-              </MenuTrigger>
-              <MenuPopover>
-                <MenuList>
-                  {hideTitleBar && (
-                    <MenuItem icon={<Edit20Regular />} onClick={handleStartEditTitle}>
-                      Rename task
-                    </MenuItem>
-                  )}
-                  {gitInfo?.isGitRepo && (
-                    <MenuItem icon={<BranchFork20Regular />} onClick={handleStartEditBranch}>
-                      Edit branch
-                    </MenuItem>
-                  )}
-                  {!ticket.resolution && !isTerminalColumn && (
-                    <>
-                      <MenuDivider />
-                      {(['completed', 'wont_do', 'duplicate', 'cancelled'] as TicketResolution[]).map((res) => (
-                        <ResolutionMenuItem key={res} resolution={res} onResolve={handleResolve} />
-                      ))}
-                    </>
-                  )}
-                  {ticket.resolution && (
-                    <>
-                      <MenuDivider />
-                      {ticket.archivedAt ? (
-                        <MenuItem onClick={handleUnarchive}>Unarchive task</MenuItem>
-                      ) : (
-                        <MenuItem onClick={handleArchive}>Archive task</MenuItem>
-                      )}
-                    </>
-                  )}
-                  <MenuDivider />
-                  <MenuItem icon={<Delete20Regular />} onClick={handleRequestDelete}>
-                    Delete task
-                  </MenuItem>
-                </MenuList>
-              </MenuPopover>
-            </Menu>
-          )}
-        </div>
-
         {/* Branch edit (conditional) */}
         {editingBranch && gitInfo?.isGitRepo && (
-          <div className={styles.branchEditBar}>
-            <div className={styles.branchGroup}>
-              <Caption1 style={{ color: tokens.colorNeutralForeground3, fontWeight: tokens.fontWeightMedium }}>
-                Isolated worktree
-              </Caption1>
+          <div className="flex flex-col gap-2 pl-4 pr-4 pt-2 pb-2 border-b border-border bg-card shrink-0">
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground font-medium text-muted-foreground">Isolated worktree</span>
               <Switch
                 checked={editUseWorktree}
                 onCheckedChange={setEditUseWorktree}
@@ -596,11 +390,9 @@ export const TicketDetail = memo(
               />
             </div>
             {editUseWorktree && (
-              <div className={styles.branchGroup}>
-                <Caption1 style={{ color: tokens.colorNeutralForeground3, fontWeight: tokens.fontWeightMedium }}>
-                  Branch
-                </Caption1>
-                <Select value={editBranch} onChange={handleBranchChange} size="sm">
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-muted-foreground font-medium text-muted-foreground">Branch</span>
+                <Select value={editBranch} onChange={handleBranchChange}>
                   <option value="">None</option>
                   {gitInfo.branches.map((branch) => (
                     <option key={branch} value={branch}>
@@ -610,14 +402,14 @@ export const TicketDetail = memo(
                 </Select>
               </div>
             )}
-            <Caption1 style={{ color: tokens.colorNeutralForeground2 }}>
+            <span className="text-xs text-muted-foreground text-foreground/80">
               {ticket.worktreePath
                 ? 'Clean up the active worktree before switching modes.'
                 : editUseWorktree
                   ? 'The agent works in its own branch + worktree, isolated from the main checkout.'
                   : 'The agent works directly in the project checkout. Only one direct-mode task can run at a time.'}
-            </Caption1>
-            <div className={styles.branchGroup}>
+            </span>
+            <div className="flex items-center gap-2">
               <Button size="sm" onClick={handleSaveBranch}>
                 Save
               </Button>
@@ -628,97 +420,64 @@ export const TicketDetail = memo(
           </div>
         )}
 
-        {/* Tab content */}
-        {activeTab === 'Overview' && (
-          <div className={styles.overviewScroll}>
+        <div className="flex-1 min-w-0 min-h-0 w-full max-w-full overflow-x-hidden overflow-y-auto p-5 sm:p-8">
+          <div className="flex w-full max-w-4xl min-w-0 ml-auto mr-auto flex-col gap-8">
             <TicketOverviewTab ticket={ticket} compact={compact} />
+            <TicketResults ticket={ticket} />
           </div>
-        )}
-        {activeTab === 'Artifacts' && (
-          <div className={styles.tabPane}>
-            <TicketArtifactsTab ticketId={ticketId} />
-          </div>
-        )}
-
-        <ConfirmDialog
-          open={deleteConfirmOpen}
-          onClose={handleCloseDelete}
-          onConfirm={handleDelete}
-          title={
-            !ticket.title || ticket.title === 'Untitled'
-              ? 'Delete this untitled task?'
-              : `Delete task "${ticket.title}"?`
-          }
-          description="This action cannot be undone."
-          confirmLabel="Delete"
-          destructive
-        />
+        </div>
       </div>
     );
   }
 );
 TicketDetail.displayName = 'TicketDetail';
 
-type ResolutionMenuItemProps = {
-  resolution: TicketResolution;
-  onResolve: (resolution: TicketResolution) => void;
-};
-
-const ResolutionMenuItem = memo(({ resolution, onResolve }: ResolutionMenuItemProps) => {
-  const handleResolve = useCallback(() => onResolve(resolution), [onResolve, resolution]);
-
-  return <MenuItem onClick={handleResolve}>{RESOLUTION_LABELS[resolution]}</MenuItem>;
-});
-ResolutionMenuItem.displayName = 'ResolutionMenuItem';
-
 // --- Phase status (read-only badge + action buttons) ---
 
-const PHASE_BADGE: Record<string, { label: string; color: 'green' | 'yellow' | 'blue' | 'red' }> = {
-  running: { label: 'Working', color: 'green' },
-  continuing: { label: 'Working', color: 'green' },
-  provisioning: { label: 'Starting', color: 'blue' },
-  connecting: { label: 'Connecting', color: 'blue' },
-  session_creating: { label: 'Starting', color: 'blue' },
-  awaiting_input: { label: 'Needs input', color: 'blue' },
-  retrying: { label: 'Retrying', color: 'yellow' },
-  error: { label: 'Error', color: 'red' },
-  completed: { label: 'Done', color: 'green' },
+const PHASE_BADGE: Partial<Record<TicketPhase, { label: string }>> = {
+  running: { label: 'Omni is working' },
+  provisioning: { label: 'Starting' },
+  connecting: { label: 'Starting' },
+  session_creating: { label: 'Starting' },
+  completed: { label: 'Ready to check' },
 };
 
 const PhaseStatus = memo(
   ({ phase, onChat, onAutopilot }: { phase: TicketPhase | undefined; onChat: () => void; onAutopilot: () => void }) => {
-    const styles = useStyles();
-
     const badge = phase ? PHASE_BADGE[phase] : undefined;
     if (phase === 'error') {
       return (
-        <div className={styles.actionGroup}>
-          <Badge color="red">Error</Badge>
-          <Button size="sm" variant="ghost" leftIcon={<Chat20Regular />} onClick={onChat}>
-            Chat
+        <div className="flex items-center gap-1 shrink-0">
+          <Badge variant="secondary">Needs attention</Badge>
+          <Button size="sm" variant="ghost" onClick={onChat}>
+            <MessageCircle />
+            Ask Omni
           </Button>
-          <Button size="sm" leftIcon={<Play20Filled />} onClick={onAutopilot}>
-            Retry
+          <Button size="sm" onClick={onAutopilot}>
+            <Play />
+            Try again
           </Button>
         </div>
       );
     }
     if (badge) {
       return (
-        <div className={styles.actionGroup}>
-          <Badge color={badge.color}>{badge.label}</Badge>
+        <div className="flex items-center gap-1 shrink-0">
+          <Badge variant="secondary">{badge.label}</Badge>
         </div>
       );
     }
 
     // Idle — show action buttons
     return (
-      <div className={styles.actionGroup}>
-        <Button size="sm" variant="ghost" leftIcon={<Chat20Regular />} onClick={onChat}>
-          Chat
+      <div className="flex items-center gap-1 shrink-0">
+        <Button size="sm" variant="ghost" onClick={onChat}>
+          <MessageCircle />
+          Ask Omni
         </Button>
-        <Button size="sm" leftIcon={<Play20Filled />} onClick={onAutopilot}>
-          Start agent
+        <Button size="sm" onClick={onAutopilot}>
+          <Play />
+          Start task
         </Button>
       </div>
     );

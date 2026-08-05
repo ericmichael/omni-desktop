@@ -748,10 +748,51 @@ export function runMigrations(store: IMigrationStore, deps: MigrationDeps): void
     store.delete('lastWeeklyReviewAt');
     store.set('schemaVersion', 28);
     deps.repairProjectRoots?.();
-    return;
+    // Fall through to v28→v29.
   }
 
-  if (((store.get('schemaVersion', 0) as number) ?? 0) >= 28) {
+  // v28 → v29: remove Jira-style ticket resolution. The pipeline's Done
+  // category is the sole completion state; archive is the sole retirement
+  // state. This is a one-way migration, not a runtime compatibility path.
+  if ((store.get('schemaVersion', 0) as number) === 28) {
+    const projects = (store.get('projects', []) as Array<Record<string, unknown>>) ?? [];
+    const doneColumnByProject = new Map<string, string>();
+    for (const project of projects) {
+      const pipeline = project.pipeline as { columns?: Array<Record<string, unknown>> } | undefined;
+      const columns = pipeline?.columns ?? [];
+      const done = [...columns].reverse().find((column) => column.category === 'done') ?? columns.at(-1);
+      if (typeof project.id === 'string' && typeof done?.id === 'string') {
+        doneColumnByProject.set(project.id, done.id);
+      }
+    }
+
+    const tickets = (store.get('tickets', []) as Array<Record<string, unknown>>) ?? [];
+    const migrated = tickets.map((raw) => {
+      const { resolution, resolvedAt, ...rest } = raw;
+      const next: Record<string, unknown> = { ...rest };
+      const updatedAt = typeof raw.updatedAt === 'number' ? raw.updatedAt : deps.now();
+      const legacyCompletedAt = typeof resolvedAt === 'number' ? resolvedAt : updatedAt;
+      const doneColumnId = typeof raw.projectId === 'string' ? doneColumnByProject.get(raw.projectId) : undefined;
+
+      if (resolution === 'completed') {
+        if (doneColumnId) {
+          next.columnId = doneColumnId;
+        }
+        next.completedAt = typeof raw.completedAt === 'number' ? raw.completedAt : legacyCompletedAt;
+      } else if (resolution !== undefined) {
+        next.archivedAt = typeof raw.archivedAt === 'number' ? raw.archivedAt : legacyCompletedAt;
+        delete next.completedAt;
+      } else if (doneColumnId && raw.columnId === doneColumnId) {
+        next.completedAt = typeof raw.completedAt === 'number' ? raw.completedAt : legacyCompletedAt;
+      }
+      return next;
+    });
+    store.set('tickets', migrated);
+    store.set('schemaVersion', 29);
+    deps.repairProjectRoots?.();
+  }
+
+  if (((store.get('schemaVersion', 0) as number) ?? 0) >= 29) {
     // Stale pre-v26 clients (an old PWA tab against a migrated server) can
     // re-mint the legacy chat keys after the fold ran. They're dead weight —
     // sweep them on every boot of the migrated store.

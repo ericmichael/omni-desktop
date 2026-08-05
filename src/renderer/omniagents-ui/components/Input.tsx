@@ -1,9 +1,7 @@
 import { useStore } from '@nanostores/react';
 import {
   ArrowUpIcon,
-  CheckIcon,
   FolderIcon,
-  Loader2Icon,
   LockIcon,
   MicIcon,
   MonitorIcon,
@@ -13,9 +11,19 @@ import {
   VolumeXIcon,
   XIcon,
 } from 'lucide-react';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 
 import { configuredVoiceMode } from '@/lib/voice-mode';
+import { Button } from '@/renderer/ds/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from '@/renderer/ds/ui/dropdown-menu';
+import { Spinner } from '@/renderer/ds/ui/spinner';
+import { Toggle } from '@/renderer/ds/ui/toggle';
 import { persistedStoreApi } from '@/renderer/services/store';
 import { isLocalVoiceCapable } from '@/renderer/services/voice-client';
 
@@ -97,34 +105,13 @@ export function Input({
   const localVoiceSupported = voiceMode === 'local' && isLocalVoiceCapable();
   const hostedVoiceSupported = voiceMode === 'hosted' && Boolean(voiceEnabled);
   const speakerToggleLabel = speakRepliesEnabled ? 'Spoken replies on' : 'Spoken replies off';
-  const [sandboxMenuOpen, setSandboxMenuOpen] = useState(false);
   const taRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const sandboxMenuRef = useRef<HTMLDivElement | null>(null);
-
-  // Close the sandbox dropdown when the user clicks anywhere outside it.
-  useEffect(() => {
-    if (!sandboxMenuOpen) {
-      return;
-    }
-    const onDown = (e: MouseEvent) => {
-      if (sandboxMenuRef.current && !sandboxMenuRef.current.contains(e.target as Node)) {
-        setSandboxMenuOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', onDown);
-    return () => document.removeEventListener('mousedown', onDown);
-  }, [sandboxMenuOpen]);
 
   const sandboxInteractive = !!sandboxOptions && sandboxOptions.length > 0 && !!onSandboxChange && !sandboxLocked;
 
-  const toggleSandboxMenu = useCallback(() => {
-    setSandboxMenuOpen((v) => !v);
-  }, []);
-
   const handleSandboxSelect = useCallback(
     (value: string) => {
-      setSandboxMenuOpen(false);
       if (value !== currentSandboxProfile) {
         onSandboxChange?.(value);
       }
@@ -280,35 +267,43 @@ export function Input({
                       alt=""
                       className="h-20 w-20 rounded-lg object-cover border border-border"
                     />
-                    <button
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon-xs"
+                      aria-label={`Remove ${f.name}`}
                       onClick={() => {
                         setFiles((prev) => prev.filter((_, idx) => idx !== i));
                         if (fileInputRef.current) {
                           fileInputRef.current.value = '';
                         }
                       }}
-                      className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-card border border-border text-muted-foreground hover:text-foreground flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                      className="absolute -top-1.5 -right-1.5 size-5 rounded-full opacity-0 transition-opacity group-hover:opacity-100"
                     >
-                      <XIcon size={12} />
-                    </button>
+                      <XIcon className="size-3" />
+                    </Button>
                   </div>
                 ) : (
                   <div key={i} className="bg-card flex items-center gap-2 rounded-lg px-3 py-2 text-sm">
-                    <PaperclipIcon size={16} className="text-foreground" />
-                    <span className="max-w-[120px] truncate text-foreground" title={f.name}>
+                    <PaperclipIcon className="size-4 text-foreground" />
+                    <span className="max-w-30 truncate text-foreground" title={f.name}>
                       {f.name}
                     </span>
-                    <button
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-xs"
+                      aria-label={`Remove ${f.name}`}
                       onClick={() => {
                         setFiles((prev) => prev.filter((_, idx) => idx !== i));
                         if (fileInputRef.current) {
                           fileInputRef.current.value = '';
                         }
                       }}
-                      className="hover:bg-accent rounded-full p-1"
+                      className="rounded-full"
                     >
-                      <XIcon size={16} className="text-foreground" />
-                    </button>
+                      <XIcon className="size-4 text-foreground" />
+                    </Button>
                   </div>
                 )
               )}
@@ -319,7 +314,7 @@ export function Input({
             placeholder="How can I help you today?"
             onKeyDown={handleKeyDown}
             onPaste={handlePaste}
-            className="max-h-[50vh]"
+            className="max-h-1/2"
             disabled={disabled}
           />
 
@@ -339,136 +334,117 @@ export function Input({
                   className="hidden"
                   id="file-upload"
                 />
-                <PaperclipIcon size={20} className="text-foreground" />
+                <PaperclipIcon className="size-4 text-foreground" />
               </label>
 
               {workspacePath !== undefined && (
-                <button
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
                   onClick={workspaceLocked ? undefined : onWorkspaceClick}
                   disabled={workspaceLocked}
-                  className={`flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs transition-colors min-w-0 ${
-                    workspaceLocked
-                      ? 'text-muted-foreground cursor-default'
-                      : 'text-secondary-foreground hover:bg-accent/50 cursor-pointer'
-                  }`}
+                  className="h-7 min-w-0 gap-1.5 px-2 text-xs font-normal"
                   title={workspacePath || 'Select workspace'}
                 >
                   <FolderIcon
-                    size={14}
-                    className={`shrink-0 ${workspaceLocked ? 'text-muted-foreground' : 'text-primary'}`}
+                    className={`size-3.5 shrink-0 ${workspaceLocked ? 'text-muted-foreground' : 'text-primary'}`}
                   />
-                  <span className="max-w-[96px] sm:max-w-[200px] truncate">
+                  <span className="max-w-24 truncate sm:max-w-50">
                     {workspacePath ? workspaceLabel(workspacePath) : 'Select workspace'}
                   </span>
-                  {workspaceLocked && <LockIcon size={10} className="text-muted-foreground flex-shrink-0" />}
-                </button>
+                  {workspaceLocked && <LockIcon className="size-2.5 shrink-0 text-muted-foreground" />}
+                </Button>
               )}
 
               {sandboxLabel && (
-                <div ref={sandboxMenuRef} className="relative min-w-0">
-                  <button
-                    type="button"
-                    onClick={sandboxInteractive ? toggleSandboxMenu : undefined}
-                    disabled={!sandboxInteractive}
-                    title={
-                      sandboxLocked ? `Sandbox: ${sandboxLabel} (locked once a run starts)` : `Sandbox: ${sandboxLabel}`
-                    }
-                    className={`flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs transition-colors min-w-0 ${
-                      sandboxInteractive
-                        ? 'text-secondary-foreground hover:bg-accent/50 cursor-pointer'
-                        : 'text-secondary-foreground cursor-default'
-                    }`}
-                  >
-                    {sandboxLoading ? (
-                      <Loader2Icon size={14} className="text-muted-foreground animate-spin shrink-0" />
-                    ) : null}
-                    <MonitorIcon
-                      size={14}
-                      className={`shrink-0 ${sandboxInteractive ? 'text-primary' : 'text-secondary-foreground'}`}
-                    />
-                    <span className="max-w-[96px] sm:max-w-[200px] truncate">{sandboxLabel}</span>
-                    {sandboxLocked && <LockIcon size={10} className="text-muted-foreground flex-shrink-0" />}
-                  </button>
-                  {sandboxMenuOpen && sandboxOptions && (
-                    <div
-                      role="menu"
-                      className="absolute bottom-full left-0 mb-1 z-50 min-w-[180px] rounded-md border border-border bg-card p-1 shadow-md"
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      disabled={!sandboxInteractive}
+                      title={
+                        sandboxLocked
+                          ? `Sandbox: ${sandboxLabel} (locked once a run starts)`
+                          : `Sandbox: ${sandboxLabel}`
+                      }
+                      className="h-7 min-w-0 gap-1.5 px-2 text-xs font-normal"
                     >
-                      {sandboxOptions.map((opt) => {
-                        const selected = opt.value === currentSandboxProfile;
-                        return (
-                          <button
-                            key={opt.value}
-                            type="button"
-                            role="menuitemradio"
-                            aria-checked={selected}
-                            onClick={handleSandboxSelect.bind(null, opt.value)}
-                            className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-xs text-foreground hover:bg-accent/50"
-                          >
-                            <span className="inline-flex h-3 w-3 items-center justify-center text-primary">
-                              {selected ? <CheckIcon size={12} /> : null}
-                            </span>
-                            <span className="flex-1 truncate">{opt.label}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
+                      {sandboxLoading ? <Spinner className="size-3.5 shrink-0 text-muted-foreground" /> : null}
+                      <MonitorIcon
+                        className={`size-3.5 shrink-0 ${sandboxInteractive ? 'text-primary' : 'text-secondary-foreground'}`}
+                      />
+                      <span className="max-w-24 truncate sm:max-w-50">{sandboxLabel}</span>
+                      {sandboxLocked && <LockIcon className="size-2.5 shrink-0 text-muted-foreground" />}
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent side="top" align="start" className="min-w-45">
+                    <DropdownMenuRadioGroup value={currentSandboxProfile} onValueChange={handleSandboxSelect}>
+                      {sandboxOptions?.map((option) => (
+                        <DropdownMenuRadioItem key={option.value} value={option.value} className="text-xs">
+                          {option.label}
+                        </DropdownMenuRadioItem>
+                      ))}
+                    </DropdownMenuRadioGroup>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               )}
             </div>
 
             <div className="flex items-center gap-1 sm:gap-2 shrink-0">
               {localVoiceSupported ? (
                 <>
-                  <button
-                    type="button"
-                    onClick={() => onSpeakRepliesChange?.(!speakRepliesEnabled)}
-                    className={`flex h-8 w-8 items-center justify-center rounded-2xl transition-colors ${
-                      speakRepliesEnabled
-                        ? 'bg-primary/15 text-primary hover:bg-primary/20'
-                        : 'hover:bg-accent/50 text-muted-foreground hover:text-foreground'
-                    }`}
+                  <Toggle
+                    size="sm"
+                    pressed={!!speakRepliesEnabled}
+                    onPressedChange={onSpeakRepliesChange}
+                    className="rounded-2xl text-muted-foreground data-[state=on]:bg-primary/15 data-[state=on]:text-primary"
                     aria-label={speakerToggleLabel}
-                    aria-pressed={!!speakRepliesEnabled}
                     title={speakerToggleLabel}
                   >
-                    {speakRepliesEnabled ? <Volume2Icon size={20} /> : <VolumeXIcon size={20} />}
-                  </button>
+                    {speakRepliesEnabled ? <Volume2Icon className="size-4" /> : <VolumeXIcon className="size-4" />}
+                  </Toggle>
                   <LocalVoiceButton onSubmit={(t) => (onVoiceSubmit ?? onSubmit)(t)} />
                 </>
               ) : hostedVoiceSupported ? (
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="icon-sm"
                   onClick={() => setIsVoiceModalOpen(true)}
-                  className="hover:bg-accent/50 flex h-8 w-8 items-center justify-center rounded-2xl"
+                  className="rounded-2xl"
                   aria-label="Voice mode"
                 >
-                  <MicIcon size={20} className="text-foreground" />
-                </button>
+                  <MicIcon className="size-4 text-foreground" />
+                </Button>
               ) : null}
 
               {!thinking ? (
-                <button
+                <Button
                   type="button"
+                  size="icon-sm"
                   disabled={!canSend}
                   onClick={handleSubmit}
-                  className="h-8 w-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center disabled:bg-secondary disabled:text-muted-foreground hover:brightness-110 focus:outline-none shadow-sm"
+                  className="rounded-full"
                   aria-label="Send"
                   title="Send (Enter)"
                 >
-                  <ArrowUpIcon size={20} className="pointer-events-none" />
-                </button>
+                  <ArrowUpIcon className="pointer-events-none size-4" />
+                </Button>
               ) : (
-                <button
+                <Button
                   type="button"
+                  variant="destructive"
+                  size="icon-sm"
                   onClick={onStop}
-                  className="h-8 w-8 rounded-full bg-destructive text-primary-foreground flex items-center justify-center hover:brightness-110 focus:outline-none shadow-sm"
+                  className="rounded-full"
                   aria-label="Stop"
                   title="Stop"
                 >
-                  <SquareIcon size={20} className="pointer-events-none" />
-                </button>
+                  <SquareIcon className="pointer-events-none size-4" />
+                </Button>
               )}
             </div>
           </PromptInputActions>

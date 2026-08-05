@@ -49,8 +49,6 @@ const defaultStoreData = (): StoreData =>
     codeTabs: [],
     activeCodeTabId: null,
     codeLayoutMode: 'tile',
-    codeDeckBackground: null,
-    glassTone: 'dark',
     activeTicketId: null,
     enabledExtensions: {},
   }) as unknown as StoreData;

@@ -1,17 +1,16 @@
-import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
 import { memo, useCallback, useEffect, useState } from 'react';
 
+import { Alert, AlertDescription } from '@/renderer/ds/ui/alert';
+import { Button } from '@/renderer/ds/ui/button';
+import { Card, CardContent, CardFooter } from '@/renderer/ds/ui/card';
+import { Field, FieldContent, FieldDescription, FieldLabel } from '@/renderer/ds/ui/field';
+import { Skeleton } from '@/renderer/ds/ui/skeleton';
+import { Spinner } from '@/renderer/ds/ui/spinner';
 import {
-  Button,
-  Card,
-  FormField,
-  FormSkeleton,
-  MessageBar,
-  MessageBarBody,
-  SectionLabel,
-  Spinner,
-} from '@/renderer/ds';
-import { RemoteBackendCard } from '@/renderer/features/SettingsModal/RemoteBackendCard';
+  settingsCardContentClassName,
+  SettingsPane,
+  SettingsSection,
+} from '@/renderer/features/SettingsModal/SettingsLayout';
 import { emitter, ipc, isCloudLinked, isElectron } from '@/renderer/services/ipc';
 import type { PlatformCredentials } from '@/shared/types';
 
@@ -20,59 +19,7 @@ type AuthFlowState =
   | { step: 'pending'; userCode: string; verificationUri: string; message: string }
   | { step: 'error'; error: string };
 
-const useStyles = makeStyles({
-  root: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalM },
-  text: {
-    fontSize: tokens.fontSizeBase300,
-    color: tokens.colorNeutralForeground2,
-    '@media (min-width: 640px)': { fontSize: tokens.fontSizeBase200 },
-  },
-  textCapitalize: {
-    fontSize: tokens.fontSizeBase300,
-    color: tokens.colorNeutralForeground2,
-    textTransform: 'capitalize',
-    '@media (min-width: 640px)': { fontSize: tokens.fontSizeBase200 },
-  },
-  flexEnd: { display: 'flex', justifyContent: 'flex-end' },
-  codeBox: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalM,
-    padding: tokens.spacingVerticalM,
-    backgroundColor: tokens.colorNeutralBackground1,
-    borderRadius: tokens.borderRadiusLarge,
-    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
-  },
-  codeText: {
-    fontSize: tokens.fontSizeBase500,
-    fontFamily: 'monospace',
-    fontWeight: tokens.fontWeightBold,
-    letterSpacing: '0.1em',
-    color: tokens.colorNeutralForeground1,
-    flex: '1 1 0',
-    textAlign: 'center',
-  },
-  link: {
-    fontSize: tokens.fontSizeBase300,
-    color: tokens.colorBrandForeground1,
-    textDecorationLine: 'underline',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    '@media (min-width: 640px)': { fontSize: tokens.fontSizeBase200 },
-  },
-  waitingRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-    fontSize: tokens.fontSizeBase300,
-    color: tokens.colorNeutralForeground2,
-    '@media (min-width: 640px)': { fontSize: tokens.fontSizeBase200 },
-  },
-});
-
 export const SettingsModalAccountTab = memo(() => {
-  const styles = useStyles();
   const [isEnterprise, setIsEnterprise] = useState<boolean | null>(null);
   const [auth, setAuth] = useState<PlatformCredentials | null>(null);
   const [flow, setFlow] = useState<AuthFlowState>({ step: 'idle' });
@@ -133,113 +80,155 @@ export const SettingsModalAccountTab = memo(() => {
   }, [flow]);
 
   if (isEnterprise === null) {
-    return <FormSkeleton fields={3} />;
+    return (
+      <div className="flex w-full flex-col gap-5 p-4">
+        {Array.from({ length: 3 }, (_, index) => (
+          <div key={index} className="flex flex-col gap-2">
+            <Skeleton className={`h-3 ${['w-15', 'w-18', 'w-20'][index % 3]}`} />
+            <Skeleton className="h-8 w-full" />
+          </div>
+        ))}
+      </div>
+    );
   }
-
-  // Cloud link moved here from General: it's identity, not app behavior.
-  // MachinesCard lives in Sandboxes → Health (sandboxes-tab-plan.md Decision 6).
-  const cloudCards = <>{isElectron && <RemoteBackendCard />}</>;
 
   if (!isEnterprise) {
     return (
-      <div className={styles.root}>
-        {cloudCards}
-        {!isElectron && !isCloudLinked && (
-          <Card>
-            <p className={styles.text}>Your account is managed by this deployment.</p>
-          </Card>
-        )}
-      </div>
+      <SettingsPane>
+        <SettingsSection title="Profile">
+          {isElectron || (!isElectron && !isCloudLinked) ? (
+            <Card>
+              <CardContent>
+                <Field>
+                  <FieldContent>
+                    <FieldLabel>{isElectron ? 'Local profile' : 'Managed profile'}</FieldLabel>
+                    <FieldDescription>
+                      {isElectron
+                        ? 'No account is required. Your projects and settings are stored on this computer.'
+                        : 'Your account is managed by this deployment.'}
+                    </FieldDescription>
+                  </FieldContent>
+                </Field>
+              </CardContent>
+            </Card>
+          ) : null}
+        </SettingsSection>
+      </SettingsPane>
     );
   }
 
   if (auth) {
     return (
-      <div className={styles.root}>
-        {cloudCards}
-        <SectionLabel>Account</SectionLabel>
-        <Card>
-          <FormField label="Signed in as">
-            <span className={styles.text}>{auth.userEmail ?? 'Unknown'}</span>
-          </FormField>
-          {auth.userName && (
-            <FormField label="Name">
-              <span className={styles.text}>{auth.userName}</span>
-            </FormField>
-          )}
-          {auth.userRole && (
-            <FormField label="Role">
-              <span className={styles.textCapitalize}>{auth.userRole}</span>
-            </FormField>
-          )}
-          {auth.domains && auth.domains.length > 0 && (
-            <FormField label="Domains">
-              <span className={styles.text}>{auth.domains.map((d) => d.name).join(', ')}</span>
-            </FormField>
-          )}
-        </Card>
-        <div className={styles.flexEnd}>
-          <Button size="sm" variant="destructive" onClick={handleSignOut}>
-            Sign out
-          </Button>
-        </div>
-      </div>
+      <SettingsPane>
+        <SettingsSection title="Profile">
+          <Card>
+            <CardContent className={settingsCardContentClassName}>
+              <Field orientation="horizontal" className="justify-between gap-4">
+                <div className="min-w-0">
+                  <FieldLabel>Signed in as</FieldLabel>
+                </div>
+                <span className="text-sm text-muted-foreground sm:text-xs">{auth.userEmail ?? 'Unknown'}</span>
+              </Field>
+              {auth.userName && (
+                <Field orientation="horizontal" className="justify-between gap-4">
+                  <div className="min-w-0">
+                    <FieldLabel>Name</FieldLabel>
+                  </div>
+                  <span className="text-sm text-muted-foreground sm:text-xs">{auth.userName}</span>
+                </Field>
+              )}
+              {auth.userRole && (
+                <Field orientation="horizontal" className="justify-between gap-4">
+                  <div className="min-w-0">
+                    <FieldLabel>Role</FieldLabel>
+                  </div>
+                  <span className="text-sm text-muted-foreground capitalize sm:text-xs">{auth.userRole}</span>
+                </Field>
+              )}
+              {auth.domains && auth.domains.length > 0 && (
+                <Field orientation="horizontal" className="justify-between gap-4">
+                  <div className="min-w-0">
+                    <FieldLabel>Domains</FieldLabel>
+                  </div>
+                  <span className="text-sm text-muted-foreground sm:text-xs">
+                    {auth.domains.map((d) => d.name).join(', ')}
+                  </span>
+                </Field>
+              )}
+            </CardContent>
+            <CardFooter className="justify-end">
+              <Button size="sm" variant="outline" onClick={handleSignOut}>
+                Sign out
+              </Button>
+            </CardFooter>
+          </Card>
+        </SettingsSection>
+      </SettingsPane>
     );
   }
 
   return (
-    <div className={styles.root}>
-      {cloudCards}
-      <SectionLabel>Account</SectionLabel>
-      <Card>
-        {flow.step === 'idle' && (
-          <>
-            <p className={styles.text}>
-              Sign in with your institutional account to access managed sandboxes and enterprise features.
-            </p>
-            <div className={styles.flexEnd}>
-              <Button size="sm" variant="primary" onClick={handleSignIn}>
-                Sign in
-              </Button>
-            </div>
-          </>
-        )}
+    <SettingsPane>
+      <SettingsSection title="Profile">
+        <Card>
+          <CardContent className={settingsCardContentClassName}>
+            {flow.step === 'idle' && (
+              <>
+                <p className="text-sm text-muted-foreground sm:text-xs">
+                  Sign in with your institutional account to access managed sandboxes and enterprise features.
+                </p>
+                <div className="flex justify-end">
+                  <Button size="sm" variant="default" onClick={handleSignIn}>
+                    Sign in
+                  </Button>
+                </div>
+              </>
+            )}
 
-        {flow.step === 'pending' && (
-          <>
-            <p className={styles.text}>
-              {flow.message || 'Enter the code below at the verification URL to complete sign-in.'}
-            </p>
-            <div className={styles.codeBox}>
-              <code className={styles.codeText}>{flow.userCode}</code>
-              <Button size="sm" variant="ghost" onClick={handleCopyCode}>
-                {copied ? 'Copied' : 'Copy'}
-              </Button>
-            </div>
-            <a href={flow.verificationUri} target="_blank" rel="noopener noreferrer" className={styles.link}>
-              {flow.verificationUri}
-            </a>
-            <div className={styles.waitingRow}>
-              <Spinner />
-              <span>Waiting for authentication...</span>
-            </div>
-          </>
-        )}
+            {flow.step === 'pending' && (
+              <>
+                <p className="text-sm text-muted-foreground sm:text-xs">
+                  {flow.message || 'Enter the code below at the verification URL to complete sign-in.'}
+                </p>
+                <div className="flex items-center gap-4 p-4 bg-background rounded-xl border border-border">
+                  <code className="text-xl font-mono font-bold tracking-widest text-foreground flex-1 text-center">
+                    {flow.userCode}
+                  </code>
+                  <Button size="sm" variant="ghost" onClick={handleCopyCode}>
+                    {copied ? 'Copied' : 'Copy'}
+                  </Button>
+                </div>
+                <a
+                  href={flow.verificationUri}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-sm text-primary underline overflow-hidden text-ellipsis whitespace-nowrap sm:text-xs"
+                >
+                  {flow.verificationUri}
+                </a>
+                <div className="flex items-center gap-2 text-sm text-muted-foreground sm:text-xs">
+                  <Spinner />
+                  <span>Waiting for authentication...</span>
+                </div>
+              </>
+            )}
 
-        {flow.step === 'error' && (
-          <>
-            <MessageBar intent="error">
-              <MessageBarBody>{flow.error}</MessageBarBody>
-            </MessageBar>
-            <div className={styles.flexEnd}>
-              <Button size="sm" variant="primary" onClick={handleSignIn}>
-                Try again
-              </Button>
-            </div>
-          </>
-        )}
-      </Card>
-    </div>
+            {flow.step === 'error' && (
+              <>
+                <Alert variant="destructive">
+                  <AlertDescription>{flow.error}</AlertDescription>
+                </Alert>
+                <div className="flex justify-end">
+                  <Button size="sm" variant="default" onClick={handleSignIn}>
+                    Try again
+                  </Button>
+                </div>
+              </>
+            )}
+          </CardContent>
+        </Card>
+      </SettingsSection>
+    </SettingsPane>
   );
 });
 SettingsModalAccountTab.displayName = 'SettingsModalAccountTab';

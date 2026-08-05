@@ -1,4 +1,3 @@
-import { makeStyles } from '@fluentui/react-components';
 import { debounce } from 'es-toolkit/compat';
 import { memo, useCallback, useEffect, useRef } from 'react';
 import { assert } from 'tsafe';
@@ -6,10 +5,6 @@ import { assert } from 'tsafe';
 import type { TerminalState } from '@/renderer/features/Console/state';
 import { useXTermTheme } from '@/renderer/features/Console/use-xterm-theme';
 import { emitter } from '@/renderer/services/ipc';
-
-const useStyles = makeStyles({
-  root: { width: '100%', height: '100%' },
-});
 
 export const ConsoleXterm = memo(({ terminal, isActive }: { terminal: TerminalState; isActive: boolean }) => {
   const theme = useXTermTheme();
@@ -70,8 +65,6 @@ export const ConsoleXterm = memo(({ terminal, isActive }: { terminal: TerminalSt
   const handlePointerDownCapture = useCallback(() => {
     terminal.xterm.focus();
   }, [terminal.xterm]);
-
-  const styles = useStyles();
-  return <div ref={ref} className={styles.root} onPointerDownCapture={handlePointerDownCapture} />;
+  return <div ref={ref} className="w-full h-full" onPointerDownCapture={handlePointerDownCapture} />;
 });
 ConsoleXterm.displayName = 'ConsoleXterm';

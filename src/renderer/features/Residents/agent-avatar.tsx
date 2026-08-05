@@ -1,27 +1,12 @@
-import type { PresenceBadgeStatus } from '@fluentui/react-components';
-import { Avatar, AvatarGroup, AvatarGroupItem, makeStyles } from '@fluentui/react-components';
+import { CheckIcon, LoaderCircleIcon, MinusIcon } from 'lucide-react';
 import { memo } from 'react';
 
+import { Avatar, AvatarFallback } from '@/renderer/ds/ui/avatar';
 import type { ResidentAgent, ResidentAgentRuntime } from '@/shared/types';
-
-const useStyles = makeStyles({
-  /** Off-screen but announced — the presence dot's text equivalent. */
-  srOnly: {
-    position: 'absolute',
-    width: '1px',
-    height: '1px',
-    padding: 0,
-    margin: '-1px',
-    overflow: 'hidden',
-    clipPath: 'inset(50%)',
-    whiteSpace: 'nowrap',
-    border: 'none',
-  },
-});
 
 /** The presence values agent surfaces can show — the product has no "away"
  *  or "out of office" for agents, so the type pins the three we derive. */
-export type AgentPresence = Extract<PresenceBadgeStatus, 'available' | 'busy' | 'offline'>;
+export type AgentPresence = 'available' | 'busy' | 'offline';
 
 /**
  * Live presence for an agent — the ONE mapping from runtime state to badge,
@@ -65,8 +50,7 @@ export const participantPresence = (
   return agent ? presenceStatus(statuses[participantId]?.state, agent.enabled) : undefined;
 };
 
-/** Spoken form of each presence — Fluent's own PresenceBadge wording, so the
- *  text equivalent matches what the glyph means. */
+/** Spoken form of each presence. */
 export const PRESENCE_LABEL: Record<AgentPresence, string> = {
   available: 'available',
   busy: 'busy',
@@ -75,27 +59,33 @@ export const PRESENCE_LABEL: Record<AgentPresence, string> = {
 
 export type AvatarSize = 20 | 24 | 28 | 32 | 36 | 40 | 48;
 
-/**
- * The badge slot shared by every agent avatar. Below 28px Fluent auto-drops
- * the badge to `tiny`, whose 6px box crops the glyph down to a bare dot — pin
- * `extra-small`, whose 10px box shows the whole shape, so small rows still
- * read a status rather than just a colour. (Both sizes ship the SAME 10px SVG;
- * only the badge box and its cutout differ.)
- *
- * An omitted `size` also pins, rather than falling through to Fluent: the
- * resolved size then comes from an ambient `AvatarContextProvider` that this
- * helper cannot see, and every context in the app is a compact slot
- * (`InteractionTag` publishes 16/20/28, all of which want `extra-small` or
- * smaller). Guessing `extra-small` there can only ever raise a 6px badge, never
- * shrink a correct one.
- */
-const presenceBadge = (presence: AgentPresence, size: AvatarSize | undefined) => ({
-  status: presence,
-  ...(size === undefined || size < 28 ? { size: 'extra-small' as const } : {}),
-});
+const initials = (name: string) =>
+  name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join('')
+    .toUpperCase();
+
+const avatarHue = (key: string) => [...key].reduce((sum, char) => sum + char.charCodeAt(0), 0) % 360;
+
+export const AgentPresenceBadge = ({ presence }: { presence: AgentPresence }) => {
+  const Icon = presence === 'available' ? CheckIcon : presence === 'busy' ? LoaderCircleIcon : MinusIcon;
+  const color = presence === 'available' ? 'bg-success' : presence === 'busy' ? 'bg-warning' : 'bg-muted-foreground';
+  return (
+    <span
+      data-slot="presence-badge"
+      aria-label={presence}
+      className={`inline-flex size-2.5 items-center justify-center rounded-full text-primary-foreground ${color}`}
+    >
+      <Icon className="size-2" aria-hidden="true" />
+    </span>
+  );
+};
 
 /**
- * The Agents surface's one identity mark: colorful Avatar keyed by the STABLE
+ * The Agents surface's one identity mark: colorful avatar keyed by the stable
  * id (a rename keeps the color), presence composed in where live state
  * matters.
  *
@@ -108,10 +98,6 @@ const presenceBadge = (presence: AgentPresence, size: AvatarSize | undefined) =>
  * users get the same information from the badge glyph, which differs in SHAPE
  * per status at every size — never colour alone.
  *
- * `size` is deliberately un-defaulted: Fluent resolves `props.size ??
- * avatarContextSize ?? 32`, so a hardcoded default would beat the
- * `AvatarContextProvider` that slots like `InteractionTagPrimary` publish and
- * blow the avatar out of its container.
  */
 export const AgentAvatar = memo(function AgentAvatar({
   name,
@@ -123,21 +109,37 @@ export const AgentAvatar = memo(function AgentAvatar({
   /** Stable color key — agent id, or the `user` participant. */
   colorId: string;
   presence?: AgentPresence;
-  /** Omit to inherit an ambient Fluent avatar context (slot media, etc). */
+  /** Omit to use the default avatar size. */
   size?: AvatarSize;
 }): React.JSX.Element {
-  const styles = useStyles();
+  const sizeClass = {
+    20: 'size-5',
+    24: 'size-6',
+    28: 'size-7',
+    32: 'size-8',
+    36: 'size-9',
+    40: 'size-10',
+    48: 'size-12',
+  }[size ?? 32];
+
   return (
     <>
-      <Avatar
-        color="colorful"
-        name={name}
-        idForColor={colorId}
-        aria-hidden="true"
-        {...(size !== undefined ? { size } : {})}
-        {...(presence ? { badge: presenceBadge(presence, size) } : {})}
-      />
-      {presence ? <span className={styles.srOnly}>{PRESENCE_LABEL[presence]}</span> : null}
+      <span data-slot="avatar-shell" className="relative inline-flex shrink-0" aria-hidden="true">
+        <Avatar className={sizeClass}>
+          <AvatarFallback
+            className="text-primary-foreground"
+            style={{ backgroundColor: `hsl(${avatarHue(colorId)} 65% 45%)` }}
+          >
+            {initials(name)}
+          </AvatarFallback>
+        </Avatar>
+        {presence && (
+          <span className="absolute -right-0.5 -bottom-0.5 rounded-full ring-2 ring-background">
+            <AgentPresenceBadge presence={presence} />
+          </span>
+        )}
+      </span>
+      {presence ? <span className="sr-only">{PRESENCE_LABEL[presence]}</span> : null}
     </>
   );
 });
@@ -157,22 +159,15 @@ export const AgentAvatarGroup = memo(function AgentAvatarGroup({
   avatars: ReadonlyArray<{ name: string; colorId: string; presence?: AgentPresence }>;
   size?: AvatarSize;
 }): React.JSX.Element {
-  const styles = useStyles();
   const spoken = avatars.flatMap((a) => (a.presence ? [`${a.name} ${PRESENCE_LABEL[a.presence]}`] : []));
   return (
     <>
-      <AvatarGroup layout="spread" size={size} aria-hidden="true">
+      <div className="flex gap-1" aria-hidden="true">
         {avatars.map((a) => (
-          <AvatarGroupItem
-            key={a.colorId}
-            color="colorful"
-            name={a.name}
-            idForColor={a.colorId}
-            {...(a.presence ? { badge: presenceBadge(a.presence, size) } : {})}
-          />
+          <AgentAvatar key={a.colorId} name={a.name} colorId={a.colorId} presence={a.presence} size={size} />
         ))}
-      </AvatarGroup>
-      {spoken.length > 0 ? <span className={styles.srOnly}>{spoken.join(', ')}</span> : null}
+      </div>
+      {spoken.length > 0 ? <span className="sr-only">{spoken.join(', ')}</span> : null}
     </>
   );
 });

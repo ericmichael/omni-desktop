@@ -581,7 +581,7 @@ async function handleVoiceTools(toolName: string, toolArgs: Record<string, unkno
 /**
  * Workspace-introspection + column-lifecycle tools (superuser scope only).
  * `list_workspace` is the caller's map of the deck; `open_column` /
- * `close_column` manage columns via `codeApi`.
+ * `archive_session` manages session removal via `codeApi`.
  */
 async function handleWorkspaceTools(
   toolName: string,
@@ -642,14 +642,14 @@ async function handleWorkspaceTools(
         return err(String(e));
       }
     }
-    case 'close_column': {
+    case 'archive_session': {
       const tabId = String(toolArgs.tab_id ?? '');
       if (!tabId) {
         return err('Missing tab_id');
       }
       try {
-        await codeApi.removeTab(tabId);
-        return ok({ closed: true });
+        await codeApi.archiveTab(tabId);
+        return ok({ archived: true });
       } catch (e) {
         return err(String(e));
       }

@@ -116,7 +116,9 @@ describe('WorkspaceFileTree', () => {
     const source = treeItem('source');
     await act(async () => source.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })));
     expect(registry.subscribed).toEqual(['.', 'source']);
-    expect(container.querySelector('[role="status"]')?.textContent).toContain('Loading source');
+    expect(
+      [...container.querySelectorAll('[role="status"]')].some((node) => node.textContent?.includes('Loading source'))
+    ).toBe(true);
 
     await act(async () =>
       registry.callbacks.get('source')?.onRescan?.(listing('source', [file('source/index.ts')]), 'initial')

@@ -1,20 +1,21 @@
-import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
-import { Add20Regular, Delete20Regular } from '@fluentui/react-icons';
+import { Plus, Trash2 } from 'lucide-react';
 import type { ChangeEvent } from 'react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 
+import { SaveBar } from '@/renderer/ds/SaveBar';
+import { Badge } from '@/renderer/ds/ui/badge';
+import { Button } from '@/renderer/ds/ui/button';
+import { Card, CardContent } from '@/renderer/ds/ui/card';
+import { Checkbox } from '@/renderer/ds/ui/checkbox';
+import { Field, FieldLabel } from '@/renderer/ds/ui/field';
+import { Input } from '@/renderer/ds/ui/input';
+import { Skeleton } from '@/renderer/ds/ui/skeleton';
+import { Switch } from '@/renderer/ds/ui/switch';
 import {
-  Button,
-  Card,
-  Checkbox,
-  FormField,
-  FormSkeleton,
-  IconButton,
-  Input,
-  SaveBar,
-  SectionLabel,
-  Switch,
-} from '@/renderer/ds';
+  settingsCardContentClassName,
+  SettingsPane,
+  SettingsSection,
+} from '@/renderer/features/SettingsModal/SettingsLayout';
 import { agentConfigApi } from '@/renderer/services/config';
 import type { NetworkConfig } from '@/shared/types';
 
@@ -103,75 +104,7 @@ function buildSavePayload(config: NetworkConfig): NetworkConfig {
   return { ...config, allowlist: mergedAllowlist };
 }
 
-const useStyles = makeStyles({
-  root: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalM },
-  cardGap4: { gap: tokens.spacingVerticalL },
-  description: {
-    fontSize: tokens.fontSizeBase300,
-    color: tokens.colorNeutralForeground2,
-    '@media (min-width: 640px)': { fontSize: tokens.fontSizeBase200 },
-  },
-  colGap2: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalS },
-  colGap1: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalXS },
-  subLabel: {
-    fontSize: tokens.fontSizeBase300,
-    fontWeight: tokens.fontWeightMedium,
-    color: tokens.colorNeutralForeground3,
-    '@media (min-width: 640px)': { fontSize: tokens.fontSizeBase200 },
-  },
-  rowGap2: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS },
-  flex1: { flex: '1 1 0' },
-  hostChip: {
-    height: '36px',
-    paddingLeft: tokens.spacingHorizontalM,
-    paddingRight: tokens.spacingHorizontalM,
-    fontSize: tokens.fontSizeBase300,
-    borderRadius: tokens.borderRadiusLarge,
-    backgroundColor: tokens.colorNeutralBackground2,
-    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke2),
-    color: tokens.colorNeutralForeground1,
-    fontFamily: 'monospace',
-    flex: '1 1 0',
-    display: 'flex',
-    alignItems: 'center',
-    '@media (min-width: 640px)': {
-      height: '32px',
-      paddingLeft: tokens.spacingHorizontalS,
-      paddingRight: tokens.spacingHorizontalS,
-      fontSize: tokens.fontSizeBase200,
-    },
-  },
-  effectiveMono: {
-    fontSize: tokens.fontSizeBase300,
-    color: tokens.colorNeutralForeground2,
-    fontFamily: 'monospace',
-    '@media (min-width: 640px)': { fontSize: tokens.fontSizeBase200 },
-  },
-  iconMr: { marginRight: tokens.spacingHorizontalXS },
-  presetLabel: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '10px',
-    cursor: 'pointer',
-    paddingTop: '2px',
-    paddingBottom: '2px',
-  },
-  presetCol: { display: 'flex', flexDirection: 'column' },
-  presetName: {
-    fontSize: tokens.fontSizeBase300,
-    fontWeight: tokens.fontWeightMedium,
-    color: tokens.colorNeutralForeground1,
-    '@media (min-width: 640px)': { fontSize: tokens.fontSizeBase200 },
-  },
-  presetDesc: {
-    fontSize: tokens.fontSizeBase300,
-    color: tokens.colorNeutralForeground2,
-    '@media (min-width: 640px)': { fontSize: tokens.fontSizeBase200 },
-  },
-});
-
 export const SettingsModalNetworkTab = memo(() => {
-  const styles = useStyles();
   const [config, setConfig] = useState<NetworkConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [dirty, setDirty] = useState(false);
@@ -330,121 +263,137 @@ export const SettingsModalNetworkTab = memo(() => {
   }, [config]);
 
   if (loading || !config) {
-    return <FormSkeleton fields={4} />;
+    return (
+      <div className="flex w-full flex-col gap-5 p-4">
+        {Array.from({ length: 4 }, (_, index) => (
+          <div key={index} className="flex flex-col gap-2">
+            <Skeleton className={`h-3 ${['w-15', 'w-18', 'w-20'][index % 3]}`} />
+            <Skeleton className="h-8 w-full" />
+          </div>
+        ))}
+      </div>
+    );
   }
 
   return (
-    <div className={styles.root}>
-      <SectionLabel>Network Isolation</SectionLabel>
-
-      <Card className={styles.cardGap4}>
-        <FormField label="Enable network isolation">
-          <Switch checked={config.enabled} onCheckedChange={onToggleEnabled} />
-        </FormField>
-
-        <p className={styles.description}>
-          When enabled, outbound network traffic is restricted to the hosts listed below in both chat and sandbox modes.
-          All other traffic is blocked. Hosts can be domain names, IP addresses, or CIDR ranges.
-        </p>
-
-        {config.enabled && (
-          <>
-            <div className={styles.colGap2}>
-              <span className={styles.subLabel}>Presets</span>
-              <div className={styles.colGap2}>
-                {PRESETS.map((preset) => (
-                  <PresetRow
-                    key={preset.id}
-                    preset={preset}
-                    checked={config.presets.includes(preset.id)}
-                    onToggle={togglePreset}
-                  />
-                ))}
+    <SettingsPane>
+      <SettingsSection title="Network isolation">
+        <Card>
+          <CardContent className={settingsCardContentClassName}>
+            <Field orientation="horizontal" className="justify-between gap-4">
+              <div className="min-w-0">
+                <FieldLabel>Enable network isolation</FieldLabel>
               </div>
-            </div>
+              <Switch checked={config.enabled} onCheckedChange={onToggleEnabled} />
+            </Field>
 
-            <div className={styles.colGap2}>
-              <span className={styles.subLabel}>Additional allowed hosts</span>
-              <div className={styles.colGap1}>
-                {config.allowlist.map((host, i) => (
-                  <HostRow key={i} host={host} index={i} onRemove={removeHost} />
-                ))}
-              </div>
-              <div className={styles.rowGap2}>
-                <Input
-                  type="text"
-                  value={newHost}
-                  onChange={onChangeNewHost}
-                  onKeyDown={onNewHostKeyDown}
-                  placeholder="example.openai.azure.com or 10.0.0.0/16"
-                  mono
-                  className={styles.flex1}
-                />
-                <Button size="sm" variant="ghost" onClick={addHost} isDisabled={!newHost.trim()}>
-                  <Add20Regular className={styles.iconMr} />
-                  Add host
-                </Button>
-              </div>
-            </div>
+            <p className="text-sm text-muted-foreground sm:text-xs">
+              When enabled, outbound network traffic is restricted to the hosts listed below in both chat and sandbox
+              modes. All other traffic is blocked. Hosts can be domain names, IP addresses, or CIDR ranges.
+            </p>
 
-            <div className={styles.colGap2}>
-              <span className={styles.subLabel}>Denied hosts</span>
-              <p className={styles.description}>
-                Explicitly blocked hosts. Denied hosts take precedence over allowed hosts.
-              </p>
-              <div className={styles.colGap1}>
-                {config.denylist.map((host, i) => (
-                  <HostRow key={i} host={host} index={i} onRemove={removeDenyHost} />
-                ))}
-              </div>
-              <div className={styles.rowGap2}>
-                <Input
-                  type="text"
-                  value={newDenyHost}
-                  onChange={onChangeNewDenyHost}
-                  onKeyDown={onNewDenyHostKeyDown}
-                  placeholder="blocked.example.com"
-                  mono
-                  className={styles.flex1}
-                />
-                <Button size="sm" variant="ghost" onClick={addDenyHost} isDisabled={!newDenyHost.trim()}>
-                  <Add20Regular className={styles.iconMr} />
-                  Add denied host
-                </Button>
-              </div>
-            </div>
+            {config.enabled && (
+              <>
+                <div className="flex flex-col gap-2">
+                  <span className="text-sm font-medium text-muted-foreground sm:text-xs">Presets</span>
+                  <div className="flex flex-col gap-2">
+                    {PRESETS.map((preset) => (
+                      <PresetRow
+                        key={preset.id}
+                        preset={preset}
+                        checked={config.presets.includes(preset.id)}
+                        onToggle={togglePreset}
+                      />
+                    ))}
+                  </div>
+                </div>
 
-            <FormField label="Allow private IP ranges (10.x, 172.16.x, 192.168.x)">
-              <Switch checked={config.allow_private_ips} onCheckedChange={onToggleAllowPrivateIps} />
-            </FormField>
+                <div className="flex flex-col gap-2">
+                  <span className="text-sm font-medium text-muted-foreground sm:text-xs">Additional allowed hosts</span>
+                  <div className="flex flex-col gap-1">
+                    {config.allowlist.map((host, i) => (
+                      <HostRow key={i} host={host} index={i} onRemove={removeHost} />
+                    ))}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="text"
+                      value={newHost}
+                      onChange={onChangeNewHost}
+                      onKeyDown={onNewHostKeyDown}
+                      placeholder="example.openai.azure.com or 10.0.0.0/16"
+                      className="flex-1"
+                    />
 
-            {effectiveHosts.length > 0 && (
-              <div className={styles.colGap1}>
-                <span className={styles.subLabel}>Effective allowlist</span>
-                <p className={styles.effectiveMono}>{effectiveHosts.join(', ')}</p>
-              </div>
+                    <Button size="sm" variant="ghost" onClick={addHost} disabled={!newHost.trim()}>
+                      <Plus className="mr-1" />
+                      Add host
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-2">
+                  <span className="text-sm font-medium text-muted-foreground sm:text-xs">Denied hosts</span>
+                  <p className="text-sm text-muted-foreground sm:text-xs">
+                    Explicitly blocked hosts. Denied hosts take precedence over allowed hosts.
+                  </p>
+                  <div className="flex flex-col gap-1">
+                    {config.denylist.map((host, i) => (
+                      <HostRow key={i} host={host} index={i} onRemove={removeDenyHost} />
+                    ))}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="text"
+                      value={newDenyHost}
+                      onChange={onChangeNewDenyHost}
+                      onKeyDown={onNewDenyHostKeyDown}
+                      placeholder="blocked.example.com"
+                      className="flex-1"
+                    />
+
+                    <Button size="sm" variant="ghost" onClick={addDenyHost} disabled={!newDenyHost.trim()}>
+                      <Plus className="mr-1" />
+                      Add denied host
+                    </Button>
+                  </div>
+                </div>
+
+                <Field orientation="horizontal" className="justify-between gap-4">
+                  <div className="min-w-0">
+                    <FieldLabel>Allow private IP ranges (10.x, 172.16.x, 192.168.x)</FieldLabel>
+                  </div>
+                  <Switch checked={config.allow_private_ips} onCheckedChange={onToggleAllowPrivateIps} />
+                </Field>
+
+                {effectiveHosts.length > 0 && (
+                  <div className="flex flex-col gap-1">
+                    <span className="text-sm font-medium text-muted-foreground sm:text-xs">Effective allowlist</span>
+                    <p className="text-sm text-muted-foreground font-mono sm:text-xs">{effectiveHosts.join(', ')}</p>
+                  </div>
+                )}
+              </>
             )}
-          </>
-        )}
-      </Card>
+          </CardContent>
+        </Card>
+      </SettingsSection>
 
       <SaveBar onSave={save} dirty={dirty} saving={saving} error={error} />
-    </div>
+    </SettingsPane>
   );
 });
 SettingsModalNetworkTab.displayName = 'SettingsModalNetworkTab';
 
 const PresetRow = memo(
   ({ preset, checked, onToggle }: { preset: Preset; checked: boolean; onToggle: (id: string) => void }) => {
-    const styles = useStyles();
     const onChange = useCallback(() => onToggle(preset.id), [preset.id, onToggle]);
 
     return (
-      <label className={styles.presetLabel}>
+      <label className="flex items-center gap-2.5 cursor-pointer pt-0.5 pb-0.5">
         <Checkbox checked={checked} onCheckedChange={onChange} />
-        <div className={styles.presetCol}>
-          <span className={styles.presetName}>{preset.label}</span>
-          <span className={styles.presetDesc}>{preset.description}</span>
+        <div className="flex flex-col">
+          <span className="text-sm font-medium text-foreground sm:text-xs">{preset.label}</span>
+          <span className="text-sm text-muted-foreground sm:text-xs">{preset.description}</span>
         </div>
       </label>
     );
@@ -454,13 +403,19 @@ PresetRow.displayName = 'PresetRow';
 
 const HostRow = memo(
   ({ host, index, onRemove }: { host: string; index: number; onRemove: (index: number) => void }) => {
-    const styles = useStyles();
     const onClickRemove = useCallback(() => onRemove(index), [index, onRemove]);
 
     return (
-      <div className={styles.rowGap2}>
-        <span className={styles.hostChip}>{host}</span>
-        <IconButton aria-label="Remove host" icon={<Delete20Regular />} size="sm" onClick={onClickRemove} />
+      <div className="flex items-center gap-2">
+        <Badge
+          variant="outline"
+          className="h-9 min-w-0 flex-1 justify-start truncate rounded-md px-4 font-mono font-normal sm:h-8 sm:px-2"
+        >
+          {host}
+        </Badge>
+        <Button type="button" variant="ghost" size="icon-sm" aria-label="Remove host" onClick={onClickRemove}>
+          <Trash2 />
+        </Button>
       </div>
     );
   }

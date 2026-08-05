@@ -1,91 +1,12 @@
-import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
-import { Open16Regular } from '@fluentui/react-icons';
+import { ExternalLink } from 'lucide-react';
 import { memo, useCallback, useMemo } from 'react';
 
-import { AnimatedDialog, Button, DialogBody, DialogContent, DialogFooter, DialogHeader } from '@/renderer/ds';
+import { cn } from '@/renderer/ds/cn';
+import { Button } from '@/renderer/ds/ui/button';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/renderer/ds/ui/dialog';
 import { requestPreviewOpen } from '@/renderer/features/Tickets/preview-bridge';
 import { ticketApi } from '@/renderer/features/Tickets/state';
 import type { Project, ProjectSource, PullRequestLink, Ticket } from '@/shared/types';
-
-const useStyles = makeStyles({
-  body: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalM,
-  },
-  section: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalXS,
-  },
-  sectionTitle: {
-    fontSize: tokens.fontSizeBase200,
-    fontWeight: tokens.fontWeightSemibold,
-    color: tokens.colorNeutralForeground3,
-    textTransform: 'uppercase',
-    letterSpacing: '0.04em',
-  },
-  panel: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalS,
-    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
-    borderRadius: tokens.borderRadiusMedium,
-    backgroundColor: tokens.colorNeutralBackground2,
-    padding: tokens.spacingVerticalM,
-  },
-  row: {
-    display: 'grid',
-    gridTemplateColumns: '96px minmax(0, 1fr)',
-    gap: tokens.spacingHorizontalM,
-    alignItems: 'baseline',
-  },
-  key: {
-    color: tokens.colorNeutralForeground3,
-    fontSize: tokens.fontSizeBase200,
-  },
-  value: {
-    minWidth: 0,
-    overflowWrap: 'anywhere',
-    color: tokens.colorNeutralForeground1,
-    fontSize: tokens.fontSizeBase300,
-  },
-  item: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: tokens.spacingHorizontalM,
-  },
-  itemText: {
-    minWidth: 0,
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '2px',
-  },
-  itemTitle: {
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    color: tokens.colorNeutralForeground1,
-    fontWeight: tokens.fontWeightSemibold,
-  },
-  itemMeta: {
-    color: tokens.colorNeutralForeground3,
-    fontSize: tokens.fontSizeBase200,
-  },
-  empty: {
-    color: tokens.colorNeutralForeground3,
-    fontSize: tokens.fontSizeBase200,
-  },
-  footer: {
-    display: 'flex',
-    justifyContent: 'space-between',
-  },
-  footerGroup: {
-    display: 'flex',
-    gap: tokens.spacingHorizontalS,
-  },
-});
 
 type SourceDetailDialogProps = {
   open: boolean;
@@ -102,7 +23,6 @@ const sourceLocation = (source: ProjectSource): string =>
 
 export const SourceDetailDialog = memo(
   ({ open, onClose, project, source, tickets, onEdit, onRemove }: SourceDetailDialogProps) => {
-    const styles = useStyles();
     const relatedTickets = useMemo(
       () =>
         tickets.filter(
@@ -129,39 +49,43 @@ export const SourceDetailDialog = memo(
     const handleOpenTicket = useCallback((ticketId: string) => ticketApi.goToTicket(ticketId), []);
 
     return (
-      <AnimatedDialog open={open} onClose={onClose}>
+      <Dialog open={open} onOpenChange={(nextOpen) => !nextOpen && onClose()}>
         <DialogContent className="sm:max-w-xl">
-          <DialogHeader>{source.mountName}</DialogHeader>
-          <DialogBody className={styles.body}>
-            <div className={styles.section}>
-              <span className={styles.sectionTitle}>Source</span>
-              <div className={styles.panel}>
-                <div className={styles.row}>
-                  <span className={styles.key}>Kind</span>
-                  <span className={styles.value}>{source.kind}</span>
+          <DialogHeader>
+            <DialogTitle>{source.mountName}</DialogTitle>
+          </DialogHeader>
+          <div className={cn('min-h-0 overflow-y-auto', 'flex flex-col gap-4')}>
+            <div className="flex flex-col gap-1">
+              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Source</span>
+              <div className="flex flex-col gap-2 border border-border rounded-lg bg-card p-4">
+                <div className="flex items-baseline gap-4">
+                  <span className="w-24 shrink-0 text-xs text-muted-foreground">Kind</span>
+                  <span className="min-w-0 flex-1 wrap-anywhere text-sm text-foreground">{source.kind}</span>
                 </div>
-                <div className={styles.row}>
-                  <span className={styles.key}>Location</span>
-                  <span className={styles.value}>{sourceLocation(source)}</span>
+                <div className="flex items-baseline gap-4">
+                  <span className="w-24 shrink-0 text-xs text-muted-foreground">Location</span>
+                  <span className="min-w-0 flex-1 wrap-anywhere text-sm text-foreground">{sourceLocation(source)}</span>
                 </div>
-                <div className={styles.row}>
-                  <span className={styles.key}>Mount</span>
-                  <span className={styles.value}>/workspace/{source.mountName}</span>
+                <div className="flex items-baseline gap-4">
+                  <span className="w-24 shrink-0 text-xs text-muted-foreground">Mount</span>
+                  <span className="min-w-0 flex-1 wrap-anywhere text-sm text-foreground">
+                    /workspace/{source.mountName}
+                  </span>
                 </div>
                 {source.kind === 'git-remote' && source.defaultBranch && (
-                  <div className={styles.row}>
-                    <span className={styles.key}>Branch</span>
-                    <span className={styles.value}>{source.defaultBranch}</span>
+                  <div className="flex items-baseline gap-4">
+                    <span className="w-24 shrink-0 text-xs text-muted-foreground">Branch</span>
+                    <span className="min-w-0 flex-1 wrap-anywhere text-sm text-foreground">{source.defaultBranch}</span>
                   </div>
                 )}
               </div>
             </div>
 
-            <div className={styles.section}>
-              <span className={styles.sectionTitle}>Pull Requests</span>
-              <div className={styles.panel}>
+            <div className="flex flex-col gap-1">
+              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Pull Requests</span>
+              <div className="flex flex-col gap-2 border border-border rounded-lg bg-card p-4">
                 {pullRequests.length === 0 ? (
-                  <span className={styles.empty}>No pull requests linked to this source yet.</span>
+                  <span className="text-muted-foreground text-xs">No pull requests linked to this source yet.</span>
                 ) : (
                   pullRequests.map((pr) => (
                     <PullRequestRow key={pr.url} pullRequest={pr} onOpen={handleOpenPullRequest} />
@@ -170,11 +94,11 @@ export const SourceDetailDialog = memo(
               </div>
             </div>
 
-            <div className={styles.section}>
-              <span className={styles.sectionTitle}>Linked tasks</span>
-              <div className={styles.panel}>
+            <div className="flex flex-col gap-1">
+              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Linked tasks</span>
+              <div className="flex flex-col gap-2 border border-border rounded-lg bg-card p-4">
                 {relatedTickets.length === 0 ? (
-                  <span className={styles.empty}>No tasks have linked PRs for this source.</span>
+                  <span className="text-muted-foreground text-xs">No tasks have linked PRs for this source.</span>
                 ) : (
                   relatedTickets.map((ticket) => (
                     <TicketRow key={ticket.id} ticket={ticket} onOpen={handleOpenTicket} />
@@ -182,12 +106,12 @@ export const SourceDetailDialog = memo(
                 )}
               </div>
             </div>
-          </DialogBody>
-          <DialogFooter className={styles.footer}>
+          </div>
+          <DialogFooter className="flex justify-between">
             <Button variant="ghost" onClick={onClose}>
               Close
             </Button>
-            <div className={styles.footerGroup}>
+            <div className="flex gap-2">
               <Button variant="ghost" onClick={onEdit}>
                 Edit
               </Button>
@@ -197,7 +121,7 @@ export const SourceDetailDialog = memo(
             </div>
           </DialogFooter>
         </DialogContent>
-      </AnimatedDialog>
+      </Dialog>
     );
   }
 );
@@ -205,20 +129,22 @@ SourceDetailDialog.displayName = 'SourceDetailDialog';
 
 const PullRequestRow = memo(
   ({ pullRequest, onOpen }: { pullRequest: PullRequestLink; onOpen: (url: string) => void }) => {
-    const styles = useStyles();
     const handleOpen = useCallback(() => onOpen(pullRequest.url), [onOpen, pullRequest.url]);
     return (
-      <div className={styles.item}>
-        <div className={styles.itemText}>
-          <span className={styles.itemTitle}>{pullRequest.title || `PR #${pullRequest.number}`}</span>
-          <span className={styles.itemMeta}>
+      <div className="flex items-center justify-between gap-4">
+        <div className="min-w-0 flex flex-col gap-0.5">
+          <span className="overflow-hidden text-ellipsis whitespace-nowrap text-foreground font-semibold">
+            {pullRequest.title || `PR #${pullRequest.number}`}
+          </span>
+          <span className="text-muted-foreground text-xs">
             PR #{pullRequest.number}
             {pullRequest.branch ? ` · ${pullRequest.branch}` : ''}
             {pullRequest.sessionId ? ` · session ${pullRequest.sessionId.slice(0, 8)}` : ''} · seen{' '}
             {new Date(pullRequest.lastSeenAt).toLocaleString()}
           </span>
         </div>
-        <Button size="sm" variant="ghost" leftIcon={<Open16Regular />} onClick={handleOpen}>
+        <Button size="sm" variant="ghost" onClick={handleOpen}>
+          <ExternalLink />
           Open
         </Button>
       </div>
@@ -228,13 +154,14 @@ const PullRequestRow = memo(
 PullRequestRow.displayName = 'PullRequestRow';
 
 const TicketRow = memo(({ ticket, onOpen }: { ticket: Ticket; onOpen: (ticketId: string) => void }) => {
-  const styles = useStyles();
   const handleOpen = useCallback(() => onOpen(ticket.id), [onOpen, ticket.id]);
   return (
-    <div className={styles.item}>
-      <div className={styles.itemText}>
-        <span className={styles.itemTitle}>{ticket.title}</span>
-        <span className={styles.itemMeta}>{ticket.phase || ticket.priority}</span>
+    <div className="flex items-center justify-between gap-4">
+      <div className="min-w-0 flex flex-col gap-0.5">
+        <span className="overflow-hidden text-ellipsis whitespace-nowrap text-foreground font-semibold">
+          {ticket.title}
+        </span>
+        <span className="text-muted-foreground text-xs">{ticket.phase || ticket.priority}</span>
       </div>
       <Button size="sm" variant="ghost" onClick={handleOpen}>
         Open

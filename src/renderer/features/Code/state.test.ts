@@ -159,7 +159,7 @@ describe('code tab sandbox profile resolution', () => {
   });
 });
 
-describe('chat columns and conversation archival', () => {
+describe('chat columns and conversation history', () => {
   beforeEach(() => {
     vi.resetModules();
     resetStore();
@@ -199,7 +199,7 @@ describe('chat columns and conversation archival', () => {
     expect(store.codeTabs.find((item) => item.id === 'routine-tab')).toMatchObject({ routineId: 'routine-1' });
   });
 
-  it('removeTab archives an activated chat column (transcript only) and deletes its snapshot', async () => {
+  it('archiveTab archives the transcript and removes its column snapshot', async () => {
     resetStore({
       codeTabs: [
         tab({ id: 'chat-tab', projectId: null, sessionId: 'sess-1', snapshotRef: 'snapshot-chat', activatedAt: 5 }),
@@ -208,24 +208,30 @@ describe('chat columns and conversation archival', () => {
     });
     const { codeApi } = await import('./state');
 
-    await codeApi.removeTab('chat-tab');
+    await codeApi.archiveTab('chat-tab', 'Plan my week');
 
     expect(store.codeTabs).toHaveLength(0);
-    // Close is terminal for the sandbox — chat and code alike. Only the
-    // transcript entry survives in Recent.
     expect(invoke).toHaveBeenCalledWith('snapshot:delete', 'snapshot-chat');
     expect(store.chatConversations[0]).toMatchObject({
       sessionId: 'sess-1',
       title: 'Plan my week',
       profileName: 'host',
+      archivedAt: expect.any(Number),
     });
   });
 
-  it('removeTab deletes the snapshot of an un-activated chat column and of project tabs', async () => {
+  it('removeTab only removes technical columns and does not create session history', async () => {
     resetStore({
       codeTabs: [
         tab({ id: 'fresh-chat', projectId: null, sessionId: 'sess-fresh', snapshotRef: 'snapshot-fresh' }),
-        tab({ id: 'proj-tab', projectId: 'p1', sessionId: 'sess-proj', snapshotRef: 'snapshot-proj' }),
+        tab({
+          id: 'proj-tab',
+          projectId: 'p1',
+          sessionId: 'sess-proj',
+          snapshotRef: 'snapshot-proj',
+          ticketId: 'ticket-1',
+          ticketTitle: 'Fix the sidebar',
+        }),
       ],
     });
     const { codeApi } = await import('./state');
@@ -235,7 +241,7 @@ describe('chat columns and conversation archival', () => {
 
     expect(invoke).toHaveBeenCalledWith('snapshot:delete', 'snapshot-fresh');
     expect(invoke).toHaveBeenCalledWith('snapshot:delete', 'snapshot-proj');
-    expect(store.chatConversations).toHaveLength(0);
+    expect(store.chatConversations).toEqual([]);
   });
 
   it('setTabActivated stamps once and never re-stamps', async () => {
@@ -273,7 +279,7 @@ describe('chat columns and conversation archival', () => {
     expect(store.activeCodeTabId).toBe('chat-tab');
   });
 
-  it('addTabForConversation rebuilds a column from an archived entry', async () => {
+  it('addTabForConversation rebuilds a column from retained history', async () => {
     resetStore();
     const { codeApi } = await import('./state');
 
@@ -282,24 +288,31 @@ describe('chat columns and conversation archival', () => {
       title: 'x',
       lastActiveAt: 1,
       profileName: 'devbox',
+      projectId: 'project-1',
+      ticketId: 'ticket-1',
+      ticketTitle: 'Fix the sidebar',
     });
 
     expect(opened).toMatchObject({
-      projectId: null,
+      projectId: 'project-1',
       sessionId: 'sess-1',
       profileName: 'devbox',
+      ticketId: 'ticket-1',
+      ticketTitle: 'Fix the sidebar',
     });
     expect(opened.activatedAt).toBeTypeOf('number');
   });
 
-  it('deleteConversation removes only the archived conversation entry', async () => {
-    resetStore({ chatConversations: [{ sessionId: 'sess-1', title: 'x', lastActiveAt: 1 }] });
+  it('archives and restores retained conversations', async () => {
+    const conversation = { sessionId: 'sess-1', title: 'x', lastActiveAt: 1 };
+    resetStore({ chatConversations: [conversation] });
     const { codeApi } = await import('./state');
 
-    await codeApi.deleteConversation('sess-1');
+    await codeApi.archiveConversation(conversation);
+    expect(store.chatConversations[0]).toMatchObject({ sessionId: 'sess-1', archivedAt: expect.any(Number) });
 
-    expect(store.chatConversations).toHaveLength(0);
-    expect(invoke).not.toHaveBeenCalledWith('snapshot:delete', 'sess-1');
+    await codeApi.restoreConversation('sess-1');
+    expect(store.chatConversations[0]?.archivedAt).toBeUndefined();
   });
 
   it('reorderTabs preserves records missing from a filtered input list', async () => {

@@ -1,5 +1,8 @@
 import React from 'react';
 
+import { Button } from '@/renderer/ds/ui/button';
+import { Card } from '@/renderer/ds/ui/card';
+
 // Server payload from omni-code's /goal autopilot loop (server_functions/goal.py).
 // snapshot=null means no goal is set on this session (panel renders nothing).
 // "paused" is a non-terminal hold state — the periodic tick is off but
@@ -32,12 +35,12 @@ function dotClass(status: GoalSnapshot['status']): string {
     return 'bg-primary animate-pulse';
   }
   if (status === 'completed') {
-    return 'bg-successGreen';
+    return 'bg-success';
   }
   if (status === 'paused') {
-    return 'bg-warningOrange';
+    return 'bg-warning';
   }
-  return 'bg-errorRed';
+  return 'bg-destructive';
 }
 
 // Compact single-line docked panel for the /goal autopilot loop. Mirrors
@@ -52,15 +55,15 @@ export function GoalPanel({ snapshot, onDismiss }: { snapshot: GoalSnapshot | nu
   const terminal = snapshot.status === 'completed' || snapshot.status === 'cancelled';
   return (
     <div className="px-3 pt-2">
-      <div className="rounded-md border border-bgCardAlt bg-bgCardAlt/60 px-2.5 py-1.5">
-        <div className="flex items-center gap-2 text-xs text-textSubtle">
+      <Card className="gap-0 rounded-md border-accent bg-accent/60 px-2.5 py-1.5 shadow-none">
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <span
             className={['inline-block w-1.5 h-1.5 rounded-full flex-shrink-0', dotClass(snapshot.status)].join(' ')}
             aria-hidden
           />
-          <span className="font-medium text-textPrimary">goal</span>
+          <span className="font-medium text-foreground">goal</span>
           <span aria-hidden>·</span>
-          <span className="truncate min-w-0 text-textPrimary" title={snapshot.goal}>
+          <span className="truncate min-w-0 text-foreground" title={snapshot.goal}>
             {shortGoal(snapshot.goal, GOAL_TRUNCATE)}
           </span>
           {snapshot.status !== 'active' && (
@@ -68,28 +71,29 @@ export function GoalPanel({ snapshot, onDismiss }: { snapshot: GoalSnapshot | nu
               className={[
                 'ml-auto whitespace-nowrap',
                 snapshot.status === 'completed'
-                  ? 'text-successGreen'
+                  ? 'text-success'
                   : snapshot.status === 'paused'
-                    ? 'text-warningOrange'
-                    : 'text-errorRed',
+                    ? 'text-warning'
+                    : 'text-destructive',
               ].join(' ')}
             >
               {snapshot.status}
             </span>
           )}
           {terminal && onDismiss ? (
-            <button
-              type="button"
+            <Button
+              variant="ghost"
+              size="xs"
               onClick={onDismiss}
-              className="ml-1 text-textSubtle hover:text-textPrimary transition-colors px-1.5 py-0.5 rounded hover:bg-bgCardAlt"
+              className="ml-1"
               title="Dismiss goal status"
               aria-label="Dismiss goal status"
             >
               dismiss
-            </button>
+            </Button>
           ) : null}
         </div>
-      </div>
+      </Card>
     </div>
   );
 }

@@ -1,6 +1,10 @@
-import { CodeIcon, FileTextIcon, GlobeIcon, ImageIcon } from 'lucide-react';
+import { CodeIcon, FileTextIcon, GlobeIcon, ImageIcon, XIcon } from 'lucide-react';
 import React, { useMemo } from 'react';
 
+import { Button } from '@/renderer/ds/ui/button';
+import { Item, ItemContent, ItemMedia, ItemTitle } from '@/renderer/ds/ui/item';
+import { ScrollArea } from '@/renderer/ds/ui/scroll-area';
+import { Sheet, SheetClose, SheetContent, SheetHeader, SheetTitle } from '@/renderer/ds/ui/sheet';
 import type { ArtifactItem } from '@/shared/chat-types';
 export type { ArtifactItem } from '@/shared/chat-types';
 
@@ -15,13 +19,16 @@ const MODE_ICON: Record<string, React.ComponentType<{ className?: string }>> = {
 function ArtifactRow({ item, onScrollTo }: { item: ArtifactItem; onScrollTo?: (artifactId: string) => void }) {
   const Icon = MODE_ICON[item.mode || 'markdown'] || FileTextIcon;
   return (
-    <button
-      className="w-full text-left flex items-center gap-2.5 rounded-md px-3 py-2 text-sm hover:bg-accent transition-colors group"
-      onClick={() => item.artifact_id && onScrollTo?.(item.artifact_id)}
-    >
-      <Icon className="size-4 shrink-0 text-muted-foreground group-hover:text-foreground" />
-      <span className="truncate text-foreground">{item.title || 'Artifact'}</span>
-    </button>
+    <Item asChild size="sm" className="w-full cursor-pointer hover:bg-accent">
+      <button type="button" onClick={() => item.artifact_id && onScrollTo?.(item.artifact_id)}>
+        <ItemMedia>
+          <Icon className="text-muted-foreground" />
+        </ItemMedia>
+        <ItemContent>
+          <ItemTitle className="truncate">{item.title || 'Artifact'}</ItemTitle>
+        </ItemContent>
+      </button>
+    </Item>
   );
 }
 
@@ -47,31 +54,30 @@ export function ArtifactsPanel({
   }
 
   const list = (
-    <div className="flex-1 overflow-y-auto p-2 space-y-0.5">
-      {items.map((a, idx) => (
-        <ArtifactRow key={a.artifact_id || idx} item={a} onScrollTo={onScrollTo} />
-      ))}
-    </div>
+    <ScrollArea className="min-h-0 flex-1">
+      <div className="space-y-0.5 p-2">
+        {items.map((a, idx) => (
+          <ArtifactRow key={a.artifact_id || idx} item={a} onScrollTo={onScrollTo} />
+        ))}
+      </div>
+    </ScrollArea>
   );
 
   if (asOverlay) {
     return (
-      <div className="fixed inset-0 z-40">
-        <div className="absolute inset-0 bg-background/60" onClick={onClose} />
-        <div className="absolute right-0 top-0 bottom-0 w-full max-w-[90vw] sm:max-w-xs bg-background border-l border-border flex flex-col">
-          <div className="px-4 py-3 border-b border-border flex items-center justify-between flex-shrink-0">
-            <div className="text-sm font-semibold text-foreground">Artifacts</div>
-            <button
-              className="w-7 h-7 rounded hover:bg-accent text-muted-foreground hover:text-foreground text-xs"
-              onClick={onClose}
-              aria-label="Close"
-            >
-              ✕
-            </button>
-          </div>
+      <Sheet open onOpenChange={(open) => !open && onClose?.()}>
+        <SheetContent side="right" showCloseButton={false} className="w-full max-w-11/12 gap-0 p-0 sm:max-w-xs">
+          <SheetHeader className="flex-row items-center justify-between border-b px-4 py-3 text-left">
+            <SheetTitle className="text-sm">Artifacts</SheetTitle>
+            <SheetClose asChild>
+              <Button type="button" variant="ghost" size="icon-sm" aria-label="Close">
+                <XIcon />
+              </Button>
+            </SheetClose>
+          </SheetHeader>
           {list}
-        </div>
-      </div>
+        </SheetContent>
+      </Sheet>
     );
   }
 
@@ -79,13 +85,9 @@ export function ArtifactsPanel({
     <div className="h-full flex flex-col bg-background">
       <div className="px-4 py-3 border-b border-border flex items-center justify-between flex-shrink-0">
         <div className="text-sm font-semibold text-foreground">Artifacts</div>
-        <button
-          className="w-7 h-7 rounded hover:bg-accent text-muted-foreground hover:text-foreground text-xs"
-          onClick={onClose}
-          aria-label="Close panel"
-        >
-          ✕
-        </button>
+        <Button type="button" variant="ghost" size="icon-sm" onClick={onClose} aria-label="Close panel">
+          <XIcon />
+        </Button>
       </div>
       {list}
     </div>

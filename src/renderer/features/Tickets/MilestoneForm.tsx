@@ -1,7 +1,9 @@
-import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 
-import { Button, Input, Select, Textarea } from '@/renderer/ds';
+import { Button } from '@/renderer/ds/ui/button';
+import { Input } from '@/renderer/ds/ui/input';
+import { NativeSelect as Select } from '@/renderer/ds/ui/native-select';
+import { Textarea } from '@/renderer/ds/ui/textarea';
 import { milestoneApi } from '@/renderer/features/Initiatives/state';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { GitRepoInfo, Milestone, ProjectId } from '@/shared/types';
@@ -9,36 +11,8 @@ import { firstSource } from '@/shared/types';
 
 import { ticketApi } from './state';
 
-const useStyles = makeStyles({
-  root: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalM,
-    borderRadius: tokens.borderRadiusMedium,
-    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
-    backgroundColor: tokens.colorNeutralBackground2,
-    padding: tokens.spacingVerticalL,
-  },
-  branchRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-  },
-  branchLabel: {
-    fontSize: tokens.fontSizeBase200,
-    fontWeight: tokens.fontWeightMedium,
-    color: tokens.colorNeutralForeground3,
-  },
-  actions: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-  },
-});
-
 export const MilestoneForm = memo(
   ({ projectId, onClose, editMilestone }: { projectId: ProjectId; onClose: () => void; editMilestone?: Milestone }) => {
-    const styles = useStyles();
     const [title, setTitle] = useState('');
     const [description, setDescription] = useState('');
     const [branch, setBranch] = useState('');
@@ -102,7 +76,7 @@ export const MilestoneForm = memo(
     }, [title, description, branch, dueDate, gitInfo, isSubmitting, projectId, onClose, editMilestone]);
 
     return (
-      <div className={styles.root}>
+      <div className="flex flex-col gap-4 rounded-lg border border-border bg-card p-5">
         <Input
           aria-label="Milestone title"
           value={title}
@@ -111,6 +85,7 @@ export const MilestoneForm = memo(
           className="w-full"
           autoFocus
         />
+
         <Textarea
           aria-label="Milestone description"
           value={description}
@@ -118,10 +93,11 @@ export const MilestoneForm = memo(
           placeholder="Description — what is this milestone delivering?"
           rows={2}
         />
+
         {gitInfo?.isGitRepo && (
-          <div className={styles.branchRow}>
-            <label className={styles.branchLabel}>Branch</label>
-            <Select value={branch} onChange={(e) => setBranch(e.target.value)} size="sm">
+          <div className="flex items-center gap-2">
+            <label className="text-xs font-medium text-muted-foreground">Branch</label>
+            <Select value={branch} onChange={(e) => setBranch(e.target.value)}>
               <option value="">None</option>
               {gitInfo.branches.map((b) => (
                 <option key={b} value={b}>
@@ -131,12 +107,12 @@ export const MilestoneForm = memo(
             </Select>
           </div>
         )}
-        <div className={styles.branchRow}>
-          <label className={styles.branchLabel}>Due date</label>
+        <div className="flex items-center gap-2">
+          <label className="text-xs font-medium text-muted-foreground">Due date</label>
           <Input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
         </div>
-        <div className={styles.actions}>
-          <Button onClick={handleSubmit} isDisabled={!title.trim() || isSubmitting}>
+        <div className="flex items-center gap-2">
+          <Button onClick={handleSubmit} disabled={!title.trim() || isSubmitting}>
             {editMilestone ? 'Save Milestone' : 'Create Milestone'}
           </Button>
           <Button variant="ghost" onClick={onClose}>

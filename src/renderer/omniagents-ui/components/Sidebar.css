@@ -1,0 +1,17 @@
+.omniagents-sidebar-provider {
+  --sidebar-width: 18rem !important;
+}
+
+.omniagents-sidebar-overlay {
+  box-sizing: border-box;
+  padding-right: env(safe-area-inset-right, 0);
+  padding-left: env(safe-area-inset-left, 0);
+}
+
+.omniagents-sidebar-overlay-header {
+  padding-top: calc(2rem + env(safe-area-inset-top, 0));
+}
+
+.omniagents-sidebar-overlay-body {
+  padding-bottom: calc(1.25rem + var(--safe-area-bottom, env(safe-area-inset-bottom, 0)));
+}

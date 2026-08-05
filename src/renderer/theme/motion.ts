@@ -6,7 +6,7 @@
  *   per-component bezier inventions; if a surface needs a new feel, change it
  *   here, not locally.
  * - Only `transform` (position/scale) and `opacity` animate. Never width/
- *   height of text containers, never blur (except the static glass styles),
+ *   height of text containers,
  *   never color transitions longer than 200ms.
  * - Entering elements: opacity 0 → 1 with a small upward/scale settle
  *   (`ENTER_INITIAL`). Departing elements just release; their neighbors

@@ -446,43 +446,38 @@ describe('ProjectManager', () => {
       expect(ticket.columnChangedAt).toBeGreaterThan(0);
     });
 
-    it('auto-resolves as completed when moving to terminal column', () => {
+    it('records completion when moving to a done column', () => {
       const { pm, store } = makePm({
         tickets: [{ id: 't1', columnId: 'in_progress' }],
       });
       pm.moveTicketToColumn('t1', 'done'); // terminal column of TEST_PIPELINE
 
       const ticket = store.get('tickets', []).find((t: Ticket) => t.id === 't1')!;
-      expect(ticket.resolution).toBe('completed');
-      expect(ticket.resolvedAt).toBeGreaterThan(0);
+      expect(ticket.completedAt).toBeGreaterThan(0);
     });
 
-    it('preserves existing resolution when moving to terminal column', () => {
+    it('preserves an existing completion timestamp in a done column', () => {
       const { pm, store } = makePm({
         tickets: [{ id: 't1', columnId: 'in_progress' }],
       });
-      // Pre-set a different resolution
-      pm.updateTicket('t1', { resolution: 'wont-do' as never });
+      pm.updateTicket('t1', { completedAt: 12345 });
 
       pm.moveTicketToColumn('t1', 'done');
 
       const ticket = store.get('tickets', []).find((t: Ticket) => t.id === 't1')!;
-      // Should keep 'wont-do', not override with 'completed'
-      expect(ticket.resolution).toBe('wont-do');
+      expect(ticket.completedAt).toBe(12345);
     });
 
-    it('clears resolution when moving away from terminal column (reopen)', () => {
+    it('clears the completion timestamp when moving away from a done column', () => {
       const { pm, store } = makePm({
         tickets: [{ id: 't1', columnId: 'done' }],
       });
-      // Set resolution as if ticket was completed
-      pm.updateTicket('t1', { resolution: 'completed' as never, resolvedAt: Date.now() });
+      pm.updateTicket('t1', { completedAt: Date.now() });
 
       pm.moveTicketToColumn('t1', 'in_progress');
 
       const ticket = store.get('tickets', []).find((t: Ticket) => t.id === 't1')!;
-      expect(ticket.resolution).toBeUndefined();
-      expect(ticket.resolvedAt).toBeUndefined();
+      expect(ticket.completedAt).toBeUndefined();
     });
 
     it('is a no-op for unknown ticketId', () => {
@@ -503,77 +498,8 @@ describe('ProjectManager', () => {
     });
   });
 
-  // -------------------------------------------------------------------------
-  // T-new — resolveTicket
-  // -------------------------------------------------------------------------
-  describe('resolveTicket', () => {
-    it('sets resolution and moves to terminal column', () => {
-      const { pm, store } = makePm({
-        tickets: [{ id: 't1', columnId: 'in_progress' }],
-      });
-      pm.resolveTicket('t1', 'completed' as never);
-
-      const ticket = store.get('tickets', []).find((t: Ticket) => t.id === 't1')!;
-      expect(ticket.resolution).toBe('completed');
-      expect(ticket.columnId).toBe('done'); // terminal column
-      expect(ticket.resolvedAt).toBeGreaterThan(0);
-    });
-
-    it('does not overwrite resolvedAt if already set', () => {
-      const { pm, store } = makePm({
-        tickets: [{ id: 't1', columnId: 'in_progress' }],
-      });
-      // Pre-set resolvedAt
-      pm.updateTicket('t1', { resolvedAt: 12345 });
-
-      pm.resolveTicket('t1', 'wont-do' as never);
-
-      const ticket = store.get('tickets', []).find((t: Ticket) => t.id === 't1')!;
-      expect(ticket.resolvedAt).toBe(12345);
-    });
-
-    it('is a no-op for unknown ticketId', () => {
-      const { pm } = makePm({ tickets: [{ id: 't1' }] });
-      expect(() => pm.resolveTicket('nope' as never, 'completed' as never)).not.toThrow();
-    });
-
-    it('does not move if ticket is already in terminal column', () => {
-      const { pm, store } = makePm({
-        tickets: [{ id: 't1', columnId: 'done' }],
-      });
-      // Spy on updateTicket calls indirectly through store changes
-      const before = store.get('tickets', [])[0]!.updatedAt;
-      vi.setSystemTime(new Date('2030-01-01T00:00:00Z'));
-
-      pm.resolveTicket('t1', 'completed' as never);
-
-      const ticket = store.get('tickets', []).find((t: Ticket) => t.id === 't1')!;
-      expect(ticket.columnId).toBe('done'); // unchanged
-      expect(ticket.resolution).toBe('completed');
-    });
-  });
-
   // migrateOrphanedTickets was removed — its replacement (repo.syncColumnsForProject)
   // is exercised by packages/projects-db/src/repo.test.ts.
-
-  // -------------------------------------------------------------------------
-  // T-new — removeTicket
-  // -------------------------------------------------------------------------
-  describe('removeTicket', () => {
-    it('removes the ticket from the store', () => {
-      const { pm, store } = makePm({
-        tickets: [{ id: 't1' }, { id: 't2' }],
-      });
-      pm.removeTicket('t1');
-      expect(store.get('tickets', []).map((t: Ticket) => t.id)).toEqual(['t2']);
-    });
-
-    it('is a no-op for unknown ticketId', () => {
-      const { pm, store } = makePm({ tickets: [{ id: 't1' }] });
-      pm.removeTicket('nope' as never);
-      expect(store.get('tickets', [])).toHaveLength(1);
-    });
-  });
 
   // -------------------------------------------------------------------------
   // processManager wiring

@@ -53,7 +53,7 @@ describe('tickets navigation', () => {
     $activeMilestoneId.set('all');
   });
 
-  it('goToProject defaults to the home tab', () => {
+  it('goToProject defaults to the overview tab', () => {
     ticketApi.goToProject('p1');
     expect($ticketsView.get()).toEqual({ type: 'project', projectId: 'p1', tab: 'home' });
   });
@@ -63,18 +63,18 @@ describe('tickets navigation', () => {
     expect($ticketsView.get()).toEqual({ type: 'project', projectId: 'p1', tab: 'settings' });
   });
 
-  it('goToBoard is sugar for the board tab and resets the milestone filter', () => {
+  it('goToBoard is sugar for the work tab and resets the milestone filter', () => {
     $activeMilestoneId.set('m1');
     ticketApi.goToBoard('p1');
-    expect($ticketsView.get()).toEqual({ type: 'project', projectId: 'p1', tab: 'board' });
+    expect($ticketsView.get()).toEqual({ type: 'project', projectId: 'p1', tab: 'tasks' });
     expect($activeMilestoneId.get()).toBe('all');
   });
 
   it('goBackToPrevious replays the previous project view including its tab', () => {
-    ticketApi.goToProject('p1', 'board');
+    ticketApi.goToProject('p1', 'tasks');
     ticketApi.goToPage('page-1', 'p1');
     ticketApi.goBackToPrevious();
-    expect($ticketsView.get()).toEqual({ type: 'project', projectId: 'p1', tab: 'board' });
+    expect($ticketsView.get()).toEqual({ type: 'project', projectId: 'p1', tab: 'tasks' });
   });
 
   it('goBackToPrevious returns to the previous ticket (real history stack)', () => {

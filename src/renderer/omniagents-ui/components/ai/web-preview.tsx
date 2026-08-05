@@ -1,16 +1,24 @@
 import { CheckIcon, CopyIcon, PlayIcon, Trash2Icon, XIcon } from 'lucide-react';
 import type { ComponentProps, ReactNode } from 'react';
-import { createContext, forwardRef, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-
-import { Button } from '@/renderer/omniagents-ui/components/ui/button';
-import { Input } from '@/renderer/omniagents-ui/components/ui/input';
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@/renderer/omniagents-ui/components/ui/tooltip';
-import { cn } from '@/renderer/omniagents-ui/lib/utils';
+  createContext,
+  forwardRef,
+  Fragment,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+
+import { cn } from '@/renderer/ds/cn';
+import { Button } from '@/renderer/ds/ui/button';
+import { Input } from '@/renderer/ds/ui/input';
+import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '@/renderer/ds/ui/input-group';
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/renderer/ds/ui/resizable';
+import { ToggleGroup, ToggleGroupItem } from '@/renderer/ds/ui/toggle-group';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/renderer/ds/ui/tooltip';
 
 export interface WebPreviewContextValue {
   url: string;
@@ -62,7 +70,7 @@ export const WebPreview = ({ className, children, defaultUrl = '', onUrlChange, 
   return (
     <WebPreviewContext.Provider value={contextValue}>
       <div className={cn('flex size-full flex-col rounded-lg border bg-card', className)} {...props}>
-        {children}
+        <ResizablePanelGroup orientation="vertical">{children}</ResizablePanelGroup>
       </div>
     </WebPreviewContext.Provider>
   );
@@ -71,9 +79,18 @@ export const WebPreview = ({ className, children, defaultUrl = '', onUrlChange, 
 export type WebPreviewNavigationProps = ComponentProps<'div'>;
 
 export const WebPreviewNavigation = ({ className, children, ...props }: WebPreviewNavigationProps) => (
-  <div className={cn('flex items-center gap-1 border-b p-2', className)} {...props}>
-    {children}
-  </div>
+  <ResizablePanel
+    id="navigation"
+    defaultSize={49}
+    minSize={49}
+    maxSize={49}
+    disabled
+    groupResizeBehavior="preserve-pixel-size"
+  >
+    <div className={cn('flex h-full items-center gap-1 border-b p-2', className)} {...props}>
+      {children}
+    </div>
+  </ResizablePanel>
 );
 
 export type WebPreviewNavigationButtonProps = ComponentProps<typeof Button> & {
@@ -161,16 +178,18 @@ export const WebPreviewBody = ({ className, loading, src, ...props }: WebPreview
   const { url } = useWebPreview();
 
   return (
-    <div className="flex-1">
-      <iframe
-        className={cn('size-full', className)}
-        sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-presentation"
-        src={(src ?? url) || undefined}
-        title="Preview"
-        {...props}
-      />
-      {loading}
-    </div>
+    <ResizablePanel id="preview" minSize={80}>
+      <div className="relative size-full">
+        <iframe
+          className={cn('size-full', className)}
+          sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-presentation"
+          src={(src ?? url) || undefined}
+          title="Preview"
+          {...props}
+        />
+        {loading}
+      </div>
+    </ResizablePanel>
   );
 };
 
@@ -198,17 +217,19 @@ const CopyButton = ({ text, className }: { text: string; className?: string }) =
     });
   }, [text]);
   return (
-    <button
+    <Button
       type="button"
+      variant="ghost"
+      size="icon-xs"
       onClick={handleCopy}
       className={cn(
-        'inline-flex shrink-0 items-center justify-center rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover/log:opacity-100',
+        'shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/log:opacity-100',
         className
       )}
       aria-label="Copy"
     >
-      {copied ? <CheckIcon className="h-3 w-3" /> : <CopyIcon className="h-3 w-3" />}
-    </button>
+      {copied ? <CheckIcon className="size-3" /> : <CopyIcon className="size-3" />}
+    </Button>
   );
 };
 
@@ -228,11 +249,7 @@ export const WebPreviewConsole = ({
   const [filter, setFilter] = useState<LevelFilter>('all');
   const [scriptInput, setScriptInput] = useState('');
   const [copyAllDone, setCopyAllDone] = useState(false);
-  const [height, setHeight] = useState(DEFAULT_CONSOLE_HEIGHT);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const draggingRef = useRef(false);
-  const startYRef = useRef(0);
-  const startHeightRef = useRef(0);
 
   const errorCount = useMemo(() => logs.filter((l) => l.level === 'error').length, [logs]);
   const warnCount = useMemo(() => logs.filter((l) => l.level === 'warn').length, [logs]);
@@ -276,189 +293,166 @@ export const WebPreviewConsole = ({
     [handleExec]
   );
 
-  // Resize via drag
-  const handlePointerDown = useCallback(
-    (e: React.PointerEvent) => {
-      e.preventDefault();
-      draggingRef.current = true;
-      startYRef.current = e.clientY;
-      startHeightRef.current = height;
-      (e.target as HTMLElement).setPointerCapture(e.pointerId);
-    },
-    [height]
-  );
-
-  const handlePointerMove = useCallback((e: React.PointerEvent) => {
-    if (!draggingRef.current) {
-      return;
-    }
-    const delta = startYRef.current - e.clientY;
-    setHeight(Math.min(MAX_CONSOLE_HEIGHT, Math.max(MIN_CONSOLE_HEIGHT, startHeightRef.current + delta)));
-  }, []);
-
-  const handlePointerUp = useCallback(() => {
-    draggingRef.current = false;
-  }, []);
-
   if (!consoleOpen) {
     return null;
   }
 
   return (
-    <div
-      className={cn('flex flex-col border-t bg-muted/50 font-mono text-sm', className)}
-      style={{ height }}
-      {...props}
-    >
-      {/* Resize handle */}
-      <div
-        className="flex h-1.5 shrink-0 cursor-row-resize items-center justify-center hover:bg-accent/50 active:bg-accent"
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerUp}
-        role="separator"
-        aria-orientation="horizontal"
-        aria-label="Resize console"
+    <Fragment>
+      <ResizableHandle />
+      <ResizablePanel
+        id="console"
+        defaultSize={DEFAULT_CONSOLE_HEIGHT}
+        minSize={MIN_CONSOLE_HEIGHT}
+        maxSize={MAX_CONSOLE_HEIGHT}
+        groupResizeBehavior="preserve-pixel-size"
       >
-        <div className="h-0.5 w-8 rounded-full bg-border" />
-      </div>
-
-      {/* Toolbar */}
-      <div className="flex shrink-0 items-center gap-1 border-b border-border/50 px-3 py-1">
-        <div className="flex items-center gap-0.5">
-          {LEVEL_LABELS.map((level) => (
-            <button
-              key={level}
-              type="button"
-              onClick={() => setFilter(level)}
-              className={cn(
-                'rounded px-1.5 py-0.5 text-[10px] font-medium transition-colors',
-                filter === level ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:text-foreground'
-              )}
+        <div className={cn('flex size-full flex-col bg-muted font-mono text-sm', className)} {...props}>
+          {/* Toolbar */}
+          <div className="flex shrink-0 items-center gap-1 border-b border-border/50 px-3 py-1">
+            <ToggleGroup
+              type="single"
+              value={filter}
+              onValueChange={(value) => value && setFilter(value as LevelFilter)}
+              size="sm"
+              className="gap-0.5"
             >
-              {level === 'all' ? 'All' : level.charAt(0).toUpperCase() + level.slice(1)}
-              {level === 'error' && errorCount > 0 && <span className="ml-1 text-destructive">{errorCount}</span>}
-              {level === 'warn' && warnCount > 0 && <span className="ml-1 text-warning">{warnCount}</span>}
-            </button>
-          ))}
-        </div>
-        <div className="flex-1" />
-        <TooltipProvider delayDuration={300}>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                onClick={handleCopyAll}
-                disabled={filtered.length === 0}
-                className="inline-flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:text-foreground disabled:opacity-30"
-                aria-label="Copy all"
-              >
-                {copyAllDone ? <CheckIcon className="h-3 w-3" /> : <CopyIcon className="h-3 w-3" />}
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="top">
-              <p>Copy all logs</p>
-            </TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                onClick={onClear}
-                disabled={logs.length === 0}
-                className="inline-flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:text-foreground disabled:opacity-30"
-                aria-label="Clear console"
-              >
-                <Trash2Icon className="h-3 w-3" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="top">
-              <p>Clear console</p>
-            </TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                onClick={() => setConsoleOpen(false)}
-                className="inline-flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:text-foreground"
-                aria-label="Close console"
-              >
-                <XIcon className="h-3 w-3" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="top">
-              <p>Close console</p>
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
-      </div>
+              {LEVEL_LABELS.map((level) => (
+                <ToggleGroupItem key={level} value={level} className="h-6 px-1.5 text-xs">
+                  {level === 'all' ? 'All' : level.charAt(0).toUpperCase() + level.slice(1)}
+                  {level === 'error' && errorCount > 0 && <span className="ml-1 text-destructive">{errorCount}</span>}
+                  {level === 'warn' && warnCount > 0 && <span className="ml-1 text-warning">{warnCount}</span>}
+                </ToggleGroupItem>
+              ))}
+            </ToggleGroup>
+            <div className="flex-1" />
+            <TooltipProvider delayDuration={300}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-xs"
+                    onClick={handleCopyAll}
+                    disabled={filtered.length === 0}
+                    className="text-muted-foreground"
+                    aria-label="Copy all"
+                  >
+                    {copyAllDone ? <CheckIcon className="size-3" /> : <CopyIcon className="size-3" />}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="top">
+                  <p>Copy all logs</p>
+                </TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-xs"
+                    onClick={onClear}
+                    disabled={logs.length === 0}
+                    className="text-muted-foreground"
+                    aria-label="Clear console"
+                  >
+                    <Trash2Icon className="size-3" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="top">
+                  <p>Clear console</p>
+                </TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-xs"
+                    onClick={() => setConsoleOpen(false)}
+                    className="text-muted-foreground"
+                    aria-label="Close console"
+                  >
+                    <XIcon className="size-3" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="top">
+                  <p>Close console</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </div>
 
-      {/* Log entries */}
-      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
-        {filtered.length === 0 ? (
-          <p className="px-3 py-3 text-xs text-muted-foreground">
-            {logs.length === 0 ? 'No console output' : 'No matching logs'}
-          </p>
-        ) : (
-          filtered.map((log, i) => (
-            <div
-              className={cn(
-                'group/log flex items-start gap-2 border-b border-border/30 px-3 py-1 text-[11px] leading-relaxed last:border-b-0',
-                log.level === 'error' && 'bg-destructive/5 text-destructive',
-                log.level === 'warn' && 'bg-warning/5 text-warning',
-                log.level === 'log' && 'text-foreground',
-                log.level === 'result' && 'text-info italic'
-              )}
-              key={`${i}-${log.timestamp.getTime()}-${log.level}`}
-            >
-              <span className="shrink-0 select-none text-muted-foreground/60">
-                {log.timestamp.toLocaleTimeString()}
-              </span>
-              <span className="min-w-0 flex-1 break-all whitespace-pre-wrap">{log.message}</span>
-              <CopyButton text={log.message} />
-            </div>
-          ))
-        )}
-        {children}
-      </div>
-
-      {/* Script input */}
-      {onExecute && (
-        <div className="flex shrink-0 items-center gap-1 border-t border-border/50 px-3 py-1.5">
-          <span className="shrink-0 select-none text-[11px] text-muted-foreground/60">&gt;</span>
-          <input
-            type="text"
-            value={scriptInput}
-            onChange={(e) => setScriptInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Evaluate JavaScript..."
-            className="flex-1 min-w-0 bg-transparent font-mono text-[11px] text-foreground outline-none placeholder:text-muted-foreground/50"
-            autoComplete="off"
-            autoCorrect="off"
-            autoCapitalize="off"
-            spellCheck={false}
-          />
-          <TooltipProvider delayDuration={300}>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  onClick={handleExec}
-                  disabled={!scriptInput.trim()}
-                  className="inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground transition-colors hover:text-foreground disabled:opacity-30"
-                  aria-label="Execute"
+          {/* Log entries */}
+          <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
+            {filtered.length === 0 ? (
+              <p className="px-3 py-3 text-xs text-muted-foreground">
+                {logs.length === 0 ? 'No console output' : 'No matching logs'}
+              </p>
+            ) : (
+              filtered.map((log, i) => (
+                <div
+                  className={cn(
+                    'group/log flex items-start gap-2 border-b border-border/30 px-3 py-1 text-xs leading-relaxed last:border-b-0',
+                    log.level === 'error' && 'bg-destructive/5 text-destructive',
+                    log.level === 'warn' && 'bg-warning/5 text-warning',
+                    log.level === 'log' && 'text-foreground',
+                    log.level === 'result' && 'text-muted-foreground italic'
+                  )}
+                  key={`${i}-${log.timestamp.getTime()}-${log.level}`}
                 >
-                  <PlayIcon className="h-3 w-3" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="top">
-                <p>Run (Enter)</p>
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
+                  <span className="shrink-0 select-none text-muted-foreground/60">
+                    {log.timestamp.toLocaleTimeString()}
+                  </span>
+                  <span className="min-w-0 flex-1 break-all whitespace-pre-wrap">{log.message}</span>
+                  <CopyButton text={log.message} />
+                </div>
+              ))
+            )}
+            {children}
+          </div>
+
+          {/* Script input */}
+          {onExecute && (
+            <div className="shrink-0 border-t border-border/50 px-3 py-1.5">
+              <InputGroup className="h-7 border-0 shadow-none">
+                <InputGroupAddon className="pl-0 text-xs text-muted-foreground/60">&gt;</InputGroupAddon>
+                <InputGroupInput
+                  type="text"
+                  value={scriptInput}
+                  onChange={(e) => setScriptInput(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder="Evaluate JavaScript..."
+                  className="min-w-0 px-1 font-mono text-xs"
+                  autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="off"
+                  spellCheck={false}
+                />
+                <InputGroupAddon align="inline-end" className="pr-0">
+                  <TooltipProvider delayDuration={300}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <InputGroupButton
+                          size="icon-xs"
+                          onClick={handleExec}
+                          disabled={!scriptInput.trim()}
+                          aria-label="Execute"
+                        >
+                          <PlayIcon className="size-3" />
+                        </InputGroupButton>
+                      </TooltipTrigger>
+                      <TooltipContent side="top">
+                        <p>Run (Enter)</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                </InputGroupAddon>
+              </InputGroup>
+            </div>
+          )}
         </div>
-      )}
-    </div>
+      </ResizablePanel>
+    </Fragment>
   );
 };

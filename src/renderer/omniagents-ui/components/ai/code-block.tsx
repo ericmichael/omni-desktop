@@ -4,15 +4,9 @@ import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRe
 import type { BundledLanguage, BundledTheme, HighlighterGeneric, ThemedToken } from 'shiki';
 import { createHighlighter } from 'shiki';
 
-import { Button } from '@/renderer/omniagents-ui/components/ui/button';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/renderer/omniagents-ui/components/ui/select';
-import { cn } from '@/renderer/omniagents-ui/lib/utils';
+import { cn } from '@/renderer/ds/cn';
+import { Button } from '@/renderer/ds/ui/button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/renderer/ds/ui/select';
 
 // Shiki uses bitflags for font styles: 1=italic, 2=bold, 4=underline
 
@@ -42,7 +36,6 @@ const addKeysToTokens = (lines: ThemedToken[][]): KeyedLine[] =>
 
 const TokenSpan = ({ token }: { token: ThemedToken }) => (
   <span
-    className="!bg-[var(--shiki-dark-bg)] !text-[var(--shiki-dark)]"
     style={
       {
         backgroundColor: token.bgColor,
@@ -60,9 +53,8 @@ const TokenSpan = ({ token }: { token: ThemedToken }) => (
 
 const LINE_NUMBER_CLASSES = cn(
   'block',
-  'before:content-[counter(line)]',
+  'code-block-line-number',
   'before:inline-block',
-  'before:[counter-increment:line]',
   'before:w-8',
   'before:mr-4',
   'before:text-right',
@@ -198,14 +190,8 @@ const CodeBlockBody = memo(
     const keyedLines = useMemo(() => addKeysToTokens(tokenized.tokens), [tokenized.tokens]);
 
     return (
-      <pre
-        className={cn(
-          '!bg-[var(--shiki-dark-bg)] !text-[var(--shiki-dark)] m-0 overflow-x-auto whitespace-pre p-4 text-sm',
-          className
-        )}
-        style={preStyle}
-      >
-        <code className={cn('font-mono text-sm', showLineNumbers && '[counter-increment:line_0] [counter-reset:line]')}>
+      <pre className={cn('m-0 overflow-x-auto whitespace-pre p-4 text-sm', className)} style={preStyle}>
+        <code className={cn('font-mono text-sm', showLineNumbers && 'code-block-lines')}>
           {keyedLines.map((keyedLine) => (
             <LineSpan key={keyedLine.key} keyedLine={keyedLine} showLineNumbers={showLineNumbers} />
           ))}
@@ -224,17 +210,15 @@ CodeBlockBody.displayName = 'CodeBlockBody';
 export const CodeBlockContainer = ({
   className,
   language,
-  style,
   ...props
 }: HTMLAttributes<HTMLDivElement> & { language: string }) => (
   <div
     className={cn(
-      'group relative w-full min-w-0 overflow-x-auto overflow-y-hidden rounded-md border bg-background text-foreground',
+      'optimize-offscreen-content group relative w-full min-w-0 overflow-x-auto overflow-y-hidden rounded-md border bg-background text-foreground',
       className
     )}
     data-language={language}
     data-slot="code-block"
-    style={{ containIntrinsicSize: 'auto 200px', contentVisibility: 'auto', ...style }}
     {...props}
   />
 );
@@ -376,7 +360,7 @@ export const CodeBlockCopyButton = ({
   const Icon = isCopied ? CheckIcon : CopyIcon;
   return (
     <Button className={cn('shrink-0', className)} onClick={copyToClipboard} size="icon" variant="ghost" {...props}>
-      {children ?? <Icon size={14} />}
+      {children ?? <Icon className="size-4" />}
     </Button>
   );
 };

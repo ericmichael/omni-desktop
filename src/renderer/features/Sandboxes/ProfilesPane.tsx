@@ -8,81 +8,18 @@
  * draft; a confirm guard is intentionally omitted (keep it simple).
  */
 
-import { makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useState } from 'react';
 
-import { Badge, Body1, Button, Caption1, Card, SectionLabel, Textarea } from '@/renderer/ds';
+import { cn } from '@/renderer/ds/cn';
+import { Badge } from '@/renderer/ds/ui/badge';
+import { Button } from '@/renderer/ds/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/renderer/ds/ui/card';
+import { Textarea } from '@/renderer/ds/ui/textarea';
 import { $sandboxesError, $sandboxProfiles, refreshSandboxProfiles } from '@/renderer/features/Sandboxes/state';
 import { emitter, isCloudLinked, isElectron, isServerLinked, isWslLinked } from '@/renderer/services/ipc';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { ProfileSummary } from '@/shared/types';
-
-const useStyles = makeStyles({
-  root: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalM },
-  list: { display: 'flex', flexDirection: 'column' },
-  row: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalM,
-    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalS}`,
-    borderRadius: tokens.borderRadiusMedium,
-    cursor: 'pointer',
-    border: 'none',
-    backgroundColor: 'transparent',
-    width: '100%',
-    textAlign: 'left',
-    ':hover': { backgroundColor: tokens.colorSubtleBackgroundHover },
-    ':focus-visible': {
-      outlineWidth: '2px',
-      outlineStyle: 'solid',
-      outlineColor: tokens.colorBrandStroke1,
-      outlineOffset: '-2px',
-    },
-  },
-  rowSelected: { backgroundColor: tokens.colorSubtleBackgroundSelected },
-  rowMain: { flex: '1 1 0', minWidth: 0, display: 'flex', flexDirection: 'column', gap: '2px' },
-  chips: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalXS, flexShrink: 0 },
-  summary: { color: tokens.colorNeutralForeground2 },
-  error: { color: tokens.colorPaletteRedForeground1 },
-  detail: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalS },
-  detailHeader: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: tokens.spacingHorizontalM,
-  },
-  actions: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS, flexWrap: 'wrap' },
-  mono: { fontFamily: tokens.fontFamilyMonospace },
-  yaml: {
-    fontFamily: tokens.fontFamilyMonospace,
-    fontSize: tokens.fontSizeBase200,
-    backgroundColor: tokens.colorNeutralBackground2,
-    borderRadius: tokens.borderRadiusMedium,
-    padding: tokens.spacingHorizontalS,
-    overflowX: 'auto',
-    whiteSpace: 'pre',
-    margin: 0,
-  },
-  yamlEditor: {
-    '& textarea': {
-      fontFamily: tokens.fontFamilyMonospace,
-      fontSize: tokens.fontSizeBase200,
-      whiteSpace: 'pre',
-      overflowX: 'auto',
-    },
-  },
-  editorActions: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS },
-  pathRow: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS, minWidth: 0 },
-  pathText: {
-    fontFamily: tokens.fontFamilyMonospace,
-    color: tokens.colorNeutralForeground2,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    minWidth: 0,
-  },
-});
 
 const ORIGIN_LABELS: Record<ProfileSummary['origin'], string> = {
   builtin: 'built-in',
@@ -112,7 +49,6 @@ const isWritable = (profile: ProfileSummary): boolean =>
   profile.path !== null && (profile.origin === 'user-override' || !profile.builtin);
 
 export const ProfilesPane = memo(() => {
-  const styles = useStyles();
   const profiles = useStore($sandboxProfiles);
   const fetchError = useStore($sandboxesError);
   const store = useStore(persistedStoreApi.$atom);
@@ -218,120 +154,165 @@ export const ProfilesPane = memo(() => {
   const dirty = yaml !== null && draft !== null && draft !== yaml;
 
   return (
-    <div className={styles.root}>
-      <SectionLabel>Profiles</SectionLabel>
+    <div className="flex flex-col gap-4">
       <Card>
-        <div className={styles.list}>
-          {profiles.length === 0 && <Caption1 className={styles.summary}>Discovering profiles…</Caption1>}
-          {profiles.map((profile) => (
-            <button
-              key={profile.name}
-              type="button"
-              className={mergeClasses(styles.row, profile.name === selectedName && styles.rowSelected)}
-              onClick={() => selectProfile(profile.name)}
-            >
-              <div className={styles.rowMain}>
-                <Body1>{profile.label}</Body1>
-                <Caption1 className={mergeClasses(styles.summary, styles.mono)}>{profile.name}</Caption1>
-              </div>
-              <div className={styles.chips}>
-                {profile.name === defaultName && <Badge color="green">default</Badge>}
-                <Badge color="blue">{profile.clientType}</Badge>
-                <Badge>{ORIGIN_LABELS[profile.origin]}</Badge>
-              </div>
-            </button>
-          ))}
-        </div>
-        {fetchError && <Caption1 className={styles.error}>{fetchError}</Caption1>}
+        <CardHeader>
+          <CardTitle>Sandbox profiles</CardTitle>
+          <CardDescription>Choose the environments available to projects and agents.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="flex flex-col">
+            {profiles.length === 0 && (
+              <span className={cn('text-xs text-muted-foreground', 'text-muted-foreground')}>
+                Discovering profiles…
+              </span>
+            )}
+            {profiles.map((profile) => (
+              <Button
+                key={profile.name}
+                type="button"
+                variant="ghost"
+                className={cn(
+                  'flex items-center gap-4 p-2 rounded-lg cursor-pointer border-0 bg-transparent w-full text-left hover:bg-accent focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-primary focus-visible:-outline-offset-2',
+                  'h-auto justify-start',
+                  profile.name === selectedName && 'bg-accent'
+                )}
+                onClick={() => selectProfile(profile.name)}
+              >
+                <div className="flex-1 min-w-0 flex flex-col gap-0.5">
+                  <span className="text-sm">{profile.label}</span>
+                  <span className={cn('text-xs text-muted-foreground', cn('text-muted-foreground', 'font-mono'))}>
+                    {profile.name}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  {profile.name === defaultName && <Badge variant="secondary">default</Badge>}
+                  <Badge variant="secondary">{profile.clientType}</Badge>
+                  <Badge variant="secondary">{ORIGIN_LABELS[profile.origin]}</Badge>
+                </div>
+              </Button>
+            ))}
+          </div>
+          {fetchError && <span className={cn('text-xs text-muted-foreground', 'text-destructive')}>{fetchError}</span>}
+        </CardContent>
       </Card>
 
       {selected && (
         <Card>
-          <div className={styles.detail}>
-            <div className={styles.detailHeader}>
-              <div className={styles.rowMain}>
-                <Body1>{selected.label}</Body1>
-                {usedByCount > 0 && (
-                  <Caption1 className={styles.summary}>
-                    {`Used by ${usedByCount} ${usedByCount === 1 ? 'project' : 'projects'}`}
-                  </Caption1>
-                )}
-              </div>
-              <div className={styles.actions}>
-                {selected.name !== defaultName && (
-                  <Button size="sm" variant="ghost" onClick={onSetDefault}>
-                    Set as default
-                  </Button>
-                )}
-                {selected.origin === 'builtin' && (
-                  <Button size="sm" variant="ghost" onClick={onCreateOverride}>
-                    Create override
-                  </Button>
-                )}
-              </div>
-            </div>
-
-            {selected.details?.image && (
-              <Caption1 className={styles.summary}>{`Image: ${selected.details.image}`}</Caption1>
-            )}
-            {selected.details?.services && selected.details.services.length > 0 && (
-              <Caption1 className={styles.summary}>{`Services: ${selected.details.services.join(', ')}`}</Caption1>
-            )}
-            {selected.details?.runAs && (
-              <Caption1 className={styles.summary}>{`Runs as: ${selected.details.runAs}`}</Caption1>
-            )}
-            {selected.details?.confine !== undefined && (
-              <Caption1 className={styles.summary}>{`Confined: ${selected.details.confine ? 'yes' : 'no'}`}</Caption1>
-            )}
-
-            {selected.origin === 'user-override' && selected.path && (
-              <div className={styles.pathRow}>
-                <Caption1 className={styles.pathText}>{selected.path}</Caption1>
-                <Button size="sm" variant="ghost" onClick={onCopyPath}>
-                  {copied ? 'Copied' : 'Copy path'}
-                </Button>
-                {canReveal && (
-                  <Button size="sm" variant="ghost" onClick={onReveal}>
-                    Reveal
-                  </Button>
-                )}
-              </div>
-            )}
-
-            {createdPath && <Caption1 className={styles.summary}>{`Override created at ${createdPath}`}</Caption1>}
-            {actionError && <Caption1 className={styles.error}>{actionError}</Caption1>}
-
-            {yaml !== null ? (
-              writable ? (
-                <>
-                  <Textarea
-                    className={styles.yamlEditor}
-                    value={draft ?? ''}
-                    onChange={onDraftChange}
-                    maxHeight={480}
-                    aria-label={`YAML for ${selected.name}`}
-                  />
-                  <div className={styles.editorActions}>
-                    <Button size="sm" variant="primary" onClick={onSave} isDisabled={!dirty || saving}>
-                      {saving ? 'Saving…' : 'Save'}
+          <CardContent>
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center justify-between gap-4">
+                <div className="flex-1 min-w-0 flex flex-col gap-0.5">
+                  <span className="text-sm">{selected.label}</span>
+                  {usedByCount > 0 && (
+                    <span className={cn('text-xs text-muted-foreground', 'text-muted-foreground')}>
+                      {`Used by ${usedByCount} ${usedByCount === 1 ? 'project' : 'projects'}`}
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  {selected.name !== defaultName && (
+                    <Button size="sm" variant="ghost" onClick={onSetDefault}>
+                      Set as default
                     </Button>
-                    <Button size="sm" variant="ghost" onClick={onRevert} isDisabled={!dirty || saving}>
-                      Revert
+                  )}
+                  {selected.origin === 'builtin' && (
+                    <Button size="sm" variant="ghost" onClick={onCreateOverride}>
+                      Create override
                     </Button>
-                    {dirty && !saving && <Caption1 className={styles.summary}>Unsaved changes</Caption1>}
-                  </div>
-                </>
+                  )}
+                </div>
+              </div>
+
+              {selected.details?.image && (
+                <span
+                  className={cn('text-xs text-muted-foreground', 'text-muted-foreground')}
+                >{`Image: ${selected.details.image}`}</span>
+              )}
+              {selected.details?.services && selected.details.services.length > 0 && (
+                <span
+                  className={cn('text-xs text-muted-foreground', 'text-muted-foreground')}
+                >{`Services: ${selected.details.services.join(', ')}`}</span>
+              )}
+              {selected.details?.runAs && (
+                <span
+                  className={cn('text-xs text-muted-foreground', 'text-muted-foreground')}
+                >{`Runs as: ${selected.details.runAs}`}</span>
+              )}
+              {selected.details?.confine !== undefined && (
+                <span
+                  className={cn('text-xs text-muted-foreground', 'text-muted-foreground')}
+                >{`Confined: ${selected.details.confine ? 'yes' : 'no'}`}</span>
+              )}
+
+              {selected.origin === 'user-override' && selected.path && (
+                <div className="flex items-center gap-2 min-w-0">
+                  <span
+                    className={cn(
+                      'text-xs text-muted-foreground',
+                      'font-mono text-muted-foreground overflow-hidden text-ellipsis whitespace-nowrap min-w-0'
+                    )}
+                  >
+                    {selected.path}
+                  </span>
+                  <Button size="sm" variant="ghost" onClick={onCopyPath}>
+                    {copied ? 'Copied' : 'Copy path'}
+                  </Button>
+                  {canReveal && (
+                    <Button size="sm" variant="ghost" onClick={onReveal}>
+                      Reveal
+                    </Button>
+                  )}
+                </div>
+              )}
+
+              {createdPath && (
+                <span
+                  className={cn('text-xs text-muted-foreground', 'text-muted-foreground')}
+                >{`Override created at ${createdPath}`}</span>
+              )}
+              {actionError && (
+                <span className={cn('text-xs text-muted-foreground', 'text-destructive')}>{actionError}</span>
+              )}
+
+              {yaml !== null ? (
+                writable ? (
+                  <>
+                    <Textarea
+                      className="[&_textarea]:font-mono [&_textarea]:text-xs [&_textarea]:whitespace-pre [&_textarea]:overflow-x-auto"
+                      value={draft ?? ''}
+                      onChange={onDraftChange}
+                      aria-label={`YAML for ${selected.name}`}
+                    />
+
+                    <div className="flex items-center gap-2">
+                      <Button size="sm" variant="default" onClick={onSave} disabled={!dirty || saving}>
+                        {saving ? 'Saving…' : 'Save'}
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={onRevert} disabled={!dirty || saving}>
+                        Revert
+                      </Button>
+                      {dirty && !saving && (
+                        <span className={cn('text-xs text-muted-foreground', 'text-muted-foreground')}>
+                          Unsaved changes
+                        </span>
+                      )}
+                    </div>
+                  </>
+                ) : (
+                  <pre className="font-mono text-xs bg-card rounded-lg p-2 overflow-x-auto whitespace-pre m-0">
+                    {yaml}
+                  </pre>
+                )
               ) : (
-                <pre className={styles.yaml}>{yaml}</pre>
-              )
-            ) : (
-              <Caption1 className={styles.summary}>
-                {selected.origin === 'implicit'
-                  ? 'Built into omni serve — no YAML file backs this profile.'
-                  : 'Loading YAML…'}
-              </Caption1>
-            )}
-          </div>
+                <span className={cn('text-xs text-muted-foreground', 'text-muted-foreground')}>
+                  {selected.origin === 'implicit'
+                    ? 'Built into omni serve — no YAML file backs this profile.'
+                    : 'Loading YAML…'}
+                </span>
+              )}
+            </div>
+          </CardContent>
         </Card>
       )}
     </div>

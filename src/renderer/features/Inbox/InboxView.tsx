@@ -1,125 +1,26 @@
-import { makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
-import {
-  Add20Regular,
-  ArrowCounterclockwise20Regular,
-  Delete20Regular,
-  MoreHorizontal20Regular,
-  TimerRegular,
-} from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
+import { Ellipsis, Plus, RotateCcw, Timer, Trash2 } from 'lucide-react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 
 import { useIsDesktop } from '@/renderer/common/use-is-desktop';
+import { cn } from '@/renderer/ds/cn';
+import { Button } from '@/renderer/ds/ui/button';
+// ---------------------------------------------------------------------------
+// Styles
+// ---------------------------------------------------------------------------
 import {
-  Button,
-  EmptyState,
-  IconButton,
-  Menu,
-  MenuItem,
-  MenuList,
-  MenuPopover,
-  MenuTrigger,
-  type SelectTabData,
-  Tab,
-  TabList,
-} from '@/renderer/ds';
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/renderer/ds/ui/dropdown-menu';
+import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from '@/renderer/ds/ui/empty';
+import { ToggleGroup, ToggleGroupItem } from '@/renderer/ds/ui/toggle-group';
 import { $quickCaptureOpen } from '@/renderer/features/Inbox/QuickCapture';
 import type { InboxItem, InboxItemId } from '@/shared/types';
 
 import { InboxItemDetail } from './InboxItemDetail';
 import { $activeInbox, $inboxItems, $inboxView, $laterInbox, $promotedInbox, inboxApi } from './state';
-
-// ---------------------------------------------------------------------------
-// Styles
-// ---------------------------------------------------------------------------
-
-const useStyles = makeStyles({
-  root: {
-    display: 'flex',
-    flexDirection: 'column',
-    width: '100%',
-    height: '100%',
-  },
-  tabRow: {
-    display: 'flex',
-    alignItems: 'center',
-    paddingLeft: tokens.spacingHorizontalS,
-    paddingRight: tokens.spacingHorizontalS,
-    borderBottom: `1px solid ${tokens.colorNeutralStroke1}`,
-    flexShrink: 0,
-  },
-  tabRowSpacer: {
-    flex: '1 1 0',
-  },
-  tabCount: {
-    marginLeft: '6px',
-    fontSize: tokens.fontSizeBase100,
-    color: tokens.colorNeutralForeground3,
-  },
-  body: {
-    flex: '1 1 0',
-    minHeight: 0,
-    overflowY: 'auto',
-  },
-  row: {
-    display: 'flex',
-    alignItems: 'flex-start',
-    gap: tokens.spacingHorizontalS,
-    paddingLeft: tokens.spacingHorizontalL,
-    paddingRight: tokens.spacingHorizontalS,
-    paddingTop: '8px',
-    paddingBottom: '8px',
-    backgroundColor: 'transparent',
-    border: 'none',
-    width: '100%',
-    textAlign: 'left',
-    cursor: 'pointer',
-    ':hover': { backgroundColor: tokens.colorSubtleBackgroundHover },
-    ':focus-visible': {
-      outlineWidth: '2px',
-      outlineStyle: 'solid',
-      outlineColor: tokens.colorBrandStroke1,
-      outlineOffset: '-2px',
-    },
-    '&:hover .inbox-row-menu': { opacity: 1 },
-    '&:focus-within .inbox-row-menu': { opacity: 1 },
-  },
-  rowMenu: {
-    display: 'flex',
-    alignItems: 'center',
-    flexShrink: 0,
-    opacity: 0,
-    transitionProperty: 'opacity',
-    transitionDuration: tokens.durationFaster,
-  },
-  rowMenuOpen: {
-    opacity: 1,
-  },
-  dangerMenuItem: {
-    color: tokens.colorPaletteRedForeground1,
-  },
-  rowMain: {
-    flex: '1 1 0',
-    minWidth: 0,
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '2px',
-  },
-  rowTitle: {
-    fontSize: tokens.fontSizeBase300,
-    color: tokens.colorNeutralForeground1,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-  },
-  rowNote: {
-    fontSize: tokens.fontSizeBase200,
-    color: tokens.colorNeutralForeground3,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-  },
-});
 
 // ---------------------------------------------------------------------------
 // Component
@@ -143,7 +44,6 @@ const EMPTY_COPY: Record<InboxTab, { title: string; description?: string }> = {
  * back, so the detail's own back header renders on desktop only.
  */
 export const InboxView = memo(() => {
-  const styles = useStyles();
   const isDesktop = useIsDesktop();
   const active = useStore($activeInbox);
   const later = useStore($laterInbox);
@@ -184,8 +84,10 @@ export const InboxView = memo(() => {
   const handleAdd = useCallback(() => {
     $quickCaptureOpen.set(true);
   }, []);
-  const handleTabSelect = useCallback((_event: unknown, data: SelectTabData) => {
-    setTab(data.value as InboxTab);
+  const handleTabSelect = useCallback((value: string) => {
+    if (value === 'active' || value === 'later' || value === 'archive') {
+      setTab(value);
+    }
   }, []);
   const handleOpenItem = useCallback((id: InboxItemId) => $inboxView.set({ selectedItemId: id }), []);
 
@@ -203,38 +105,50 @@ export const InboxView = memo(() => {
   }
 
   return (
-    <div className={styles.root}>
-      <div className={styles.tabRow}>
-        <TabList selectedValue={tab} onTabSelect={handleTabSelect} size="small" appearance="subtle">
-          <Tab value="active">
+    <div className="flex flex-col w-full h-full">
+      <div className="flex items-center pl-2 pr-2 border-b border-border shrink-0">
+        <ToggleGroup
+          type="single"
+          variant="outline"
+          spacing={0}
+          value={tab}
+          onValueChange={handleTabSelect}
+          aria-label="Inbox view"
+        >
+          <ToggleGroupItem value="active">
             Inbox
-            {active.length > 0 && <span className={styles.tabCount}>{active.length}</span>}
-          </Tab>
-          <Tab value="later">
+            {active.length > 0 && <span className="ml-1.5 text-xs text-muted-foreground">{active.length}</span>}
+          </ToggleGroupItem>
+          <ToggleGroupItem value="later">
             Later
-            {later.length > 0 && <span className={styles.tabCount}>{later.length}</span>}
-          </Tab>
-          <Tab value="archive">Archive</Tab>
-        </TabList>
-        <div className={styles.tabRowSpacer} />
-        <IconButton aria-label="Add item" icon={<Add20Regular />} size="sm" onClick={handleAdd} />
+            {later.length > 0 && <span className="ml-1.5 text-xs text-muted-foreground">{later.length}</span>}
+          </ToggleGroupItem>
+          <ToggleGroupItem value="archive">Archive</ToggleGroupItem>
+        </ToggleGroup>
+        <div className="flex-1" />
+        <Button type="button" variant="ghost" size="icon-sm" aria-label="Add item" onClick={handleAdd}>
+          <Plus />
+        </Button>
       </div>
 
-      <div className={styles.body}>
+      <div className="flex-1 min-h-0 overflow-y-auto">
         {visible.length === 0 ? (
-          <EmptyState
-            title={EMPTY_COPY[tab].title}
-            description={EMPTY_COPY[tab].description}
-            action={
-              tab === 'active' ? (
-                <Button size="sm" leftIcon={<Add20Regular />} onClick={handleAdd}>
+          <Empty>
+            <EmptyHeader>
+              <EmptyTitle className="text-base">{EMPTY_COPY[tab].title}</EmptyTitle>
+              <EmptyDescription>{EMPTY_COPY[tab].description}</EmptyDescription>
+            </EmptyHeader>
+            <EmptyContent>
+              {tab === 'active' ? (
+                <Button size="sm" onClick={handleAdd}>
+                  <Plus />
                   Add item
                 </Button>
-              ) : undefined
-            }
-          />
+              ) : undefined}
+            </EmptyContent>
+          </Empty>
         ) : (
-          visible.map((item) => <InboxRow key={item.id} item={item} styles={styles} onOpen={handleOpenItem} />)
+          visible.map((item) => <InboxRow key={item.id} item={item} onOpen={handleOpenItem} />)
         )}
       </div>
     </div>
@@ -248,13 +162,12 @@ InboxView.displayName = 'InboxView';
 
 type InboxRowProps = {
   item: InboxItem;
-  styles: ReturnType<typeof useStyles>;
   onOpen: (id: InboxItemId) => void;
 };
 
 const stopPropagation = (e: React.SyntheticEvent) => e.stopPropagation();
 
-const InboxRow = memo(({ item, styles, onOpen }: InboxRowProps) => {
+const InboxRow = memo(({ item, onOpen }: InboxRowProps) => {
   const [menuOpen, setMenuOpen] = useState(false);
   const handleOpen = useCallback(() => onOpen(item.id), [item.id, onOpen]);
   const handleKeyDown = useCallback(
@@ -266,7 +179,7 @@ const InboxRow = memo(({ item, styles, onOpen }: InboxRowProps) => {
     },
     [item.id, onOpen]
   );
-  const handleMenuOpenChange = useCallback((_e: unknown, data: { open: boolean }) => setMenuOpen(data.open), []);
+  const handleMenuOpenChange = useCallback((open: boolean) => setMenuOpen(open), []);
   const handleDefer = useCallback(() => void inboxApi.defer(item.id), [item.id]);
   const handleReactivate = useCallback(() => void inboxApi.reactivate(item.id), [item.id]);
   const handleDrop = useCallback(() => void inboxApi.remove(item.id), [item.id]);
@@ -274,38 +187,57 @@ const InboxRow = memo(({ item, styles, onOpen }: InboxRowProps) => {
   return (
     // div+role rather than <button>: the row hosts the "…" menu button, and
     // nesting buttons inside a button is invalid markup.
-    <div role="button" tabIndex={0} className={styles.row} onClick={handleOpen} onKeyDown={handleKeyDown}>
-      <div className={styles.rowMain}>
-        <span className={styles.rowTitle}>{item.title}</span>
-        {item.note && <span className={styles.rowNote}>{item.note}</span>}
+    <div
+      role="button"
+      tabIndex={0}
+      className="flex items-start gap-2 pl-5 pr-2 pt-2 pb-2 bg-transparent border-0 w-full text-left cursor-pointer hover:bg-accent focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-primary focus-visible:-outline-offset-2 [&:hover_.inbox-row-menu]:opacity-100 [&:focus-within_.inbox-row-menu]:opacity-100"
+      onClick={handleOpen}
+      onKeyDown={handleKeyDown}
+    >
+      <div className="flex-1 min-w-0 flex flex-col gap-0.5">
+        <span className="text-sm text-foreground overflow-hidden text-ellipsis whitespace-nowrap">{item.title}</span>
+        {item.note && (
+          <span className="text-xs text-muted-foreground overflow-hidden text-ellipsis whitespace-nowrap">
+            {item.note}
+          </span>
+        )}
       </div>
       <span
         role="presentation"
-        className={mergeClasses(styles.rowMenu, 'inbox-row-menu', menuOpen && styles.rowMenuOpen)}
+        className={cn(
+          'flex items-center shrink-0 opacity-0 transition-opacity duration-100',
+          'inbox-row-menu',
+          menuOpen && 'opacity-100'
+        )}
         onClick={stopPropagation}
       >
-        <Menu open={menuOpen} onOpenChange={handleMenuOpenChange} positioning={{ position: 'below', align: 'end' }}>
-          <MenuTrigger disableButtonEnhancement>
-            <IconButton aria-label="Item actions" icon={<MoreHorizontal20Regular />} size="sm" />
-          </MenuTrigger>
-          <MenuPopover>
-            <MenuList>
+        <DropdownMenu open={menuOpen} onOpenChange={handleMenuOpenChange}>
+          <DropdownMenuTrigger asChild>
+            <Button type="button" variant="ghost" size="icon-sm" aria-label="Item actions">
+              <Ellipsis />
+            </Button>
+          </DropdownMenuTrigger>
+          <>
+            <DropdownMenuContent>
               {!item.promotedTo &&
                 (item.status === 'later' ? (
-                  <MenuItem icon={<ArrowCounterclockwise20Regular />} onClick={handleReactivate}>
+                  <DropdownMenuItem onClick={handleReactivate}>
+                    <RotateCcw />
                     Reactivate
-                  </MenuItem>
+                  </DropdownMenuItem>
                 ) : (
-                  <MenuItem icon={<TimerRegular />} onClick={handleDefer}>
+                  <DropdownMenuItem onClick={handleDefer}>
+                    <Timer />
                     Defer to later
-                  </MenuItem>
+                  </DropdownMenuItem>
                 ))}
-              <MenuItem icon={<Delete20Regular />} onClick={handleDrop} className={styles.dangerMenuItem}>
+              <DropdownMenuItem onClick={handleDrop} className="text-destructive">
+                <Trash2 />
                 Drop
-              </MenuItem>
-            </MenuList>
-          </MenuPopover>
-        </Menu>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </>
+        </DropdownMenu>
       </span>
     </div>
   );

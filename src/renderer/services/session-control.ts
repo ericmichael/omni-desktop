@@ -117,8 +117,8 @@ export type SessionController = {
   /** Start a fresh conversation (mints a new session id, no sandbox restart). */
   newSession: () => void;
   /**
-   * List the agent server's stored sessions. Feeds the Focus sidebar's
-   * Recent section — the same source the old conversations drawer read.
+   * List the agent server's stored sessions. Feeds the launcher's Projects
+   * and Recents sections — the same source the old conversations drawer read.
    * Optional so bare test/tool controllers don't have to fake a session
    * store; consumers must guard.
    */

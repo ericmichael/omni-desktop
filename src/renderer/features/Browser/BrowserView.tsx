@@ -7,18 +7,10 @@
  * through `browserApi` so main-process is the single source of truth across
  * tabs, history, bookmarks, and profiles.
  */
-import { makeStyles, mergeClasses, shorthands, tokens } from '@fluentui/react-components';
-import {
-  ArrowClockwise20Regular,
-  ArrowLeft20Regular,
-  ArrowRight20Regular,
-  Dismiss20Regular,
-  Globe20Regular,
-  Star20Filled,
-  Star20Regular,
-  WindowDevTools20Regular,
-} from '@fluentui/react-icons';
+import './BrowserView.css';
+
 import { useStore } from '@nanostores/react';
+import { ArrowLeft, ArrowRight, Globe, RefreshCw, Star, Wrench, X } from 'lucide-react';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { fallbackTitle, normalizeAddress, parseOrigin } from '@/lib/url';
@@ -29,6 +21,12 @@ import {
   openInBrowserTab,
   type WebviewLoadError,
 } from '@/renderer/common/webview-fallback';
+import { cn } from '@/renderer/ds/cn';
+import { Button } from '@/renderer/ds/ui/button';
+import { ButtonGroup } from '@/renderer/ds/ui/button-group';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/renderer/ds/ui/collapsible';
+import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/renderer/ds/ui/empty';
+import { Toggle } from '@/renderer/ds/ui/toggle';
 import { BookmarksBar } from '@/renderer/features/Browser/BookmarksBar';
 import { DevtoolsPanel } from '@/renderer/features/Browser/Devtools/DevtoolsPanel';
 import { DownloadsTray } from '@/renderer/features/Browser/DownloadsTray';
@@ -44,137 +42,6 @@ import type { AppHandleScope } from '@/shared/app-control-types';
 import { makeAppHandleId } from '@/shared/app-control-types';
 import type { BrowserProfileId, BrowserTabsetId } from '@/shared/types';
 
-const useStyles = makeStyles({
-  root: {
-    display: 'flex',
-    flexDirection: 'column',
-    height: '100%',
-    width: '100%',
-    minHeight: 0,
-    backgroundColor: tokens.colorNeutralBackground1,
-  },
-  rootGlass: {
-    backgroundColor: 'transparent',
-  },
-  toolbar: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '6px',
-    height: '36px',
-    paddingLeft: tokens.spacingHorizontalM,
-    paddingRight: tokens.spacingHorizontalM,
-    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
-    backgroundColor: tokens.colorNeutralBackground2,
-    position: 'relative',
-  },
-  toolbarGlass: {
-    backgroundColor: 'transparent',
-  },
-  navBtn: {
-    display: 'inline-flex',
-    width: '26px',
-    height: '26px',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: tokens.borderRadiusMedium,
-    border: 'none',
-    backgroundColor: 'transparent',
-    color: tokens.colorNeutralForeground2,
-    cursor: 'pointer',
-    flexShrink: 0,
-    ':hover': { backgroundColor: tokens.colorSubtleBackgroundHover, color: tokens.colorNeutralForeground1 },
-    ':disabled': { opacity: 0.4, cursor: 'not-allowed', ':hover': { backgroundColor: 'transparent' } },
-  },
-  body: {
-    position: 'relative',
-    flex: '1 1 0',
-    minHeight: 0,
-    display: 'flex',
-    flexDirection: 'column',
-  },
-  loadingBar: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    height: '2px',
-    overflow: 'hidden',
-    zIndex: 1,
-    pointerEvents: 'none',
-    '::before': {
-      content: '""',
-      position: 'absolute',
-      top: 0,
-      bottom: 0,
-      width: '40%',
-      backgroundImage: `linear-gradient(90deg, transparent, ${tokens.colorBrandBackground}, transparent)`,
-      animationName: {
-        '0%': { transform: 'translateX(-100%)' },
-        '100%': { transform: 'translateX(250%)' },
-      },
-      animationDuration: '1.4s',
-      animationTimingFunction: 'linear',
-      animationIterationCount: 'infinite',
-    },
-  },
-  errorPane: {
-    flex: '1 1 0',
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: tokens.spacingVerticalM,
-    padding: tokens.spacingHorizontalXL,
-    textAlign: 'center',
-    color: tokens.colorNeutralForeground2,
-  },
-  errorTitle: {
-    fontSize: tokens.fontSizeBase400,
-    fontWeight: tokens.fontWeightSemibold,
-    color: tokens.colorNeutralForeground1,
-  },
-  errorUrl: { fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3, wordBreak: 'break-all' },
-  errorLabel: {
-    fontSize: tokens.fontSizeBase100,
-    fontWeight: tokens.fontWeightSemibold,
-    color: tokens.colorNeutralForeground3,
-  },
-  errorInstructions: { maxWidth: '560px', fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 },
-  errorActions: { display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: tokens.spacingHorizontalS },
-  errorButton: {
-    paddingLeft: tokens.spacingHorizontalM,
-    paddingRight: tokens.spacingHorizontalM,
-    height: '28px',
-    borderRadius: tokens.borderRadiusMedium,
-    backgroundColor: tokens.colorBrandBackground,
-    color: tokens.colorNeutralForegroundOnBrand,
-    border: 'none',
-    cursor: 'pointer',
-    ':hover': { backgroundColor: tokens.colorBrandBackgroundHover },
-  },
-  errorButtonGhost: {
-    paddingLeft: tokens.spacingHorizontalM,
-    paddingRight: tokens.spacingHorizontalM,
-    height: '28px',
-    borderRadius: tokens.borderRadiusMedium,
-    backgroundColor: 'transparent',
-    color: tokens.colorNeutralForeground1,
-    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
-    cursor: 'pointer',
-    ':hover': { backgroundColor: tokens.colorSubtleBackgroundHover },
-  },
-  errorDetails: {
-    maxWidth: '640px',
-    fontSize: tokens.fontSizeBase100,
-    color: tokens.colorNeutralForeground3,
-    textAlign: 'left',
-  },
-  errorDetailsSummary: {
-    cursor: 'pointer',
-    textAlign: 'center',
-  },
-});
-
 type PreviewState = {
   loading: boolean;
   error: WebviewLoadError | null;
@@ -188,7 +55,6 @@ export const BrowserView = memo(
   ({
     tabsetId,
     profileId,
-    isGlass,
     registryScope = 'global',
     registryTabId,
     src,
@@ -196,7 +62,6 @@ export const BrowserView = memo(
   }: {
     tabsetId: BrowserTabsetId;
     profileId?: BrowserProfileId;
-    isGlass?: boolean;
     /**
      * App-control scope for the active tab's webview registration. Default is
      * `'global'` (standalone browser column); the per-session dock browser
@@ -213,7 +78,6 @@ export const BrowserView = memo(
     /** Called whenever the active tab's URL changes (user nav, agent nav). */
     onUrlChange?: (url: string) => void;
   }) => {
-    const styles = useStyles();
     const state = useStore($browserState);
     const tabset = state.tabsets[tabsetId];
     // Per-session dock browsers are transient and scoped to a workspace column,
@@ -562,8 +426,8 @@ export const BrowserView = memo(
 
     if (!tabset || !activeTab) {
       return (
-        <div className={mergeClasses(styles.root, isGlass && styles.rootGlass)}>
-          <div className={styles.body}>{/* loading */}</div>
+        <div className="flex flex-col h-full w-full min-h-0 bg-card">
+          <div className="relative flex-1 min-h-0 flex flex-col">{/* loading */}</div>
         </div>
       );
     }
@@ -575,133 +439,140 @@ export const BrowserView = memo(
       : null;
 
     return (
-      <div className={mergeClasses(styles.root, isGlass && styles.rootGlass)}>
-        <TabStrip tabset={tabset} isGlass={isGlass} onNewTab={handleNewTab} />
-        <div className={mergeClasses(styles.toolbar, isGlass && styles.toolbarGlass)}>
-          <button
+      <div className="flex flex-col h-full w-full min-h-0 bg-card">
+        <TabStrip tabset={tabset} onNewTab={handleNewTab} />
+        <div className="flex items-center gap-1.5 h-9 pl-4 pr-4 border-b border-border bg-card relative">
+          <Button
             type="button"
-            className={styles.navBtn}
+            variant="ghost"
+            size="icon-sm"
             aria-label="Back"
             title={`Back (${MOD}←)`}
             onClick={() => webviewRef.current?.goBack()}
           >
-            <ArrowLeft20Regular style={{ width: 14, height: 14 }} />
-          </button>
-          <button
+            <ArrowLeft className="size-4" />
+          </Button>
+          <Button
             type="button"
-            className={styles.navBtn}
+            variant="ghost"
+            size="icon-sm"
             aria-label="Forward"
             title={`Forward (${MOD}→)`}
             onClick={() => webviewRef.current?.goForward()}
           >
-            <ArrowRight20Regular style={{ width: 14, height: 14 }} />
-          </button>
+            <ArrowRight className="size-4" />
+          </Button>
           {previewState.loading ? (
-            <button
+            <Button
               type="button"
-              className={styles.navBtn}
+              variant="ghost"
+              size="icon-sm"
               aria-label="Stop"
               title="Stop (Esc)"
               onClick={() => webviewRef.current?.stop()}
             >
-              <Dismiss20Regular style={{ width: 14, height: 14 }} />
-            </button>
+              <X className="size-4" />
+            </Button>
           ) : (
-            <button
+            <Button
               type="button"
-              className={styles.navBtn}
+              variant="ghost"
+              size="icon-sm"
               aria-label="Reload"
               title={`Reload (${MOD}R)`}
               onClick={() => webviewRef.current?.reload()}
             >
-              <ArrowClockwise20Regular style={{ width: 14, height: 14 }} />
-            </button>
+              <RefreshCw className="size-4" />
+            </Button>
           )}
           <Omnibox ref={omniRef} value={activeTab.url} onSubmit={handleOmniboxSubmit} />
           {isGlobal && (
-            <button
-              type="button"
-              className={styles.navBtn}
+            <Toggle
+              size="sm"
+              pressed={bookmarked}
               aria-label={bookmarked ? 'Remove bookmark' : 'Add bookmark'}
-              aria-pressed={bookmarked}
               title={bookmarked ? `Remove bookmark (${MOD}D)` : `Add bookmark (${MOD}D)`}
-              onClick={handleBookmarkToggle}
+              onPressedChange={handleBookmarkToggle}
             >
-              {bookmarked ? (
-                <Star20Filled style={{ width: 14, height: 14, color: 'goldenrod' }} />
-              ) : (
-                <Star20Regular style={{ width: 14, height: 14 }} />
-              )}
-            </button>
+              {bookmarked ? <Star className="size-4 text-warning" /> : <Star className="size-4" />}
+            </Toggle>
           )}
-          <button
-            type="button"
-            className={styles.navBtn}
+          <Toggle
+            size="sm"
+            pressed={devtoolsOpen}
             aria-label={devtoolsOpen ? 'Close devtools' : 'Open devtools'}
-            aria-pressed={devtoolsOpen}
             title={devtoolsOpen ? 'Close devtools (F12)' : 'Open devtools (F12)'}
-            onClick={() => setDevtoolsOpen((v) => !v)}
+            onPressedChange={setDevtoolsOpen}
           >
-            <WindowDevTools20Regular
-              style={{
-                width: 14,
-                height: 14,
-                ...(devtoolsOpen ? { color: tokens.colorBrandForeground1 } : {}),
-              }}
-            />
-          </button>
+            <Wrench className={cn('size-3.5', devtoolsOpen && 'text-primary')} />
+          </Toggle>
           <DownloadsTray />
         </div>
-        {isGlobal && <BookmarksBar bookmarks={state.bookmarks} isGlass={isGlass} onOpen={navigateActive} />}
+        {isGlobal && <BookmarksBar bookmarks={state.bookmarks} onOpen={navigateActive} />}
         <PermissionsBar partition={partition} />
-        <div className={styles.body}>
-          {previewState.loading && <div className={styles.loadingBar} />}
+        <div className="relative flex-1 min-h-0 flex flex-col">
+          {previewState.loading && <div className="omni-browser-loading-bar" />}
           {fallbackDiagnostics ? (
-            <div className={styles.errorPane}>
-              <Globe20Regular style={{ width: 40, height: 40, opacity: 0.5 }} />
-              <div className={styles.errorTitle}>{fallbackDiagnostics.title}</div>
-              <div>{fallbackDiagnostics.reason}</div>
-              <div>
-                <div className={styles.errorLabel}>Canonical URL</div>
-                <div className={styles.errorUrl}>{fallbackDiagnostics.displayUrl}</div>
-              </div>
-              <div className={styles.errorInstructions}>{fallbackDiagnostics.instructions}</div>
-              <div className={styles.errorActions}>
-                <button
-                  type="button"
-                  className={styles.errorButton}
-                  onClick={() => {
-                    setPreviewState({ loading: false, error: null });
-                    webviewRef.current?.reload();
-                  }}
-                >
-                  Retry
-                </button>
-                <button
-                  type="button"
-                  className={styles.errorButtonGhost}
-                  onClick={() => {
-                    void navigator.clipboard.writeText(fallbackDiagnostics.canonicalUrl).catch(() => {});
-                  }}
-                >
-                  Copy URL
-                </button>
-                <button
-                  type="button"
-                  className={styles.errorButtonGhost}
-                  onClick={() => openInBrowserTab(fallbackDiagnostics.canonicalUrl)}
-                >
-                  Open in Browser
-                </button>
-              </div>
-              {(fallbackDiagnostics.transportUrl || fallbackDiagnostics.debugDescription) && (
-                <details className={styles.errorDetails}>
-                  <summary className={styles.errorDetailsSummary}>Details</summary>
-                  {fallbackDiagnostics.debugDescription && <div>Reason: {fallbackDiagnostics.debugDescription}</div>}
-                  {fallbackDiagnostics.transportUrl && <div>Proxy transport: {fallbackDiagnostics.transportUrl}</div>}
-                </details>
-              )}
-            </div>
+            <Empty className="border-0">
+              <EmptyHeader>
+                <EmptyMedia variant="icon">
+                  <Globe />
+                </EmptyMedia>
+                <EmptyTitle>{fallbackDiagnostics.title}</EmptyTitle>
+                <EmptyDescription>{fallbackDiagnostics.reason}</EmptyDescription>
+              </EmptyHeader>
+              <EmptyContent>
+                <div className="text-xs text-muted-foreground">
+                  <div className="mb-1 font-semibold">Canonical URL</div>
+                  <div className="break-all">{fallbackDiagnostics.displayUrl}</div>
+                </div>
+                <p className="max-w-140 text-xs text-muted-foreground">{fallbackDiagnostics.instructions}</p>
+                <ButtonGroup className="flex-wrap justify-center">
+                  <Button
+                    type="button"
+                    onClick={() => {
+                      setPreviewState({ loading: false, error: null });
+                      webviewRef.current?.reload();
+                    }}
+                  >
+                    Retry
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      void navigator.clipboard.writeText(fallbackDiagnostics.canonicalUrl).catch(() => {});
+                    }}
+                  >
+                    Copy URL
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => openInBrowserTab(fallbackDiagnostics.canonicalUrl)}
+                  >
+                    Open in Browser
+                  </Button>
+                </ButtonGroup>
+                {(fallbackDiagnostics.transportUrl || fallbackDiagnostics.debugDescription) && (
+                  <Collapsible className="max-w-160 text-xs text-muted-foreground text-left">
+                    <CollapsibleTrigger asChild>
+                      <Button variant="ghost" size="sm" className="cursor-pointer text-center">
+                        Details
+                      </Button>
+                    </CollapsibleTrigger>
+                    <CollapsibleContent>
+                      {fallbackDiagnostics.debugDescription && (
+                        <div>Reason: {fallbackDiagnostics.debugDescription}</div>
+                      )}
+                      {fallbackDiagnostics.transportUrl && (
+                        <div>Proxy transport: {fallbackDiagnostics.transportUrl}</div>
+                      )}
+                    </CollapsibleContent>
+                  </Collapsible>
+                )}
+              </EmptyContent>
+            </Empty>
           ) : (
             <Webview
               ref={webviewRef}

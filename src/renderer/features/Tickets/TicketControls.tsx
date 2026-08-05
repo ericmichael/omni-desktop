@@ -1,63 +1,13 @@
-import { makeStyles, tokens } from '@fluentui/react-components';
-import {
-  Add20Regular,
-  ArrowSync20Regular,
-  CheckmarkCircle20Regular,
-  Play20Filled,
-  Stop20Filled,
-  Warning20Regular,
-} from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
+import { CircleCheck, Play, Plus, RefreshCw, Square, TriangleAlert } from 'lucide-react';
 import { memo, useCallback, useEffect, useMemo } from 'react';
 
-import { Badge, Button, IconButton, Spinner } from '@/renderer/ds';
+import { categoryOf } from '@/lib/pipeline-category';
+import { Badge } from '@/renderer/ds/ui/badge';
+import { Button } from '@/renderer/ds/ui/button';
+import { Spinner } from '@/renderer/ds/ui/spinner';
 import { $pipeline, $tasks, $tickets, ticketApi } from '@/renderer/features/Tickets/state';
 import type { TicketId, TicketPhase } from '@/shared/types';
-
-import { RESOLUTION_COLORS, RESOLUTION_LABELS } from './ticket-constants';
-
-const useStyles = makeStyles({
-  columnBadge: {
-    fontSize: tokens.fontSizeBase200,
-    color: tokens.colorNeutralForeground3,
-    backgroundColor: `color-mix(in srgb, ${tokens.colorNeutralBackground2} 50%, transparent)`,
-    backdropFilter: 'blur(20px) saturate(160%)',
-    WebkitBackdropFilter: 'blur(20px) saturate(160%)',
-    paddingLeft: '6px',
-    paddingRight: '6px',
-    paddingTop: '2px',
-    paddingBottom: '2px',
-    borderRadius: tokens.borderRadiusSmall,
-    fontWeight: tokens.fontWeightMedium,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    maxWidth: '120px',
-  },
-  phaseRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '6px',
-    flexShrink: 0,
-  },
-  greenIcon: {
-    color: tokens.colorPaletteGreenForeground1,
-  },
-  greenText: {
-    fontSize: tokens.fontSizeBase200,
-    color: tokens.colorPaletteGreenForeground1,
-    fontWeight: tokens.fontWeightMedium,
-  },
-  redIcon: {
-    color: tokens.colorPaletteRedForeground1,
-  },
-  controlsRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '6px',
-    flexShrink: 0,
-  },
-});
 
 /** Shared hook for ticket automation state and handlers. */
 const useTicketAutomation = (ticketId: TicketId) => {
@@ -88,7 +38,6 @@ const useTicketAutomation = (ticketId: TicketId) => {
 
 /** Column label badge for the ticket banner. */
 export const TicketColumnBadge = memo(({ ticketId }: { ticketId: TicketId }) => {
-  const styles = useStyles();
   const tickets = useStore($tickets);
   const pipeline = useStore($pipeline);
   const ticket = tickets[ticketId];
@@ -108,15 +57,15 @@ export const TicketColumnBadge = memo(({ ticketId }: { ticketId: TicketId }) => 
     return pipeline.columns.find((c) => c.id === ticket.columnId)?.label ?? null;
   }, [ticket?.columnId, pipeline]);
 
-  // Hide when resolved — TicketResolutionBadge takes over.
-  if (ticket?.resolution) {
-    return null;
-  }
   if (!columnLabel) {
     return null;
   }
 
-  return <span className={styles.columnBadge}>{columnLabel}</span>;
+  return (
+    <Badge variant="secondary" className="max-w-30 truncate rounded-md">
+      {columnLabel}
+    </Badge>
+  );
 });
 TicketColumnBadge.displayName = 'TicketColumnBadge';
 
@@ -124,25 +73,21 @@ TicketColumnBadge.displayName = 'TicketColumnBadge';
 export const TicketHeaderActions = memo(({ ticketId }: { ticketId: TicketId }) => {
   const { handleReset } = useTicketAutomation(ticketId);
   return (
-    <IconButton
-      aria-label="New session"
-      icon={<Add20Regular style={{ width: 10, height: 10 }} />}
-      size="sm"
-      onClick={handleReset}
-    />
+    <Button type="button" variant="ghost" size="icon-sm" aria-label="New session" onClick={handleReset}>
+      <Plus className="size-4" />
+    </Button>
   );
 });
 TicketHeaderActions.displayName = 'TicketHeaderActions';
 
 /** Banner action: autopilot controls + phase indicator. */
 export const TicketBannerActions = memo(({ ticketId }: { ticketId: TicketId }) => {
-  const styles = useStyles();
   const tickets = useStore($tickets);
+  const pipeline = useStore($pipeline);
   const ticket = tickets[ticketId];
   const { phase, handleStart, handleStop } = useTicketAutomation(ticketId);
 
-  // When the ticket has a resolution, TicketResolutionBadge handles the display.
-  if (ticket?.resolution) {
+  if (!ticket || ticket.archivedAt || categoryOf(pipeline, ticket.columnId) === 'done') {
     return null;
   }
 
@@ -154,25 +99,23 @@ export const TicketBannerActions = memo(({ ticketId }: { ticketId: TicketId }) =
   if (isAutonomous) {
     return (
       <>
-        <ArrowSync20Regular style={{ width: 10, height: 10 }} className={`${styles.greenIcon} animate-spin`} />
-        <span className={styles.greenText}>Working</span>
-        <IconButton
-          aria-label="Stop"
-          icon={<Stop20Filled style={{ width: 10, height: 10 }} />}
-          size="sm"
-          onClick={handleStop}
-        />
+        <RefreshCw className={`size-3 animate-spin ${'text-success'}`} />
+        <span className="text-xs font-medium text-success">Working</span>
+        <Button type="button" variant="ghost" size="icon-sm" aria-label="Stop" onClick={handleStop}>
+          <Square className="size-4" />
+        </Button>
       </>
     );
   }
   if (isProvisioning) {
-    return <Spinner size="sm" />;
+    return <Spinner />;
   }
   if (isError) {
     return (
       <>
-        <Warning20Regular style={{ width: 12, height: 12 }} className={styles.redIcon} />
-        <Button size="sm" leftIcon={<Play20Filled style={{ width: 10, height: 10 }} />} onClick={handleStart}>
+        <TriangleAlert className={`size-3 ${'text-destructive'}`} />
+        <Button size="sm" onClick={handleStart}>
+          <Play className="size-4" />
           Retry
         </Button>
       </>
@@ -181,38 +124,26 @@ export const TicketBannerActions = memo(({ ticketId }: { ticketId: TicketId }) =
   if (isCompleted) {
     return (
       <>
-        <CheckmarkCircle20Regular style={{ width: 12, height: 12 }} className={styles.greenIcon} />
-        <span className={styles.greenText}>Done</span>
+        <CircleCheck className={`size-3 ${'text-success'}`} />
+        <span className="text-xs font-medium text-success">Done</span>
       </>
     );
   }
-  // Idle — show autopilot button
+  // Idle — offer the user-facing task action. Environment selection is a
+  // project-level advanced setting, not something users repeat per run.
   return (
-    <Button size="sm" leftIcon={<Play20Filled style={{ width: 10, height: 10 }} />} onClick={handleStart}>
-      Autopilot
+    <Button size="sm" onClick={handleStart}>
+      <Play className="size-4" />
+      Start task
     </Button>
   );
 });
 TicketBannerActions.displayName = 'TicketBannerActions';
 
-/** Resolution badge — displays the resolution label when a ticket is resolved. */
-export const TicketResolutionBadge = memo(({ ticketId }: { ticketId: TicketId }) => {
-  const tickets = useStore($tickets);
-  const ticket = tickets[ticketId];
-
-  if (!ticket?.resolution) {
-    return null;
-  }
-
-  return <Badge color={RESOLUTION_COLORS[ticket.resolution]}>{RESOLUTION_LABELS[ticket.resolution]}</Badge>;
-});
-TicketResolutionBadge.displayName = 'TicketResolutionBadge';
-
 /** Combined controls (legacy export). */
 export const CodeTicketControls = memo(({ ticketId }: { ticketId: TicketId }) => {
-  const styles = useStyles();
   return (
-    <div className={styles.controlsRow}>
+    <div className="flex items-center gap-1.5 shrink-0">
       <TicketHeaderActions ticketId={ticketId} />
       <TicketBannerActions ticketId={ticketId} />
     </div>

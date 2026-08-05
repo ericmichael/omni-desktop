@@ -304,6 +304,20 @@ export class PgProjectsRepo implements IProjectsRepo {
         }
       }
 
+      // Category is authoritative; pipeline edits must update the internal
+      // completion timestamp even when the ticket's column id stays put.
+      await c.query(
+        `UPDATE tickets
+         SET completed_at = CASE
+           WHEN column_id IN (
+             SELECT id FROM pipeline_columns WHERE project_id = $1 AND category = 'done'
+           ) THEN COALESCE(completed_at, column_changed_at, updated_at)
+           ELSE NULL
+         END
+         WHERE project_id = $1`,
+        [projectId]
+      );
+
       return result;
     });
   }
@@ -330,17 +344,17 @@ export class PgProjectsRepo implements IProjectsRepo {
     return c.query(
       `INSERT INTO tickets (
          tenant_id, id, project_id, milestone_id, column_id, title, description, priority, branch,
-         blocked_by, resolution, resolved_at, archived_at, column_changed_at,
+         blocked_by, completed_at, archived_at, column_changed_at,
          use_worktree, worktree_path, worktree_name, supervisor_session_id,
          phase, phase_changed_at, supervisor_task_id, token_usage, runs,
          pr_review, pr_merged_at, assignee, created_at, updated_at
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28)
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27)
        ON CONFLICT (id) DO UPDATE SET
          project_id = EXCLUDED.project_id, milestone_id = EXCLUDED.milestone_id,
          column_id = EXCLUDED.column_id, title = EXCLUDED.title, description = EXCLUDED.description,
          priority = EXCLUDED.priority, branch = EXCLUDED.branch, blocked_by = EXCLUDED.blocked_by,
-         resolution = EXCLUDED.resolution, resolved_at = EXCLUDED.resolved_at,
-         archived_at = EXCLUDED.archived_at, column_changed_at = EXCLUDED.column_changed_at,
+         completed_at = EXCLUDED.completed_at, archived_at = EXCLUDED.archived_at,
+         column_changed_at = EXCLUDED.column_changed_at,
          use_worktree = EXCLUDED.use_worktree, worktree_path = EXCLUDED.worktree_path,
          worktree_name = EXCLUDED.worktree_name, supervisor_session_id = EXCLUDED.supervisor_session_id,
          phase = EXCLUDED.phase, phase_changed_at = EXCLUDED.phase_changed_at,
@@ -359,8 +373,7 @@ export class PgProjectsRepo implements IProjectsRepo {
         row.priority,
         row.branch,
         row.blocked_by,
-        row.resolution,
-        row.resolved_at,
+        row.completed_at,
         row.archived_at,
         row.column_changed_at,
         row.use_worktree,

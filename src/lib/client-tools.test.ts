@@ -65,7 +65,7 @@ describe('client_tools shape', () => {
     // workspace-superuser tools
     expect(names).toContain('list_workspace');
     expect(names).toContain('open_column');
-    expect(names).toContain('close_column');
+    expect(names).toContain('archive_session');
     expect(names).toContain('column_send');
     expect(names).toContain('column_decide');
     expect(names).toContain('column_cancel');

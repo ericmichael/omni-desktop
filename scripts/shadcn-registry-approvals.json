@@ -1,0 +1,24 @@
+{
+  "$schema": "./shadcn-registry-approvals.schema.json",
+  "version": 1,
+  "approvals": [
+    {
+      "component": "sidebar.tsx",
+      "upstreamSha256": "78dd9a5c50628d7bc8d5c637fdbfe613e49f4174fd3d525c9cc0be2152e67994",
+      "localSemanticSha256": "2638a3396afac9f5177d9460b1f537cdd798dda07d9b2ceee3ed17219717c18a",
+      "reason": "The mobile Sheet path returns before desktop sidebar markup renders, so the stock responsive display gates are redundant; removing them prevents Electron's generated responsive CSS from hiding the desktop sidebar while preserving the stock component structure and styling."
+    },
+    {
+      "component": "sonner.tsx",
+      "upstreamSha256": "13ccc9b0fe4248e622f83a1d3b2f0566b72b5e04162d7d0c8db8945ecc71b55f",
+      "localSemanticSha256": "60e6fedb5f0444b719007697e7e70521d4c51988c77a1b1abdc36d3736bec9f5",
+      "reason": "Sonner maps Omni's canonical persisted named theme to its required light/dark value; no visual drift or second theme authority."
+    },
+    {
+      "component": "tooltip.tsx",
+      "upstreamSha256": "a0784eb77831a799fad7991df4f1b666f876201565a80175e1aa68733574a2e4",
+      "localSemanticSha256": "bb780500f3a8367d731f45548268f8ec0f3387bfee1af2040bd637d2157aacfc",
+      "reason": "Tooltips use the semantic popover surface with a border and shadow, and omit the malformed rotated Radix arrow so the shared component remains opaque and legible across themes."
+    }
+  ]
+}

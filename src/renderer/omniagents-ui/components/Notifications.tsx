@@ -1,5 +1,8 @@
 import React from 'react';
 
+import { Button } from '@/renderer/ds/ui/button';
+import { Card } from '@/renderer/ds/ui/card';
+
 export type NotificationInfo = {
   id: string;
   message: string;
@@ -16,7 +19,7 @@ type Props = {
 // agent and persists them until the user explicitly dismisses them —
 // long-running runs can drop many heads-ups; the user catches up at a
 // glance and decides what to clear. Mirrors Tasks / BashJobs styling
-// (same bgCardAlt card, brand-color accents).
+// (same semantic card surface and primary-color accents).
 export function Notifications({ notifications, onDismiss, onDismissAll }: Props) {
   if (!notifications || notifications.length === 0) {
     return null;
@@ -26,40 +29,42 @@ export function Notifications({ notifications, onDismiss, onDismissAll }: Props)
 
   return (
     <div className="px-3 pt-2">
-      <div className="rounded-md border border-bgCardAlt bg-bgCardAlt/60 p-2.5">
-        <div className="flex items-center gap-2 text-xs text-textSubtle">
-          <span className="font-medium text-textPrimary">Notifications</span>
+      <Card className="gap-0 rounded-md border-accent bg-accent/60 p-2.5 shadow-none">
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <span className="font-medium text-foreground">Notifications</span>
           <span aria-hidden>·</span>
           <span>
-            <span className="text-brand">{notifications.length}</span> {noun}
+            <span className="text-primary">{notifications.length}</span> {noun}
           </span>
-          <button
-            type="button"
+          <Button
+            variant="ghost"
+            size="xs"
             onClick={onDismissAll}
-            className="ml-auto text-textSubtle hover:text-textPrimary transition-colors px-1.5 py-0.5 rounded hover:bg-bgCardAlt"
+            className="ml-auto"
             title="Dismiss all notifications"
           >
             dismiss all
-          </button>
+          </Button>
         </div>
         <ul className="mt-1.5 space-y-1">
           {notifications.map((n) => (
             <li key={n.id} className="flex items-start gap-2 text-xs leading-5">
               <span className="inline-block w-1.5 h-1.5 rounded-full bg-primary flex-shrink-0 mt-1.5" aria-hidden />
-              <span className="min-w-0 flex-1 text-textPrimary">{n.message}</span>
-              <button
-                type="button"
+              <span className="min-w-0 flex-1 text-foreground">{n.message}</span>
+              <Button
+                variant="ghost"
+                size="icon-xs"
                 onClick={() => onDismiss(n.id)}
-                className="text-textSubtle hover:text-errorRed transition-colors px-1.5 py-0.5 rounded hover:bg-bgCardAlt flex-shrink-0"
+                className="shrink-0 text-muted-foreground hover:text-destructive"
                 title="Dismiss"
                 aria-label="Dismiss notification"
               >
                 ✕
-              </button>
+              </Button>
             </li>
           ))}
         </ul>
-      </div>
+      </Card>
     </div>
   );
 }

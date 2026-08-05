@@ -42,7 +42,8 @@ import type {
 const FRONTMATTER_FENCE = '---';
 
 const TICKET_PRIORITIES = ['low', 'medium', 'high', 'critical'] as const;
-const TICKET_RESOLUTIONS = ['completed', 'wont_do', 'duplicate', 'cancelled'] as const;
+/** Accepted only while reading pre-completion-model ticket files. */
+const LEGACY_TICKET_RESOLUTIONS = ['completed', 'wont_do', 'duplicate', 'cancelled'] as const;
 const MILESTONE_STATUSES = ['active', 'completed', 'archived'] as const;
 const TICKET_PHASES = [
   'idle',
@@ -235,7 +236,9 @@ const TicketMetaSchema = z.object({
   worktreePath: z.string().optional(),
   worktreeName: z.string().optional(),
   phase: z.enum(TICKET_PHASES).optional(),
-  resolution: z.enum(TICKET_RESOLUTIONS).optional(),
+  completedAt: Timestamp.optional(),
+  archivedAt: Timestamp.optional(),
+  resolution: z.enum(LEGACY_TICKET_RESOLUTIONS).optional(),
   autopilot: z.boolean().optional(),
   tokenUsage: TokenUsageSchema.optional(),
   shaping: LegacyShapingSchema.optional(),
@@ -378,7 +381,8 @@ export function parseTicketFile(text: string, id: TicketId, projectId: ProjectId
     worktreePath: m.worktreePath,
     worktreeName: m.worktreeName,
     phase: m.phase,
-    resolution: m.resolution,
+    completedAt: m.completedAt ?? (m.resolution === 'completed' ? m.updatedAt : undefined),
+    archivedAt: m.archivedAt ?? (m.resolution && m.resolution !== 'completed' ? m.updatedAt : undefined),
     autopilot: m.autopilot,
     tokenUsage: m.tokenUsage,
     comments: [],
@@ -546,7 +550,8 @@ export function serializeTicketFile(ticket: Ticket): string {
     worktreePath: ticket.worktreePath,
     worktreeName: ticket.worktreeName,
     phase: ticket.phase,
-    resolution: ticket.resolution,
+    completedAt: ticket.completedAt === undefined ? undefined : msToIso(ticket.completedAt),
+    archivedAt: ticket.archivedAt === undefined ? undefined : msToIso(ticket.archivedAt),
     autopilot: ticket.autopilot,
     tokenUsage: ticket.tokenUsage,
     createdAt: msToIso(ticket.createdAt),

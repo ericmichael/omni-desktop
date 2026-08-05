@@ -1,5 +1,8 @@
 import React from 'react';
 
+import { Button } from '@/renderer/ds/ui/button';
+import { Card } from '@/renderer/ds/ui/card';
+
 // Server payload from omni-code's schedule_wakeup tick loop
 // (server_functions/wakeup.py). snapshot=null means no schedule is
 // active on this session (panel renders nothing). The server emits a
@@ -48,7 +51,7 @@ function dotClass(status: WakeupSnapshot['status']): string {
   if (status === 'active') {
     return 'bg-primary animate-pulse';
   }
-  return 'bg-errorRed';
+  return 'bg-destructive';
 }
 
 // Compact single-line docked panel for schedule_wakeup, mirroring
@@ -83,15 +86,15 @@ export function WakeupPanel({ snapshot, onDismiss }: { snapshot: WakeupSnapshot 
 
   return (
     <div className="px-3 pt-2">
-      <div className="rounded-md border border-bgCardAlt bg-bgCardAlt/60 px-2.5 py-1.5">
-        <div className="flex items-center gap-2 text-xs text-textSubtle">
+      <Card className="gap-0 rounded-md border-accent bg-accent/60 px-2.5 py-1.5 shadow-none">
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <span
             className={['inline-block w-1.5 h-1.5 rounded-full flex-shrink-0', dotClass(snapshot.status)].join(' ')}
             aria-hidden
           />
-          <span className="font-medium text-textPrimary">wakeup</span>
+          <span className="font-medium text-foreground">wakeup</span>
           <span aria-hidden>·</span>
-          <span className="truncate min-w-0 text-textPrimary" title={snapshot.message}>
+          <span className="truncate min-w-0 text-foreground" title={snapshot.message}>
             {shortMessage(snapshot.message, MESSAGE_TRUNCATE)}
           </span>
           {tail.map((part, idx) => (
@@ -101,21 +104,22 @@ export function WakeupPanel({ snapshot, onDismiss }: { snapshot: WakeupSnapshot 
             </React.Fragment>
           ))}
           {snapshot.status !== 'active' && (
-            <span className="ml-auto whitespace-nowrap text-errorRed">{snapshot.status}</span>
+            <span className="ml-auto whitespace-nowrap text-destructive">{snapshot.status}</span>
           )}
           {snapshot.status !== 'active' && onDismiss ? (
-            <button
-              type="button"
+            <Button
+              variant="ghost"
+              size="xs"
               onClick={onDismiss}
-              className="ml-1 text-textSubtle hover:text-textPrimary transition-colors px-1.5 py-0.5 rounded hover:bg-bgCardAlt"
+              className="ml-1"
               title="Dismiss wakeup status"
               aria-label="Dismiss wakeup status"
             >
               dismiss
-            </button>
+            </Button>
           ) : null}
         </div>
-      </div>
+      </Card>
     </div>
   );
 }

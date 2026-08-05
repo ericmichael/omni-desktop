@@ -6,11 +6,12 @@
  * The atom is populated by a `browser:permissions-changed` event pushed
  * from the main-process `PermissionsManager`.
  */
-import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
 import { useStore } from '@nanostores/react';
 import { atom } from 'nanostores';
 import { memo, useCallback } from 'react';
 
+import { Alert, AlertDescription } from '@/renderer/ds/ui/alert';
+import { Button } from '@/renderer/ds/ui/button';
 import { emitter, ipc } from '@/renderer/services/ipc';
 import type { PermissionRequest } from '@/shared/permissions-types';
 
@@ -26,51 +27,6 @@ void emitter
   .catch(() => {
     /* server mode — empty */
   });
-
-const useStyles = makeStyles({
-  root: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '12px',
-    padding: '8px 12px',
-    backgroundColor: tokens.colorNeutralBackground3,
-    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
-  },
-  message: {
-    flex: '1 1 0',
-    minWidth: 0,
-    fontSize: tokens.fontSizeBase200,
-    color: tokens.colorNeutralForeground1,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-  },
-  origin: { fontWeight: tokens.fontWeightSemibold },
-  allow: {
-    height: '26px',
-    paddingLeft: '10px',
-    paddingRight: '10px',
-    borderRadius: tokens.borderRadiusMedium,
-    backgroundColor: tokens.colorBrandBackground,
-    color: tokens.colorNeutralForegroundOnBrand,
-    border: 'none',
-    cursor: 'pointer',
-    fontSize: tokens.fontSizeBase200,
-    ':hover': { backgroundColor: tokens.colorBrandBackgroundHover },
-  },
-  deny: {
-    height: '26px',
-    paddingLeft: '10px',
-    paddingRight: '10px',
-    borderRadius: tokens.borderRadiusMedium,
-    backgroundColor: 'transparent',
-    color: tokens.colorNeutralForeground1,
-    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
-    cursor: 'pointer',
-    fontSize: tokens.fontSizeBase200,
-    ':hover': { backgroundColor: tokens.colorSubtleBackgroundHover },
-  },
-});
 
 const FRIENDLY: Record<string, string> = {
   notifications: 'show notifications',
@@ -96,7 +52,6 @@ function describe(permission: string): string {
 }
 
 export const PermissionsBar = memo(({ partition }: { partition?: string }) => {
-  const styles = useStyles();
   const all = useStore($permissions);
 
   // Scope visible requests to this surface's partition. The main-process
@@ -116,17 +71,17 @@ export const PermissionsBar = memo(({ partition }: { partition?: string }) => {
   }
 
   return (
-    <div className={styles.root} role="alertdialog" aria-label="Permission request">
-      <span className={styles.message}>
-        <span className={styles.origin}>{next.origin}</span> wants to {describe(next.permission)}.
-      </span>
-      <button type="button" className={styles.deny} onClick={() => decide(next.id, false)}>
+    <Alert className="flex items-center gap-3 rounded-none border-x-0 border-t-0 bg-muted px-3 py-2">
+      <AlertDescription className="min-w-0 flex-1 truncate text-xs text-foreground">
+        <span className="font-semibold">{next.origin}</span> wants to {describe(next.permission)}.
+      </AlertDescription>
+      <Button type="button" variant="outline" size="sm" onClick={() => decide(next.id, false)}>
         Deny
-      </button>
-      <button type="button" className={styles.allow} onClick={() => decide(next.id, true)}>
+      </Button>
+      <Button type="button" size="sm" onClick={() => decide(next.id, true)}>
         Allow
-      </button>
-    </div>
+      </Button>
+    </Alert>
   );
 });
 PermissionsBar.displayName = 'PermissionsBar';

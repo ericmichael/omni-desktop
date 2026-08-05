@@ -19,7 +19,7 @@ export const MARIMO_NOTEBOOK_TEMPLATE = `# /// script
 import marimo
 
 __generated_with = "0.0.0"
-app = marimo.App(css_file="marimo-glass.css")
+app = marimo.App()
 
 
 @app.cell

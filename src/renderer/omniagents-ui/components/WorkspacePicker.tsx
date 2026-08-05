@@ -1,5 +1,20 @@
+import { ArrowUp, Folder, House } from 'lucide-react';
 import React, { useCallback, useEffect, useState } from 'react';
 
+import { Button } from '@/renderer/ds/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/renderer/ds/ui/dialog';
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/renderer/ds/ui/empty';
+import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '@/renderer/ds/ui/input-group';
+import { Item, ItemContent, ItemGroup, ItemMedia, ItemTitle } from '@/renderer/ds/ui/item';
+import { ScrollArea } from '@/renderer/ds/ui/scroll-area';
+import { Spinner } from '@/renderer/ds/ui/spinner';
 import { useRPCClient } from '@/renderer/omniagents-ui/rpc-context';
 
 type DirEntry = {
@@ -105,87 +120,53 @@ export function WorkspacePicker({
   }, [manualInput, load]);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/70" onClick={onClose}>
-      <div
-        className="bg-bgMain border border-bgCardAlt rounded-xl shadow-2xl w-full max-w-lg mx-4 flex flex-col"
-        style={{ maxHeight: '80vh' }}
-        onClick={(e) => e.stopPropagation()}
-      >
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-h-dialog flex max-w-lg flex-col gap-0 overflow-hidden p-0">
         {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-bgCardAlt">
-          <h2 className="text-sm font-semibold text-textHeading">Choose Workspace</h2>
-          <button onClick={onClose} className="text-textSubtle hover:text-textHeading p-1 rounded" aria-label="Close">
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-            >
-              <path d="M18 6L6 18M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
+        <DialogHeader className="px-4 py-3 text-left">
+          <DialogTitle className="text-sm">Choose Workspace</DialogTitle>
+          <DialogDescription className="sr-only">
+            Choose the folder the agent should use as its workspace.
+          </DialogDescription>
+        </DialogHeader>
 
         {/* Path bar */}
-        <div className="flex items-center gap-2 px-4 py-2 border-b border-bgCardAlt">
-          <button
-            onClick={() => parentPath && load(parentPath)}
-            disabled={!parentPath}
-            className="flex-shrink-0 text-textSubtle hover:text-textHeading disabled:opacity-30 p-1 rounded"
-            aria-label="Go up"
-            title="Parent directory"
-          >
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-            >
-              <path d="M12 19V5M5 12l7-7 7 7" />
-            </svg>
-          </button>
-          <button
-            onClick={async () => {
-              try {
-                const res = (await client.serverCall('fs_get_home', {}, sessionId, environmentId)) as any;
-                if (res?.path) {
-                  load(res.path);
-                }
-              } catch {}
-            }}
-            className="flex-shrink-0 text-textSubtle hover:text-textHeading p-1 rounded"
-            aria-label="Home"
-            title="Home directory"
-          >
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-              <polyline points="9 22 9 12 15 12 15 22" />
-            </svg>
-          </button>
-          {editingPath ? (
-            <form
-              className="flex-1 flex items-center gap-1"
-              onSubmit={(e) => {
-                e.preventDefault();
-                handleManualGo();
-              }}
-            >
-              <input
+        <form
+          className="border-b border-accent px-4 py-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            handleManualGo();
+          }}
+        >
+          <InputGroup className="h-8">
+            <InputGroupAddon>
+              <InputGroupButton
+                size="icon-xs"
+                onClick={() => parentPath && load(parentPath)}
+                disabled={!parentPath}
+                aria-label="Go up"
+                title="Parent directory"
+              >
+                <ArrowUp />
+              </InputGroupButton>
+              <InputGroupButton
+                size="icon-xs"
+                onClick={async () => {
+                  try {
+                    const res = (await client.serverCall('fs_get_home', {}, sessionId, environmentId)) as any;
+                    if (res?.path) {
+                      load(res.path);
+                    }
+                  } catch {}
+                }}
+                aria-label="Home"
+                title="Home directory"
+              >
+                <House />
+              </InputGroupButton>
+            </InputGroupAddon>
+            {editingPath ? (
+              <InputGroupInput
                 type="text"
                 value={manualInput}
                 onChange={(e) => setManualInput(e.target.value)}
@@ -196,71 +177,70 @@ export function WorkspacePicker({
                   }
                 }}
                 autoFocus
-                className="flex-1 bg-bgCard text-textHeading text-xs rounded px-2 py-1 border border-bgCardAlt outline-none focus:border-brand"
+                className="h-7 text-xs"
               />
-            </form>
-          ) : (
-            <button
-              onClick={() => setEditingPath(true)}
-              className="flex-1 text-left text-xs text-textHeading truncate hover:underline cursor-text px-1"
-              title={currentPath || ''}
-            >
-              {currentPath || '…'}
-            </button>
-          )}
-        </div>
+            ) : (
+              <InputGroupInput
+                readOnly
+                value={currentPath || '…'}
+                className="h-7 cursor-text truncate text-xs"
+                onClick={() => setEditingPath(true)}
+                title={currentPath || ''}
+              />
+            )}
+          </InputGroup>
+        </form>
 
         {/* Entries list */}
-        <div className="flex-1 overflow-y-auto min-h-0" style={{ maxHeight: '50vh' }}>
+        <ScrollArea className="h-1/2 min-h-0 flex-1">
           {loading ? (
             <div className="flex items-center justify-center py-8">
-              <div className="animate-spin rounded-full h-5 w-5 border-2 border-primary border-t-transparent" />
+              <Spinner />
             </div>
           ) : error ? (
-            <div className="px-4 py-6 text-sm text-errorRed text-center">{error}</div>
+            <Empty className="h-full border-0 p-6">
+              <EmptyHeader>
+                <EmptyTitle>Could not load folders</EmptyTitle>
+                <EmptyDescription className="text-destructive">{error}</EmptyDescription>
+              </EmptyHeader>
+            </Empty>
           ) : entries.length === 0 ? (
-            <div className="px-4 py-6 text-sm text-textSubtle text-center">No subdirectories</div>
+            <Empty className="h-full border-0 p-6">
+              <EmptyHeader>
+                <EmptyMedia variant="icon">
+                  <Folder />
+                </EmptyMedia>
+                <EmptyTitle>No subdirectories</EmptyTitle>
+              </EmptyHeader>
+            </Empty>
           ) : (
-            <div className="py-1">
+            <ItemGroup className="p-1">
               {entries.map((entry) => (
-                <button
-                  key={entry.path}
-                  onClick={() => load(entry.path)}
-                  className="w-full flex items-center gap-3 px-4 py-2 text-left hover:bg-bgCard/50 transition-colors"
-                >
-                  <svg
-                    width="16"
-                    height="16"
-                    viewBox="0 0 24 24"
-                    className="flex-shrink-0 text-brand"
-                    fill="currentColor"
-                  >
-                    <path d="M2 6a2 2 0 012-2h5l2 2h9a2 2 0 012 2v10a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" />
-                  </svg>
-                  <span className="text-sm text-textHeading truncate">{entry.name}</span>
-                </button>
+                <Item key={entry.path} asChild size="sm" className="w-full cursor-pointer hover:bg-accent">
+                  <button type="button" onClick={() => load(entry.path)}>
+                    <ItemMedia>
+                      <Folder className="text-primary" />
+                    </ItemMedia>
+                    <ItemContent>
+                      <ItemTitle className="truncate">{entry.name}</ItemTitle>
+                    </ItemContent>
+                  </button>
+                </Item>
               ))}
-            </div>
+            </ItemGroup>
           )}
-        </div>
+        </ScrollArea>
 
         {/* Footer */}
-        <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-bgCardAlt">
-          <button
-            onClick={onClose}
-            className="px-3 py-1.5 text-sm text-textSubtle hover:text-textHeading rounded-lg hover:bg-bgCard transition-colors"
-          >
+        <DialogFooter className="border-t px-4 py-3">
+          <Button type="button" variant="outline" onClick={onClose}>
             Cancel
-          </button>
-          <button
-            onClick={() => currentPath && onSelect(currentPath)}
-            disabled={!currentPath}
-            className="px-4 py-1.5 text-sm font-medium bg-primary text-primary-foreground rounded-lg hover:brightness-110 disabled:opacity-50 transition-all"
-          >
+          </Button>
+          <Button type="button" onClick={() => currentPath && onSelect(currentPath)} disabled={!currentPath}>
             Use This Folder
-          </button>
-        </div>
-      </div>
-    </div>
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

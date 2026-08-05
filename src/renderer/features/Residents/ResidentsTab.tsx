@@ -1,37 +1,24 @@
-import type { FieldProps, LabelProps } from '@fluentui/react-components';
-import {
-  Divider as LabeledDivider,
-  Field,
-  InfoLabel,
-  InteractionTag,
-  InteractionTagPrimary,
-  makeStyles,
-  mergeClasses,
-  Spinner,
-  Switch,
-  Tab,
-  TabList,
-  tokens,
-  Tooltip,
-} from '@fluentui/react-components';
-import {
-  Add20Regular,
-  ArrowReply20Regular,
-  BookOpen20Regular,
-  Chat20Regular,
-  Checkmark20Regular,
-  Delete20Regular,
-  Dismiss20Regular,
-  FlashRegular,
-  Mic20Regular,
-  MoreHorizontal20Regular,
-  PersonAdd20Regular,
-  Send20Regular,
-  Speaker220Regular,
-  SpeakerMute20Regular,
-} from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
-import type { ChangeEvent, ComponentProps, FormEvent, KeyboardEvent } from 'react';
+import {
+  BookOpen,
+  Brain,
+  Check,
+  Ellipsis,
+  FolderKanban,
+  MessageCircle,
+  Mic,
+  Plus,
+  Reply,
+  Send,
+  Speaker,
+  Terminal,
+  Trash2,
+  UserPlus,
+  VolumeX,
+  X,
+  Zap,
+} from 'lucide-react';
+import type { ChangeEvent, ComponentProps, FormEvent, KeyboardEvent, ReactNode } from 'react';
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { formatDayLabel, formatTimeOfDay, formatTimestamp } from '@/lib/format-time';
@@ -47,34 +34,56 @@ import {
 } from '@/lib/resident-agent';
 import { RESIDENT_TEMPLATES } from '@/lib/resident-templates';
 import { configuredVoiceMode } from '@/lib/voice-mode';
-import { openMobileNav } from '@/renderer/app/mobile-nav';
 import { useIsDesktop } from '@/renderer/common/use-is-desktop';
+import { cn } from '@/renderer/ds/cn';
+import { PageTabsList, PageTabsTrigger } from '@/renderer/ds/PageTabs';
+import { SaveBar } from '@/renderer/ds/SaveBar';
+import { TopAppBar } from '@/renderer/ds/TopAppBar';
+import { Alert, AlertDescription } from '@/renderer/ds/ui/alert';
 import {
-  Badge,
-  Button,
-  Caption1,
-  Checkbox,
-  ConfirmDialog,
-  CounterBadge,
-  EmptyState,
-  FormSkeleton,
-  IconButton,
-  Input,
-  Menu,
-  type MenuCheckedValueChangeData,
-  MenuDivider,
-  MenuItem,
-  MenuItemCheckbox,
-  MenuList,
-  MenuPopover,
-  MenuTrigger,
-  MessageBar,
-  MessageBarBody,
-  SaveBar,
-  Select,
-  Textarea,
-  TopAppBar,
-} from '@/renderer/ds';
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/renderer/ds/ui/alert-dialog';
+import { Badge } from '@/renderer/ds/ui/badge';
+import { Button } from '@/renderer/ds/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/renderer/ds/ui/card';
+import { Checkbox } from '@/renderer/ds/ui/checkbox';
+import { Command, CommandItem, CommandList } from '@/renderer/ds/ui/command';
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/renderer/ds/ui/dropdown-menu';
+import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from '@/renderer/ds/ui/empty';
+import { Field, FieldDescription, FieldLabel } from '@/renderer/ds/ui/field';
+import { Input } from '@/renderer/ds/ui/input';
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from '@/renderer/ds/ui/item';
+import { NativeSelect as Select } from '@/renderer/ds/ui/native-select';
+import { Popover, PopoverAnchor, PopoverContent } from '@/renderer/ds/ui/popover';
+import { Separator } from '@/renderer/ds/ui/separator';
+import { Skeleton } from '@/renderer/ds/ui/skeleton';
+import { Spinner } from '@/renderer/ds/ui/spinner';
+import { Switch } from '@/renderer/ds/ui/switch';
+import { Tabs } from '@/renderer/ds/ui/tabs';
+import { Textarea } from '@/renderer/ds/ui/textarea';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/renderer/ds/ui/tooltip';
 import { SandboxPicker } from '@/renderer/features/SandboxProfile/SandboxPicker';
 import { ScheduledTasks } from '@/renderer/features/ScheduledTasks/ScheduledTasks';
 import { OmniAgentsApp } from '@/renderer/omniagents-ui';
@@ -87,7 +96,6 @@ import { $machines } from '@/renderer/services/machines';
 import { persistedStoreApi } from '@/renderer/services/store';
 import { isLocalVoiceCapable } from '@/renderer/services/voice-client';
 import { VoiceScopeContext } from '@/renderer/services/voice-recording';
-import { $glassEnabled } from '@/renderer/theme/use-glass';
 import type {
   AgentRuntimeConnection,
   Project,
@@ -113,560 +121,6 @@ import {
 
 type SandboxContext = ComponentProps<typeof SandboxPicker>['context'];
 
-const useStyles = makeStyles({
-  root: {
-    display: 'flex',
-    width: '100%',
-    height: '100%',
-  },
-  rootGlass: {
-    backgroundColor: 'transparent',
-  },
-  listPane: {
-    display: 'flex',
-    flexDirection: 'column',
-    width: '100%',
-    height: '100%',
-    '@media (min-width: 640px)': {
-      // Nav-sidebar width — matches the Work sidebar's NavDrawer.
-      width: '260px',
-      flexShrink: 0,
-      borderRight: `1px solid ${tokens.colorNeutralStroke1}`,
-    },
-  },
-  listPaneGlass: {
-    backgroundColor: tokens.colorNeutralBackground2,
-    backdropFilter: 'var(--glass-blur)',
-    WebkitBackdropFilter: 'var(--glass-blur)',
-  },
-  list: {
-    flex: '1 1 0',
-    minHeight: 0,
-    overflowY: 'auto',
-  },
-  detailPane: {
-    flex: '1 1 0',
-    minWidth: 0,
-    display: 'flex',
-    flexDirection: 'column',
-  },
-  detailPaneGlass: {
-    backgroundColor: tokens.colorNeutralBackground1,
-    backdropFilter: 'var(--glass-blur)',
-    WebkitBackdropFilter: 'var(--glass-blur)',
-  },
-  row: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'stretch',
-    gap: '2px',
-    paddingLeft: tokens.spacingHorizontalL,
-    paddingRight: tokens.spacingHorizontalS,
-    paddingTop: '8px',
-    paddingBottom: '8px',
-    cursor: 'pointer',
-    border: 'none',
-    backgroundColor: 'transparent',
-    width: '100%',
-    textAlign: 'left',
-    ':hover': { backgroundColor: tokens.colorSubtleBackgroundHover },
-    ':focus-visible': {
-      outlineWidth: '2px',
-      outlineStyle: 'solid',
-      outlineColor: tokens.colorBrandStroke1,
-      outlineOffset: '-2px',
-    },
-    '&:hover .resident-row-menu': { opacity: 1 },
-    '&:focus-within .resident-row-menu': { opacity: 1 },
-  },
-  rowTop: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-  },
-  /* Actions slot content on nav TreeItems (the Work sidebar's idiom). */
-  rowActions: {
-    display: 'flex',
-    alignItems: 'center',
-  },
-  /* Hover/focus-revealed "…" menu on list rows — same idiom as Routines. */
-  rowMenu: {
-    display: 'flex',
-    alignItems: 'center',
-    flexShrink: 0,
-    opacity: 0,
-    transitionProperty: 'opacity',
-    transitionDuration: tokens.durationFaster,
-  },
-  rowMenuOpen: {
-    opacity: 1,
-  },
-  rowTitle: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-    fontWeight: tokens.fontWeightRegular,
-    fontSize: tokens.fontSizeBase300,
-    minWidth: 0,
-  },
-  /* Unread rows follow the mainstream convention: weight, not just a badge. */
-  rowTitleUnread: {
-    fontWeight: tokens.fontWeightSemibold,
-  },
-  rowTitleText: {
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-  },
-  /* Two stacked text lines beside a row avatar. */
-  rowLines: {
-    flex: '1 1 0',
-    minWidth: 0,
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '2px',
-  },
-  rowMeta: {
-    color: tokens.colorNeutralForeground3,
-    fontSize: tokens.fontSizeBase200,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-  },
-  rowTime: {
-    flexShrink: 0,
-    color: tokens.colorNeutralForeground3,
-    fontSize: tokens.fontSizeBase100,
-  },
-  /* ── Detail: the standard skeleton — full-bleed header band (title +
-     actions + metadata), like the Routines and ticket detail pages. ── */
-  bandHeader: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalXS,
-    paddingLeft: tokens.spacingHorizontalL,
-    paddingRight: tokens.spacingHorizontalL,
-    paddingTop: tokens.spacingVerticalL,
-    paddingBottom: tokens.spacingVerticalS,
-    borderBottom: `1px solid ${tokens.colorNeutralStroke1}`,
-    flexShrink: 0,
-  },
-  bandTitleRow: {
-    display: 'flex',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    columnGap: tokens.spacingHorizontalS,
-    rowGap: tokens.spacingVerticalXS,
-    minWidth: 0,
-  },
-  bandTitle: {
-    flex: '0 1 auto',
-    minWidth: 0,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    fontSize: tokens.fontSizeBase600,
-    fontWeight: tokens.fontWeightSemibold,
-    lineHeight: tokens.lineHeightBase600,
-    color: tokens.colorNeutralForeground1,
-  },
-  bandSpacer: {
-    flex: '1 1 0',
-  },
-  dangerMenuItem: {
-    color: tokens.colorPaletteRedForeground1,
-  },
-  detailBody: {
-    flex: '1 1 0',
-    minHeight: 0,
-    overflowY: 'auto',
-    padding: tokens.spacingHorizontalL,
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalM,
-  },
-  sessionHost: {
-    flex: '1 1 0',
-    minHeight: 0,
-    position: 'relative',
-    display: 'flex',
-    flexDirection: 'column',
-  },
-  sessionCenter: {
-    flex: '1 1 0',
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: tokens.spacingVerticalM,
-    color: tokens.colorNeutralForeground3,
-    textAlign: 'center',
-    padding: tokens.spacingHorizontalXXL,
-  },
-  feed: {
-    flex: '1 1 0',
-    minHeight: 0,
-    overflowY: 'auto',
-    paddingLeft: tokens.spacingHorizontalL,
-    paddingRight: tokens.spacingHorizontalL,
-    paddingTop: tokens.spacingVerticalS,
-    paddingBottom: tokens.spacingVerticalS,
-    display: 'flex',
-    flexDirection: 'column',
-  },
-  /* ── Message rows: the Slack gutter grid — avatar column, then head line
-     over the body. Consecutive same-sender messages group: only the first
-     carries the avatar + head. ── */
-  message: {
-    position: 'relative',
-    display: 'grid',
-    gridTemplateColumns: '32px 1fr',
-    columnGap: tokens.spacingHorizontalS,
-    paddingTop: '2px',
-    paddingBottom: '2px',
-    paddingLeft: tokens.spacingHorizontalXS,
-    paddingRight: tokens.spacingHorizontalXS,
-    borderRadius: tokens.borderRadiusMedium,
-    ':hover': { backgroundColor: tokens.colorSubtleBackgroundHover },
-    '&:hover .message-actions': { opacity: 1 },
-    '&:focus-within .message-actions': { opacity: 1 },
-  },
-  messageGroupStart: {
-    marginTop: tokens.spacingVerticalM,
-  },
-  /* Replies keep a narrower gutter under the thread rail. */
-  messageReplyGrid: {
-    gridTemplateColumns: '24px 1fr',
-  },
-  /* A reply nests under its root — one level deep, the Slack shape. */
-  messageReply: {
-    marginLeft: tokens.spacingHorizontalXL,
-    paddingLeft: tokens.spacingHorizontalM,
-    borderLeft: `2px solid ${tokens.colorNeutralStroke1}`,
-  },
-  msgGutter: {
-    paddingTop: '2px',
-  },
-  msgMain: {
-    minWidth: 0,
-    display: 'flex',
-    flexDirection: 'column',
-  },
-  messageHead: {
-    display: 'flex',
-    alignItems: 'baseline',
-    gap: tokens.spacingHorizontalS,
-    minWidth: 0,
-  },
-  messageFrom: {
-    fontWeight: tokens.fontWeightSemibold,
-    fontSize: tokens.fontSizeBase300,
-  },
-  /* Hover action bar, floated over the row's top-right (Slack's idiom). */
-  msgActions: {
-    position: 'absolute',
-    top: '-12px',
-    right: tokens.spacingHorizontalS,
-    opacity: 0,
-    transitionProperty: 'opacity',
-    transitionDuration: tokens.durationFaster,
-    backgroundColor: tokens.colorNeutralBackground1,
-    border: `1px solid ${tokens.colorNeutralStroke2}`,
-    borderRadius: tokens.borderRadiusMedium,
-    boxShadow: tokens.shadow4,
-    '@media (hover: none)': { opacity: 1 },
-  },
-  /* Constrain the shared markdown surface to feed density. */
-  markdownBody: {
-    fontSize: tokens.fontSizeBase300,
-    lineHeight: tokens.lineHeightBase300,
-  },
-  /* Day dividers carry the date so message stamps stay time-only. */
-  dayDivider: {
-    flexShrink: 0,
-    paddingTop: tokens.spacingVerticalL,
-    paddingBottom: tokens.spacingVerticalXS,
-    fontSize: tokens.fontSizeBase200,
-    color: tokens.colorNeutralForeground3,
-  },
-  /* "↳ reply" marker for reply rows outside the grouped channel view. */
-  replyMarker: {
-    color: tokens.colorNeutralForeground3,
-    fontSize: tokens.fontSizeBase100,
-  },
-  /* Conversation tag on Activity rows — a real button, so the tag can open
-     the channel/thread it names. */
-  channelBadgeBtn: {
-    border: 'none',
-    backgroundColor: 'transparent',
-    padding: 0,
-    cursor: 'pointer',
-    display: 'inline-flex',
-    borderRadius: tokens.borderRadiusMedium,
-    ':focus-visible': {
-      outline: `2px solid ${tokens.colorBrandStroke1}`,
-      outlineOffset: '1px',
-    },
-  },
-  /* "Show N earlier replies" — sits on the thread rail like the replies. */
-  threadExpandBtn: {
-    border: 'none',
-    backgroundColor: 'transparent',
-    cursor: 'pointer',
-    padding: '2px 0',
-    color: tokens.colorNeutralForeground3,
-    fontSize: tokens.fontSizeBase200,
-    borderRadius: tokens.borderRadiusMedium,
-    ':hover': { color: tokens.colorBrandForeground1 },
-    ':focus-visible': {
-      outline: `2px solid ${tokens.colorBrandStroke1}`,
-      outlineOffset: '1px',
-    },
-  },
-  /* Composer block: optional reply banner + error line + the input row.
-     Relative so the mention popup can anchor above it. */
-  composerArea: {
-    position: 'relative',
-    borderTop: `1px solid ${tokens.colorNeutralStroke1}`,
-  },
-  /* ── @-mention typeahead, floated above the composer. ── */
-  mentionPopup: {
-    position: 'absolute',
-    bottom: '100%',
-    left: tokens.spacingHorizontalL,
-    zIndex: 10,
-    minWidth: '260px',
-    maxHeight: '240px',
-    overflowY: 'auto',
-    backgroundColor: tokens.colorNeutralBackground1,
-    border: `1px solid ${tokens.colorNeutralStroke2}`,
-    borderRadius: tokens.borderRadiusMedium,
-    boxShadow: tokens.shadow16,
-    paddingTop: tokens.spacingVerticalXS,
-    paddingBottom: tokens.spacingVerticalXS,
-  },
-  mentionItem: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-    width: '100%',
-    border: 'none',
-    backgroundColor: 'transparent',
-    textAlign: 'left',
-    cursor: 'pointer',
-    paddingTop: tokens.spacingVerticalXS,
-    paddingBottom: tokens.spacingVerticalXS,
-    paddingLeft: tokens.spacingHorizontalM,
-    paddingRight: tokens.spacingHorizontalM,
-    fontSize: tokens.fontSizeBase300,
-  },
-  mentionItemActive: {
-    backgroundColor: tokens.colorSubtleBackgroundSelected,
-  },
-  mentionItemRole: {
-    color: tokens.colorNeutralForeground3,
-    fontSize: tokens.fontSizeBase200,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-  },
-  replyBanner: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-    paddingLeft: tokens.spacingHorizontalL,
-    paddingRight: tokens.spacingHorizontalS,
-    paddingTop: tokens.spacingVerticalXS,
-  },
-  replyBannerText: {
-    flex: '1 1 0',
-    minWidth: 0,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-  },
-  sendError: {
-    paddingLeft: tokens.spacingHorizontalL,
-    paddingRight: tokens.spacingHorizontalL,
-    paddingTop: tokens.spacingVerticalXS,
-    color: tokens.colorPaletteRedForeground1,
-  },
-  composer: {
-    display: 'flex',
-    alignItems: 'flex-end',
-    gap: tokens.spacingHorizontalS,
-    padding: tokens.spacingHorizontalL,
-  },
-  composerInput: {
-    flex: '1 1 0',
-  },
-  memoryRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-  },
-  memoryText: {
-    flex: '1 1 0',
-    fontSize: tokens.fontSizeBase200,
-  },
-  memoryAdd: {
-    display: 'flex',
-    gap: tokens.spacingHorizontalS,
-    marginTop: tokens.spacingVerticalS,
-  },
-  projectScopeList: {
-    display: 'flex',
-    flexDirection: 'column',
-  },
-  newChannelWrap: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '2px',
-    paddingBottom: '8px',
-  },
-  newChannelRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-    paddingLeft: tokens.spacingHorizontalL,
-    paddingRight: tokens.spacingHorizontalS,
-    paddingTop: '4px',
-  },
-  newChannelHint: {
-    paddingLeft: tokens.spacingHorizontalL,
-    paddingRight: tokens.spacingHorizontalL,
-  },
-  newChannelError: {
-    paddingLeft: tokens.spacingHorizontalL,
-    paddingRight: tokens.spacingHorizontalL,
-    color: tokens.colorPaletteRedForeground1,
-  },
-  /* ── Channel member bar: member chips w/ live presence + manage menu. ── */
-  memberBar: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '2px',
-    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalL}`,
-    borderBottom: `1px solid ${tokens.colorNeutralStroke1}`,
-  },
-  memberBarRow: {
-    display: 'flex',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: tokens.spacingHorizontalS,
-  },
-  memberBarSpacer: {
-    flex: '1 1 0',
-  },
-  memberBarNote: {
-    color: tokens.colorNeutralForeground3,
-  },
-  memberWarning: {
-    color: tokens.colorPaletteYellowForeground1,
-  },
-  /* Desktop title band above a channel/DM feed (mobile titles via TopAppBar). */
-  feedHeader: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-    paddingLeft: tokens.spacingHorizontalL,
-    paddingRight: tokens.spacingHorizontalL,
-    paddingTop: tokens.spacingVerticalM,
-    paddingBottom: tokens.spacingVerticalS,
-    borderBottom: `1px solid ${tokens.colorNeutralStroke1}`,
-    flexShrink: 0,
-    minWidth: 0,
-  },
-  feedHeaderTitle: {
-    fontSize: tokens.fontSizeBase400,
-    fontWeight: tokens.fontWeightSemibold,
-    whiteSpace: 'nowrap',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-  },
-  feedHeaderMeta: {
-    color: tokens.colorNeutralForeground3,
-    fontSize: tokens.fontSizeBase200,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    minWidth: 0,
-  },
-  dialogForm: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalM,
-  },
-  dialogButtons: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-  },
-  /* #system rows are the incident log — failures rise, chatter recedes. */
-  messageIncident: {
-    borderLeft: `3px solid ${tokens.colorStatusWarningBorder1}`,
-    backgroundColor: tokens.colorStatusWarningBackground1,
-    borderRadius: tokens.borderRadiusMedium,
-    padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalS}`,
-  },
-  /* Agent↔agent DM threads render without a composer. */
-  readOnlyHint: {
-    padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalL}`,
-    borderTop: `1px solid ${tokens.colorNeutralStroke1}`,
-    color: tokens.colorNeutralForeground3,
-    fontSize: tokens.fontSizeBase200,
-  },
-  statusLine: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalM,
-    flexWrap: 'wrap',
-  },
-  idChip: {
-    color: tokens.colorNeutralForeground3,
-    fontFamily: tokens.fontFamilyMonospace,
-    fontSize: tokens.fontSizeBase200,
-  },
-  form: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalM,
-    maxWidth: '560px',
-  },
-  /* ── Persona field: template select stacked over the doctrine text ── */
-  personaField: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalXS,
-  },
-  /* ── Handbook: the Docs editor hosted at roster level ── */
-  handbookPane: {
-    display: 'flex',
-    flexDirection: 'column',
-    flex: '1 1 0',
-    minHeight: 0,
-  },
-  handbookHeader: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalXS,
-    paddingLeft: tokens.spacingHorizontalXXL,
-    paddingRight: tokens.spacingHorizontalXXL,
-    paddingTop: tokens.spacingVerticalM,
-  },
-  handbookBody: {
-    flex: '1 1 0',
-    minHeight: 0,
-    overflowY: 'auto',
-    paddingLeft: tokens.spacingHorizontalL,
-    paddingRight: tokens.spacingHorizontalL,
-    maxWidth: '56rem',
-    width: '100%',
-    marginLeft: 'auto',
-    marginRight: 'auto',
-  },
-});
-
 const MORNING_HOUR_OPTIONS = Array.from({ length: 24 }, (_, h) => h);
 
 const STATE_LABEL: Record<ResidentAgentRuntime['state'], string> = {
@@ -677,25 +131,34 @@ const STATE_LABEL: Record<ResidentAgentRuntime['state'], string> = {
   reflecting: 'Reflecting…',
 };
 
-const stateBadgeColor = (state: ResidentAgentRuntime['state'] | undefined): 'blue' | 'green' | 'default' => {
-  if (state === 'thinking' || state === 'reflecting' || state === 'starting') {
-    return 'blue';
+function availabilityLabel(runtime: ResidentAgentRuntime | undefined, enabled: boolean): string {
+  if (!enabled) {
+    return 'Unavailable';
   }
-  if (state === 'idle') {
-    return 'green';
+  if (runtime?.state === 'thinking' || runtime?.state === 'reflecting') {
+    return 'Working';
   }
-  return 'default';
-};
+  if (runtime?.state === 'starting') {
+    return 'Getting ready';
+  }
+  return 'Available';
+}
 
 /** Field label with the doctrine tucked behind an info icon — labels stay
  *  scannable, the manual stays available. */
-const infoLabel = (text: string, info: string): FieldProps['label'] => ({
-  children: (_: unknown, props: LabelProps) => (
-    <InfoLabel {...props} info={info}>
-      {text}
-    </InfoLabel>
-  ),
-});
+const infoLabel = (text: string, info: string): ReactNode => (
+  <Tooltip>
+    <TooltipTrigger asChild>
+      <span className="inline-flex items-center gap-1">
+        {text}
+        <span className="text-muted-foreground" aria-hidden="true">
+          ⓘ
+        </span>
+      </span>
+    </TooltipTrigger>
+    <TooltipContent>{info}</TooltipContent>
+  </Tooltip>
+);
 
 /** Human label for a channel: null for #team, "you ↔ Scout" for DMs. */
 const channelLabel = (channel: string, roster: ResidentAgent[]): string | null => {
@@ -723,12 +186,10 @@ const MentionItem = memo(function MentionItem({
   agent: ResidentAgent;
   index: number;
   active: boolean;
-  /** Live presence — who you're about to address is worth knowing here. */
-  presence?: AgentPresence;
+  /** Live presence — who you're about to address is worth knowing here. */ presence?: AgentPresence;
   onPick: (agent: ResidentAgent) => void;
   onHover: (index: number) => void;
 }): React.JSX.Element {
-  const styles = useStyles();
   const handleMouseDown = useCallback(
     (e: React.MouseEvent) => {
       e.preventDefault();
@@ -738,18 +199,21 @@ const MentionItem = memo(function MentionItem({
   );
   const handleMouseEnter = useCallback(() => onHover(index), [onHover, index]);
   return (
-    <button
-      type="button"
-      role="option"
-      aria-selected={active}
-      className={mergeClasses(styles.mentionItem, active && styles.mentionItemActive)}
+    <CommandItem
+      value={agent.id}
+      className={cn(
+        'flex items-center gap-2 w-full border-0 bg-transparent text-left cursor-pointer pt-1 pb-1 pl-4 pr-4 text-sm',
+        active && 'bg-accent'
+      )}
       onMouseDown={handleMouseDown}
       onMouseEnter={handleMouseEnter}
     >
       <AgentAvatar name={agent.name} colorId={agent.id} size={24} {...(presence ? { presence } : {})} />
       <span>{agent.name}</span>
-      <span className={styles.mentionItemRole}>{agent.role}</span>
-    </button>
+      <span className="text-muted-foreground text-xs overflow-hidden text-ellipsis whitespace-nowrap">
+        {agent.role}
+      </span>
+    </CommandItem>
   );
 });
 
@@ -789,13 +253,10 @@ function ActivityFeed({
 }: {
   roster: ResidentAgent[];
   channel?: string;
-  /** Agent↔agent DM threads are observed, not joined — no composer. */
-  readOnly?: boolean;
+  /** Agent↔agent DM threads are observed, not joined — no composer. */ readOnly?: boolean;
   /** All-traffic view only: makes each row's conversation tag a click
-   *  target that opens the channel/thread it names. */
-  onOpenChannel?: (channelId: string) => void;
+   *  target that opens the channel/thread it names. */ onOpenChannel?: (channelId: string) => void;
 }): React.JSX.Element {
-  const styles = useStyles();
   const storeData = useStore(persistedStoreApi.$atom);
   // Same presence source as the sidebar — every avatar this feed paints
   // (message gutters, the @-mention typeahead) reads from it, so a state
@@ -1141,42 +602,61 @@ function ActivityFeed({
 
   return (
     <>
-      <div ref={feedRef} className={styles.feed} onScroll={handleFeedScroll}>
+      <div
+        ref={feedRef}
+        className="flex-1 min-h-0 overflow-y-auto pl-5 pr-5 pt-2 pb-2 flex flex-col"
+        onScroll={handleFeedScroll}
+      >
         {messages.length === 0 ? (
           channel ? (
-            <EmptyState
-              title={dmPair ? 'No messages in this thread yet' : `No messages in #${channel} yet`}
-              description={
-                dmPair
-                  ? undefined
-                  : 'Posts reach the channel’s members on their next wakeup; mention an agent by name to wake it now.'
-              }
-            />
+            <Empty>
+              <EmptyHeader>
+                <EmptyTitle className="text-base">
+                  {dmPair ? 'No messages in this thread yet' : `No messages in #${channel} yet`}
+                </EmptyTitle>
+                <EmptyDescription>
+                  {dmPair
+                    ? undefined
+                    : 'Posts reach the channel’s members on their next wakeup; mention an agent by name to wake it now.'}
+                </EmptyDescription>
+              </EmptyHeader>
+            </Empty>
           ) : (
-            <EmptyState
-              title="No activity yet"
-              description="Everything your agents say — in #team and to each other — lands here. Posting mentions an agent by name to address it directly."
-            />
+            <Empty>
+              <EmptyHeader>
+                <EmptyTitle className="text-base">No activity yet</EmptyTitle>
+                <EmptyDescription>
+                  Everything your agents say — in #team and to each other — lands here. Posting mentions an agent by
+                  name to address it directly.
+                </EmptyDescription>
+              </EmptyHeader>
+            </Empty>
           )
         ) : (
           feedItems.map((item) => {
             if (item.kind === 'day') {
               return (
-                <LabeledDivider key={`day-${item.ts}`} className={styles.dayDivider}>
-                  {formatDayLabel(item.ts)}
-                </LabeledDivider>
+                <div
+                  key={`day-${item.ts}`}
+                  className={cn('shrink-0 pt-5 pb-1 text-xs text-muted-foreground', 'flex items-center gap-2')}
+                >
+                  <Separator className="flex-1" />
+                  <span className="text-xs text-muted-foreground">{formatDayLabel(item.ts)}</span>
+                  <Separator className="flex-1" />
+                </div>
               );
             }
             if (item.kind === 'expand') {
               return (
-                <div key={`expand-${item.rootId}`} className={styles.messageReply}>
-                  <button
-                    type="button"
-                    className={styles.threadExpandBtn}
+                <div key={`expand-${item.rootId}`} className="ml-6 pl-4 border-l-2 border-border">
+                  <Button
+                    variant="ghost"
+                    size="xs"
+                    className="border-0 bg-transparent cursor-pointer py-0.5 text-muted-foreground text-xs rounded-lg hover:text-primary focus-visible:outline-2 outline-primary focus-visible:outline-offset-1"
                     onClick={handleExpandThread.bind(null, item.rootId)}
                   >
                     Show {item.hiddenCount} earlier {item.hiddenCount === 1 ? 'reply' : 'replies'}
-                  </button>
+                  </Button>
                 </div>
               );
             }
@@ -1194,15 +674,14 @@ function ActivityFeed({
             return (
               <div
                 key={m.id}
-                className={mergeClasses(
-                  styles.message,
-                  indent && styles.messageReplyGrid,
-                  indent && styles.messageReply,
-                  isIncident && styles.messageIncident,
-                  groupHead && styles.messageGroupStart
+                className={cn(
+                  'relative flex gap-2 pt-0.5 pb-0.5 pl-1 pr-1 rounded-lg hover:bg-accent [&:hover_.message-actions]:opacity-100 [&:focus-within_.message-actions]:opacity-100',
+                  indent && 'ml-6 pl-4 border-l-2 border-border',
+                  isIncident && 'rounded-lg border-l-4 border-warning/50 bg-warning/10 px-2 py-1',
+                  groupHead && 'mt-4'
                 )}
               >
-                <div className={styles.msgGutter}>
+                <div className={cn('shrink-0 pt-0.5', indent ? 'w-6' : 'w-8')}>
                   {groupHead && (
                     <AgentAvatar
                       name={m.from === USER_PARTICIPANT ? 'You' : fromName}
@@ -1212,49 +691,60 @@ function ActivityFeed({
                     />
                   )}
                 </div>
-                <div className={styles.msgMain}>
+                <div className="min-w-0 flex flex-col">
                   {groupHead && (
-                    <div className={styles.messageHead}>
-                      <span className={styles.messageFrom}>{m.from === USER_PARTICIPANT ? 'You' : fromName}</span>
+                    <div className="flex items-baseline gap-2 min-w-0">
+                      <span className="font-semibold text-sm">{m.from === USER_PARTICIPANT ? 'You' : fromName}</span>
                       {/* Incident (#system) tags stay inert — `system` is a
-                          reserved id with no channel view to open. */}
+                    reserved id with no channel view to open. */}
                       {label &&
                         (onOpenChannel && !isIncident ? (
-                          <button
-                            type="button"
-                            className={styles.channelBadgeBtn}
+                          <Button
+                            variant="ghost"
+                            size="xs"
+                            className="border-0 bg-transparent p-0 cursor-pointer inline-flex rounded-lg focus-visible:outline-2 outline-primary focus-visible:outline-offset-1"
                             aria-label={`Open ${label}`}
                             onClick={onOpenChannel.bind(null, m.channel)}
                           >
-                            <Badge color="purple">{label}</Badge>
-                          </button>
+                            <Badge variant="secondary">{label}</Badge>
+                          </Button>
                         ) : (
-                          <Badge color={isIncident ? 'yellow' : 'purple'}>{label}</Badge>
+                          <Badge variant="secondary">{label}</Badge>
                         ))}
                       {showReplyMarker && (
-                        <span className={styles.replyMarker} title={rootMsg ? rootMsg.text : undefined}>
+                        <span className="text-muted-foreground text-xs" title={rootMsg ? rootMsg.text : undefined}>
                           ↳ replying to {rootMsg ? participantName(rootMsg) : 'an earlier message'}
                         </span>
                       )}
                       {replyCount !== undefined && (
-                        <span className={styles.replyMarker}>
+                        <span className="text-muted-foreground text-xs">
                           {replyCount} {replyCount === 1 ? 'reply' : 'replies'}
                         </span>
                       )}
-                      <Caption1>{isNamedChannel ? formatTimestamp(m.at) : formatTimeOfDay(m.at)}</Caption1>
+                      <span className="text-xs text-muted-foreground">
+                        {isNamedChannel ? formatTimestamp(m.at) : formatTimeOfDay(m.at)}
+                      </span>
                     </div>
                   )}
-                  <MarkdownMessage content={m.text} className={styles.markdownBody} />
+                  <MarkdownMessage content={m.text} className="text-sm leading-5" />
                 </div>
                 {isNamedChannel && !readOnly && (
-                  <div className={mergeClasses(styles.msgActions, 'message-actions')}>
-                    <IconButton
+                  <div
+                    className={cn(
+                      'absolute -top-3 right-2 opacity-0 transition-opacity duration-100 bg-background border border-border rounded-lg shadow-sm [@media(hover:none)]:opacity-100',
+                      'message-actions'
+                    )}
+                  >
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
                       aria-label={`Reply to ${fromName} in a thread`}
-                      tooltip={`Reply to ${fromName} in a thread`}
-                      size="sm"
-                      icon={<ArrowReply20Regular />}
                       onClick={handleReplyClick.bind(null, m)}
-                    />
+                      title={`Reply to ${fromName} in a thread`}
+                    >
+                      <Reply />
+                    </Button>
                   </div>
                 )}
               </div>
@@ -1263,79 +753,121 @@ function ActivityFeed({
         )}
       </div>
       {readOnly ? (
-        <div className={styles.readOnlyHint}>
+        <div className="px-5 py-4 border-t border-border text-muted-foreground text-xs">
           An agent-to-agent thread — you’re observing. Post in #team (or DM an agent) to join the conversation.
         </div>
       ) : (
-        <div className={styles.composerArea}>
+        <Popover
+          open={mention !== null && mentionCandidates.length > 0}
+          onOpenChange={(open) => !open && dismissMention()}
+        >
+          <PopoverAnchor asChild>
+            <div className="relative border-t border-border">
+              {replyTarget && (
+                <div className="flex items-center gap-2 pl-5 pr-2 pt-1">
+                  <span
+                    className={cn(
+                      'text-xs text-muted-foreground',
+                      'flex-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap'
+                    )}
+                  >
+                    Replying to {participantName(replyTarget)} — “{replyTarget.text.slice(0, 80)}”
+                  </span>
+                  <Button type="button" variant="ghost" size="icon-sm" aria-label="Cancel reply" onClick={clearReply}>
+                    <X />
+                  </Button>
+                </div>
+              )}
+              {sendError && (
+                <span className={cn('text-xs text-muted-foreground', 'pl-5 pr-5 pt-1 text-destructive')}>
+                  {sendError}
+                </span>
+              )}
+              <form className="flex items-end gap-2 p-5" onSubmit={handleSubmit}>
+                <Textarea
+                  ref={composerRef}
+                  className="flex-1"
+                  value={draft}
+                  rows={1}
+                  placeholder={composerLabel}
+                  onChange={handleDraftChange}
+                  onKeyDown={handleKeyDown}
+                  onBlur={dismissMention}
+                  aria-label={dmPeerName ? `Message ${dmPeerName}` : `Message #${channel ?? TEAM_CHANNEL}`}
+                />
+
+                {voiceReady && (
+                  <>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      aria-label={spokenOn ? 'Spoken replies on' : 'Spoken replies off'}
+                      onClick={handleToggleSpoken}
+                      title={
+                        spokenOn
+                          ? `Stop reading ${dmPeerName ?? 'agent'} replies aloud`
+                          : 'Read replies aloud in this DM'
+                      }
+                    >
+                      {spokenOn ? <Speaker /> : <VolumeX />}
+                    </Button>
+
+                    {/* Scope = the DM channel id: the mic registry keys the voice
+              hotkey and recording glow by it (same registry the deck
+              columns use). */}
+                    <VoiceScopeContext.Provider value={channel ?? null}>
+                      <LocalVoiceButton onSubmit={handleVoiceSubmit} />
+                    </VoiceScopeContext.Provider>
+                  </>
+                )}
+                {hostedVoiceReady && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    aria-label="Voice mode"
+                    onClick={openHostedVoice}
+                    title={`Talk with ${dmPeerName ?? 'agent'}`}
+                  >
+                    <Mic />
+                  </Button>
+                )}
+                <Button type="button" variant="ghost" size="icon" aria-label="Send" onClick={submit}>
+                  <Send />
+                </Button>
+              </form>
+              {hostedVoiceOpen && dmPeerId && (
+                <ResidentHostedVoice agentId={dmPeerId} onClose={closeHostedVoice} onError={setSendError} />
+              )}
+            </div>
+          </PopoverAnchor>
           {mention && mentionCandidates.length > 0 && (
-            <div className={styles.mentionPopup} role="listbox" aria-label="Mention an agent">
-              {mentionCandidates.map((a, i) => (
-                <MentionItem
-                  key={a.id}
-                  agent={a}
-                  index={i}
-                  active={i === mentionIndex}
-                  presence={presenceStatus(statuses[a.id]?.state, a.enabled)}
-                  onPick={acceptMention}
-                  onHover={setMentionIndex}
-                />
-              ))}
-            </div>
+            <PopoverContent
+              side="top"
+              align="start"
+              className="max-h-60 min-w-64 overflow-y-auto p-1"
+              onOpenAutoFocus={(event) => event.preventDefault()}
+              onCloseAutoFocus={(event) => event.preventDefault()}
+            >
+              <Command label="Mention an agent" shouldFilter={false}>
+                <CommandList>
+                  {mentionCandidates.map((agent, index) => (
+                    <MentionItem
+                      key={agent.id}
+                      agent={agent}
+                      index={index}
+                      active={index === mentionIndex}
+                      presence={presenceStatus(statuses[agent.id]?.state, agent.enabled)}
+                      onPick={acceptMention}
+                      onHover={setMentionIndex}
+                    />
+                  ))}
+                </CommandList>
+              </Command>
+            </PopoverContent>
           )}
-          {replyTarget && (
-            <div className={styles.replyBanner}>
-              <Caption1 className={styles.replyBannerText}>
-                Replying to {participantName(replyTarget)} — “{replyTarget.text.slice(0, 80)}”
-              </Caption1>
-              <IconButton aria-label="Cancel reply" size="sm" icon={<Dismiss20Regular />} onClick={clearReply} />
-            </div>
-          )}
-          {sendError && <Caption1 className={styles.sendError}>{sendError}</Caption1>}
-          <form className={styles.composer} onSubmit={handleSubmit}>
-            <Textarea
-              ref={composerRef}
-              className={styles.composerInput}
-              value={draft}
-              rows={1}
-              placeholder={composerLabel}
-              onChange={handleDraftChange}
-              onKeyDown={handleKeyDown}
-              onBlur={dismissMention}
-              aria-label={dmPeerName ? `Message ${dmPeerName}` : `Message #${channel ?? TEAM_CHANNEL}`}
-            />
-            {voiceReady && (
-              <>
-                <IconButton
-                  aria-label={spokenOn ? 'Spoken replies on' : 'Spoken replies off'}
-                  tooltip={
-                    spokenOn ? `Stop reading ${dmPeerName ?? 'agent'} replies aloud` : 'Read replies aloud in this DM'
-                  }
-                  icon={spokenOn ? <Speaker220Regular /> : <SpeakerMute20Regular />}
-                  onClick={handleToggleSpoken}
-                />
-                {/* Scope = the DM channel id: the mic registry keys the voice
-                    hotkey and recording glow by it (same registry the deck
-                    columns use). */}
-                <VoiceScopeContext.Provider value={channel ?? null}>
-                  <LocalVoiceButton onSubmit={handleVoiceSubmit} />
-                </VoiceScopeContext.Provider>
-              </>
-            )}
-            {hostedVoiceReady && (
-              <IconButton
-                aria-label="Voice mode"
-                tooltip={`Talk with ${dmPeerName ?? 'agent'}`}
-                icon={<Mic20Regular />}
-                onClick={openHostedVoice}
-              />
-            )}
-            <IconButton aria-label="Send" icon={<Send20Regular />} onClick={submit} />
-          </form>
-          {hostedVoiceOpen && dmPeerId && (
-            <ResidentHostedVoice agentId={dmPeerId} onClose={closeHostedVoice} onError={setSendError} />
-          )}
-        </div>
+        </Popover>
       )}
     </>
   );
@@ -1401,7 +933,6 @@ function ResidentHostedVoice({
 // ---------------------------------------------------------------------------
 
 function ResidentSessionView({ agent }: { agent: ResidentAgent }): React.JSX.Element {
-  const styles = useStyles();
   const storeData = useStore(persistedStoreApi.$atom);
   const [boot, setBoot] = useState<
     | { phase: 'booting' }
@@ -1458,7 +989,7 @@ function ResidentSessionView({ agent }: { agent: ResidentAgent }): React.JSX.Ele
 
   if (boot.phase === 'error') {
     return (
-      <div className={styles.sessionCenter}>
+      <div className="flex-1 flex flex-col items-center justify-center gap-4 text-muted-foreground text-center p-8">
         <span>{boot.message}</span>
         <Button size="sm" onClick={launch}>
           Retry
@@ -1468,7 +999,7 @@ function ResidentSessionView({ agent }: { agent: ResidentAgent }): React.JSX.Ele
   }
   if (boot.phase === 'parked') {
     return (
-      <div className={styles.sessionCenter}>
+      <div className="flex-1 flex flex-col items-center justify-center gap-4 text-muted-foreground text-center p-8">
         <span>{agent.name} parked after sitting idle.</span>
         <Button size="sm" onClick={launch}>
           Wake
@@ -1478,14 +1009,14 @@ function ResidentSessionView({ agent }: { agent: ResidentAgent }): React.JSX.Ele
   }
   if (boot.phase !== 'ready' || !themedConnection) {
     return (
-      <div className={styles.sessionCenter}>
-        <Spinner size="small" />
+      <div className="flex-1 flex flex-col items-center justify-center gap-4 text-muted-foreground text-center p-8">
+        <Spinner />
         <span>Opening session…</span>
       </div>
     );
   }
   return (
-    <div className={styles.sessionHost}>
+    <div className="flex-1 min-h-0 relative flex flex-col">
       <OmniAgentsApp connection={themedConnection} sessionId={boot.sessionId} onClientToolCall={swallowToolCall} />
     </div>
   );
@@ -1515,16 +1046,13 @@ const MemberChip = memo(function MemberChip({
   const headline = busy && runtime?.lastReason ? ` · ${runtime.lastReason}` : '';
   const presence = presenceStatus(state, agent.enabled);
   return (
-    <Tooltip
-      content={`Open ${agent.name}'s session — ${STATE_LABEL[state ?? 'parked']}${headline}`}
-      relationship="description"
-    >
-      <InteractionTag size="small" shape="circular">
-        <InteractionTagPrimary
-          // 20px matches the AvatarContextProvider `InteractionTag size="small"`
-          // publishes; the chip is a 24px pill, so an unsized avatar would
-          // default to 32 and burst it.
-          media={<AgentAvatar name={agent.name} colorId={agent.id} size={20} presence={presence} />}
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          type="button"
+          variant="secondary"
+          size="xs"
+          className="rounded-full p-0.5 pr-2 font-normal"
           onClick={handleClick}
           // The button's own label wins over everything in its subtree, so the
           // avatar's off-screen status never reaches AT here — the label has
@@ -1532,9 +1060,11 @@ const MemberChip = memo(function MemberChip({
           // disabled agent reads `offline` while its runtime still says idle.
           aria-label={`Open ${agent.name}'s session — ${PRESENCE_LABEL[presence]}`}
         >
+          <AgentAvatar name={agent.name} colorId={agent.id} size={20} presence={presence} />
           {agent.name}
-        </InteractionTagPrimary>
-      </InteractionTag>
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{`Open ${agent.name}'s session — ${STATE_LABEL[state ?? 'parked']}${headline}`}</TooltipContent>
     </Tooltip>
   );
 });
@@ -1548,7 +1078,6 @@ function MemberBar({
   roster: ResidentAgent[];
   onOpenAgent: (agentId: string) => void;
 }): React.JSX.Element | null {
-  const styles = useStyles();
   const storeData = useStore(persistedStoreApi.$atom);
   const statuses = useStore($residentStatus);
   const def = (storeData.residentChannelDefs ?? []).find((c) => c.id === channel);
@@ -1557,13 +1086,12 @@ function MemberBar({
   const memberIds = useMemo(() => def?.members ?? roster.map((a) => a.id), [def?.members, roster]);
   const members = useMemo(() => roster.filter((a) => memberIds.includes(a.id)), [roster, memberIds]);
 
-  const handleCheckedChange = useCallback(
-    (_e: unknown, data: MenuCheckedValueChangeData) => {
-      if (data.name === 'members') {
-        void residentApi.setChannelMembers(channel, data.checkedItems);
-      }
+  const handleMemberChange = useCallback(
+    (agentId: string, checked: boolean) => {
+      const next = checked ? [...memberIds, agentId] : memberIds.filter((id) => id !== agentId);
+      void residentApi.setChannelMembers(channel, next);
     },
-    [channel]
+    [channel, memberIds]
   );
 
   // The way back from a curated list: null clears `members`, restoring the
@@ -1576,50 +1104,49 @@ function MemberBar({
     return null; // #team is all-hands, always; DM participants are fixed
   }
   return (
-    <div className={styles.memberBar}>
-      <div className={styles.memberBarRow}>
-        <Caption1>Members:</Caption1>
+    <div className="flex flex-col gap-0.5 px-5 py-2 border-b border-border">
+      <div className="flex items-center flex-wrap gap-2">
+        <span className="text-xs text-muted-foreground">Members:</span>
         {members.map((agent) => (
           <MemberChip key={agent.id} agent={agent} runtime={statuses[agent.id]} onOpen={onOpenAgent} />
         ))}
-        {roster.length === 0 && <Caption1>no agents yet</Caption1>}
+        {roster.length === 0 && <span className="text-xs text-muted-foreground">no agents yet</span>}
         {roster.length > 0 && members.length === 0 && (
-          <Caption1 className={styles.memberWarning}>No members — posts here wake no agents</Caption1>
+          <span className={cn('text-xs text-muted-foreground', 'text-warning')}>
+            No members — posts here wake no agents
+          </span>
         )}
-        <div className={styles.memberBarSpacer} />
-        {isOpenChannel && roster.length > 0 && <Caption1>Open to all</Caption1>}
+        <div className="flex-1" />
+        {isOpenChannel && roster.length > 0 && <span className="text-xs text-muted-foreground">Open to all</span>}
         {roster.length > 0 && (
-          <Menu
-            checkedValues={{ members: memberIds }}
-            onCheckedValueChange={handleCheckedChange}
-            positioning={{ position: 'below', align: 'end' }}
-          >
-            <MenuTrigger disableButtonEnhancement>
-              <IconButton aria-label="Manage members" icon={<PersonAdd20Regular />} size="sm" />
-            </MenuTrigger>
-            <MenuPopover>
-              <MenuList>
-                <MenuItem
-                  icon={isOpenChannel ? <Checkmark20Regular /> : undefined}
-                  disabled={isOpenChannel}
-                  onClick={handleOpenToEveryone}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button type="button" variant="ghost" size="icon-sm" aria-label="Manage members">
+                <UserPlus />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem disabled={isOpenChannel} onClick={handleOpenToEveryone}>
+                {isOpenChannel ? <Check /> : null}
+                Everyone (default)
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              {roster.map((agent) => (
+                <DropdownMenuCheckboxItem
+                  key={agent.id}
+                  checked={memberIds.includes(agent.id)}
+                  onCheckedChange={(checked) => handleMemberChange(agent.id, checked)}
                 >
-                  Everyone (default)
-                </MenuItem>
-                <MenuDivider />
-                {roster.map((agent) => (
-                  <MenuItemCheckbox key={agent.id} name="members" value={agent.id}>
-                    {agent.name}
-                  </MenuItemCheckbox>
-                ))}
-              </MenuList>
-            </MenuPopover>
-          </Menu>
+                  {agent.name}
+                </DropdownMenuCheckboxItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
         )}
       </div>
-      <Caption1 className={styles.memberBarNote}>
+      <span className={cn('text-xs text-muted-foreground', 'text-muted-foreground')}>
         Posts reach members on their next wakeup — mention an agent by name to wake it now.
-      </Caption1>
+      </span>
     </div>
   );
 }
@@ -1650,39 +1177,49 @@ const DmRow = memo(function DmRow({
   channelId: string;
   title: string;
   /** Identity of each thread participant that is an agent — one for a
-   *  user↔agent thread, two for agent↔agent — each with its live presence. */
-  avatars: ReadonlyArray<DmAvatar>;
+   *  user↔agent thread, two for agent↔agent — each with its live presence. */ avatars: ReadonlyArray<DmAvatar>;
   snippet: string;
   lastAt: number;
   unread: number;
   onSelect: (id: string) => void;
 }): React.JSX.Element {
-  const styles = useStyles();
   const handleClick = useCallback(() => onSelect(channelId), [onSelect, channelId]);
   const single = avatars.length === 1 ? avatars[0] : null;
   return (
-    <button type="button" className={styles.row} onClick={handleClick}>
-      <span className={styles.rowTop}>
-        {single ? (
-          <AgentAvatar
-            name={single.name}
-            colorId={single.colorId}
-            size={32}
-            {...(single.presence ? { presence: single.presence } : {})}
-          />
-        ) : (
-          <AgentAvatarGroup avatars={avatars} size={24} />
-        )}
-        <span className={styles.rowLines}>
-          <span className={mergeClasses(styles.rowTitle, unread > 0 && styles.rowTitleUnread)}>
-            <span className={styles.rowTitleText}>{title}</span>
-          </span>
-          <span className={styles.rowMeta}>{snippet}</span>
-        </span>
-        <span className={styles.rowTime}>{formatTimestamp(lastAt)}</span>
-        {unread > 0 && <CounterBadge count={unread} size="small" color="brand" />}
-      </span>
-    </button>
+    <Item asChild variant="outline" size="sm">
+      <button
+        type="button"
+        className="w-full min-w-0 cursor-pointer text-left hover:bg-accent/50"
+        onClick={handleClick}
+      >
+        <ItemMedia>
+          {single ? (
+            <AgentAvatar
+              name={single.name}
+              colorId={single.colorId}
+              size={32}
+              {...(single.presence ? { presence: single.presence } : {})}
+            />
+          ) : (
+            <AgentAvatarGroup avatars={avatars} size={24} />
+          )}
+        </ItemMedia>
+        <ItemContent className="min-w-0">
+          <ItemTitle className={cn('max-w-full', unread > 0 && 'font-semibold')}>
+            <span className="truncate">{title}</span>
+          </ItemTitle>
+          <ItemDescription className="line-clamp-2 max-w-full text-left wrap-anywhere">{snippet}</ItemDescription>
+        </ItemContent>
+        <ItemActions className="ml-auto shrink-0 self-start">
+          <span className="text-xs whitespace-nowrap text-muted-foreground">{formatTimestamp(lastAt)}</span>
+          {unread > 0 && (
+            <Badge variant="secondary" className="h-4 min-w-4 rounded-full px-1 text-xs tabular-nums">
+              {unread}
+            </Badge>
+          )}
+        </ItemActions>
+      </button>
+    </Item>
   );
 });
 
@@ -1711,7 +1248,6 @@ const AgentRow = memo(function AgentRow({
   onToggleEnabled: (id: string, enabled: boolean) => void;
   onRequestDelete: (id: string) => void;
 }): React.JSX.Element {
-  const styles = useStyles();
   const [menuOpen, setMenuOpen] = useState(false);
   const handleClick = useCallback(() => onSelect(agent.id), [onSelect, agent.id]);
   const handleRowKeyDown = useCallback(
@@ -1723,7 +1259,7 @@ const AgentRow = memo(function AgentRow({
     },
     [onSelect, agent.id]
   );
-  const handleMenuOpenChange = useCallback((_e: unknown, data: { open: boolean }) => setMenuOpen(data.open), []);
+  const handleMenuOpenChange = useCallback((open: boolean) => setMenuOpen(open), []);
   const handleMessage = useCallback(() => onMessage(agent.id), [onMessage, agent.id]);
   const handleWake = useCallback(() => onWake(agent.id), [onWake, agent.id]);
   const handleToggle = useCallback(
@@ -1738,16 +1274,22 @@ const AgentRow = memo(function AgentRow({
   return (
     // div+role rather than <button>: the row hosts the "…" menu button, and
     // nesting buttons inside a button is invalid markup.
-    <div role="button" tabIndex={0} className={styles.row} onClick={handleClick} onKeyDown={handleRowKeyDown}>
-      <span className={styles.rowTop}>
+    <div
+      role="button"
+      tabIndex={0}
+      className="flex flex-col items-stretch gap-0.5 pl-5 pr-2 pt-2 pb-2 cursor-pointer border-0 bg-transparent w-full text-left hover:bg-accent focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-primary focus-visible:-outline-offset-2 [&:hover_.resident-row-menu]:opacity-100 [&:focus-within_.resident-row-menu]:opacity-100"
+      onClick={handleClick}
+      onKeyDown={handleRowKeyDown}
+    >
+      <span className="flex items-center gap-2">
         <AgentAvatar name={agent.name} colorId={agent.id} size={32} presence={presenceStatus(state, agent.enabled)} />
-        <span className={styles.rowLines}>
-          <span className={styles.rowTitle}>
-            <span className={styles.rowTitleText}>{agent.name}</span>
-            {busy && <Badge color={stateBadgeColor(state)}>{STATE_LABEL[state ?? 'parked']}</Badge>}
-            {!agent.enabled && <Badge color="default">Disabled</Badge>}
+        <span className="flex-1 min-w-0 flex flex-col gap-0.5">
+          <span className="flex items-center gap-2 font-normal text-sm min-w-0">
+            <span className="overflow-hidden text-ellipsis whitespace-nowrap">{agent.name}</span>
+            {busy && <Badge variant="secondary">{STATE_LABEL[state ?? 'parked']}</Badge>}
+            {!agent.enabled && <Badge variant="secondary">Disabled</Badge>}
           </span>
-          <span className={styles.rowMeta}>
+          <span className="text-muted-foreground text-xs overflow-hidden text-ellipsis whitespace-nowrap">
             {agent.role}
             {projectLabel ? ` · ${projectLabel}` : ''}
             {runtime?.lastWakeupAt ? ` · woke ${formatTimestamp(runtime.lastWakeupAt)}` : ''}
@@ -1755,29 +1297,51 @@ const AgentRow = memo(function AgentRow({
         </span>
         <span
           role="presentation"
-          className={mergeClasses(styles.rowMenu, 'resident-row-menu', menuOpen && styles.rowMenuOpen)}
+          className={cn(
+            'flex items-center gap-0.5 shrink-0 opacity-0 transition-opacity duration-100 [@media(hover:none)]:opacity-100',
+            'resident-row-menu',
+            menuOpen && 'opacity-100'
+          )}
           onClick={stopPropagation}
         >
-          <Menu open={menuOpen} onOpenChange={handleMenuOpenChange} positioning={{ position: 'below', align: 'end' }}>
-            <MenuTrigger disableButtonEnhancement>
-              <IconButton aria-label={`${agent.name} actions`} icon={<MoreHorizontal20Regular />} size="sm" />
-            </MenuTrigger>
-            <MenuPopover>
-              <MenuList>
-                <MenuItem icon={<Chat20Regular />} onClick={handleMessage}>
-                  Message
-                </MenuItem>
-                <MenuItem icon={<FlashRegular />} disabled={!agent.enabled} onClick={handleWake}>
-                  Wake now
-                </MenuItem>
-                <MenuItem onClick={handleToggle}>{agent.enabled ? 'Disable' : 'Enable'}</MenuItem>
-                <MenuDivider />
-                <MenuItem icon={<Delete20Regular />} className={styles.dangerMenuItem} onClick={handleDelete}>
-                  Delete…
-                </MenuItem>
-              </MenuList>
-            </MenuPopover>
-          </Menu>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                className="text-muted-foreground hover:text-primary"
+                aria-label={`Message ${agent.name}`}
+                onClick={handleMessage}
+              >
+                <MessageCircle />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="top">Message</TooltipContent>
+          </Tooltip>
+          <DropdownMenu open={menuOpen} onOpenChange={handleMenuOpenChange}>
+            <DropdownMenuTrigger asChild>
+              <Button type="button" variant="ghost" size="icon-sm" aria-label={`${agent.name} actions`}>
+                <Ellipsis />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={handleMessage}>
+                <MessageCircle />
+                Message
+              </DropdownMenuItem>
+              <DropdownMenuItem disabled={!agent.enabled} onClick={handleWake}>
+                <Zap />
+                Wake now
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleToggle}>{agent.enabled ? 'Disable' : 'Enable'}</DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem className="text-destructive" onClick={handleDelete}>
+                <Trash2 />
+                Delete…
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </span>
       </span>
     </div>
@@ -1805,62 +1369,71 @@ function AgentRoster({
   onNewAgent: () => void;
   onOpenHandbook: () => void;
 }): React.JSX.Element {
-  const styles = useStyles();
   const isDesktop = useIsDesktop();
   const statuses = useStore($residentStatus);
   return (
     <>
       {/* Mobile titles via the TopAppBar; the band then only carries the
-          action. */}
-      <div className={styles.bandHeader}>
-        <div className={styles.bandTitleRow}>
-          {isDesktop && <span className={styles.bandTitle}>Agents</span>}
-          <div className={styles.bandSpacer} />
-          <Button size="sm" leftIcon={<Add20Regular />} onClick={onNewAgent}>
+            action. */}
+      <div className="flex flex-col gap-1 pl-5 pr-5 pt-5 pb-2 shrink-0">
+        <div className="flex items-center flex-wrap gap-x-2 gap-y-1 min-w-0">
+          {isDesktop && (
+            <span className="flex-initial min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-2xl font-semibold leading-8 text-foreground">
+              Agents
+            </span>
+          )}
+          <div className="flex-1" />
+          <Button variant="ghost" size="sm" onClick={onOpenHandbook}>
+            <BookOpen />
+            Handbook
+          </Button>
+          <Button size="sm" onClick={onNewAgent}>
+            <Plus />
             New agent
           </Button>
         </div>
+        <span className="text-xs text-muted-foreground">
+          Your AI teammates. Message one privately, or work together in a shared channel.
+        </span>
       </div>
       {roster.length === 0 ? (
-        <EmptyState
-          title="No agents yet"
-          description="Resident agents are named, persistent teammates: they wake on messages and mentions, work in their own sandbox, talk in #team, and distill each day into durable memory."
-          action={
-            <Button size="sm" leftIcon={<Add20Regular />} onClick={onNewAgent}>
+        <Empty>
+          <EmptyHeader>
+            <EmptyTitle className="text-base">No agents yet</EmptyTitle>
+            <EmptyDescription>
+              Resident agents are named, persistent teammates: they wake on messages and mentions, work in their own
+              sandbox, talk in #team, and distill each day into durable memory.
+            </EmptyDescription>
+          </EmptyHeader>
+          <EmptyContent>
+            <Button size="sm" onClick={onNewAgent}>
+              <Plus />
               New agent
             </Button>
-          }
-        />
+          </EmptyContent>
+        </Empty>
       ) : (
-        <div className={styles.list}>
-          {/* Team-level configuration lives with the team directory. */}
-          <button type="button" className={styles.row} onClick={onOpenHandbook}>
-            <span className={styles.rowTop}>
-              <BookOpen20Regular />
-              <span className={styles.rowTitle}>
-                <span className={styles.rowTitleText}>Handbook</span>
-              </span>
-            </span>
-            <span className={styles.rowMeta}>Shared team rules — every agent receives them on wake</span>
-          </button>
-          {roster.map((agent) => (
-            <AgentRow
-              key={agent.id}
-              agent={agent}
-              runtime={statuses[agent.id]}
-              projectLabel={
-                (agent.projectIds ?? [])
-                  .map((id) => projects.find((p) => p.id === id)?.label)
-                  .filter(Boolean)
-                  .join(', ') || null
-              }
-              onSelect={onOpenAgent}
-              onMessage={onMessage}
-              onWake={onWake}
-              onToggleEnabled={onToggleEnabled}
-              onRequestDelete={onRequestDelete}
-            />
-          ))}
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          <div className="w-full max-w-4xl ml-auto mr-auto px-4 pt-3 pb-6">
+            {roster.map((agent) => (
+              <AgentRow
+                key={agent.id}
+                agent={agent}
+                runtime={statuses[agent.id]}
+                projectLabel={
+                  (agent.projectIds ?? [])
+                    .map((id) => projects.find((p) => p.id === id)?.label)
+                    .filter(Boolean)
+                    .join(', ') || null
+                }
+                onSelect={onOpenAgent}
+                onMessage={onMessage}
+                onWake={onWake}
+                onToggleEnabled={onToggleEnabled}
+                onRequestDelete={onRequestDelete}
+              />
+            ))}
+          </div>
         </div>
       )}
     </>
@@ -1880,7 +1453,12 @@ function sameIdSet(a: string[], b: string[]): boolean {
 const ProjectScopeRow = memo(
   ({ project, checked, onToggle }: { project: Project; checked: boolean; onToggle: (id: string) => void }) => {
     const handleChange = useCallback(() => onToggle(project.id), [onToggle, project.id]);
-    return <Checkbox label={project.label} checked={checked} onCheckedChange={handleChange} />;
+    return (
+      <label className="inline-flex items-center gap-2 text-sm">
+        <Checkbox checked={checked} onCheckedChange={handleChange} />
+        {project.label}
+      </label>
+    );
   }
 );
 ProjectScopeRow.displayName = 'ProjectScopeRow';
@@ -1892,6 +1470,8 @@ function AssignmentFields({
   sandboxContext,
   onProjectIdsChange,
   onProfileChange,
+  showProjects = true,
+  showSandbox = true,
 }: {
   projectIds: string[];
   profileName: string;
@@ -1899,8 +1479,9 @@ function AssignmentFields({
   sandboxContext: SandboxContext;
   onProjectIdsChange: (projectIds: string[]) => void;
   onProfileChange: (profileName: string) => void;
+  showProjects?: boolean;
+  showSandbox?: boolean;
 }): React.JSX.Element {
-  const styles = useStyles();
   const handleToggle = useCallback(
     (id: string) => {
       onProjectIdsChange(projectIds.includes(id) ? projectIds.filter((p) => p !== id) : [...projectIds, id]);
@@ -1909,26 +1490,32 @@ function AssignmentFields({
   );
   return (
     <>
-      <Field
-        label={infoLabel(
-          'Projects',
-          "Scoped agents launch with every selected project's sources mounted (with their git credentials); their private home rides along as the `home` mount. None = generalist with only the home workspace."
-        )}
-      >
-        <div className={styles.projectScopeList}>
-          {projects.map((p) => (
-            <ProjectScopeRow key={p.id} project={p} checked={projectIds.includes(p.id)} onToggle={handleToggle} />
-          ))}
-        </div>
-      </Field>
-      <Field
-        label={infoLabel(
-          'Sandbox',
-          "Where this agent's sessions run. Applied on save — the agent parks and its next wakeup starts with the new configuration."
-        )}
-      >
-        <SandboxPicker value={profileName} onChange={onProfileChange} context={sandboxContext} />
-      </Field>
+      {showProjects && (
+        <Field>
+          <FieldLabel>
+            {infoLabel(
+              'Projects',
+              "Scoped agents launch with every selected project's sources mounted (with their git credentials); their private home rides along as the `home` mount. None = generalist with only the home workspace."
+            )}
+          </FieldLabel>
+          <div className="flex flex-col">
+            {projects.map((p) => (
+              <ProjectScopeRow key={p.id} project={p} checked={projectIds.includes(p.id)} onToggle={handleToggle} />
+            ))}
+          </div>
+        </Field>
+      )}
+      {showSandbox && (
+        <Field>
+          <FieldLabel>
+            {infoLabel(
+              'Sandbox',
+              "Where this agent's sessions run. Applied on save — the agent parks and its next wakeup starts with the new configuration."
+            )}
+          </FieldLabel>
+          <SandboxPicker value={profileName} onChange={onProfileChange} context={sandboxContext} />
+        </Field>
+      )}
     </>
   );
 }
@@ -1941,12 +1528,15 @@ function AgentSettings({
   agent,
   projects,
   sandboxContext,
+  section = 'profile',
+  embedded = false,
 }: {
   agent: ResidentAgent;
   projects: Project[];
   sandboxContext: SandboxContext;
+  section?: 'profile' | 'advanced';
+  embedded?: boolean;
 }): React.JSX.Element {
-  const styles = useStyles();
   const storeData = useStore(persistedStoreApi.$atom);
 
   // Saved baselines — the whole form commits together on Save (one commit
@@ -2035,20 +1625,32 @@ function AgentSettings({
   ]);
 
   return (
-    <div className={styles.detailBody}>
-      <div className={styles.form}>
-        <Field label="Name" hint={`DM address: @${residentHandle(name.trim() || agent.name)} — it follows the name.`}>
-          <Input value={name} onChange={handleName} />
-        </Field>
-        <Field label="Role">
-          <Input value={role} onChange={handleRole} />
-        </Field>
-        <Field
-          label="Persona"
-          hint="Who this agent is — voice, doctrine, specialization. Applied on its next session start."
-        >
-          <Textarea value={persona} rows={8} onChange={handlePersona} />
-        </Field>
+    <div className={embedded ? undefined : 'flex-1 min-h-0 overflow-y-auto p-5 flex flex-col gap-4'}>
+      <div className="flex flex-col gap-4 w-full max-w-2xl ml-auto mr-auto">
+        {section === 'profile' && (
+          <Field>
+            <FieldLabel>Name</FieldLabel>
+            <Input value={name} onChange={handleName} />
+            <FieldDescription>
+              {`DM address: @${residentHandle(name.trim() || agent.name)} — it follows the name.`}
+            </FieldDescription>
+          </Field>
+        )}
+        {section === 'profile' && (
+          <Field>
+            <FieldLabel>Role</FieldLabel>
+            <Input value={role} onChange={handleRole} />
+          </Field>
+        )}
+        {section === 'profile' && (
+          <Field>
+            <FieldLabel>Persona</FieldLabel>
+            <Textarea value={persona} rows={8} onChange={handlePersona} />
+            <FieldDescription>
+              Who this agent is — voice, doctrine, specialization. Applied on its next session start.
+            </FieldDescription>
+          </Field>
+        )}
         <AssignmentFields
           projectIds={projectIds}
           profileName={profileName}
@@ -2056,30 +1658,42 @@ function AgentSettings({
           sandboxContext={sandboxContext}
           onProjectIdsChange={setProjectIds}
           onProfileChange={setProfileName}
+          showProjects={section === 'profile'}
+          showSandbox={section === 'advanced'}
         />
-        <Field
-          label={infoLabel(
-            'Morning wakeup',
-            'The daily planning beat — the agent wakes with its memories and the overnight digest. If the app is closed at that hour, the beat catches up (marked late) when the app next opens that day.'
-          )}
-        >
-          <Select value={morningHour === null ? 'off' : String(morningHour)} onChange={handleMorningHour}>
-            <option value="off">Off — no morning beat</option>
-            {MORNING_HOUR_OPTIONS.map((h) => (
-              <option key={h} value={String(h)}>
-                {`${h}:00`}
-              </option>
-            ))}
-          </Select>
-        </Field>
-        <Field
-          label={infoLabel(
-            'Workspace superuser',
-            'Grants tools over your whole deck: see every column (list_workspace), instruct and approve other agents (column_send / column_decide), open and close columns, and drive any column’s apps. The tools work while the app is open; when it’s closed they return an error the agent understands. The global voice hotkey targets the first enabled superuser’s DM.'
-          )}
-        >
-          <Switch label="Can observe and drive the workspace" checked={superuser} onChange={handleSuperuser} />
-        </Field>
+
+        {section === 'profile' && (
+          <Field>
+            <FieldLabel>
+              {infoLabel(
+                'Morning wakeup',
+                'The daily planning beat — the agent wakes with its memories and the overnight digest. If the app is closed at that hour, the beat catches up (marked late) when the app next opens that day.'
+              )}
+            </FieldLabel>
+            <Select value={morningHour === null ? 'off' : String(morningHour)} onChange={handleMorningHour}>
+              <option value="off">Off — no morning beat</option>
+              {MORNING_HOUR_OPTIONS.map((h) => (
+                <option key={h} value={String(h)}>
+                  {`${h}:00`}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        )}
+        {section === 'advanced' && (
+          <Field>
+            <FieldLabel>
+              {infoLabel(
+                'Workspace superuser',
+                'Grants tools over your whole deck: see every column (list_workspace), instruct and approve other agents (column_send / column_decide), open and close columns, and drive any column’s apps. The tools work while the app is open; when it’s closed they return an error the agent understands. The global voice hotkey targets the first enabled superuser’s DM.'
+              )}
+            </FieldLabel>
+            <label className="inline-flex items-center gap-2 text-sm">
+              <Switch checked={superuser} onCheckedChange={(checked) => handleSuperuser(undefined, { checked })} />
+              Can observe and drive the workspace
+            </label>
+          </Field>
+        )}
 
         <SaveBar onSave={save} dirty={dirty} saving={saving} error={error} />
       </div>
@@ -2091,8 +1705,7 @@ function AgentSettings({
 // Memory tab (durable memory editor)
 // ---------------------------------------------------------------------------
 
-function AgentMemory({ agent }: { agent: ResidentAgent }): React.JSX.Element {
-  const styles = useStyles();
+function AgentMemory({ agent, onBack }: { agent: ResidentAgent; onBack?: () => void }): React.JSX.Element {
   const storeData = useStore(persistedStoreApi.$atom);
   const memories = useMemo(
     () => (storeData.residentMemories ?? {})[agent.id] ?? [],
@@ -2140,35 +1753,46 @@ function AgentMemory({ agent }: { agent: ResidentAgent }): React.JSX.Element {
   }, [agent.id, memories, newMemory, newKey]);
 
   return (
-    <div className={styles.detailBody}>
-      <div className={styles.form}>
-        <Field
-          label={infoLabel(
-            `Durable memory (${memories.length})`,
-            'Keyed facts the agent maintains with its remember/forget tools (curated nightly at reflection); you can prune or add here. Changes reach the agent on its next run.'
-          )}
-        >
-          <div>
-            {memories.length === 0 && (
-              <Caption1>Nothing remembered yet. The agent saves facts with its remember tool as it works.</Caption1>
-            )}
-            {memories.map((m) => (
-              <MemoryRow key={m.key} memoryKey={m.key} text={m.text} onForget={forgetMemory} />
-            ))}
-            <div className={styles.memoryAdd}>
-              <Input value={newKey} placeholder="key (optional)" onChange={handleNewKey} />
-              <Input
-                className={styles.composerInput}
-                value={newMemory}
-                placeholder="Add a fact the agent should always carry…"
-                onChange={handleNewMemory}
-              />
-              <Button size="sm" onClick={addMemory} isDisabled={!newMemory.trim()}>
-                {memoryKey(newKey) && memories.some((m) => m.key === memoryKey(newKey)) ? 'Update' : 'Add'}
-              </Button>
+    <div className="flex-1 min-h-0 overflow-y-auto p-5 flex flex-col gap-4">
+      <div className="w-full max-w-4xl ml-auto mr-auto flex flex-col gap-4">
+        {onBack && (
+          <Button variant="ghost" size="sm" className="self-start" onClick={onBack}>
+            Back to Advanced
+          </Button>
+        )}
+        <div className="flex flex-col gap-4 w-full max-w-2xl ml-auto mr-auto">
+          <Field>
+            <FieldLabel>
+              {infoLabel(
+                `Durable memory (${memories.length})`,
+                'Keyed facts the agent maintains with its remember/forget tools (curated nightly at reflection); you can prune or add here. Changes reach the agent on its next run.'
+              )}
+            </FieldLabel>
+            <div>
+              {memories.length === 0 && (
+                <span className="text-xs text-muted-foreground">
+                  Nothing remembered yet. The agent saves facts with its remember tool as it works.
+                </span>
+              )}
+              {memories.map((m) => (
+                <MemoryRow key={m.key} memoryKey={m.key} text={m.text} onForget={forgetMemory} />
+              ))}
+              <div className="flex gap-2 mt-2">
+                <Input value={newKey} placeholder="key (optional)" onChange={handleNewKey} />
+                <Input
+                  className="flex-1"
+                  value={newMemory}
+                  placeholder="Add a fact the agent should always carry…"
+                  onChange={handleNewMemory}
+                />
+
+                <Button size="sm" onClick={addMemory} disabled={!newMemory.trim()}>
+                  {memoryKey(newKey) && memories.some((m) => m.key === memoryKey(newKey)) ? 'Update' : 'Add'}
+                </Button>
+              </div>
             </div>
-          </div>
-        </Field>
+          </Field>
+        </div>
       </div>
     </div>
   );
@@ -2183,13 +1807,14 @@ const MemoryRow = memo(function MemoryRow({
   text: string;
   onForget: (key: string) => void;
 }): React.JSX.Element {
-  const styles = useStyles();
   const handleForget = useCallback(() => onForget(key), [onForget, key]);
   return (
-    <div className={styles.memoryRow}>
-      <span className={styles.idChip}>{key}</span>
-      <span className={styles.memoryText}>{text}</span>
-      <IconButton aria-label="Forget memory" size="sm" icon={<Delete20Regular />} onClick={handleForget} />
+    <div className="flex items-center gap-2">
+      <span className="text-muted-foreground font-mono text-xs">{key}</span>
+      <span className="flex-1 text-xs">{text}</span>
+      <Button type="button" variant="ghost" size="icon-sm" aria-label="Forget memory" onClick={handleForget}>
+        <Trash2 />
+      </Button>
     </div>
   );
 });
@@ -2214,7 +1839,6 @@ function AgentConversations({
   roster: ResidentAgent[];
   onOpenChannel: (channelId: string) => void;
 }): React.JSX.Element {
-  const styles = useStyles();
   const storeData = useStore(persistedStoreApi.$atom);
   const statuses = useStore($residentStatus);
 
@@ -2243,43 +1867,200 @@ function AgentConversations({
 
   if (threads.length === 0) {
     return (
-      <EmptyState
-        title="No conversations yet"
-        description={`DMs ${agent.name} has — with you or with other agents — appear here.`}
-      />
+      <div className="flex-1 min-h-0 overflow-y-auto p-5 flex flex-col gap-4">
+        <Empty>
+          <EmptyHeader>
+            <EmptyTitle className="text-base">No conversations yet</EmptyTitle>
+            <EmptyDescription>{`DMs ${agent.name} has — with you or with other agents — appear here.`}</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
+      </div>
     );
   }
 
   return (
-    <div className={styles.list}>
-      {threads.map((t) => {
-        // Rows read from this agent's perspective: the OTHER party names the
-        // thread ("You" for your own thread, the peer agent otherwise).
-        const pair = dmParticipants(t.id);
-        const other = pair?.find((p) => p !== agent.id) ?? USER_PARTICIPANT;
-        const peer = other === USER_PARTICIPANT ? null : roster.find((a) => a.id === other);
-        const presence = participantPresence(other, roster, statuses);
-        const otherName = other === USER_PARTICIPANT ? 'You' : (peer?.name ?? other);
-        return (
-          <DmRow
-            key={t.id}
-            channelId={t.id}
-            title={otherName}
-            avatars={[{ name: otherName, colorId: other, ...(presence ? { presence } : {}) }]}
-            snippet={`${t.last.from === USER_PARTICIPANT ? 'You' : (t.last.fromName ?? t.last.from)}: ${t.last.text}`}
-            lastAt={t.last.at}
-            unread={unreadIn[t.id] ?? 0}
-            onSelect={onOpenChannel}
-          />
-        );
-      })}
+    <div className="flex-1 min-h-0 overflow-y-auto p-5 flex flex-col gap-4">
+      <div className="w-full max-w-4xl ml-auto mr-auto flex flex-col gap-4">
+        <ItemGroup className="gap-2">
+          {threads.map((t) => {
+            // Rows read from this agent's perspective: the OTHER party names the
+            // thread ("You" for your own thread, the peer agent otherwise).
+            const pair = dmParticipants(t.id);
+            const other = pair?.find((p) => p !== agent.id) ?? USER_PARTICIPANT;
+            const peer = other === USER_PARTICIPANT ? null : roster.find((a) => a.id === other);
+            const presence = participantPresence(other, roster, statuses);
+            const otherName = other === USER_PARTICIPANT ? 'You' : (peer?.name ?? other);
+            return (
+              <DmRow
+                key={t.id}
+                channelId={t.id}
+                title={otherName}
+                avatars={[{ name: otherName, colorId: other, ...(presence ? { presence } : {}) }]}
+                snippet={`${t.last.from === USER_PARTICIPANT ? 'You' : (t.last.fromName ?? t.last.from)}: ${t.last.text}`}
+                lastAt={t.last.at}
+                unread={unreadIn[t.id] ?? 0}
+                onSelect={onOpenChannel}
+              />
+            );
+          })}
+        </ItemGroup>
+      </div>
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Agent detail: header + Session | Conversations | Memory | Settings tabs
+// Agent detail: human-readable overview first; internals live in Advanced.
 // ---------------------------------------------------------------------------
+
+function AgentOverview({
+  agent,
+  projects,
+  runtime,
+}: {
+  agent: ResidentAgent;
+  projects: Project[];
+  runtime: ResidentAgentRuntime | undefined;
+}): React.JSX.Element {
+  const storeData = useStore(persistedStoreApi.$atom);
+  const projectLabels = (agent.projectIds ?? [])
+    .map((id) => projects.find((project) => project.id === id)?.label)
+    .filter((label): label is string => Boolean(label));
+  const latestMessage = useMemo(() => {
+    const messages = storeData.residentChannels ?? [];
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      if (messages[index]?.from === agent.id) {
+        return messages[index];
+      }
+    }
+    return null;
+  }, [agent.id, storeData.residentChannels]);
+
+  return (
+    <div className="flex-1 min-h-0 overflow-y-auto p-5 flex flex-col gap-4">
+      <div className="w-full max-w-4xl ml-auto mr-auto flex flex-col gap-4">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <Card>
+            <CardHeader>
+              <CardTitle>Role</CardTitle>
+              <CardDescription>What {agent.name} helps with</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <p className="text-sm leading-relaxed">{agent.role || 'No role has been added yet.'}</p>
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <FolderKanban className="size-4 shrink-0" />
+                <span className="min-w-0 truncate">
+                  {projectLabels.length > 0 ? projectLabels.join(', ') : 'Available across projects'}
+                </span>
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle>Availability</CardTitle>
+              <CardDescription>{availabilityLabel(runtime, agent.enabled)}</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-2 text-sm">
+              <p>
+                {runtime?.lastWakeupAt
+                  ? `Last active ${formatTimestamp(runtime.lastWakeupAt)}`
+                  : 'No activity in this app session yet'}
+              </p>
+              {runtime?.pendingCount ? (
+                <p className="text-muted-foreground">{`${runtime.pendingCount} item${runtime.pendingCount === 1 ? '' : 's'} waiting`}</p>
+              ) : null}
+            </CardContent>
+          </Card>
+          <Card className="md:col-span-full">
+            <CardHeader>
+              <CardTitle>Recent activity</CardTitle>
+              <CardDescription>The latest visible update from this agent</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {latestMessage ? (
+                <div className="space-y-2">
+                  <p className="line-clamp-3 whitespace-pre-wrap text-sm leading-relaxed">{latestMessage.text}</p>
+                  <p className="text-xs text-muted-foreground">{formatTimestamp(latestMessage.at)}</p>
+                </div>
+              ) : runtime?.lastReason ? (
+                <p className="text-sm leading-relaxed">{runtime.lastReason}</p>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  Activity will appear here after {agent.name} sends an update.
+                </p>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AgentAdvanced({
+  agent,
+  projects,
+  sandboxContext,
+  onOpenMemory,
+  onOpenSession,
+}: {
+  agent: ResidentAgent;
+  projects: Project[];
+  sandboxContext: SandboxContext;
+  onOpenMemory: () => void;
+  onOpenSession: () => void;
+}): React.JSX.Element {
+  return (
+    <div className="flex-1 min-h-0 overflow-y-auto p-5 flex flex-col gap-4">
+      <div className="w-full max-w-4xl ml-auto mr-auto flex flex-col gap-4">
+        <Card className="mx-auto w-full max-w-2xl">
+          <CardHeader>
+            <CardTitle>Technical access</CardTitle>
+            <CardDescription>Controls that affect how and where this agent can operate.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <AgentSettings
+              agent={agent}
+              projects={projects}
+              sandboxContext={sandboxContext}
+              section="advanced"
+              embedded
+            />
+          </CardContent>
+        </Card>
+        <ItemGroup className="mx-auto w-full max-w-2xl gap-2">
+          <Item asChild variant="outline">
+            <button type="button" className="w-full text-left hover:bg-accent/50" onClick={onOpenMemory}>
+              <ItemMedia variant="icon">
+                <Brain />
+              </ItemMedia>
+              <ItemContent>
+                <ItemTitle>Durable memory</ItemTitle>
+                <ItemDescription>Review or edit the facts this agent carries between sessions.</ItemDescription>
+              </ItemContent>
+              <ItemActions className="text-sm text-muted-foreground">Open</ItemActions>
+            </button>
+          </Item>
+          <Item asChild variant="outline">
+            <button type="button" className="w-full text-left hover:bg-accent/50" onClick={onOpenSession}>
+              <ItemMedia variant="icon">
+                <Terminal />
+              </ItemMedia>
+              <ItemContent>
+                <ItemTitle>Runtime session</ItemTitle>
+                <ItemDescription>Inspect the agent’s raw session for troubleshooting.</ItemDescription>
+              </ItemContent>
+              <ItemActions className="text-sm text-muted-foreground">Open</ItemActions>
+            </button>
+          </Item>
+        </ItemGroup>
+      </div>
+    </div>
+  );
+}
+
+type AgentDetailView = 'overview' | 'conversations' | 'settings' | 'advanced';
+type AgentAdvancedView = 'menu' | 'memory' | 'session';
 
 function AgentDetail({
   agent,
@@ -2298,15 +2079,23 @@ function AgentDetail({
   onOpenChannel: (channelId: string) => void;
   onDeleted: () => void;
 }): React.JSX.Element {
-  const styles = useStyles();
+  const isDesktop = useIsDesktop();
   const statuses = useStore($residentStatus);
   const runtime = statuses[agent.id];
-  const [tab, setTab] = useState<'session' | 'conversations' | 'memory' | 'settings'>('session');
+  const [tab, setTab] = useState<AgentDetailView>('overview');
+  const [advancedView, setAdvancedView] = useState<AgentAdvancedView>('menu');
   const [confirmDelete, setConfirmDelete] = useState(false);
 
-  const handleTabSelect = useCallback((_: unknown, data: { value: unknown }) => {
-    setTab(data.value as 'session' | 'conversations' | 'memory' | 'settings');
+  const handleTabSelect = useCallback((value: string) => {
+    const next = value as AgentDetailView;
+    setTab(next);
+    if (next === 'advanced') {
+      setAdvancedView('menu');
+    }
   }, []);
+  const handleOpenMemory = useCallback(() => setAdvancedView('memory'), []);
+  const handleOpenSession = useCallback(() => setAdvancedView('session'), []);
+  const handleBackToAdvanced = useCallback(() => setAdvancedView('menu'), []);
 
   const handleMessage = useCallback(() => onMessage(agent.id), [onMessage, agent.id]);
 
@@ -2314,12 +2103,9 @@ function AgentDetail({
     void residentApi.wake(agent.id);
   }, [agent.id]);
 
-  const handleEnabledChange = useCallback(
-    (_: unknown, data: { checked: boolean }) => {
-      void residentApi.update(agent.id, { enabled: data.checked });
-    },
-    [agent.id]
-  );
+  const handleToggleEnabled = useCallback(() => {
+    void residentApi.update(agent.id, { enabled: !agent.enabled });
+  }, [agent.enabled, agent.id]);
 
   const openConfirmDelete = useCallback(() => setConfirmDelete(true), []);
   const closeConfirmDelete = useCallback(() => setConfirmDelete(false), []);
@@ -2331,78 +2117,117 @@ function AgentDetail({
   return (
     <>
       {/* Header band — title + actions above a metadata caption, like every
-          other detail page. Destructive delete lives in the overflow menu. */}
-      <div className={styles.bandHeader}>
-        <div className={styles.bandTitleRow}>
-          <AgentAvatar
-            name={agent.name}
-            colorId={agent.id}
-            size={40}
-            presence={presenceStatus(runtime?.state, agent.enabled)}
-          />
-          <span className={styles.bandTitle}>{agent.name}</span>
-          <Badge color={stateBadgeColor(runtime?.state)}>{STATE_LABEL[runtime?.state ?? 'parked']}</Badge>
-          {!agent.enabled && <Badge color="default">Disabled</Badge>}
-          <div className={styles.bandSpacer} />
-          <Button size="sm" leftIcon={<Chat20Regular />} onClick={handleMessage}>
+            other detail page. Destructive delete lives in the overflow menu. */}
+      <div className="flex flex-col gap-1 pl-5 pr-5 pt-5 pb-2 shrink-0">
+        <div className="flex items-center flex-wrap gap-x-2 gap-y-1 min-w-0">
+          {isDesktop && (
+            <>
+              <AgentAvatar
+                name={agent.name}
+                colorId={agent.id}
+                size={40}
+                presence={presenceStatus(runtime?.state, agent.enabled)}
+              />
+              <div className="flex min-w-0 flex-col gap-0.5">
+                <div className="flex min-w-0 flex-wrap items-center gap-2">
+                  <span className="flex-initial min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-2xl font-semibold leading-8 text-foreground">
+                    {agent.name}
+                  </span>
+                  <Badge variant="secondary">{availabilityLabel(runtime, agent.enabled)}</Badge>
+                </div>
+                <span className="truncate text-xs text-muted-foreground">
+                  {agent.role}
+                  {runtime?.lastWakeupAt ? ` · Last active ${formatTimestamp(runtime.lastWakeupAt)}` : ''}
+                </span>
+              </div>
+            </>
+          )}
+          {!isDesktop && <Badge variant="secondary">{availabilityLabel(runtime, agent.enabled)}</Badge>}
+          <div className="flex-1" />
+          <Button size="sm" onClick={handleMessage}>
+            <MessageCircle />
             Message
           </Button>
-          <Button size="sm" leftIcon={<FlashRegular />} onClick={handleWake} isDisabled={!agent.enabled}>
-            Wake now
-          </Button>
-          <Switch label="Enabled" checked={agent.enabled} onChange={handleEnabledChange} />
-          <Menu positioning={{ position: 'below', align: 'end' }}>
-            <MenuTrigger disableButtonEnhancement>
-              <IconButton aria-label="More actions" icon={<MoreHorizontal20Regular />} size="sm" />
-            </MenuTrigger>
-            <MenuPopover>
-              <MenuList>
-                <MenuItem icon={<Delete20Regular />} className={styles.dangerMenuItem} onClick={openConfirmDelete}>
-                  Delete agent…
-                </MenuItem>
-              </MenuList>
-            </MenuPopover>
-          </Menu>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button type="button" variant="ghost" size="icon-sm" aria-label="More actions">
+                <Ellipsis />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem disabled={!agent.enabled} onClick={handleWake}>
+                <Zap />
+                Wake now
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleToggleEnabled}>
+                {agent.enabled ? 'Make unavailable' : 'Make available'}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem className="text-destructive" onClick={openConfirmDelete}>
+                <Trash2 />
+                Delete agent…
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
-        <Caption1>
-          <span className={styles.idChip}>@{residentHandle(agent.name)}</span>
-          {` · ${agent.role}`}
-          {runtime?.decisions ? ` · ${runtime.decisions} wakeups` : ''}
-          {runtime?.lastReason ? ` · last: ${runtime.lastReason}` : ''}
-        </Caption1>
-        <TabList size="small" selectedValue={tab} onTabSelect={handleTabSelect}>
-          {/* The raw session is the debugging view — DMs are the front door
-              for talking to an agent (the Message button up top). */}
-          <Tab value="session">Session (debug)</Tab>
-          <Tab value="conversations">Conversations</Tab>
-          <Tab value="memory">Memory</Tab>
-          <Tab value="settings">Settings</Tab>
-        </TabList>
+        <Tabs value={tab} onValueChange={handleTabSelect}>
+          <PageTabsList>
+            <PageTabsTrigger value="overview">Overview</PageTabsTrigger>
+            <PageTabsTrigger value="conversations">Conversations</PageTabsTrigger>
+            <PageTabsTrigger value="settings">Settings</PageTabsTrigger>
+            <PageTabsTrigger value="advanced">Advanced</PageTabsTrigger>
+          </PageTabsList>
+        </Tabs>
       </div>
-      {tab === 'session' ? (
-        agent.enabled ? (
-          <ResidentSessionView agent={agent} />
-        ) : (
-          <div className={styles.sessionCenter}>
-            <span>{agent.name} is disabled. Enable it to open its session.</span>
-          </div>
-        )
+      {tab === 'overview' ? (
+        <AgentOverview agent={agent} projects={projects} runtime={runtime} />
       ) : tab === 'conversations' ? (
         <AgentConversations agent={agent} roster={roster} onOpenChannel={onOpenChannel} />
-      ) : tab === 'memory' ? (
-        <AgentMemory agent={agent} />
-      ) : (
+      ) : tab === 'settings' ? (
         <AgentSettings agent={agent} projects={projects} sandboxContext={sandboxContext} />
+      ) : advancedView === 'memory' ? (
+        <AgentMemory agent={agent} onBack={handleBackToAdvanced} />
+      ) : advancedView === 'session' ? (
+        <div className="flex min-h-0 flex-1 flex-col">
+          <div className="flex shrink-0 items-center gap-2 border-b px-4 py-2">
+            <Button variant="ghost" size="sm" onClick={handleBackToAdvanced}>
+              Back to Advanced
+            </Button>
+            <span className="text-sm font-medium">Runtime session</span>
+          </div>
+          {agent.enabled ? (
+            <ResidentSessionView agent={agent} />
+          ) : (
+            <div className="flex-1 flex flex-col items-center justify-center gap-4 text-muted-foreground text-center p-8">
+              <span>{agent.name} is unavailable. Make it available to inspect its runtime session.</span>
+            </div>
+          )}
+        </div>
+      ) : (
+        <AgentAdvanced
+          agent={agent}
+          projects={projects}
+          sandboxContext={sandboxContext}
+          onOpenMemory={handleOpenMemory}
+          onOpenSession={handleOpenSession}
+        />
       )}
-      <ConfirmDialog
-        open={confirmDelete}
-        title={`Delete ${agent.name}?`}
-        description="The agent, its durable memories, and its DM threads are removed. Its workspace folder stays on disk."
-        confirmLabel="Delete"
-        destructive
-        onConfirm={handleDelete}
-        onClose={closeConfirmDelete}
-      />
+      <AlertDialog open={confirmDelete} onOpenChange={(open) => !open && closeConfirmDelete()}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{`Delete ${agent.name}?`}</AlertDialogTitle>
+            <AlertDialogDescription>
+              The agent, its durable memories, and its DM threads are removed. Its workspace folder stays on disk.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={handleDelete}>
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }
@@ -2422,7 +2247,6 @@ function NewAgentForm({
   onCreated: (id: string) => void;
   onCancel: () => void;
 }): React.JSX.Element {
-  const styles = useStyles();
   const [name, setName] = useState('');
   const [role, setRole] = useState('');
   const [persona, setPersona] = useState('');
@@ -2463,25 +2287,28 @@ function NewAgentForm({
   }, [name, role, persona, profileName, projectIds, onCreated]);
 
   return (
-    <div className={styles.detailBody}>
-      <div className={styles.form}>
+    <div className="flex-1 min-h-0 overflow-y-auto p-5 flex flex-col gap-4">
+      <div className="flex flex-col gap-4 w-full max-w-2xl ml-auto mr-auto">
         {error && (
-          <MessageBar intent="error">
-            <MessageBarBody>{error}</MessageBarBody>
-          </MessageBar>
+          <Alert variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
         )}
-        <Field
-          label="Name"
-          required
-          hint={name.trim() ? `DM address: @${residentHandle(name)} — it follows the name` : undefined}
-        >
+        <Field>
+          <FieldLabel>Name</FieldLabel>
           <Input value={name} placeholder="Scout" onChange={handleName} />
+          {name.trim() && (
+            <FieldDescription>{`DM address: @${residentHandle(name)} — it follows the name`}</FieldDescription>
+          )}
         </Field>
-        <Field label="Role" hint="One line — what this agent is for.">
+        <Field>
+          <FieldLabel>Role</FieldLabel>
           <Input value={role} placeholder="research & codebase reconnaissance" onChange={handleRole} />
+          <FieldDescription>One line — what this agent is for.</FieldDescription>
         </Field>
-        <Field label="Persona" hint="Voice, doctrine, working style. Durable memory accumulates on top of this.">
-          <div className={styles.personaField}>
+        <Field>
+          <FieldLabel>Persona</FieldLabel>
+          <div className="flex flex-col gap-1">
             <Select value={templateId ?? ''} onChange={handleTemplate} aria-label="Persona template">
               <option value="">Template: start blank</option>
               {RESIDENT_TEMPLATES.map((template) => (
@@ -2492,6 +2319,9 @@ function NewAgentForm({
             </Select>
             <Textarea value={persona} rows={10} onChange={handlePersona} />
           </div>
+          <FieldDescription>
+            Voice, doctrine, working style. Durable memory accumulates on top of this.
+          </FieldDescription>
         </Field>
         <AssignmentFields
           projectIds={projectIds}
@@ -2501,11 +2331,12 @@ function NewAgentForm({
           onProjectIdsChange={setProjectIds}
           onProfileChange={setProfileName}
         />
-        <div className={styles.statusLine}>
-          <Button variant="primary" onClick={handleCreate} isDisabled={!name.trim() || creating}>
+
+        <div className="flex items-center gap-4 flex-wrap">
+          <Button variant="default" onClick={handleCreate} disabled={!name.trim() || creating}>
             {creating ? 'Creating…' : 'Create agent'}
           </Button>
-          <Button onClick={onCancel} isDisabled={creating}>
+          <Button onClick={onCancel} disabled={creating}>
             Cancel
           </Button>
         </div>
@@ -2526,7 +2357,6 @@ const ContextEditor = lazy(() =>
 const HANDBOOK_SAVE_DEBOUNCE_MS = 800;
 
 function HandbookPane({ roster }: { roster: ResidentAgent[] }): React.JSX.Element {
-  const styles = useStyles();
   const [loaded, setLoaded] = useState<{ body: string } | null>(null);
   const [meta, setMeta] = useState<{ updatedAt: number; updatedBy: string | null } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -2591,31 +2421,40 @@ function HandbookPane({ roster }: { roster: ResidentAgent[] }): React.JSX.Elemen
 
   if (!loaded) {
     return (
-      <div className={styles.handbookBody}>
-        <FormSkeleton fields={4} />
+      <div className="flex-1 min-h-0 overflow-y-auto pl-5 pr-5 max-w-4xl w-full ml-auto mr-auto">
+        <div className="flex w-full flex-col gap-5 p-4">
+          {Array.from({ length: 4 }, (_, index) => (
+            <div key={index} className="flex flex-col gap-2">
+              <Skeleton className={`h-3 ${['w-15', 'w-18', 'w-20'][index % 3]}`} />
+              <Skeleton className="h-8 w-full" />
+            </div>
+          ))}
+        </div>
       </div>
     );
   }
   return (
-    <div className={styles.handbookPane}>
-      <div className={styles.handbookHeader}>
-        <span className={styles.bandTitle}>Handbook</span>
+    <div className="flex flex-col flex-1 min-h-0">
+      <div className="flex flex-col gap-1 pl-8 pr-8 pt-4">
+        <span className="flex-initial min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-2xl font-semibold leading-8 text-foreground">
+          Handbook
+        </span>
         {meta && (
-          <span className={styles.rowMeta}>
+          <span className="text-muted-foreground text-xs overflow-hidden text-ellipsis whitespace-nowrap">
             Last updated {formatTimestamp(meta.updatedAt)} by {editorName}
           </span>
         )}
         {error && (
-          <MessageBar intent="error">
-            <MessageBarBody>{error}</MessageBarBody>
-          </MessageBar>
+          <Alert variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
         )}
       </div>
-      <div className={styles.handbookBody}>
+      <div className="flex-1 min-h-0 overflow-y-auto pl-5 pr-5 max-w-4xl w-full ml-auto mr-auto">
         <Suspense
           fallback={
-            <div className={styles.sessionCenter}>
-              <Spinner size="small" />
+            <div className="flex-1 flex flex-col items-center justify-center gap-4 text-muted-foreground text-center p-8">
+              <Spinner />
             </div>
           }
         >
@@ -2631,9 +2470,7 @@ function HandbookPane({ roster }: { roster: ResidentAgent[] }): React.JSX.Elemen
 // ---------------------------------------------------------------------------
 
 export function ResidentsTab(): React.JSX.Element {
-  const styles = useStyles();
   const isDesktop = useIsDesktop();
-  const isGlass = useStore($glassEnabled);
   const storeData = useStore(persistedStoreApi.$atom);
   const statuses = useStore($residentStatus);
   const view = useStore($residentsView);
@@ -2811,7 +2648,7 @@ export function ResidentsTab(): React.JSX.Element {
       const identity = dmRowIdentity(selectedChannel);
       const single = identity.avatars.length === 1 ? identity.avatars[0] : null;
       feedHeader = (
-        <div className={styles.feedHeader}>
+        <div className="flex items-center gap-2 pl-5 pr-5 pt-4 pb-2 border-b border-border shrink-0 min-w-0">
           {single ? (
             <AgentAvatar
               name={single.name}
@@ -2822,8 +2659,14 @@ export function ResidentsTab(): React.JSX.Element {
           ) : (
             <AgentAvatarGroup avatars={identity.avatars} size={24} />
           )}
-          <span className={styles.feedHeaderTitle}>{dmTitle(selectedChannel)}</span>
-          {selectedIsAgentDm && <span className={styles.feedHeaderMeta}>agent↔agent — observed</span>}
+          <span className="text-base font-semibold whitespace-nowrap overflow-hidden text-ellipsis">
+            {dmTitle(selectedChannel)}
+          </span>
+          {selectedIsAgentDm && (
+            <span className="text-muted-foreground text-xs overflow-hidden text-ellipsis whitespace-nowrap min-w-0">
+              agent↔agent — observed
+            </span>
+          )}
         </div>
       );
     } else {
@@ -2831,9 +2674,15 @@ export function ResidentsTab(): React.JSX.Element {
       const headerMeta =
         def?.description ?? (selectedChannel === TEAM_CHANNEL ? 'All-hands — everyone reads it' : null);
       feedHeader = (
-        <div className={styles.feedHeader}>
-          <span className={styles.feedHeaderTitle}>#{selectedChannel}</span>
-          {headerMeta && <span className={styles.feedHeaderMeta}>{headerMeta}</span>}
+        <div className="flex items-center gap-2 pl-5 pr-5 pt-4 pb-2 border-b border-border shrink-0 min-w-0">
+          <span className="text-base font-semibold whitespace-nowrap overflow-hidden text-ellipsis">
+            #{selectedChannel}
+          </span>
+          {headerMeta && (
+            <span className="text-muted-foreground text-xs overflow-hidden text-ellipsis whitespace-nowrap min-w-0">
+              {headerMeta}
+            </span>
+          )}
         </div>
       );
     }
@@ -2842,9 +2691,11 @@ export function ResidentsTab(): React.JSX.Element {
   const detailBody = creating ? (
     <>
       {isDesktop && (
-        <div className={styles.bandHeader}>
-          <div className={styles.bandTitleRow}>
-            <span className={styles.bandTitle}>New agent</span>
+        <div className="flex flex-col gap-1 pl-5 pr-5 pt-5 pb-2 shrink-0">
+          <div className="flex items-center flex-wrap gap-x-2 gap-y-1 min-w-0">
+            <span className="flex-initial min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-2xl font-semibold leading-8 text-foreground">
+              New agent
+            </span>
           </div>
         </div>
       )}
@@ -2883,15 +2734,21 @@ export function ResidentsTab(): React.JSX.Element {
       onOpenHandbook={handleSelectHandbook}
     />
   ) : roster.length === 0 && isDesktop ? (
-    <EmptyState
-      title="No agents yet"
-      description="Resident agents are named, persistent teammates: they wake on messages and mentions, work in their own sandbox, talk in #team, and distill each day into durable memory."
-      action={
-        <Button size="sm" leftIcon={<Add20Regular />} onClick={startCreate}>
+    <Empty>
+      <EmptyHeader>
+        <EmptyTitle className="text-base">No agents yet</EmptyTitle>
+        <EmptyDescription>
+          Resident agents are named, persistent teammates: they wake on messages and mentions, work in their own
+          sandbox, talk in #team, and distill each day into durable memory.
+        </EmptyDescription>
+      </EmptyHeader>
+      <EmptyContent>
+        <Button size="sm" onClick={startCreate}>
+          <Plus />
           New agent
         </Button>
-      }
-    />
+      </EmptyContent>
+    </Empty>
   ) : selectedChannel ? (
     <>
       {feedHeader}
@@ -2905,15 +2762,22 @@ export function ResidentsTab(): React.JSX.Element {
   // Channel dialogs live inside ChannelsSection now — only the agent
   // delete confirm remains at shell level (roster rows + detail share it).
   const agentDialogs = (
-    <ConfirmDialog
-      open={pendingDeleteAgent !== null}
-      onClose={closeDeleteAgent}
-      onConfirm={confirmDeleteAgent}
-      title={`Delete ${pendingDeleteAgent?.name ?? ''}?`}
-      description="The agent, its durable memories, and its DM threads are removed. Its workspace folder stays on disk."
-      confirmLabel="Delete"
-      destructive
-    />
+    <AlertDialog open={pendingDeleteAgent !== null} onOpenChange={(open) => !open && closeDeleteAgent()}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{`Delete ${pendingDeleteAgent?.name ?? ''}?`}</AlertDialogTitle>
+          <AlertDialogDescription>
+            The agent, its durable memories, and its DM threads are removed. Its workspace folder stays on disk.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction variant="destructive" onClick={confirmDeleteAgent}>
+            Delete
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 
   // Mobile: the surface always fills the screen. A TopAppBar titles it and
@@ -2923,8 +2787,8 @@ export function ResidentsTab(): React.JSX.Element {
   if (!isDesktop) {
     if (routinesOpen) {
       return (
-        <div className={mergeClasses(styles.root, isGlass && styles.rootGlass)}>
-          <div className={mergeClasses(styles.detailPane, isGlass && styles.detailPaneGlass)}>
+        <div className="flex w-full h-full">
+          <div className="flex-1 min-w-0 min-h-0 h-full overflow-hidden flex flex-col">
             <ScheduledTasks />
           </div>
           {agentDialogs}
@@ -2946,9 +2810,9 @@ export function ResidentsTab(): React.JSX.Element {
               : 'Activity';
     const mobileBack = creating || selected !== null ? handleBackToRoster : undefined;
     return (
-      <div className={mergeClasses(styles.root, isGlass && styles.rootGlass)}>
-        <div className={mergeClasses(styles.detailPane, isGlass && styles.detailPaneGlass)}>
-          <TopAppBar title={mobileTitle} {...(mobileBack ? { onBack: mobileBack } : { onMenu: openMobileNav })} />
+      <div className="flex w-full h-full">
+        <div className="flex-1 min-w-0 min-h-0 h-full overflow-hidden flex flex-col">
+          <TopAppBar title={mobileTitle} {...(mobileBack ? { onBack: mobileBack } : { showMenu: true })} />
           {detailBody}
         </div>
         {agentDialogs}
@@ -2957,8 +2821,8 @@ export function ResidentsTab(): React.JSX.Element {
   }
 
   return (
-    <div className={mergeClasses(styles.root, isGlass && styles.rootGlass)}>
-      <div className={mergeClasses(styles.detailPane, isGlass && styles.detailPaneGlass)}>{detailBody}</div>
+    <div className="flex w-full h-full">
+      <div className="flex-1 min-w-0 min-h-0 h-full overflow-hidden flex flex-col">{detailBody}</div>
       {agentDialogs}
     </div>
   );

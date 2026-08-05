@@ -1,7 +1,8 @@
-import { makeStyles } from '@fluentui/react-components';
 import { memo, useCallback, useState } from 'react';
 
-import { Body1Strong, Button, Caption1, MessageBar, MessageBarBody, Spinner } from '@/renderer/ds';
+import { Alert, AlertDescription } from '@/renderer/ds/ui/alert';
+import { Button } from '@/renderer/ds/ui/button';
+import { Spinner } from '@/renderer/ds/ui/spinner';
 import { emitter } from '@/renderer/services/ipc';
 
 type Props = {
@@ -9,15 +10,7 @@ type Props = {
   onFinish: () => void;
 };
 
-const useStyles = makeStyles({
-  root: { display: 'flex', flexDirection: 'column', gap: '24px' },
-  header: { display: 'flex', flexDirection: 'column', gap: '4px' },
-  body: { display: 'flex', flexDirection: 'column', gap: '12px' },
-  actions: { display: 'flex', justifyContent: 'space-between' },
-});
-
 export const OnboardingValidationStep = memo(({ onBack, onFinish }: Props) => {
-  const styles = useStyles();
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; output: string } | null>(null);
 
@@ -35,17 +28,19 @@ export const OnboardingValidationStep = memo(({ onBack, onFinish }: Props) => {
   }, []);
 
   return (
-    <div className={styles.root}>
-      <div className={styles.header}>
-        <Body1Strong>Almost there</Body1Strong>
-        <Caption1>Your setup is saved. You can give it a quick test before you start.</Caption1>
+    <div className="flex flex-col gap-6">
+      <div className="flex flex-col gap-1">
+        <span className="text-sm font-semibold">Almost there</span>
+        <span className="text-xs text-muted-foreground">
+          Your setup is saved. You can give it a quick test before you start.
+        </span>
       </div>
 
-      <div className={styles.body}>
-        <Button variant="ghost" size="sm" onClick={handleTest} isDisabled={testing}>
+      <div className="flex flex-col gap-3">
+        <Button variant="ghost" size="sm" onClick={handleTest} disabled={testing}>
           {testing ? (
-            <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <Spinner size="sm" />
+            <span className="flex items-center gap-2">
+              <Spinner />
               Testing connection…
             </span>
           ) : (
@@ -54,17 +49,17 @@ export const OnboardingValidationStep = memo(({ onBack, onFinish }: Props) => {
         </Button>
 
         {testResult && (
-          <MessageBar intent={testResult.success ? 'success' : 'error'}>
-            <MessageBarBody>{testResult.output}</MessageBarBody>
-          </MessageBar>
+          <Alert variant={(testResult.success ? 'success' : 'error') === 'error' ? 'destructive' : 'default'}>
+            <AlertDescription>{testResult.output}</AlertDescription>
+          </Alert>
         )}
       </div>
 
-      <div className={styles.actions}>
+      <div className="flex justify-between">
         <Button variant="ghost" size="sm" onClick={onBack}>
           Back
         </Button>
-        <Button variant="primary" size="sm" onClick={onFinish}>
+        <Button variant="default" size="sm" onClick={onFinish}>
           {testResult?.success === false ? 'Continue anyway' : 'Continue'}
         </Button>
       </div>

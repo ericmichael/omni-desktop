@@ -145,9 +145,8 @@ Medium — three weekends.
       description: 'Fresh Vite template, trim it to what we need, commit.',
       columnId: 'completed',
       priority: 'high',
-      resolution: 'completed',
       createdAgo: 13 * day,
-      resolvedAgo: 12 * day,
+      completedAgo: 12 * day,
       phase: 'completed',
     },
     {
@@ -157,9 +156,8 @@ Medium — three weekends.
         'Minimal schema. `Habit` = id, name, frequency, createdAt. `CheckIn` = id, habitId, date, createdAt.',
       columnId: 'completed',
       priority: 'high',
-      resolution: 'completed',
       createdAgo: 12 * day,
-      resolvedAgo: 10 * day,
+      completedAgo: 10 * day,
       phase: 'completed',
       blockedBy: ['done-scaffold'],
     },
@@ -233,8 +231,7 @@ Medium — three weekends.
         columnId: t.columnId,
         priority: t.priority,
         createdAt: now - t.createdAgo,
-        resolvedAt: t.resolvedAgo !== undefined ? now - t.resolvedAgo : undefined,
-        resolution: t.resolution,
+        completedAt: t.completedAgo !== undefined ? now - t.completedAgo : undefined,
         phase: t.phase,
       })
     );

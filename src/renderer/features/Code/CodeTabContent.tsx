@@ -1,4 +1,3 @@
-import { makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
 import { useStore } from '@nanostores/react';
 import { motion } from 'framer-motion';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
@@ -7,7 +6,9 @@ import { getArtifactsDir, getContainerArtifactsDir, profileRunsOnHost } from '@/
 import { conversationTitle } from '@/lib/chat-conversations';
 import { buildSessionVariables } from '@/lib/client-tools';
 import { uuidv4 } from '@/lib/uuid';
-import { Button, Spinner } from '@/renderer/ds';
+import { cn } from '@/renderer/ds/cn';
+import { Button } from '@/renderer/ds/ui/button';
+import { Spinner } from '@/renderer/ds/ui/spinner';
 import { SessionStatusBanner } from '@/renderer/features/Banner/SessionStatusBanner';
 import { getAvailableProfileNames, getProfileMenuLabel } from '@/renderer/features/SandboxProfile/profile-list';
 import { SandboxPicker } from '@/renderer/features/SandboxProfile/SandboxPicker';
@@ -37,86 +38,15 @@ import { CHAT_SUGGESTIONS, COLUMN_SUGGESTIONS } from './empty-suggestions';
 import { $codeTabErrors, $codeTabStatuses, codeApi } from './state';
 import { useCodeAutoLaunch } from './use-code-auto-launch';
 
-const useStyles = makeStyles({
-  fullSize: { width: '100%', height: '100%' },
-  fullSizeRelative: { width: '100%', height: '100%', position: 'relative' },
-  hidden: { display: 'none' },
-  flexCenter: { width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' },
-  errorWrap: {
-    maxWidth: '448px',
-    textAlign: 'center',
-    paddingLeft: tokens.spacingHorizontalL,
-    paddingRight: tokens.spacingHorizontalL,
-  },
-  errorText: {
-    fontSize: tokens.fontSizeBase400,
-    fontWeight: tokens.fontWeightMedium,
-    color: tokens.colorNeutralForeground1,
-  },
-  errorRetry: { marginTop: tokens.spacingVerticalL },
-  flexColFullRelative: {
-    display: 'flex',
-    flexDirection: 'column',
-    width: '100%',
-    height: '100%',
-    position: 'relative',
-  },
-  flex1Relative: { flex: '1 1 0', minHeight: 0, position: 'relative' },
-  // In-place sandbox-switch scrim — dims the still-mounted agent column while
-  // the sandbox is rebuilt; the conversation reappears intact when it clears.
-  switchScrim: {
-    position: 'absolute',
-    inset: 0,
-    zIndex: 20,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(0, 0, 0, 0.35)',
-    backdropFilter: 'blur(1px)',
-    WebkitBackdropFilter: 'blur(1px)',
-  },
-  switchCard: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    gap: tokens.spacingVerticalS,
-    padding: `${tokens.spacingVerticalXL} ${tokens.spacingHorizontalXXL}`,
-    borderRadius: tokens.borderRadiusXLarge,
-    backgroundColor: tokens.colorNeutralBackground1,
-    boxShadow: tokens.shadow28,
-    maxWidth: '320px',
-    textAlign: 'center',
-  },
-  switchTitle: {
-    fontSize: tokens.fontSizeBase400,
-    fontWeight: tokens.fontWeightSemibold,
-    color: tokens.colorNeutralForeground1,
-  },
-  switchHint: { fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 },
-  spinnerPill: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-    borderRadius: '9999px',
-    backgroundColor: tokens.colorNeutralBackground2,
-    paddingLeft: tokens.spacingHorizontalL,
-    paddingRight: tokens.spacingHorizontalL,
-    paddingTop: tokens.spacingVerticalS,
-    paddingBottom: tokens.spacingVerticalS,
-  },
-  spinnerText: { fontSize: tokens.fontSizeBase300, color: tokens.colorNeutralForeground2 },
-});
-
 const CodeErrorView = memo(({ tabId, retry }: { tabId: CodeTabId; retry: () => void }) => {
-  const styles = useStyles();
   const allErrors = useStore($codeTabErrors);
   const error = allErrors[tabId] ?? null;
 
   return (
-    <div className={styles.flexCenter}>
-      <div className={styles.errorWrap}>
-        <div className={styles.errorText}>{error ?? 'Something went wrong'}</div>
-        <div className={styles.errorRetry}>
+    <div className="w-full h-full flex items-center justify-center">
+      <div className="max-w-112 text-center pl-5 pr-5">
+        <div className="text-base font-medium text-foreground">{error ?? 'Something went wrong'}</div>
+        <div className="mt-5">
           <Button onClick={retry}>Retry</Button>
         </div>
       </div>
@@ -144,13 +74,9 @@ const CodeRunningView = memo(
     currentSandboxProfile,
     onSandboxChange,
     onClientToolCall,
-    previewUrl,
-    onPreviewUrlChange,
     dockTargetId,
-    isGlass,
     tabId,
     agentWorkspaceDir,
-    sidecarMode,
     filesHost,
     gitHost,
     ticketId,
@@ -178,13 +104,9 @@ const CodeRunningView = memo(
     currentSandboxProfile?: string;
     onSandboxChange?: (value: string) => void;
     onClientToolCall?: ClientToolCallHandler;
-    previewUrl?: string;
-    onPreviewUrlChange?: (url: string) => void;
     dockTargetId?: string;
-    isGlass?: boolean;
     tabId?: string;
     agentWorkspaceDir?: string;
-    sidecarMode?: boolean;
     filesHost: HTMLDivElement;
     gitHost: HTMLDivElement;
     ticketId?: TicketId;
@@ -198,7 +120,6 @@ const CodeRunningView = memo(
     pendingMessages?: PendingMessage[];
     onPendingMessagesFlushed?: () => void;
   }) => {
-    const styles = useStyles();
     const store = useStore(persistedStoreApi.$atom);
     const theme = store.theme ?? 'teams-light';
     const pendingPlan = useStore($pendingPlan);
@@ -220,8 +141,8 @@ const CodeRunningView = memo(
     const vncSrc = sandboxUrls.services?.['vnc'];
 
     return (
-      <div className={styles.flexColFullRelative}>
-        <div className={styles.flex1Relative}>
+      <div className="flex flex-col w-full h-full relative">
+        <div className="flex-1 min-h-0 relative">
           <CodeWorkspaceLayout
             connection={runtimeConnection}
             environmentId={environmentId}
@@ -231,8 +152,6 @@ const CodeRunningView = memo(
             voiceVariables={voiceVariables}
             codeServerSrc={codeServerSrc}
             vncSrc={vncSrc}
-            previewUrl={previewUrl}
-            onPreviewUrlChange={onPreviewUrlChange}
             activeApp={activeApp}
             onActiveAppChange={onActiveAppChange}
             onReady={onReady}
@@ -246,10 +165,8 @@ const CodeRunningView = memo(
             pendingPlan={pendingPlan}
             onPlanDecision={resolvePlanApproval}
             dockTargetId={dockTargetId}
-            isGlass={isGlass}
             tabId={tabId}
             agentWorkspaceDir={agentWorkspaceDir}
-            sidecarMode={sidecarMode}
             filesHost={filesHost}
             gitHost={gitHost}
             ticketId={ticketId}
@@ -261,13 +178,13 @@ const CodeRunningView = memo(
           />
         </div>
         {switching && (
-          <div className={styles.switchScrim}>
-            <div className={styles.switchCard}>
-              <Spinner size="md" />
-              <span className={styles.switchTitle}>
+          <div className="absolute inset-0 z-20 flex items-center justify-center bg-card">
+            <div className="flex max-w-80 flex-col items-center gap-2 rounded-2xl bg-card px-8 py-6 text-center shadow-xl">
+              <Spinner />
+              <span className="text-base font-semibold text-foreground">
                 Switching to {getProfileMenuLabel(currentSandboxProfile ?? 'host')}…
               </span>
-              <span className={styles.switchHint}>Your conversation and files are preserved.</span>
+              <span className="text-xs text-muted-foreground">Your conversation and files are preserved.</span>
             </div>
           </div>
         )}
@@ -285,11 +202,7 @@ type CodeTabContentProps = {
   uiMinimal?: boolean;
   headerActionsTargetId?: string;
   headerActionsCompact?: boolean;
-  previewUrl?: string;
-  onPreviewUrlChange?: (url: string) => void;
   dockTargetId?: string;
-  isGlass?: boolean;
-  sidecarMode?: boolean;
   filesHost: HTMLDivElement;
   gitHost: HTMLDivElement;
 };
@@ -303,15 +216,10 @@ export const CodeTabContent = memo(
     uiMinimal,
     headerActionsTargetId,
     headerActionsCompact,
-    previewUrl,
-    onPreviewUrlChange,
     dockTargetId,
-    isGlass,
-    sidecarMode,
     filesHost,
     gitHost,
   }: CodeTabContentProps) => {
-    const styles = useStyles();
     const store = useStore(persistedStoreApi.$atom);
     // Chat mode is derived, not reserved: any projectless session column runs
     // as an ambient chat with a per-conversation scratch workspace. Attaching
@@ -566,7 +474,7 @@ export const CodeTabContent = memo(
 
     return (
       <div
-        className={mergeClasses(styles.fullSizeRelative, !isVisible && styles.hidden)}
+        className={cn('w-full h-full relative', !isVisible && 'hidden')}
         onMouseEnter={onColumnMouseEnter}
         onMouseLeave={onColumnMouseLeave}
       >
@@ -591,13 +499,9 @@ export const CodeTabContent = memo(
               currentSandboxProfile={profileName}
               onSandboxChange={handleProfileChange}
               onClientToolCall={handleClientToolCall}
-              previewUrl={previewUrl}
-              onPreviewUrlChange={onPreviewUrlChange}
               dockTargetId={dockTargetId}
-              isGlass={isGlass}
               tabId={tab.id}
               agentWorkspaceDir={agentWorkspaceDir}
-              sidecarMode={sidecarMode}
               filesHost={filesHost}
               gitHost={gitHost}
               ticketId={tab.ticketId as TicketId | undefined}
@@ -646,27 +550,17 @@ export const CodeTabContent = memo(
              workspace (we passed the early return above), so auto-launch will
              drive the machine to ``running`` shortly. The in-composer sandbox
              picker handles profile changes; no pre-launch picker needed here. */
-          <div className={styles.flexCenter}>
+          <div className="w-full h-full flex items-center justify-center">
             <motion.div
-              className={styles.spinnerPill}
+              className="inline-flex items-center gap-2 rounded-full bg-card pl-5 pr-5 pt-2 pb-2"
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.3, ease: 'easeOut' }}
             >
-              <svg
-                className="animate-spin h-4 w-4 text-fg-subtle"
-                xmlns="http://www.w3.org/2000/svg"
-                fill="none"
-                viewBox="0 0 24 24"
-              >
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path
-                  className="opacity-75"
-                  fill="currentColor"
-                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                />
-              </svg>
-              <span className={styles.spinnerText}>{phase === 'idle' ? 'Restarting sandbox…' : 'Connecting…'}</span>
+              <Spinner className="text-muted-foreground" />
+              <span className="text-sm text-muted-foreground">
+                {phase === 'idle' ? 'Restarting sandbox…' : 'Connecting…'}
+              </span>
             </motion.div>
           </div>
         )}

@@ -1,65 +1,12 @@
-import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
-import { ArrowMaximize20Regular, Dismiss20Regular } from '@fluentui/react-icons';
-import { memo, useCallback, useEffect, useRef } from 'react';
+import { Maximize2, X } from 'lucide-react';
+import { memo, useCallback } from 'react';
 
-import { IconButton } from '@/renderer/ds';
+import { Button } from '@/renderer/ds/ui/button';
+import { Sheet, SheetClose, SheetContent, SheetHeader, SheetTitle } from '@/renderer/ds/ui/sheet';
 import type { TicketId } from '@/shared/types';
 
 import { ticketApi } from './state';
 import { TicketDetail } from './TicketDetail';
-
-const PANEL_WIDTH = '480px';
-
-const useStyles = makeStyles({
-  backdrop: {
-    position: 'absolute',
-    inset: 0,
-    zIndex: 10,
-    display: 'flex',
-    justifyContent: 'flex-end',
-  },
-  scrim: {
-    position: 'absolute',
-    inset: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.2)',
-  },
-  panel: {
-    position: 'relative',
-    zIndex: 1,
-    width: PANEL_WIDTH,
-    maxWidth: '100%',
-    height: '100%',
-    display: 'flex',
-    flexDirection: 'column',
-    backgroundColor: tokens.colorNeutralBackground1,
-    ...shorthands.borderLeft('1px', 'solid', tokens.colorNeutralStroke1),
-    boxShadow: tokens.shadow64,
-    animationName: {
-      from: { transform: 'translateX(100%)' },
-      to: { transform: 'translateX(0)' },
-    },
-    animationDuration: '200ms',
-    animationTimingFunction: tokens.curveDecelerateMin,
-    animationFillMode: 'both',
-  },
-  panelHeader: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    gap: tokens.spacingHorizontalXS,
-    paddingLeft: tokens.spacingHorizontalS,
-    paddingRight: tokens.spacingHorizontalS,
-    paddingTop: tokens.spacingVerticalXS,
-    paddingBottom: tokens.spacingVerticalXS,
-    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
-    flexShrink: 0,
-  },
-  panelBody: {
-    flex: '1 1 0',
-    minHeight: 0,
-    overflow: 'hidden',
-  },
-});
 
 type TicketSidePanelProps = {
   ticketId: TicketId;
@@ -67,42 +14,31 @@ type TicketSidePanelProps = {
 };
 
 export const TicketSidePanel = memo(({ ticketId, onClose }: TicketSidePanelProps) => {
-  const styles = useStyles();
-  const panelRef = useRef<HTMLDivElement>(null);
-
-  // Close on Escape
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onClose();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onClose]);
-
   const handleOpenFullPage = useCallback(() => {
     ticketApi.goToTicket(ticketId);
   }, [ticketId]);
 
   return (
-    <div className={styles.backdrop}>
-      <div className={styles.scrim} onClick={onClose} />
-      <div ref={panelRef} className={styles.panel}>
-        <div className={styles.panelHeader}>
-          <IconButton
-            aria-label="Open full page"
-            icon={<ArrowMaximize20Regular />}
-            size="sm"
-            onClick={handleOpenFullPage}
-          />
-          <IconButton aria-label="Close panel" icon={<Dismiss20Regular />} size="sm" onClick={onClose} />
+    <Sheet open onOpenChange={(open) => !open && onClose()}>
+      <SheetContent side="right" className="h-full w-120 max-w-full gap-0 p-0 sm:max-w-120" showCloseButton={false}>
+        <SheetHeader className="sr-only">
+          <SheetTitle>Task details</SheetTitle>
+        </SheetHeader>
+        <div className="flex items-center justify-end gap-1 pl-2 pr-2 pt-1 pb-1 border-b border-border shrink-0">
+          <Button type="button" variant="ghost" size="icon-sm" aria-label="Open full page" onClick={handleOpenFullPage}>
+            <Maximize2 />
+          </Button>
+          <SheetClose asChild>
+            <Button type="button" variant="ghost" size="icon-sm" aria-label="Close panel">
+              <X />
+            </Button>
+          </SheetClose>
         </div>
-        <div className={styles.panelBody}>
+        <div className="flex-1 min-h-0 overflow-hidden">
           <TicketDetail key={ticketId} ticketId={ticketId} compact onClose={onClose} />
         </div>
-      </div>
-    </div>
+      </SheetContent>
+    </Sheet>
   );
 });
 TicketSidePanel.displayName = 'TicketSidePanel';

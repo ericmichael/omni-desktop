@@ -1,7 +1,7 @@
-import { makeStyles } from '@fluentui/react-components';
 import { memo } from 'react';
 
-import { Body1Strong, Button, Caption1, Radio, RadioGroup } from '@/renderer/ds';
+import { Button } from '@/renderer/ds/ui/button';
+import { RadioGroup, RadioGroupItem } from '@/renderer/ds/ui/radio-group';
 import type { ProviderEntry } from '@/shared/types';
 
 type ProviderOption = {
@@ -27,47 +27,35 @@ type Props = {
   onBack?: (() => void) | undefined;
 };
 
-const useStyles = makeStyles({
-  root: { display: 'flex', flexDirection: 'column', gap: '24px' },
-  header: { display: 'flex', flexDirection: 'column', gap: '4px' },
-  actions: { display: 'flex', justifyContent: 'space-between' },
-  actionsEnd: { display: 'flex', justifyContent: 'flex-end' },
-});
-
 export const OnboardingProviderTypeStep = memo(({ selected, onSelect, onNext, onBack }: Props) => {
-  const styles = useStyles();
-
   return (
-    <div className={styles.root}>
-      <div className={styles.header}>
-        <Body1Strong>Choose a provider</Body1Strong>
-        <Caption1>
+    <div className="flex flex-col gap-6">
+      <div className="flex flex-col gap-1">
+        <span className="text-sm font-semibold">Choose a provider</span>
+        <span className="text-xs text-muted-foreground">
           Omni works with any major model API. Pick where your models live — keys stay on this machine.
-        </Caption1>
+        </span>
       </div>
 
-      <RadioGroup value={selected ?? ''} onChange={(_e, data) => onSelect(data.value as ProviderEntry['type'])}>
+      <RadioGroup value={selected ?? ''} onValueChange={(value) => onSelect(value as ProviderEntry['type'])}>
         {PROVIDER_OPTIONS.map((option) => (
-          <Radio
-            key={option.value}
-            value={option.value}
-            label={
-              <div>
-                <Body1Strong>{option.label}</Body1Strong>
-                <Caption1 block>{option.description}</Caption1>
-              </div>
-            }
-          />
+          <label key={option.value} className="inline-flex items-center gap-2 text-sm">
+            <RadioGroupItem value={option.value} />
+            <div>
+              <span className="text-sm font-semibold">{option.label}</span>
+              <span className="text-xs text-muted-foreground block">{option.description}</span>
+            </div>
+          </label>
         ))}
       </RadioGroup>
 
-      <div className={onBack ? styles.actions : styles.actionsEnd}>
+      <div className={onBack ? 'flex justify-between' : 'flex justify-end'}>
         {onBack && (
           <Button variant="ghost" size="sm" onClick={onBack}>
             Back
           </Button>
         )}
-        <Button variant="primary" size="sm" onClick={onNext} isDisabled={!selected}>
+        <Button variant="default" size="sm" onClick={onNext} disabled={!selected}>
           Continue
         </Button>
       </div>

@@ -22,6 +22,7 @@ export const initBootLanding = (): void => {
     if (persistedStoreApi.get().layoutMode !== 'chat') {
       void persistedStoreApi.setKey('layoutMode', 'chat');
     }
+    codeApi.setLayoutMode('focus');
     void codeApi.openFreshChat();
   };
 

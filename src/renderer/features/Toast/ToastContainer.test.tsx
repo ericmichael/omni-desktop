@@ -1,4 +1,3 @@
-import type { ReactElement, ReactNode } from 'react';
 import * as React from 'react';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -7,62 +6,32 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { $toasts, addToast } from './state';
 import { ToastContainer } from './ToastContainer';
 
-const fluentMocks = vi.hoisted(() => ({
-  dispatchToast: vi.fn(),
-  dismissToast: vi.fn(),
+const sonnerMocks = vi.hoisted(() => ({
+  info: vi.fn(),
+  success: vi.fn(),
+  warning: vi.fn(),
+  error: vi.fn(),
+  dismiss: vi.fn(),
 }));
 
-vi.mock('@fluentui/react-components', () => {
-  return {
-    Button: ({ children, icon, onClick }: { children: ReactNode; icon?: ReactNode; onClick?: () => void }) =>
-      React.createElement('button', { type: 'button', onClick }, icon, children),
-    Toast: ({ children }: { children: ReactNode }) => React.createElement('article', null, children),
-    ToastBody: ({ children }: { children: ReactNode }) => React.createElement('div', null, children),
-    ToastFooter: ({ children }: { children: ReactNode }) => React.createElement('footer', null, children),
-    ToastTitle: ({ children }: { children: ReactNode }) => React.createElement('h2', null, children),
-    Toaster: ({ toasterId }: { toasterId: string }) => React.createElement('div', { 'data-toaster-id': toasterId }),
-    useId: (prefix: string) => prefix,
-    useToastController: () => ({
-      dispatchToast: fluentMocks.dispatchToast,
-      dismissToast: fluentMocks.dismissToast,
-    }),
-  };
-});
-
-vi.mock('@fluentui/react-icons', () => {
-  return {
-    Copy20Regular: () => React.createElement('span', { 'aria-hidden': 'true' }),
-  };
-});
+vi.mock('sonner', () => ({ toast: sonnerMocks }));
+vi.mock('@/renderer/ds/ui/sonner', () => ({ Toaster: () => React.createElement('div', { 'data-testid': 'toaster' }) }));
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let container: HTMLDivElement;
 let root: Root;
-let renderedToastRoots: Root[] = [];
-let renderedToastContainers: HTMLDivElement[] = [];
 
 beforeEach(() => {
   $toasts.set([]);
-  fluentMocks.dispatchToast.mockClear();
-  fluentMocks.dismissToast.mockClear();
+  Object.values(sonnerMocks).forEach((mock) => mock.mockClear());
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
 });
 
 afterEach(() => {
-  act(() => {
-    root.unmount();
-    for (const toastRoot of renderedToastRoots) {
-      toastRoot.unmount();
-    }
-  });
-  renderedToastRoots = [];
-  for (const toastContainer of renderedToastContainers) {
-    toastContainer.remove();
-  }
-  renderedToastContainers = [];
+  act(() => root.unmount());
   container.remove();
 });
 
@@ -73,35 +42,8 @@ const renderContainer = async () => {
   });
 };
 
-const renderDispatchedToast = async (index: number): Promise<HTMLDivElement> => {
-  const toastContainer = document.createElement('div');
-  document.body.appendChild(toastContainer);
-  const toastRoot = createRoot(toastContainer);
-  renderedToastContainers.push(toastContainer);
-  renderedToastRoots.push(toastRoot);
-
-  await act(async () => {
-    const dispatchedToast = fluentMocks.dispatchToast.mock.calls[index]?.[0];
-    expect(dispatchedToast).toBeDefined();
-    toastRoot.render(dispatchedToast as ReactElement);
-    await Promise.resolve();
-  });
-
-  return toastContainer;
-};
-
-const buttonNamed = (toastContainer: HTMLDivElement, label: string): HTMLButtonElement => {
-  const button = Array.from(toastContainer.querySelectorAll('button')).find((candidate) =>
-    candidate.textContent?.includes(label)
-  );
-  if (!button) {
-    throw new Error(`${label} button not found`);
-  }
-  return button;
-};
-
 describe('ToastContainer', () => {
-  it('dispatches every toast level with a Dismiss action', async () => {
+  it('dispatches every toast level through Sonner with a dismiss action', async () => {
     const ids = [
       addToast({ level: 'info', title: 'Info', durationMs: 5000 }),
       addToast({ level: 'success', title: 'Success', durationMs: 5000 }),
@@ -111,22 +53,25 @@ describe('ToastContainer', () => {
 
     await renderContainer();
 
-    expect(fluentMocks.dispatchToast).toHaveBeenCalledTimes(4);
-
-    for (const [index, id] of ids.entries()) {
-      const dispatchedToast = await renderDispatchedToast(index);
-      const dismissButton = buttonNamed(dispatchedToast, 'Dismiss');
-
-      act(() => {
-        dismissButton.click();
-      });
-
-      expect(fluentMocks.dismissToast).toHaveBeenCalledWith(id);
+    for (const [method, title, id] of [
+      [sonnerMocks.info, 'Info', ids[0]],
+      [sonnerMocks.success, 'Success', ids[1]],
+      [sonnerMocks.warning, 'Warning', ids[2]],
+      [sonnerMocks.error, 'Error', ids[3]],
+    ] as const) {
+      expect(method).toHaveBeenCalledOnce();
+      const [actualTitle, options] = method.mock.calls[0]!;
+      expect(actualTitle).toBe(title);
+      expect(options.id).toBe(id);
+      options.cancel.onClick();
+      expect(sonnerMocks.dismiss).toHaveBeenCalledWith(id);
     }
   });
 
-  it('dispatches copy error toasts with Copy error and Dismiss actions', async () => {
-    const id = addToast({
+  it('offers a copy action for copyable errors', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    addToast({
       level: 'error',
       title: 'Launch failed',
       description: 'Could not start agent',
@@ -135,14 +80,9 @@ describe('ToastContainer', () => {
     });
 
     await renderContainer();
-
-    const dispatchedToast = await renderDispatchedToast(0);
-    expect(buttonNamed(dispatchedToast, 'Copy error')).toBeTruthy();
-
-    act(() => {
-      buttonNamed(dispatchedToast, 'Dismiss').click();
-    });
-
-    expect(fluentMocks.dismissToast).toHaveBeenCalledWith(id);
+    const options = sonnerMocks.error.mock.calls[0]?.[1];
+    expect(options.action.label).toBeTruthy();
+    await options.action.onClick();
+    expect(writeText).toHaveBeenCalledWith('stack trace');
   });
 });

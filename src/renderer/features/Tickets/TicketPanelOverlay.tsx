@@ -1,9 +1,9 @@
-import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
-import { Dismiss20Regular, DocumentMultiple20Regular, Info20Regular } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
-import { AnimatePresence, motion } from 'framer-motion';
+import { Files, Info, X } from 'lucide-react';
 import { memo } from 'react';
 
+import { Button } from '@/renderer/ds/ui/button';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/renderer/ds/ui/dialog';
 import type { TicketId } from '@/shared/types';
 
 import { $tickets } from './state';
@@ -12,84 +12,12 @@ import { TicketOverviewTab } from './TicketOverviewTab';
 
 export type TicketPanel = 'overview' | 'artifacts';
 
-const PANEL_META: Record<TicketPanel, { label: string; icon: typeof Info20Regular }> = {
-  overview: { label: 'Overview', icon: Info20Regular },
-  artifacts: { label: 'Artifacts', icon: DocumentMultiple20Regular },
+const PANEL_META: Record<TicketPanel, { label: string; icon: typeof Info }> = {
+  overview: { label: 'Overview', icon: Info },
+  artifacts: { label: 'Results', icon: Files },
 };
 
-const transition = { type: 'spring' as const, duration: 0.28, bounce: 0.08 };
-
-const useStyles = makeStyles({
-  overviewScroll: {
-    padding: tokens.spacingVerticalXXL,
-    overflowY: 'auto',
-    height: '100%',
-  },
-  backdrop: {
-    position: 'absolute',
-    inset: 0,
-    zIndex: 30,
-    backgroundColor: 'rgba(0, 0, 0, 0.45)',
-  },
-  panel: {
-    position: 'absolute',
-    inset: tokens.spacingVerticalM,
-    zIndex: 40,
-    overflow: 'hidden',
-    borderRadius: tokens.borderRadiusXLarge,
-    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
-    backgroundColor: tokens.colorNeutralBackground1,
-    boxShadow: tokens.shadow64,
-  },
-  panelInner: {
-    display: 'flex',
-    height: '100%',
-    flexDirection: 'column',
-  },
-  panelHeader: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
-    backgroundColor: tokens.colorNeutralBackground2,
-    paddingLeft: tokens.spacingHorizontalM,
-    paddingRight: tokens.spacingHorizontalM,
-    paddingTop: tokens.spacingVerticalS,
-    paddingBottom: tokens.spacingVerticalS,
-  },
-  panelLabel: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-    fontSize: tokens.fontSizeBase300,
-    color: tokens.colorNeutralForeground2,
-  },
-  closeBtn: {
-    display: 'inline-flex',
-    width: '36px',
-    height: '36px',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: tokens.borderRadiusMedium,
-    color: tokens.colorNeutralForeground2,
-    transitionProperty: 'color, background-color',
-    transitionDuration: '150ms',
-    border: 'none',
-    backgroundColor: 'transparent',
-    cursor: 'pointer',
-    ':hover': {
-      backgroundColor: tokens.colorSubtleBackgroundHover,
-      color: tokens.colorNeutralForeground1,
-    },
-  },
-  panelBody: {
-    minHeight: 0,
-    flex: '1 1 0',
-  },
-});
-
 const PanelContent = memo(({ panel, ticketId }: { panel: TicketPanel; ticketId: TicketId }) => {
-  const styles = useStyles();
   const tickets = useStore($tickets);
   const ticket = ticketId ? tickets[ticketId] : undefined;
 
@@ -98,7 +26,7 @@ const PanelContent = memo(({ panel, ticketId }: { panel: TicketPanel; ticketId: 
       return null;
     }
     return (
-      <div className={styles.overviewScroll}>
+      <div className="p-8 overflow-y-auto h-full">
         <TicketOverviewTab ticket={ticket} />
       </div>
     );
@@ -109,49 +37,36 @@ PanelContent.displayName = 'PanelContent';
 
 export const TicketPanelOverlay = memo(
   ({ panel, ticketId, onClose }: { panel: TicketPanel | null; ticketId: TicketId; onClose: () => void }) => {
-    const styles = useStyles();
     return (
-      <AnimatePresence>
+      <Dialog open={panel !== null} onOpenChange={(open) => !open && onClose()}>
         {panel && (
-          <>
-            <motion.div
-              key="backdrop"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={transition}
-              className={styles.backdrop}
-              onClick={onClose}
-            />
-            <motion.div
-              key="panel"
-              initial={{ opacity: 0, scale: 0.97 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.97 }}
-              transition={transition}
-              className={styles.panel}
-            >
-              <div className={styles.panelInner}>
-                <div className={styles.panelHeader}>
-                  <div className={styles.panelLabel}>
-                    {(() => {
-                      const Icon = PANEL_META[panel].icon;
-                      return <Icon style={{ width: 14, height: 14 }} />;
-                    })()}
-                    <span>{PANEL_META[panel].label}</span>
-                  </div>
-                  <button type="button" onClick={onClose} className={styles.closeBtn} aria-label="Close panel">
-                    <Dismiss20Regular style={{ width: 14, height: 14 }} />
-                  </button>
-                </div>
-                <div className={styles.panelBody}>
-                  <PanelContent panel={panel} ticketId={ticketId} />
-                </div>
+          <DialogContent
+            className="flex h-dvh w-screen max-w-none flex-col gap-0 overflow-hidden p-0"
+            showCloseButton={false}
+          >
+            <div className="flex h-full flex-col">
+              <div className="flex items-center justify-between border-b border-border bg-card pl-4 pr-4 pt-2 pb-2">
+                <DialogHeader className="flex-row items-center gap-2 text-left text-sm text-foreground/80">
+                  {(() => {
+                    const Icon = PANEL_META[panel].icon;
+                    return <Icon className="size-4" />;
+                  })()}
+                  <DialogTitle className="text-sm">{PANEL_META[panel].label}</DialogTitle>
+                  <DialogDescription className="sr-only">
+                    Task {PANEL_META[panel].label.toLowerCase()}
+                  </DialogDescription>
+                </DialogHeader>
+                <Button type="button" variant="ghost" size="icon" onClick={onClose} aria-label="Close panel">
+                  <X className="size-4" />
+                </Button>
               </div>
-            </motion.div>
-          </>
+              <div className="min-h-0 flex-1">
+                <PanelContent panel={panel} ticketId={ticketId} />
+              </div>
+            </div>
+          </DialogContent>
         )}
-      </AnimatePresence>
+      </Dialog>
     );
   }
 );

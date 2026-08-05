@@ -1,97 +1,12 @@
-import { makeStyles, mergeClasses, ProgressBar, tokens, Tooltip } from '@fluentui/react-components';
-import {
-  ArrowSync20Regular,
-  Checkmark20Regular,
-  CloudArrowDown20Regular,
-  CloudArrowUp20Regular,
-  ErrorCircle20Regular,
-} from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
+import { Check, CircleX, CloudDownload, CloudUpload, RefreshCw } from 'lucide-react';
 import { memo, useMemo } from 'react';
 
+import { cn } from '@/renderer/ds/cn';
+import { Progress } from '@/renderer/ds/ui/progress';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/renderer/ds/ui/tooltip';
 import { $syncStatuses } from '@/renderer/features/WorkspaceSync/state';
 import type { WorkspaceSyncStatus } from '@/shared/types';
-
-const useStyles = makeStyles({
-  bar: {
-    position: 'fixed',
-    /* Fixed to the viewport, so it sits outside the app shell and absorbs
-       the home-indicator inset itself (the shell's own padding doesn't
-       apply here). */
-    bottom: '0',
-    paddingBottom: 'var(--safe-area-bottom, env(safe-area-inset-bottom, 0px))',
-    left: '0',
-    right: '0',
-    zIndex: 9999,
-    display: 'flex',
-    alignItems: 'center',
-    gap: '10px',
-    height: '32px',
-    paddingLeft: '12px',
-    paddingRight: '12px',
-    backgroundColor: tokens.colorNeutralBackground1,
-    borderTopWidth: '1px',
-    borderTopStyle: 'solid',
-    borderTopColor: tokens.colorNeutralStroke2,
-    fontSize: '0.75rem',
-    color: tokens.colorNeutralForeground2,
-    boxSizing: 'content-box',
-    '@media (min-width: 640px)': {
-      left: '260px', // AppSidebar width
-    },
-  },
-  barError: {
-    backgroundColor: tokens.colorPaletteRedBackground1,
-    borderTopColor: tokens.colorPaletteRedBorder1,
-    color: tokens.colorPaletteRedForeground1,
-  },
-  /* The idle "Workspace synced" state renders permanently once a sync
-     session exists — ambient info that isn't worth a permanent strip across
-     the bottom of a phone. Mobile shows only active/error states. */
-  barIdleHiddenMobile: {
-    '@media (max-width: 639px)': {
-      display: 'none',
-    },
-  },
-  icon: {
-    display: 'flex',
-    alignItems: 'center',
-    flexShrink: 0,
-    '> svg': {
-      width: '16px',
-      height: '16px',
-    },
-  },
-  spinning: {
-    animationName: {
-      from: { transform: 'rotate(0deg)' },
-      to: { transform: 'rotate(360deg)' },
-    },
-    animationDuration: '1.5s',
-    animationIterationCount: 'infinite',
-    animationTimingFunction: 'linear',
-  },
-  label: {
-    flex: '1 1 0',
-    minWidth: 0,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-  },
-  progress: {
-    width: '120px',
-    flexShrink: 0,
-  },
-  eta: {
-    flexShrink: 0,
-    color: tokens.colorNeutralForeground3,
-    fontVariantNumeric: 'tabular-nums',
-  },
-  stats: {
-    flexShrink: 0,
-    color: tokens.colorNeutralForeground3,
-  },
-});
 
 function formatEta(seconds: number): string {
   if (seconds < 60) {
@@ -150,7 +65,7 @@ function useAggregateStatus(statuses: Record<string, WorkspaceSyncStatus>) {
         totalUploaded,
         totalDownloaded,
         progress: {
-          percent: pct,
+          percent: pct * 100,
           eta: p.etaSeconds,
           rate: p.bytesPerSecond,
         },
@@ -180,7 +95,6 @@ function useAggregateStatus(statuses: Record<string, WorkspaceSyncStatus>) {
 
 export const SyncBar = memo(() => {
   const statuses = useStore($syncStatuses);
-  const styles = useStyles();
   const agg = useAggregateStatus(statuses);
 
   if (!agg) {
@@ -189,56 +103,60 @@ export const SyncBar = memo(() => {
 
   const icon =
     agg.type === 'error' ? (
-      <ErrorCircle20Regular />
+      <CircleX />
     ) : agg.type === 'progress' ? (
       agg.progress && agg.progress.percent > 0 ? (
         agg.progress.percent > 0.5 ? (
-          <CloudArrowUp20Regular />
+          <CloudUpload />
         ) : (
-          <CloudArrowDown20Regular />
+          <CloudDownload />
         )
       ) : (
-        <ArrowSync20Regular />
+        <RefreshCw />
       )
     ) : agg.type === 'busy' ? (
-      <ArrowSync20Regular />
+      <RefreshCw />
     ) : (
-      <Checkmark20Regular />
+      <Check />
     );
 
   const isSpinning = agg.type === 'busy' || (agg.type === 'progress' && !agg.progress);
 
   return (
     <div
-      className={mergeClasses(
-        styles.bar,
-        agg.type === 'error' && styles.barError,
-        agg.type === 'watching' && styles.barIdleHiddenMobile
+      className={cn(
+        'safe-area-bottom fixed right-0 bottom-0 left-0 z-50 box-content flex h-8 items-center gap-2.5 border-t border-border bg-background px-3 text-xs text-muted-foreground sm:left-64',
+        agg.type === 'error' && 'bg-destructive/10 border-destructive/50 text-destructive',
+        agg.type === 'watching' && 'max-sm:hidden'
       )}
     >
-      <span className={mergeClasses(styles.icon, isSpinning && styles.spinning)}>{icon}</span>
-      <span className={styles.label}>{agg.message}</span>
+      <span className={cn('flex items-center shrink-0 [&>_svg]:size-4', isSpinning && 'animate-spin-slow')}>
+        {icon}
+      </span>
+      <span className="flex-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">{agg.message}</span>
 
       {agg.type === 'progress' && agg.progress && (
         <>
-          <ProgressBar className={styles.progress} value={agg.progress.percent} thickness="medium" shape="rounded" />
-          {agg.progress.rate > 0 && <span className={styles.eta}>{formatRate(agg.progress.rate)}</span>}
+          <Progress className="w-30 shrink-0" value={agg.progress.percent} />
+          {agg.progress.rate > 0 && (
+            <span className="shrink-0 text-muted-foreground tabular-nums">{formatRate(agg.progress.rate)}</span>
+          )}
           {agg.progress.eta !== null && agg.progress.eta > 0 && (
-            <span className={styles.eta}>{formatEta(agg.progress.eta)}</span>
+            <span className="shrink-0 text-muted-foreground tabular-nums">{formatEta(agg.progress.eta)}</span>
           )}
         </>
       )}
 
       {agg.type === 'watching' && (agg.totalUploaded > 0 || agg.totalDownloaded > 0) && (
-        <Tooltip
-          content={`${agg.totalUploaded} uploaded, ${agg.totalDownloaded} downloaded`}
-          relationship="description"
-        >
-          <span className={styles.stats}>
-            {agg.totalUploaded > 0 && `${agg.totalUploaded}\u2191`}
-            {agg.totalUploaded > 0 && agg.totalDownloaded > 0 && ' '}
-            {agg.totalDownloaded > 0 && `${agg.totalDownloaded}\u2193`}
-          </span>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="shrink-0 text-muted-foreground">
+              {agg.totalUploaded > 0 && `${agg.totalUploaded}\u2191`}
+              {agg.totalUploaded > 0 && agg.totalDownloaded > 0 && ' '}
+              {agg.totalDownloaded > 0 && `${agg.totalDownloaded}\u2193`}
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>{`${agg.totalUploaded} uploaded, ${agg.totalDownloaded} downloaded`}</TooltipContent>
         </Tooltip>
       )}
     </div>

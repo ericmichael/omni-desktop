@@ -1,44 +1,22 @@
-import { makeStyles, tokens } from '@fluentui/react-components';
-import { Document20Regular, Folder20Regular, FolderOpen20Regular, Image20Regular } from '@fluentui/react-icons';
+import { File, Folder, FolderOpen, Image } from 'lucide-react';
 import { memo, useCallback, useRef, useState } from 'react';
 
-import type { TreeItemOpenChangeData } from '@/renderer/ds';
-import { Tree, TreeItem, TreeItemLayout } from '@/renderer/ds';
+import { Tree, TreeItem, TreeItemLayout, type TreeItemOpenChangeData } from '@/renderer/ds/Tree';
 import type { ArtifactFileEntry, TicketId } from '@/shared/types';
 
 import { ticketApi } from './state';
 
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp', '.ico']);
 
-const useStyles = makeStyles({
-  folderIcon: {
-    color: tokens.colorPaletteYellowForeground1,
-  },
-  imageIcon: {
-    color: tokens.colorBrandForeground2,
-  },
-  docIcon: {
-    color: tokens.colorNeutralForeground2,
-  },
-  sizeLabel: {
-    fontSize: tokens.fontSizeBase200,
-    color: tokens.colorNeutralForeground3,
-  },
-});
-
-const getFileIcon = (entry: ArtifactFileEntry, isExpanded: boolean, styles: ReturnType<typeof useStyles>) => {
+const getFileIcon = (entry: ArtifactFileEntry, isExpanded: boolean) => {
   if (entry.isDirectory) {
-    return isExpanded ? (
-      <FolderOpen20Regular style={{ width: 14, height: 14 }} className={styles.folderIcon} />
-    ) : (
-      <Folder20Regular style={{ width: 14, height: 14 }} className={styles.folderIcon} />
-    );
+    return isExpanded ? <FolderOpen className="size-4 text-warning" /> : <Folder className="size-4 text-warning" />;
   }
   const ext = entry.name.slice(entry.name.lastIndexOf('.')).toLowerCase();
   if (IMAGE_EXTENSIONS.has(ext)) {
-    return <Image20Regular style={{ width: 14, height: 14 }} className={styles.imageIcon} />;
+    return <Image className="size-4 text-primary" />;
   }
-  return <Document20Regular style={{ width: 14, height: 14 }} className={styles.docIcon} />;
+  return <File className="size-4 text-muted-foreground" />;
 };
 
 const formatSize = (bytes: number): string => {
@@ -61,7 +39,6 @@ type FileTreeNodeProps = {
 };
 
 const FileTreeNode = memo(({ entry, ticketId, selectedPath, onSelect, openItems, childrenMap }: FileTreeNodeProps) => {
-  const styles = useStyles();
   const isExpanded = openItems.has(entry.relativePath);
   const children = childrenMap.get(entry.relativePath);
 
@@ -74,7 +51,7 @@ const FileTreeNode = memo(({ entry, ticketId, selectedPath, onSelect, openItems,
   if (entry.isDirectory) {
     return (
       <TreeItem itemType="branch" value={entry.relativePath}>
-        <TreeItemLayout iconBefore={getFileIcon(entry, isExpanded, styles)}>{entry.name}</TreeItemLayout>
+        <TreeItemLayout iconBefore={getFileIcon(entry, isExpanded)}>{entry.name}</TreeItemLayout>
         {isExpanded && children && (
           <Tree>
             {children.map((child) => (
@@ -97,16 +74,11 @@ const FileTreeNode = memo(({ entry, ticketId, selectedPath, onSelect, openItems,
   const isSelected = selectedPath === entry.relativePath;
 
   return (
-    <TreeItem
-      itemType="leaf"
-      value={entry.relativePath}
-      onClick={handleClick}
-      aria-selected={isSelected}
-      style={isSelected ? { backgroundColor: 'var(--colorBrandBackground2, rgba(99, 102, 241, 0.15))' } : undefined}
-    >
+    <TreeItem itemType="leaf" value={entry.relativePath} onClick={handleClick} aria-selected={isSelected}>
       <TreeItemLayout
-        iconBefore={getFileIcon(entry, false, styles)}
-        aside={<span className={styles.sizeLabel}>{formatSize(entry.size)}</span>}
+        className={isSelected ? 'bg-accent text-accent-foreground' : undefined}
+        iconBefore={getFileIcon(entry, false)}
+        aside={<span className="text-xs text-muted-foreground">{formatSize(entry.size)}</span>}
       >
         {entry.name}
       </TreeItemLayout>
@@ -128,7 +100,7 @@ export const ArtifactFileTree = memo(({ entries, ticketId, selectedPath, onSelec
   const loadingRef = useRef<Set<string>>(new Set());
 
   const handleOpenChange = useCallback(
-    (_e: unknown, data: TreeItemOpenChangeData) => {
+    (data: TreeItemOpenChangeData) => {
       const path = data.value as string;
       const willOpen = data.open;
 

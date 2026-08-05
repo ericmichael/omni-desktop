@@ -1,6 +1,6 @@
 import { memo } from 'react';
 
-import { IconButton } from '@/renderer/ds';
+import { Button } from '@/renderer/ds/ui/button';
 
 const DiscordIcon = () => (
   <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
@@ -11,7 +11,9 @@ const DiscordIcon = () => (
 export const DiscordButton = memo(() => {
   return (
     <a href="https://discord.gg/ZmtBAhwWhy" target="_blank" rel="noopener noreferrer">
-      <IconButton aria-label="Discord" icon={<DiscordIcon />} />
+      <Button type="button" variant="ghost" size="icon" aria-label="Discord">
+        <DiscordIcon />
+      </Button>
     </a>
   );
 });

@@ -1,14 +1,29 @@
-import { makeStyles, tokens } from '@fluentui/react-components';
-import {
-  Delete20Regular,
-  Lightbulb20Regular,
-  PlugConnected20Regular,
-  PuzzlePiece20Regular,
-  Settings20Regular,
-} from '@fluentui/react-icons';
+import { Lightbulb, PlugZap, Puzzle, Settings, Trash2 } from 'lucide-react';
 import { memo, useState } from 'react';
 
-import { Button, ConfirmDialog, IconButton, SectionLabel, Spinner, Switch } from '@/renderer/ds';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/renderer/ds/ui/alert-dialog';
+import { Badge } from '@/renderer/ds/ui/badge';
+import { Button } from '@/renderer/ds/ui/button';
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from '@/renderer/ds/ui/item';
+import { Spinner } from '@/renderer/ds/ui/spinner';
+import { Switch } from '@/renderer/ds/ui/switch';
 import { AppIcon } from '@/renderer/features/Code/AppIcon';
 import type { InstalledPlugin, PluginKind } from '@/renderer/features/Plugins/plugin-cards';
 import { emitter } from '@/renderer/services/ipc';
@@ -21,74 +36,6 @@ const KIND_LABELS: Record<PluginKind, string> = {
   app: 'App',
   extension: 'Extension',
 };
-
-const useStyles = makeStyles({
-  root: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalS },
-  sectionHeader: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: tokens.spacingHorizontalS,
-  },
-  card: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalXS,
-    padding: tokens.spacingHorizontalL,
-    border: `1px solid ${tokens.colorNeutralStroke2}`,
-    borderRadius: tokens.borderRadiusMedium,
-    backgroundColor: tokens.colorNeutralBackground2,
-  },
-  cardHeader: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalM },
-  cardIcon: { display: 'flex', color: tokens.colorBrandForeground1, flexShrink: 0 },
-  cardTitle: {
-    flex: 1,
-    minWidth: 0,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    fontWeight: 600,
-    fontSize: tokens.fontSizeBase300,
-    color: tokens.colorNeutralForeground1,
-  },
-  kindChip: {
-    fontSize: tokens.fontSizeBase100,
-    padding: `2px ${tokens.spacingHorizontalS}`,
-    borderRadius: tokens.borderRadiusSmall,
-    backgroundColor: tokens.colorNeutralBackground4,
-    color: tokens.colorNeutralForeground2,
-    flexShrink: 0,
-  },
-  cardDescription: {
-    color: tokens.colorNeutralForeground3,
-    fontSize: tokens.fontSizeBase200,
-    lineHeight: tokens.lineHeightBase200,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-  },
-  cardMeta: { fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground4 },
-  updateRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalM,
-  },
-  updateBadge: {
-    fontSize: tokens.fontSizeBase100,
-    color: tokens.colorPaletteGreenForeground1,
-    fontWeight: tokens.fontWeightSemibold,
-  },
-  contentTypes: { display: 'flex', flexWrap: 'wrap', gap: tokens.spacingHorizontalXS },
-  dockToggleLabel: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalXS,
-    fontSize: tokens.fontSizeBase200,
-    color: tokens.colorNeutralForeground3,
-    cursor: 'pointer',
-    userSelect: 'none',
-    flexShrink: 0,
-  },
-});
 
 function formatSkillSource(skill: SkillEntry): string {
   const parts: string[] = [];
@@ -155,7 +102,6 @@ export const InstalledSection = memo(
     updateAllCount,
     onUpdateAll,
   }: InstalledSectionProps) => {
-    const styles = useStyles();
     const [uninstallSkill, setUninstallSkill] = useState<SkillEntry | null>(null);
     const [removeConnectorId, setRemoveConnectorId] = useState<string | null>(null);
 
@@ -192,175 +138,221 @@ export const InstalledSection = memo(
     const updatingAll = installingKey === 'update-all';
 
     return (
-      <div className={styles.root}>
-        <div className={styles.sectionHeader}>
-          <SectionLabel>Installed</SectionLabel>
+      <div className="flex flex-col gap-2">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Installed</span>
           {updateAllCount > 0 && (
-            <Button size="sm" variant="ghost" onClick={onUpdateAll} isDisabled={installingKey !== null}>
-              {updatingAll ? <Spinner size="sm" /> : `Update all (${updateAllCount})`}
+            <Button size="sm" variant="ghost" onClick={onUpdateAll} disabled={installingKey !== null}>
+              {updatingAll ? <Spinner /> : `Update all (${updateAllCount})`}
             </Button>
           )}
         </div>
 
-        {items.map((item) => {
-          switch (item.kind) {
-            case 'connector':
-              return (
-                <div key={`connector:${item.id}`} className={styles.card}>
-                  <div className={styles.cardHeader}>
-                    <span className={styles.cardIcon}>
-                      <PlugConnected20Regular />
-                    </span>
-                    <span className={styles.cardTitle}>{item.id}</span>
-                    <span className={styles.kindChip}>{KIND_LABELS.connector}</span>
-                    <Button size="sm" variant="ghost" onClick={() => onConfigureConnector(item.id)}>
-                      <Settings20Regular style={{ marginRight: 4 }} />
-                      Configure
-                    </Button>
-                    <IconButton
-                      aria-label={`Remove ${item.id}`}
-                      icon={<Delete20Regular />}
-                      size="sm"
-                      onClick={() => setRemoveConnectorId(item.id)}
-                    />
-                  </div>
-                  <div className={styles.cardDescription}>{connectorSummary(item.server)}</div>
-                </div>
-              );
-
-            case 'skill': {
-              const { skill, update } = item;
-              const updating = update !== undefined && installingKey === `skill:${update.repo}:${update.plugin}`;
-              return (
-                <div key={`skill:${skill.name}`} className={styles.card}>
-                  <div className={styles.cardHeader}>
-                    <span className={styles.cardIcon}>
-                      <Lightbulb20Regular />
-                    </span>
-                    <span className={styles.cardTitle}>{skill.name}</span>
-                    <span className={styles.kindChip}>{KIND_LABELS.skill}</span>
-                    <IconButton
-                      aria-label={`Uninstall ${skill.name}`}
-                      icon={<Delete20Regular />}
-                      size="sm"
-                      onClick={() => setUninstallSkill(skill)}
-                    />
-                    <Switch
-                      checked={skill.enabled}
-                      onCheckedChange={(enabled) =>
-                        run(() => emitter.invoke('skills:set-enabled', skill.name, enabled), 'Failed to update skill')
-                      }
-                    />
-                  </div>
-                  <div className={styles.cardDescription}>{skill.description}</div>
-                  <div className={styles.cardMeta}>{formatSkillSource(skill)}</div>
-                  {update && (
-                    <div className={styles.updateRow}>
-                      <span className={styles.updateBadge}>{formatUpdateSummary(update)}</span>
-                      <Button size="sm" onClick={() => onUpdateBundle(update)} isDisabled={installingKey !== null}>
-                        {updating ? <Spinner size="sm" /> : 'Update'}
+        <ItemGroup className="gap-2">
+          {items.map((item) => {
+            switch (item.kind) {
+              case 'connector':
+                return (
+                  <Item key={`connector:${item.id}`} variant="outline">
+                    <ItemMedia variant="icon">
+                      <PlugZap className="text-primary" />
+                    </ItemMedia>
+                    <ItemContent className="min-w-0">
+                      <ItemTitle className="max-w-full">
+                        <span className="truncate">{item.id}</span>
+                        <Badge variant="secondary">{KIND_LABELS.connector}</Badge>
+                      </ItemTitle>
+                      <ItemDescription>{connectorSummary(item.server)}</ItemDescription>
+                    </ItemContent>
+                    <ItemActions>
+                      <Button size="sm" variant="ghost" onClick={() => onConfigureConnector(item.id)}>
+                        <Settings className="mr-1 size-4" />
+                        Configure
                       </Button>
-                    </div>
-                  )}
-                </div>
-              );
-            }
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        aria-label={`Remove ${item.id}`}
+                        onClick={() => setRemoveConnectorId(item.id)}
+                      >
+                        <Trash2 />
+                      </Button>
+                    </ItemActions>
+                  </Item>
+                );
 
-            case 'app':
-              return (
-                <div key={`app:${item.app.id}`} className={styles.card}>
-                  <div className={styles.cardHeader}>
-                    <span className={styles.cardIcon}>
-                      <AppIcon icon={item.app.icon} size={20} />
-                    </span>
-                    <span className={styles.cardTitle}>{item.app.label}</span>
-                    <span className={styles.kindChip}>{KIND_LABELS.app}</span>
-                    <label
-                      className={styles.dockToggleLabel}
-                      title="Show in the session dock (column-scoped). When off, the app only opens as its own deck column."
-                    >
-                      <span>In dock</span>
+              case 'skill': {
+                const { skill, update } = item;
+                const updating = update !== undefined && installingKey === `skill:${update.repo}:${update.plugin}`;
+                return (
+                  <Item key={`skill:${skill.name}`} variant="outline">
+                    <ItemMedia variant="icon">
+                      <Lightbulb className="text-primary" />
+                    </ItemMedia>
+                    <ItemContent className="min-w-0">
+                      <ItemTitle className="max-w-full">
+                        <span className="truncate">{skill.name}</span>
+                        <Badge variant="secondary">{KIND_LABELS.skill}</Badge>
+                      </ItemTitle>
+                      <ItemDescription>{skill.description}</ItemDescription>
+                      <span className="text-xs text-muted-foreground">{formatSkillSource(skill)}</span>
+                      {update && (
+                        <Badge className="mt-1 text-success" variant="outline">
+                          {formatUpdateSummary(update)}
+                        </Badge>
+                      )}
+                    </ItemContent>
+                    <ItemActions>
+                      {update && (
+                        <Button size="sm" onClick={() => onUpdateBundle(update)} disabled={installingKey !== null}>
+                          {updating ? <Spinner /> : 'Update'}
+                        </Button>
+                      )}
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        aria-label={`Uninstall ${skill.name}`}
+                        onClick={() => setUninstallSkill(skill)}
+                      >
+                        <Trash2 />
+                      </Button>
+
                       <Switch
-                        checked={item.app.columnScoped ?? false}
-                        onCheckedChange={(v) => toggleApp(item.app.id, v)}
+                        checked={skill.enabled}
+                        onCheckedChange={(enabled) =>
+                          run(() => emitter.invoke('skills:set-enabled', skill.name, enabled), 'Failed to update skill')
+                        }
                       />
-                    </label>
-                    <IconButton
-                      aria-label={`Remove ${item.app.label}`}
-                      icon={<Delete20Regular />}
-                      size="sm"
-                      onClick={() => removeApp(item.app.id)}
-                    />
-                  </div>
-                  <div className={styles.cardDescription}>{item.app.url}</div>
-                </div>
-              );
+                    </ItemActions>
+                  </Item>
+                );
+              }
 
-            case 'extension':
-              return (
-                <div key={`extension:${item.ext.id}`} className={styles.card}>
-                  <div className={styles.cardHeader}>
-                    <span className={styles.cardIcon}>
-                      <PuzzlePiece20Regular />
-                    </span>
-                    <span className={styles.cardTitle}>{item.ext.name}</span>
-                    <span className={styles.kindChip}>{KIND_LABELS.extension}</span>
-                    <Switch
-                      checked={item.ext.enabled}
-                      onCheckedChange={(enabled) =>
-                        run(
-                          () => emitter.invoke('extension:set-enabled', item.ext.id, enabled),
-                          'Failed to update extension'
-                        )
-                      }
-                    />
-                  </div>
-                  <div className={styles.cardDescription}>{item.ext.description}</div>
-                  {item.ext.contentTypes.length > 0 && (
-                    <div className={styles.contentTypes}>
-                      {item.ext.contentTypes.map((ct) => (
-                        <span key={ct.id} className={styles.kindChip}>
-                          {ct.label} ({ct.fileExtension})
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              );
-          }
-        })}
+              case 'app':
+                return (
+                  <Item key={`app:${item.app.id}`} variant="outline">
+                    <ItemMedia variant="icon">
+                      <AppIcon icon={item.app.icon} size={20} />
+                    </ItemMedia>
+                    <ItemContent className="min-w-0">
+                      <ItemTitle className="max-w-full">
+                        <span className="truncate">{item.app.label}</span>
+                        <Badge variant="secondary">{KIND_LABELS.app}</Badge>
+                      </ItemTitle>
+                      <ItemDescription>{item.app.url}</ItemDescription>
+                    </ItemContent>
+                    <ItemActions>
+                      <label
+                        className="flex items-center gap-1 text-xs text-muted-foreground cursor-pointer select-none shrink-0"
+                        title="Show in the session dock (column-scoped). When off, the app only opens as its own deck column."
+                      >
+                        <span>In dock</span>
+                        <Switch
+                          checked={item.app.columnScoped ?? false}
+                          onCheckedChange={(v) => toggleApp(item.app.id, v)}
+                        />
+                      </label>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        aria-label={`Remove ${item.app.label}`}
+                        onClick={() => removeApp(item.app.id)}
+                      >
+                        <Trash2 />
+                      </Button>
+                    </ItemActions>
+                  </Item>
+                );
 
-        <ConfirmDialog
-          open={uninstallSkill !== null}
-          onClose={() => setUninstallSkill(null)}
-          onConfirm={() => {
-            const skill = uninstallSkill;
-            setUninstallSkill(null);
-            if (skill) {
-              void run(() => emitter.invoke('skills:uninstall', skill.name), 'Failed to uninstall skill');
+              case 'extension':
+                return (
+                  <Item key={`extension:${item.ext.id}`} variant="outline">
+                    <ItemMedia variant="icon">
+                      <Puzzle className="text-primary" />
+                    </ItemMedia>
+                    <ItemContent className="min-w-0">
+                      <ItemTitle className="max-w-full">
+                        <span className="truncate">{item.ext.name}</span>
+                        <Badge variant="secondary">{KIND_LABELS.extension}</Badge>
+                      </ItemTitle>
+                      <ItemDescription>{item.ext.description}</ItemDescription>
+                      {item.ext.contentTypes.length > 0 && (
+                        <div className="flex flex-wrap gap-1">
+                          {item.ext.contentTypes.map((ct) => (
+                            <Badge key={ct.id} variant="outline">
+                              {ct.label} ({ct.fileExtension})
+                            </Badge>
+                          ))}
+                        </div>
+                      )}
+                    </ItemContent>
+                    <ItemActions>
+                      <Switch
+                        checked={item.ext.enabled}
+                        onCheckedChange={(enabled) =>
+                          run(
+                            () => emitter.invoke('extension:set-enabled', item.ext.id, enabled),
+                            'Failed to update extension'
+                          )
+                        }
+                      />
+                    </ItemActions>
+                  </Item>
+                );
             }
-          }}
-          title={`Uninstall "${uninstallSkill?.name}"?`}
-          description="This will permanently remove the skill and all its files."
-          confirmLabel="Uninstall"
-          destructive
-        />
+          })}
+        </ItemGroup>
 
-        <ConfirmDialog
-          open={removeConnectorId !== null}
-          onClose={() => setRemoveConnectorId(null)}
-          onConfirm={() => {
-            const id = removeConnectorId;
-            setRemoveConnectorId(null);
-            if (id) {
-              void run(() => onRemoveConnector(id), 'Failed to remove connector');
-            }
-          }}
-          title={`Remove "${removeConnectorId}"?`}
-          description="Agent sessions will no longer have access to this MCP server."
-          confirmLabel="Remove"
-          destructive
-        />
+        <AlertDialog open={uninstallSkill !== null} onOpenChange={(open) => !open && setUninstallSkill(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>{`Uninstall "${uninstallSkill?.name}"?`}</AlertDialogTitle>
+              <AlertDialogDescription>This will permanently remove the skill and all its files.</AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                variant="destructive"
+                onClick={() => {
+                  const skill = uninstallSkill;
+                  if (skill) {
+                    void run(() => emitter.invoke('skills:uninstall', skill.name), 'Failed to uninstall skill');
+                  }
+                }}
+              >
+                Uninstall
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        <AlertDialog open={removeConnectorId !== null} onOpenChange={(open) => !open && setRemoveConnectorId(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>{`Remove "${removeConnectorId}"?`}</AlertDialogTitle>
+              <AlertDialogDescription>
+                Agent sessions will no longer have access to this MCP server.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                variant="destructive"
+                onClick={() => {
+                  const id = removeConnectorId;
+                  if (id) {
+                    void run(() => onRemoveConnector(id), 'Failed to remove connector');
+                  }
+                }}
+              >
+                Remove
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     );
   }

@@ -22,12 +22,19 @@
  * Electron-only (linking is meaningless in server mode — the web app IS the
  * remote client). The card hides itself on the browser build.
  */
-
-import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
 import { memo, useCallback, useEffect, useState } from 'react';
 
-import { Body1, Button, Caption1, Card, FormField, Input, Select, Spinner, Switch } from '@/renderer/ds';
+import { cn } from '@/renderer/ds/cn';
+import { Button } from '@/renderer/ds/ui/button';
+import { Card, CardContent } from '@/renderer/ds/ui/card';
+import { Field, FieldContent, FieldDescription, FieldLabel } from '@/renderer/ds/ui/field';
+import { Input } from '@/renderer/ds/ui/input';
+import { NativeSelect as Select } from '@/renderer/ds/ui/native-select';
+import { Spinner } from '@/renderer/ds/ui/spinner';
+import { Switch } from '@/renderer/ds/ui/switch';
+import { ToggleGroup, ToggleGroupItem } from '@/renderer/ds/ui/toggle-group';
 import { MachineIdentityChip } from '@/renderer/features/SettingsModal/MachineIdentityChip';
+import { settingsCardContentClassName } from '@/renderer/features/SettingsModal/SettingsLayout';
 import {
   bootstrapPlatform,
   ipc,
@@ -39,35 +46,8 @@ import {
 } from '@/renderer/services/ipc';
 import type { CloudDeviceCode, CloudStatus, WslBackendStatus, WslDetectResult } from '@/shared/types';
 
-const useStyles = makeStyles({
-  card: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalS },
-  row: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalM },
-  main: { flex: '1 1 0', minWidth: 0, display: 'flex', flexDirection: 'column', gap: '2px' },
-  summary: { color: tokens.colorNeutralForeground2 },
-  error: { color: tokens.colorPaletteRedForeground1 },
-  warn: { color: tokens.colorPaletteYellowForeground1 },
-  ok: { color: tokens.colorPaletteGreenForeground1 },
-  form: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalS },
-  codeBox: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '2px',
-    padding: tokens.spacingVerticalS,
-    borderRadius: tokens.borderRadiusMedium,
-    backgroundColor: tokens.colorNeutralBackground1,
-    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke2),
-  },
-  code: {
-    fontFamily: tokens.fontFamilyMonospace,
-    fontSize: tokens.fontSizeBase500,
-    fontWeight: tokens.fontWeightSemibold,
-    letterSpacing: '0.1em',
-  },
-  pending: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS },
-  mono: { fontFamily: tokens.fontFamilyMonospace },
-});
-
 type WslStatusLine = { text: string; tone: 'ok' | 'warn' | 'error' | 'muted' };
+type BackendSetupMode = 'cloud' | 'wsl' | 'server';
 
 /** Map the daemon + Docker state to a single friendly status line. */
 const wslStatusLine = (status: WslBackendStatus | null): WslStatusLine => {
@@ -106,8 +86,7 @@ const FRESH_DATA_ROOT_NOTE =
   'Switching starts a fresh backend data root inside the distro — existing local data stays on Windows and is not migrated.';
 
 export const RemoteBackendCard = memo(() => {
-  const styles = useStyles();
-
+  const [setupMode, setSetupMode] = useState<BackendSetupMode>('cloud');
   const [url, setUrl] = useState('');
   const [connecting, setConnecting] = useState(false);
   const [deviceCode, setDeviceCode] = useState<CloudDeviceCode | null>(null);
@@ -278,6 +257,12 @@ export const RemoteBackendCard = memo(() => {
   const [serverLinking, setServerLinking] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
 
+  const onSetupModeChange = useCallback((value: string) => {
+    if (value === 'cloud' || value === 'wsl' || value === 'server') {
+      setSetupMode(value);
+    }
+  }, []);
+
   const onServerConnect = useCallback(async () => {
     setServerLinking(true);
     setServerError(null);
@@ -305,20 +290,24 @@ export const RemoteBackendCard = memo(() => {
     // trusts this machine by network address.
     return (
       <Card>
-        <div className={styles.card}>
-          <div className={styles.row}>
-            <div className={styles.main}>
-              <Body1>{`Connected to ${serverOrigin()} (self-hosted)`}</Body1>
-              <Caption1 className={error ? styles.error : styles.summary}>
+        <CardContent className={settingsCardContentClassName}>
+          <div className="flex items-center gap-4">
+            <div className="flex-1 min-w-0 flex flex-col gap-0.5">
+              <span className="text-sm">{`Connected to ${serverOrigin()} (self-hosted)`}</span>
+              <span
+                className={cn('text-xs text-muted-foreground', error ? 'text-destructive' : 'text-muted-foreground')}
+              >
                 {error ?? 'Sessions, projects, and tasks live on your server'}
-              </Caption1>
+              </span>
             </div>
             <Button size="sm" variant="ghost" onClick={onDisconnect}>
               Disconnect
             </Button>
           </div>
-          {restarting && <Caption1 className={styles.ok}>Restarting Omni Code…</Caption1>}
-        </div>
+          {restarting && (
+            <span className={cn('text-xs text-muted-foreground', 'text-success')}>Restarting Omni Code…</span>
+          )}
+        </CardContent>
       </Card>
     );
   }
@@ -327,175 +316,180 @@ export const RemoteBackendCard = memo(() => {
     const statusLine = wslStatusLine(wslStatus);
     const statusClass =
       statusLine.tone === 'error'
-        ? styles.error
+        ? 'text-destructive'
         : statusLine.tone === 'warn'
-          ? styles.warn
+          ? 'text-warning'
           : statusLine.tone === 'ok'
-            ? styles.ok
-            : styles.summary;
+            ? 'text-success'
+            : 'text-muted-foreground';
     // Freeze the toggle while the daemon is mid-transition — a second restart
     // on top of a provision/spawn in flight would race the first.
     const wslBusy = wslStatus?.state === 'provisioning' || wslStatus?.state === 'starting';
     return (
       <Card>
-        <div className={styles.card}>
-          <div className={styles.row}>
-            <div className={styles.main}>
-              <Body1>{`Backend running in WSL${wslStatus?.distro ? ` (${wslStatus.distro})` : ''}`}</Body1>
-              <Caption1 className={error ? styles.error : statusClass}>{error ?? statusLine.text}</Caption1>
+        <CardContent className={settingsCardContentClassName}>
+          <div className="flex items-center gap-4">
+            <div className="flex-1 min-w-0 flex flex-col gap-0.5">
+              <span className="text-sm">{`Backend running in WSL${wslStatus?.distro ? ` (${wslStatus.distro})` : ''}`}</span>
+              <span className={cn('text-xs text-muted-foreground', error ? 'text-destructive' : statusClass)}>
+                {error ?? statusLine.text}
+              </span>
             </div>
             <Button size="sm" variant="ghost" onClick={onDisconnect}>
               Disconnect
             </Button>
           </div>
-          <div className={styles.row}>
-            <div className={styles.main}>
-              <Body1>Keep backend running when the app is closed</Body1>
-              <Caption1 className={styles.summary}>
+          <div className="flex items-center gap-4">
+            <div className="flex-1 min-w-0 flex flex-col gap-0.5">
+              <span className="text-sm">Keep backend running when the app is closed</span>
+              <span className={cn('text-xs text-muted-foreground', 'text-muted-foreground')}>
                 Changing this restarts the backend daemon — active sessions reconnect, but agent work running in the
                 daemon is interrupted.
-              </Caption1>
+              </span>
             </div>
             <Switch checked={wslStatus?.persistent === true} onCheckedChange={onPersistentChange} disabled={wslBusy} />
           </div>
-          {restarting && <Caption1 className={styles.ok}>Restarting Omni Code…</Caption1>}
-        </div>
+          {restarting && (
+            <span className={cn('text-xs text-muted-foreground', 'text-success')}>Restarting Omni Code…</span>
+          )}
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (cloudMode) {
+    return (
+      <Card>
+        <CardContent className={settingsCardContentClassName}>
+          <div className="flex items-center gap-4">
+            <FieldContent>
+              <FieldLabel>{`Connected to ${cloudMode.url}`}</FieldLabel>
+              <FieldDescription>
+                {error ?? `Signed in as ${cloudMode.account.name ?? cloudMode.account.email ?? cloudMode.account.oid}`}
+              </FieldDescription>
+            </FieldContent>
+            <Button size="sm" variant="outline" onClick={onDisconnect}>
+              Disconnect
+            </Button>
+          </div>
+          {restarting && (
+            <span className={cn('text-xs text-muted-foreground', 'text-success')}>Restarting Omni Code…</span>
+          )}
+        </CardContent>
       </Card>
     );
   }
 
   return (
     <Card>
-      <div className={styles.card}>
-        <div className={styles.row}>
-          <div className={styles.main}>
-            <Body1>
-              {cloudMode ? `Connected to ${cloudMode.url}` : 'Connect this desktop app to a cloud launcher'}
-            </Body1>
-            <Caption1 className={error ? styles.error : styles.summary}>
-              {error ??
-                (cloudMode
-                  ? `Signed in as ${cloudMode.account.name ?? cloudMode.account.email ?? cloudMode.account.oid} · sessions sync to the cloud Postgres`
-                  : 'Sign in with Microsoft Entra ID to sync your chat sessions, projects, and tasks with the deployed launcher (and the web UI).')}
-            </Caption1>
-            {/* The chip is how the cloud identifies this device — surface it
-                regardless of link state so the user knows their machine id
-                before connecting and can verify it's stable across reboots. */}
-            <div style={{ marginTop: 6 }}>
-              <MachineIdentityChip />
-            </div>
-          </div>
-          {cloudMode ? (
-            <Button size="sm" variant="ghost" onClick={onDisconnect}>
-              Disconnect
-            </Button>
-          ) : null}
-        </div>
+      <CardContent className={settingsCardContentClassName}>
+        <ToggleGroup
+          type="single"
+          variant="outline"
+          spacing={0}
+          value={setupMode}
+          onValueChange={onSetupModeChange}
+          aria-label="Backend connection type"
+        >
+          <ToggleGroupItem value="cloud">Cloud</ToggleGroupItem>
+          {showWslSection && <ToggleGroupItem value="wsl">WSL</ToggleGroupItem>}
+          <ToggleGroupItem value="server">Self-hosted</ToggleGroupItem>
+        </ToggleGroup>
 
-        {!cloudMode && (
-          <div className={styles.form}>
-            <FormField label="Launcher URL">
+        {setupMode === 'cloud' && (
+          <div className="flex flex-col gap-5">
+            <FieldContent>
+              <FieldLabel>Cloud launcher</FieldLabel>
+              <FieldDescription>Sign in to sync your work across the desktop and web apps.</FieldDescription>
+            </FieldContent>
+            <Field orientation="horizontal" className="justify-between gap-4">
+              <FieldLabel>Launcher URL</FieldLabel>
               <Input
                 value={url}
-                onChange={(e) => setUrl(e.target.value)}
+                onChange={(event) => setUrl(event.target.value)}
                 placeholder="https://omni.example.com"
                 disabled={connecting}
               />
-            </FormField>
-            <div>
-              <Button size="sm" onClick={onConnect} isDisabled={connecting || !url.trim()}>
+            </Field>
+            <div className="flex items-center justify-between gap-4">
+              <MachineIdentityChip />
+              <Button size="sm" onClick={onConnect} disabled={connecting || !url.trim()}>
                 {connecting ? 'Connecting…' : 'Connect'}
               </Button>
             </div>
+            {error && <span className={cn('text-xs text-muted-foreground', 'text-destructive')}>{error}</span>}
+            {connecting && deviceCode && (
+              <div className="flex flex-col gap-0.5 p-2 rounded-lg bg-background border border-border">
+                <span className="text-xs text-muted-foreground">
+                  Open{' '}
+                  <a
+                    href={deviceCode.verificationUriComplete ?? deviceCode.verificationUri}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    {deviceCode.verificationUri}
+                  </a>{' '}
+                  and enter this code:
+                </span>
+                <span className="font-mono text-xl font-semibold tracking-widest">{deviceCode.userCode}</span>
+                <div className="flex items-center gap-2">
+                  <Spinner />
+                  <span className="text-xs text-muted-foreground">Waiting for authorization…</span>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
-        {connecting && deviceCode && (
-          <div className={styles.codeBox}>
-            <Caption1>
-              Open{' '}
-              <a
-                href={deviceCode.verificationUriComplete ?? deviceCode.verificationUri}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                {deviceCode.verificationUri}
-              </a>{' '}
-              and enter this code:
-            </Caption1>
-            <span className={styles.code}>{deviceCode.userCode}</span>
-            <div className={styles.pending}>
-              <Spinner size="sm" />
-              <Caption1>Waiting for authorization…</Caption1>
-            </div>
-          </div>
-        )}
-
-        {!cloudMode && showWslSection && (
-          <div className={styles.form}>
-            <div className={styles.main}>
-              <Body1>Or run the backend in WSL</Body1>
-              <Caption1 className={styles.summary}>
-                Sandboxes run natively in Linux — Docker, terminals, and agents live inside the distro.
-              </Caption1>
-            </div>
+        {setupMode === 'wsl' && showWslSection && (
+          <div className="flex flex-col gap-5">
+            <FieldContent>
+              <FieldLabel>Windows Subsystem for Linux</FieldLabel>
+              <FieldDescription>Run sandboxes and agents in a local Linux environment.</FieldDescription>
+            </FieldContent>
             {wslDetect?.wsl === 'missing' ? (
               wslInstallStarted ? (
-                <Caption1 className={styles.summary}>
-                  Windows will ask for permission and may need a reboot. After WSL finishes installing, come back here.
-                </Caption1>
+                <span className="text-sm text-muted-foreground">
+                  Finish the Windows installation, then return here after restarting if requested.
+                </span>
               ) : (
-                <>
-                  <Caption1 className={wslError ? styles.error : styles.summary}>
-                    {wslError ?? (
-                      <>
-                        WSL 2 not detected — install it with <span className={styles.mono}>wsl --install</span>
-                      </>
-                    )}
-                  </Caption1>
-                  <div>
-                    <Button size="sm" onClick={onWslInstallPlatform} isDisabled={wslInstalling}>
-                      {wslInstalling ? 'Installing…' : 'Install WSL 2'}
-                    </Button>
-                  </div>
-                </>
+                <div className="flex items-center justify-between gap-4">
+                  <span className={cn('text-sm text-muted-foreground', wslError && 'text-destructive')}>
+                    {wslError ?? 'WSL 2 is not installed.'}
+                  </span>
+                  <Button size="sm" onClick={onWslInstallPlatform} disabled={wslInstalling}>
+                    {wslInstalling ? 'Installing…' : 'Install WSL 2'}
+                  </Button>
+                </div>
               )
             ) : wslDetect?.wsl === 'ok' && wslDetect.distros.length === 0 ? (
-              <>
-                <Caption1 className={wslError ? styles.error : styles.summary}>
-                  {wslError ?? 'WSL 2 is installed but has no Linux distribution.'}
-                </Caption1>
-                {wslInstalling ? (
-                  <div className={styles.pending}>
-                    <Spinner size="sm" />
-                    <Caption1>Installing Ubuntu — this downloads a few hundred MB…</Caption1>
-                  </div>
-                ) : (
-                  <div>
-                    <Button size="sm" onClick={onWslInstallDistro}>
-                      Install Ubuntu
-                    </Button>
-                  </div>
-                )}
-              </>
+              <div className="flex items-center justify-between gap-4">
+                <span className={cn('text-sm text-muted-foreground', wslError && 'text-destructive')}>
+                  {wslError ?? 'Install a Linux distribution to continue.'}
+                </span>
+                <Button size="sm" onClick={onWslInstallDistro} disabled={wslInstalling}>
+                  {wslInstalling ? 'Installing…' : 'Install Ubuntu'}
+                </Button>
+              </div>
             ) : (
               <>
-                <FormField label="WSL distro">
-                  <Select size="sm" value={wslDistro} onChange={onWslDistroChange} disabled={wslLinking || !wslDetect}>
+                <Field orientation="horizontal" className="justify-between gap-4">
+                  <FieldLabel>Linux distribution</FieldLabel>
+                  <Select value={wslDistro} onChange={onWslDistroChange} disabled={wslLinking || !wslDetect}>
                     {wslDetect?.wsl === 'ok' &&
-                      wslDetect.distros.map((d) => (
-                        <option key={d.name} value={d.name}>
-                          {d.isDefault ? `${d.name} (default)` : d.name}
+                      wslDetect.distros.map((distro) => (
+                        <option key={distro.name} value={distro.name}>
+                          {distro.isDefault ? `${distro.name} (default)` : distro.name}
                         </option>
                       ))}
                   </Select>
-                </FormField>
-                <Caption1 className={wslError ? styles.error : styles.summary}>
-                  {wslError ?? FRESH_DATA_ROOT_NOTE}
-                </Caption1>
-                <div>
-                  <Button size="sm" onClick={onWslLink} isDisabled={wslLinking || !wslDistro}>
-                    {wslLinking ? 'Setting up…' : 'Run backend in WSL'}
+                </Field>
+                <div className="flex items-center justify-between gap-4">
+                  <span className={cn('text-xs text-muted-foreground', wslError && 'text-destructive')}>
+                    {wslError ?? FRESH_DATA_ROOT_NOTE}
+                  </span>
+                  <Button size="sm" onClick={onWslLink} disabled={wslLinking || !wslDistro}>
+                    {wslLinking ? 'Setting up…' : 'Use WSL'}
                   </Button>
                 </div>
               </>
@@ -503,36 +497,36 @@ export const RemoteBackendCard = memo(() => {
           </div>
         )}
 
-        {!cloudMode && (
-          <div className={styles.form}>
-            <div className={styles.main}>
-              <Body1>Or connect to a self-hosted server</Body1>
-              <Caption1 className={styles.summary}>
-                A server-mode launcher you run yourself — homelab box, Tailscale node, or LAN server. No sign-in.
-              </Caption1>
-            </div>
-            <FormField label="Server URL">
+        {setupMode === 'server' && (
+          <div className="flex flex-col gap-5">
+            <FieldContent>
+              <FieldLabel>Self-hosted server</FieldLabel>
+              <FieldDescription>Connect to a launcher server you manage. No account is required.</FieldDescription>
+            </FieldContent>
+            <Field orientation="horizontal" className="justify-between gap-4">
+              <FieldLabel>Server URL</FieldLabel>
               <Input
                 value={serverUrl}
-                onChange={(e) => setServerUrl(e.target.value)}
+                onChange={(event) => setServerUrl(event.target.value)}
                 placeholder="http://my-server:3001"
                 disabled={serverLinking}
               />
-            </FormField>
-            <Caption1 className={serverError ? styles.error : styles.summary}>
-              {serverError ??
-                'The server must be reachable from this machine, and its /api/ws-token must trust your network — set OMNI_TRUSTED_CIDRS on the server (loopback and Tailscale with CIDRs are typical setups).'}
-            </Caption1>
-            <div>
-              <Button size="sm" onClick={onServerConnect} isDisabled={serverLinking || !serverUrl.trim()}>
+            </Field>
+            <div className="flex items-center justify-between gap-4">
+              <span className={cn('text-xs text-muted-foreground', serverError && 'text-destructive')}>
+                {serverError ?? 'The server must allow connections from this computer.'}
+              </span>
+              <Button size="sm" onClick={onServerConnect} disabled={serverLinking || !serverUrl.trim()}>
                 {serverLinking ? 'Connecting…' : 'Connect'}
               </Button>
             </div>
           </div>
         )}
 
-        {restarting && <Caption1 className={styles.ok}>Restarting Omni Code…</Caption1>}
-      </div>
+        {restarting && (
+          <span className={cn('text-xs text-muted-foreground', 'text-success')}>Restarting Omni Code…</span>
+        )}
+      </CardContent>
     </Card>
   );
 });

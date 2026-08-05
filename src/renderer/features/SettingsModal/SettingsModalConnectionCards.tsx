@@ -1,10 +1,13 @@
-import { makeStyles, tokens } from '@fluentui/react-components';
-import { CheckmarkCircle20Filled, ErrorCircle20Filled, QuestionCircle20Regular } from '@fluentui/react-icons';
+import { CircleCheck, CircleHelp, CircleX } from 'lucide-react';
 import type { ChangeEvent } from 'react';
 import { memo, useCallback, useEffect, useState } from 'react';
 
 import { maskApiKey, probeForProvider } from '@/lib/provider-config';
-import { Button, Caption1, Card, Input, Spinner } from '@/renderer/ds';
+import { cn } from '@/renderer/ds/cn';
+import { Button } from '@/renderer/ds/ui/button';
+import { Card, CardContent } from '@/renderer/ds/ui/card';
+import { Input } from '@/renderer/ds/ui/input';
+import { Spinner } from '@/renderer/ds/ui/spinner';
 import { probeFailureCopy } from '@/renderer/features/Onboarding/probe-copy';
 import { emitter } from '@/renderer/services/ipc';
 import type { ModelsConfig, ProviderEntry, ProviderProbeResult } from '@/shared/types';
@@ -40,30 +43,6 @@ function displayName(name: string, provider: ProviderEntry): string {
   return `${name} (${PROVIDER_TYPE_LABELS[provider.type]})`;
 }
 
-const useStyles = makeStyles({
-  list: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalS },
-  row: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalM, width: '100%', minWidth: 0 },
-  body: { display: 'flex', flexDirection: 'column', gap: '2px', flex: '1 1 auto', minWidth: 0 },
-  name: {
-    fontSize: tokens.fontSizeBase300,
-    fontWeight: tokens.fontWeightSemibold,
-    color: tokens.colorNeutralForeground1,
-  },
-  detail: { color: tokens.colorNeutralForeground2 },
-  health: { display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 },
-  healthOk: { color: tokens.colorPaletteGreenForeground1 },
-  healthBad: { color: tokens.colorPaletteRedForeground1 },
-  healthMuted: { color: tokens.colorNeutralForeground3 },
-  fixRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-    marginTop: tokens.spacingVerticalS,
-  },
-  fixInput: { flex: '1 1 auto', minWidth: 0 },
-  fixError: { color: tokens.colorPaletteRedForeground1, fontSize: tokens.fontSizeBase200 },
-});
-
 type CardModel = {
   name: string;
   provider: ProviderEntry;
@@ -78,7 +57,6 @@ type ConnectionCardProps = {
 };
 
 const ConnectionCard = memo(({ card, defaultModel, onFixKey }: ConnectionCardProps) => {
-  const styles = useStyles();
   const { name, provider, probeable } = card;
   const [health, setHealth] = useState<Health>(probeable ? { state: 'checking' } : { state: 'unchecked' });
   const [fixing, setFixing] = useState(false);
@@ -154,71 +132,72 @@ const ConnectionCard = memo(({ card, defaultModel, onFixKey }: ConnectionCardPro
 
   return (
     <Card>
-      <div className={styles.row}>
-        <div className={styles.body}>
-          <span className={styles.name}>{label}</span>
-          <Caption1 className={styles.detail}>
-            {provider.api_key ? `${maskApiKey(provider.api_key)} · ` : ''}
-            {provider.base_url ? `${provider.base_url} · ` : ''}
-            {usesDefault && defaultModel
-              ? `Default: ${defaultModel}`
-              : `${Object.keys(provider.models).length || 'discovered'} model${Object.keys(provider.models).length === 1 ? '' : 's'}`}
-          </Caption1>
-        </div>
-        <div className={styles.health}>
-          {health.state === 'checking' && <Spinner size="sm" />}
-          {health.state === 'ok' && (
-            <>
-              <CheckmarkCircle20Filled className={styles.healthOk} />
-              <Caption1 className={styles.healthOk}>Connected</Caption1>
-            </>
-          )}
-          {health.state === 'failed' && (
-            <>
-              <ErrorCircle20Filled className={styles.healthBad} />
-              <Caption1 className={styles.healthBad}>
-                {health.result.code === 'unauthorized' ? 'Key invalid' : 'Unreachable'}
-              </Caption1>
-              {!fixing && health.result.code === 'unauthorized' && (
-                <Button size="sm" variant="ghost" onClick={handleStartFix}>
-                  Fix
-                </Button>
-              )}
-            </>
-          )}
-          {health.state === 'unchecked' && (
-            <>
-              <QuestionCircle20Regular className={styles.healthMuted} />
-              <Caption1 className={styles.healthMuted}>Not checked</Caption1>
-            </>
-          )}
-        </div>
-      </div>
-
-      {fixing && (
-        <>
-          <div className={styles.fixRow}>
-            <div className={styles.fixInput}>
-              <Input
-                type="password"
-                size="sm"
-                value={fixKey}
-                onChange={handleFixKeyChange}
-                placeholder="Paste a new API key"
-                autoFocus
-                disabled={fixBusy}
-              />
-            </div>
-            <Button size="sm" variant="primary" onClick={handleApplyFix} isDisabled={!fixKey.trim() || fixBusy}>
-              {fixBusy ? 'Checking…' : 'Save'}
-            </Button>
-            <Button size="sm" variant="ghost" onClick={handleCancelFix} isDisabled={fixBusy}>
-              Cancel
-            </Button>
+      <CardContent className="flex flex-col gap-6">
+        <div className="flex items-center gap-4 w-full min-w-0">
+          <div className="flex flex-col gap-0.5 flex-auto min-w-0">
+            <span className="text-sm font-semibold text-foreground">{label}</span>
+            <span className={cn('text-xs text-muted-foreground', 'text-muted-foreground')}>
+              {provider.api_key ? `${maskApiKey(provider.api_key)} · ` : ''}
+              {provider.base_url ? `${provider.base_url} · ` : ''}
+              {usesDefault && defaultModel
+                ? `Default: ${defaultModel}`
+                : `${Object.keys(provider.models).length || 'discovered'} model${Object.keys(provider.models).length === 1 ? '' : 's'}`}
+            </span>
           </div>
-          {fixError && <span className={styles.fixError}>{fixError}</span>}
-        </>
-      )}
+          <div className="flex items-center gap-1.5 shrink-0">
+            {health.state === 'checking' && <Spinner />}
+            {health.state === 'ok' && (
+              <>
+                <CircleCheck className="text-success" />
+                <span className={cn('text-xs text-muted-foreground', 'text-success')}>Connected</span>
+              </>
+            )}
+            {health.state === 'failed' && (
+              <>
+                <CircleX className="text-destructive" />
+                <span className={cn('text-xs text-muted-foreground', 'text-destructive')}>
+                  {health.result.code === 'unauthorized' ? 'Key invalid' : 'Unreachable'}
+                </span>
+                {!fixing && health.result.code === 'unauthorized' && (
+                  <Button size="sm" variant="ghost" onClick={handleStartFix}>
+                    Fix
+                  </Button>
+                )}
+              </>
+            )}
+            {health.state === 'unchecked' && (
+              <>
+                <CircleHelp className="text-muted-foreground" />
+                <span className={cn('text-xs text-muted-foreground', 'text-muted-foreground')}>Not checked</span>
+              </>
+            )}
+          </div>
+        </div>
+
+        {fixing && (
+          <>
+            <div className="flex items-center gap-2 mt-2">
+              <div className="flex-auto min-w-0">
+                <Input
+                  type="password"
+                  value={fixKey}
+                  onChange={handleFixKeyChange}
+                  placeholder="Paste a new API key"
+                  autoFocus
+                  disabled={fixBusy}
+                />
+              </div>
+              <Button size="sm" variant="default" onClick={handleApplyFix} disabled={!fixKey.trim() || fixBusy}>
+                {fixBusy ? 'Checking…' : 'Save'}
+              </Button>
+              <Button size="sm" variant="ghost" onClick={handleCancelFix} disabled={fixBusy}>
+                Cancel
+              </Button>
+            </div>
+            {fixError && <span className="text-destructive text-xs">{fixError}</span>}
+          </>
+        )}
+      </CardContent>
     </Card>
   );
 });
@@ -236,14 +215,13 @@ type Props = {
  * sign-in card above, so it's skipped here.
  */
 export const SettingsModalConnectionCards = memo(({ config, onFixKey }: Props) => {
-  const styles = useStyles();
   const entries = Object.entries(config.providers).filter(([, p]) => p.type !== 'openai-oauth');
   if (entries.length === 0) {
     return null;
   }
 
   return (
-    <div className={styles.list}>
+    <div className="flex flex-col gap-2">
       {entries.map(([name, provider]) => (
         <ConnectionCard
           key={`${name}:${provider.api_key ?? ''}:${provider.base_url ?? ''}`}

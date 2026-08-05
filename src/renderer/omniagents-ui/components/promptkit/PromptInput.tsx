@@ -71,7 +71,7 @@ export function PromptInput({
       }}
     >
       <div
-        className={clsx('relative rounded-[24px] border border-bgCardAlt bg-bgColumn p-2 shadow-sm', className)}
+        className={clsx('relative rounded-3xl border border-accent bg-card p-2 shadow-sm', className)}
         onClick={() => textareaRef.current?.focus()}
       >
         {children}
@@ -128,7 +128,7 @@ export function PromptInputTextarea({
       onChange={(e) => setValue(e.target.value)}
       onKeyDown={handleKeyDown}
       className={clsx(
-        'min-h-[44px] w-full resize-none border-none bg-transparent px-4 py-3 text-base sm:text-sm text-textHeading placeholder:text-textSubtle outline-none focus:ring-0',
+        'min-h-11 w-full resize-none border-none bg-transparent px-4 py-3 text-base text-foreground outline-none placeholder:text-muted-foreground focus:ring-0 sm:text-sm',
         className
       )}
       rows={1}

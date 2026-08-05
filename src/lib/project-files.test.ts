@@ -156,7 +156,8 @@ describe('ticket file roundtrip', () => {
       worktreePath: '/tmp/worktree',
       worktreeName: 'login-fix',
       phase: 'running',
-      resolution: 'completed',
+      completedAt: 1_700_000_003_000,
+      archivedAt: 1_700_000_004_000,
       autopilot: true,
       tokenUsage: { inputTokens: 100, outputTokens: 50, totalTokens: 150 },
     });

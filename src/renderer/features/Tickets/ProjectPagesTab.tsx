@@ -1,125 +1,26 @@
-import { makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
-import {
-  Add16Regular,
-  DocumentText16Regular,
-  MoreHorizontal16Regular,
-  Notebook20Regular,
-  TextDescription20Regular,
-} from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
+import { Ellipsis, FileText, House, Notebook, Plus } from 'lucide-react';
 import { memo, useCallback, useMemo, useState } from 'react';
 
 import { flattenPageTree } from '@/lib/page-list';
+import { cn } from '@/renderer/ds/cn';
+import { Button } from '@/renderer/ds/ui/button';
 import {
-  Badge,
-  Button,
-  Caption1,
-  IconButton,
-  Input,
-  Menu,
-  MenuDivider,
-  MenuItem,
-  MenuList,
-  MenuPopover,
-  MenuTrigger,
-} from '@/renderer/ds';
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/renderer/ds/ui/dropdown-menu';
+import { Input } from '@/renderer/ds/ui/input';
 import { $pages, pageApi } from '@/renderer/features/Pages/state';
 import type { Page, ProjectId } from '@/shared/types';
 
-import { ProjectPageHeader } from './ProjectPageHeader';
 import { ticketApi } from './state';
-
-const useStyles = makeStyles({
-  root: {
-    height: '100%',
-    overflowY: 'auto',
-  },
-  container: {
-    maxWidth: '720px',
-    marginLeft: 'auto',
-    marginRight: 'auto',
-    paddingLeft: '16px',
-    paddingRight: '16px',
-    paddingTop: '24px',
-    paddingBottom: '48px',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '4px',
-  },
-  /* The container already pads horizontally — zero the header's own padding
-     so the title aligns with the page rows. */
-  pageHeader: {
-    paddingLeft: 0,
-    paddingRight: 0,
-    paddingTop: 0,
-    paddingBottom: '8px',
-  },
-  row: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-    paddingRight: '4px',
-    paddingTop: '6px',
-    paddingBottom: '6px',
-    borderRadius: tokens.borderRadiusMedium,
-    ':hover': { backgroundColor: tokens.colorSubtleBackgroundHover },
-    ':hover .page-row-actions': { opacity: 1 },
-  },
-  rowBtn: {
-    flex: '1 1 0',
-    minWidth: 0,
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-    border: 'none',
-    backgroundColor: 'transparent',
-    padding: 0,
-    cursor: 'pointer',
-    textAlign: 'left',
-    color: tokens.colorNeutralForeground1,
-  },
-  rowIcon: { flexShrink: 0, color: tokens.colorNeutralForeground3, display: 'inline-flex' },
-  rowTitle: {
-    flex: '0 1 auto',
-    minWidth: 0,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    fontSize: tokens.fontSizeBase300,
-  },
-  rowActions: {
-    flexShrink: 0,
-    opacity: 0,
-    transitionProperty: 'opacity',
-    transitionDuration: tokens.durationFaster,
-  },
-  emojiIcon: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    width: '16px',
-    height: '16px',
-    fontSize: '0.8125rem',
-    lineHeight: 1,
-    flexShrink: 0,
-  },
-  renameInput: {
-    flex: '1 1 0',
-    minWidth: 0,
-  },
-  empty: {
-    paddingTop: '16px',
-    color: tokens.colorNeutralForeground3,
-    fontStyle: 'italic',
-    fontSize: tokens.fontSizeBase300,
-  },
-});
 
 type PageRowItemProps = {
   page: Page;
   depth: number;
   projectId: ProjectId;
-  isContext?: boolean;
   renamingId: string | null;
   renameValue: string;
   onRenameValueChange: (value: string) => void;
@@ -128,12 +29,22 @@ type PageRowItemProps = {
   onCancelRename: () => void;
 };
 
+function PageDepthIndent({ depth, children }: { depth: number; children: React.ReactNode }): React.JSX.Element {
+  if (depth <= 0) {
+    return <>{children}</>;
+  }
+  return (
+    <div className="pl-5">
+      <PageDepthIndent depth={depth - 1}>{children}</PageDepthIndent>
+    </div>
+  );
+}
+
 const PageRowItem = memo(
   ({
     page,
     depth,
     projectId,
-    isContext = false,
     renamingId,
     renameValue,
     onRenameValueChange,
@@ -141,12 +52,10 @@ const PageRowItem = memo(
     onFinishRename,
     onCancelRename,
   }: PageRowItemProps) => {
-    const styles = useStyles();
     const isRenaming = renamingId === page.id;
 
     const handleOpen = useCallback(() => ticketApi.goToPage(page.id, projectId), [page.id, projectId]);
     const handleStartRename = useCallback(() => onStartRename(page), [onStartRename, page]);
-    const handleDelete = useCallback(() => void pageApi.removePage(page.id), [page.id]);
     const handleRenameChange = useCallback(
       (e: React.ChangeEvent<HTMLInputElement>) => onRenameValueChange(e.target.value),
       [onRenameValueChange]
@@ -163,63 +72,66 @@ const PageRowItem = memo(
       [onFinishRename, onCancelRename, page.id]
     );
 
-    const icon = isContext ? (
-      <TextDescription20Regular style={{ width: 16, height: 16 }} />
-    ) : page.icon ? (
-      <span className={styles.emojiIcon}>{page.icon}</span>
+    const icon = page.icon ? (
+      <span className="inline-flex items-center justify-center w-4 h-4 text-sm leading-none shrink-0">{page.icon}</span>
     ) : (
-      <DocumentText16Regular />
+      <FileText />
     );
 
     return (
-      <div className={styles.row} style={{ paddingLeft: 8 + depth * 20 }}>
-        {isRenaming ? (
-          <Input
-            value={renameValue}
-            onChange={handleRenameChange}
-            onKeyDown={handleRenameKeyDown}
-            onBlur={handleRenameBlur}
-            className={styles.renameInput}
-            size="sm"
-            autoFocus
-          />
-        ) : (
-          <button type="button" className={styles.rowBtn} onClick={handleOpen}>
-            <span className={styles.rowIcon}>{icon}</span>
-            <span className={styles.rowTitle}>{page.title || 'Untitled'}</span>
-            {isContext && <Badge color="blue">Context</Badge>}
-            {page.kind === 'notebook' && <Caption1>notebook</Caption1>}
-          </button>
-        )}
-        {!isContext && !isRenaming && (
-          <span className={mergeClasses('page-row-actions', styles.rowActions)}>
-            <Menu positioning={{ position: 'below', align: 'end' }}>
-              <MenuTrigger>
-                <IconButton aria-label="Page actions" icon={<MoreHorizontal16Regular />} size="sm" />
-              </MenuTrigger>
-              <MenuPopover>
-                <MenuList>
-                  <MenuItem onClick={handleStartRename}>Rename</MenuItem>
-                  <MenuDivider />
-                  <MenuItem onClick={handleDelete}>Delete</MenuItem>
-                </MenuList>
-              </MenuPopover>
-            </Menu>
-          </span>
-        )}
-      </div>
+      <PageDepthIndent depth={depth}>
+        <div className="flex items-center gap-2 rounded-lg py-1.5 pr-1 pl-2 hover:bg-accent [&:hover_.page-row-actions]:opacity-100">
+          {isRenaming ? (
+            <Input
+              value={renameValue}
+              onChange={handleRenameChange}
+              onKeyDown={handleRenameKeyDown}
+              onBlur={handleRenameBlur}
+              className="flex-1 min-w-0"
+              autoFocus
+            />
+          ) : (
+            <Button
+              type="button"
+              variant="ghost"
+              className="h-auto min-w-0 flex-1 justify-start gap-2 border-0 bg-transparent p-0 text-left font-normal text-foreground hover:bg-transparent"
+              onClick={handleOpen}
+            >
+              <span className="shrink-0 text-muted-foreground inline-flex">{icon}</span>
+              <span className="flex-initial min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-sm">
+                {page.title || 'Untitled'}
+              </span>
+              {page.kind === 'notebook' && <span className="text-xs text-muted-foreground">notebook</span>}
+            </Button>
+          )}
+          {!isRenaming && (
+            <span className={cn('page-row-actions', 'shrink-0 opacity-0 transition-opacity duration-100')}>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button type="button" variant="ghost" size="icon-sm" aria-label="Page actions">
+                    <Ellipsis />
+                  </Button>
+                </DropdownMenuTrigger>
+                <>
+                  <DropdownMenuContent>
+                    <DropdownMenuItem onClick={handleStartRename}>Rename</DropdownMenuItem>
+                  </DropdownMenuContent>
+                </>
+              </DropdownMenu>
+            </span>
+          )}
+        </div>
+      </PageDepthIndent>
     );
   }
 );
 PageRowItem.displayName = 'PageRowItem';
 
 /**
- * The shell's Pages tab: the full page hierarchy as an indented flat list.
- * The root/context page is pinned first with a "Context" badge; everything
- * else renders depth-indented in `sortOrder` order.
+ * The project's user-owned knowledge space: its home page and full nested
+ * page hierarchy in `sortOrder` order.
  */
 export const ProjectPagesTab = memo(({ projectId }: { projectId: ProjectId }) => {
-  const styles = useStyles();
   const pages = useStore($pages);
 
   const rootPage = useMemo(
@@ -273,45 +185,46 @@ export const ProjectPagesTab = memo(({ projectId }: { projectId: ProjectId }) =>
   );
   const handleNewPage = useCallback(() => void createPage(), [createPage]);
   const handleNewNotebook = useCallback(() => void createPage('notebook'), [createPage]);
+  const handleOpenHome = useCallback(() => {
+    if (rootPage) {
+      ticketApi.goToPage(rootPage.id, projectId);
+    }
+  }, [projectId, rootPage]);
 
   return (
-    <div className={styles.root} data-slot="project-pages-tab">
-      <div className={styles.container}>
-        <ProjectPageHeader
-          projectId={projectId}
-          title="Docs"
-          actions={
-            <>
-              <Button size="sm" variant="ghost" leftIcon={<Add16Regular />} onClick={handleNewPage}>
-                New page
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                leftIcon={<Notebook20Regular style={{ width: 16, height: 16 }} />}
-                onClick={handleNewNotebook}
-              >
-                New notebook
-              </Button>
-            </>
-          }
-          className={styles.pageHeader}
-        />
+    <div className="h-full overflow-y-auto" data-slot="project-pages-tab">
+      <div className="mx-auto flex w-full max-w-6xl flex-col gap-1 px-6 py-6">
+        <div className="mb-6 flex min-w-0 items-start gap-4">
+          <div className="min-w-0 flex-1">
+            <h2 className="font-display text-lg font-semibold tracking-tight">Pages</h2>
+            <p className="mt-1 text-sm text-muted-foreground">Notes, plans, research, and ideas for this project.</p>
+          </div>
+          <Button size="sm" variant="ghost" onClick={handleNewPage}>
+            <Plus />
+            New page
+          </Button>
+          <Button size="sm" variant="ghost" onClick={handleNewNotebook}>
+            <Notebook className="size-4" />
+            New notebook
+          </Button>
+        </div>
 
         {rootPage && (
-          <PageRowItem
-            page={rootPage}
-            depth={0}
-            projectId={projectId}
-            isContext
-            renamingId={renamingId}
-            renameValue={renameValue}
-            onRenameValueChange={setRenameValue}
-            onStartRename={handleStartRename}
-            onFinishRename={handleFinishRename}
-            onCancelRename={handleCancelRename}
-          />
+          <div className="mb-7 flex items-center gap-4 rounded-xl border p-4">
+            <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-background text-muted-foreground">
+              <House />
+            </span>
+            <div className="min-w-0 flex-1">
+              <h3 className="text-sm font-medium">Project home</h3>
+              <p className="mt-0.5 text-xs text-muted-foreground">The introduction and home page for this project.</p>
+            </div>
+            <Button size="sm" variant="outline" onClick={handleOpenHome}>
+              Open
+            </Button>
+          </div>
         )}
+
+        <h3 className="mb-2 text-sm font-medium">All pages</h3>
         {entries.map(({ page, depth }) => (
           <PageRowItem
             key={page.id}
@@ -326,7 +239,9 @@ export const ProjectPagesTab = memo(({ projectId }: { projectId: ProjectId }) =>
             onCancelRename={handleCancelRename}
           />
         ))}
-        {entries.length === 0 && !rootPage && <div className={styles.empty}>No pages yet.</div>}
+        {entries.length === 0 && (
+          <div className="pt-4 text-muted-foreground italic text-sm">No pages yet. Create one to start writing.</div>
+        )}
       </div>
     </div>
   );

@@ -1,20 +1,21 @@
-import { makeStyles, tokens } from '@fluentui/react-components';
 import { memo } from 'react';
 
+import { Card, CardContent } from '@/renderer/ds/ui/card';
+import { SettingsPane, SettingsSection } from '@/renderer/features/SettingsModal/SettingsLayout';
 import { SettingsModalWipLimit } from '@/renderer/features/SettingsModal/SettingsModalWipLimit';
-
-const useStyles = makeStyles({
-  root: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalXXL },
-});
 
 /** Personal band: how the Projects surface paces autopilot. */
 export const SettingsModalProjectsTab = memo(() => {
-  const styles = useStyles();
-
   return (
-    <div className={styles.root}>
-      <SettingsModalWipLimit />
-    </div>
+    <SettingsPane>
+      <SettingsSection title="Autopilot">
+        <Card>
+          <CardContent>
+            <SettingsModalWipLimit />
+          </CardContent>
+        </Card>
+      </SettingsSection>
+    </SettingsPane>
   );
 });
 SettingsModalProjectsTab.displayName = 'SettingsModalProjectsTab';

@@ -9,7 +9,6 @@ type UiConfig = {
   url: URL;
   searchParams: URLSearchParams;
   token?: string;
-  theme?: string;
   debug: boolean;
   minimal: boolean;
   session?: string;
@@ -70,7 +69,6 @@ export const UiConfigProvider = ({
     // query-token parsing only for standalone/browser entry points that still
     // receive an authenticated UI handoff URL.
     const token = connection.authToken ?? searchParams.get('token') ?? undefined;
-    const theme = searchParams.get('theme') || undefined;
     const debug = /^(1|true|yes)$/i.test(String(searchParams.get('debug') || ''));
     const minimal = searchParams.get('minimal') === 'true';
     const session = searchParams.get('session') || undefined;
@@ -90,7 +88,6 @@ export const UiConfigProvider = ({
       url,
       searchParams,
       token,
-      theme,
       debug,
       minimal,
       session,

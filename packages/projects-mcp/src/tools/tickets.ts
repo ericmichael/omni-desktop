@@ -30,7 +30,7 @@ function ticketPayload(t: TicketRow, cols: ColumnRow[], comments: CommentRow[]) 
     branch: t.branch,
     use_worktree: !!t.use_worktree,
     assignee: t.assignee,
-    resolution: t.resolution,
+    completed_at: t.completed_at,
     archived_at: t.archived_at,
     created_at: t.created_at,
     updated_at: t.updated_at,
@@ -93,8 +93,7 @@ export function registerTicketTools(server: McpServer, repo: IProjectsRepo): voi
         priority: priority ?? 'medium',
         branch: branch || null,
         blocked_by: '[]',
-        resolution: null,
-        resolved_at: null,
+        completed_at: null,
         archived_at: null,
         column_changed_at: null,
         use_worktree: use_worktree ? 1 : 0,
@@ -206,7 +205,13 @@ export function registerTicketTools(server: McpServer, repo: IProjectsRepo): voi
       }
 
       const now = nowTimestamp();
-      await repo.upsertTicket({ ...ticket, column_id: target.id, column_changed_at: now, updated_at: now });
+      await repo.upsertTicket({
+        ...ticket,
+        column_id: target.id,
+        completed_at: target.category === 'done' ? (ticket.completed_at ?? now) : null,
+        column_changed_at: now,
+        updated_at: now,
+      });
 
       return json({ ok: true, column: target.label });
     }
@@ -214,7 +219,7 @@ export function registerTicketTools(server: McpServer, repo: IProjectsRepo): voi
 
   server.tool(
     'archive_ticket',
-    'Archive a resolved ticket so it drops out of active project views.',
+    'Archive a task so it drops out of active project views.',
     { ticket_id: z.string().describe('The ticket ID to archive') },
     async ({ ticket_id }) => {
       const ticket = await repo.getTicket(ticket_id);

@@ -1,41 +1,50 @@
 import {
-  Branch20Regular,
-  Chat20Regular,
-  Code20Regular,
-  Desktop20Regular,
-  Folder20Regular,
-  Globe20Regular,
-  MusicNote220Regular,
-  News20Regular,
-  People20Regular,
-  PersonBoard20Regular,
-  SlideLayout20Regular,
-  Star20Regular,
-  Video20Regular,
-  WindowConsole20Regular,
-} from '@fluentui/react-icons';
+  Code,
+  Folder,
+  GitBranch,
+  Globe,
+  MessageCircle,
+  Monitor,
+  Music2,
+  Newspaper,
+  PanelsTopLeft,
+  Presentation,
+  SquareTerminal,
+  Star,
+  Users,
+  Video,
+} from 'lucide-react';
 import { memo, useMemo } from 'react';
 
-type FluentIcon = typeof Globe20Regular;
+import { cn } from '@/renderer/ds/cn';
+
+type LucideIcon = typeof Globe;
+type AppIconSize = 16 | 20 | 32;
+
+const APP_ICON_SIZE_CLASSES: Record<AppIconSize, string> = {
+  16: 'size-4',
+  20: 'size-5',
+  32: 'size-8',
+};
 
 /**
- * Map of Fluent icon name → component for builtin + user-picker icons.
+ * Map of Lucide icon name → component for builtin + user-picker icons.
  */
-export const ICON_MAP: Record<string, FluentIcon> = {
-  Branch20Regular,
-  Chat20Regular,
-  Code20Regular,
-  Desktop20Regular,
-  Folder20Regular,
-  Globe20Regular,
-  WindowConsole20Regular,
-  People20Regular,
-  Video20Regular,
-  MusicNote220Regular,
-  News20Regular,
-  Star20Regular,
-  SlideLayout20Regular,
-  PersonBoard20Regular,
+export const ICON_MAP: Record<string, LucideIcon> = {
+  GitBranch,
+  MessageCircle,
+  Code,
+  Monitor,
+  Folder,
+  Globe,
+  SquareTerminal,
+  Users,
+  Video,
+  Music2,
+  Newspaper,
+  Star,
+  PanelsTopLeft,
+  Presentation,
 };
 
 const SVG_DISALLOWED_TAGS = new Set(['script', 'foreignobject', 'iframe', 'object', 'embed', 'style']);
@@ -82,25 +91,29 @@ function sanitizeSvg(input: string, size: number): string | null {
 
 /**
  * Renders an app icon. Accepts either:
- * - A Fluent icon name (e.g. `"Globe20Regular"`) → renders the component
+ * - A Lucide icon name (e.g. `"Globe"`) → renders the component
  * - An inline SVG string (starts with `<svg`) → sanitized + rendered via innerHTML
  * - Anything else → falls back to Globe icon
  */
-export const AppIcon = memo(({ icon, size = 20, className }: { icon: string; size?: number; className?: string }) => {
-  const sanitized = useMemo(() => (icon.trimStart().startsWith('<svg') ? sanitizeSvg(icon, size) : null), [icon, size]);
-
-  if (sanitized) {
-    return (
-      <span
-        className={className}
-        style={{ display: 'inline-flex', width: size, height: size, color: 'inherit' }}
-        dangerouslySetInnerHTML={{ __html: sanitized }}
-      />
+export const AppIcon = memo(
+  ({ icon, size = 20, className }: { icon: string; size?: AppIconSize; className?: string }) => {
+    const sanitized = useMemo(
+      () => (icon.trimStart().startsWith('<svg') ? sanitizeSvg(icon, size) : null),
+      [icon, size]
     );
-  }
 
-  // Fluent icon name (or SVG that failed to parse — fall through to Globe)
-  const Icon = ICON_MAP[icon] ?? Globe20Regular;
-  return <Icon className={className} style={{ width: size, height: size }} />;
-});
+    if (sanitized) {
+      return (
+        <span
+          className={cn('inline-flex text-inherit', APP_ICON_SIZE_CLASSES[size], className)}
+          dangerouslySetInnerHTML={{ __html: sanitized }}
+        />
+      );
+    }
+
+    // Lucide icon name (or SVG that failed to parse — fall through to Globe)
+    const Icon = ICON_MAP[icon] ?? Globe;
+    return <Icon className={cn(APP_ICON_SIZE_CLASSES[size], className)} />;
+  }
+);
 AppIcon.displayName = 'AppIcon';

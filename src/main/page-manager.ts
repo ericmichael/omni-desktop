@@ -30,7 +30,6 @@ import { computePagesToDelete } from '@/lib/page-cascade';
 import { getTemplate, type TemplateKey } from '@/lib/page-templates';
 import { PageWatcherManager } from '@/lib/page-watcher';
 import { MARIMO_NOTEBOOK_TEMPLATE } from '@/main/extensions/marimo';
-import { writeGlassCss } from '@/main/extensions/marimo-glass';
 import { ensureDirectory, getProjectPagesDir } from '@/main/util';
 import type { IpcRendererEvents, Page, PageId, Project, ProjectId } from '@/shared/types';
 
@@ -159,12 +158,6 @@ export class PageManager {
       void ensureDirectory(path.dirname(filePath)).then(() =>
         fs.writeFile(filePath, initialContent, 'utf-8').catch(() => {})
       );
-    }
-    // Notebook pages need the glass CSS sidecar so marimo's css_file= reference
-    // resolves on first open. Default to glass-off; the renderer rewrites it
-    // immediately before launching the marimo webview.
-    if (page.kind === 'notebook') {
-      void writeGlassCss(path.dirname(filePath), false).catch(() => {});
     }
     return page;
   };

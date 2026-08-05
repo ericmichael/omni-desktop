@@ -8,12 +8,26 @@
  *
  * Mounted once at the app root, renders nothing until opened.
  */
-import { makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
+import './CommandPalette.css';
+
 import { useStore } from '@nanostores/react';
 import { atom } from 'nanostores';
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useMemo, useState } from 'react';
 import { useHotkeys } from 'react-hotkeys-hook';
 
+import { Button } from '@/renderer/ds/ui/button';
+import {
+  CommandDialog,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+  CommandShortcut,
+} from '@/renderer/ds/ui/command';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/renderer/ds/ui/dialog';
+import { Field, FieldLabel } from '@/renderer/ds/ui/field';
+import { Input } from '@/renderer/ds/ui/input';
 import { codeApi } from '@/renderer/features/Code/state';
 import { $quickCaptureOpen } from '@/renderer/features/Inbox/QuickCapture';
 import { goToInbox } from '@/renderer/features/Inbox/state';
@@ -24,85 +38,6 @@ import type { CodeTab, LayoutMode } from '@/shared/types';
 
 import { buildCommands, filterCommands, paletteColumns } from './commands';
 
-const useStyles = makeStyles({
-  overlay: {
-    position: 'fixed',
-    top: 0,
-    right: 0,
-    bottom: 0,
-    left: 0,
-    zIndex: 1000,
-    backgroundColor: 'rgba(0, 0, 0, 0.45)',
-    display: 'flex',
-    justifyContent: 'center',
-    alignItems: 'flex-start',
-    paddingTop: '16vh',
-  },
-  panel: {
-    width: '560px',
-    maxWidth: '92vw',
-    borderRadius: tokens.borderRadiusXLarge,
-    backgroundColor: tokens.colorNeutralBackground1,
-    border: `1px solid ${tokens.colorNeutralStroke1}`,
-    boxShadow: tokens.shadow64,
-    overflow: 'hidden',
-    display: 'flex',
-    flexDirection: 'column',
-  },
-  input: {
-    width: '100%',
-    boxSizing: 'border-box',
-    border: 'none',
-    outline: 'none',
-    backgroundColor: 'transparent',
-    color: tokens.colorNeutralForeground1,
-    fontSize: tokens.fontSizeBase400,
-    padding: '16px 20px',
-    borderBottom: `1px solid ${tokens.colorNeutralStroke1}`,
-    '::placeholder': { color: tokens.colorNeutralForeground4 },
-  },
-  list: {
-    maxHeight: '320px',
-    overflowY: 'auto',
-    padding: '6px',
-  },
-  row: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-    width: '100%',
-    textAlign: 'left',
-    border: 'none',
-    backgroundColor: 'transparent',
-    color: tokens.colorNeutralForeground1,
-    fontSize: tokens.fontSizeBase300,
-    padding: '10px 14px',
-    borderRadius: tokens.borderRadiusMedium,
-    cursor: 'pointer',
-  },
-  rowActive: {
-    backgroundColor: tokens.colorSubtleBackgroundSelected,
-  },
-  rowLabel: {
-    flex: '1 1 0',
-    minWidth: 0,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-  },
-  rowHint: {
-    flexShrink: 0,
-    fontSize: tokens.fontSizeBase200,
-    color: tokens.colorNeutralForeground3,
-    fontFamily: tokens.fontFamilyMonospace,
-  },
-  empty: {
-    padding: '18px 20px',
-    color: tokens.colorNeutralForeground3,
-    fontSize: tokens.fontSizeBase300,
-  },
-});
-
 const HOTKEY_OPTS = { enableOnFormTags: true, preventDefault: true } as const;
 
 /**
@@ -112,12 +47,11 @@ const HOTKEY_OPTS = { enableOnFormTags: true, preventDefault: true } as const;
 export const $commandPaletteOpen = atom(false);
 
 export const CommandPalette = memo(() => {
-  const styles = useStyles();
   const store = useStore(persistedStoreApi.$atom);
   const open = useStore($commandPaletteOpen);
   const [query, setQuery] = useState('');
-  const [activeIndex, setActiveIndex] = useState(0);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const [createProjectOpen, setCreateProjectOpen] = useState(false);
+  const [projectName, setProjectName] = useState('');
 
   const navigate = useCallback((mode: LayoutMode) => {
     persistedStoreApi.setKey('layoutMode', mode);
@@ -141,8 +75,12 @@ export const CommandPalette = memo(() => {
   }, []);
 
   const createProject = useCallback(() => {
-    const name = window.prompt('Project name');
-    const label = name?.trim();
+    setProjectName('');
+    setCreateProjectOpen(true);
+  }, []);
+
+  const handleCreateProject = useCallback(() => {
+    const label = projectName.trim();
     if (!label) {
       return;
     }
@@ -155,7 +93,8 @@ export const CommandPalette = memo(() => {
       // goToProject raises the Work rail tab itself.
       ticketApi.goToProject(project.id);
     });
-  }, []);
+    setCreateProjectOpen(false);
+  }, [projectName]);
 
   const resolveTabLabel = useCallback(
     (tab: CodeTab) => {
@@ -207,19 +146,14 @@ export const CommandPalette = memo(() => {
   const close = useCallback(() => {
     $commandPaletteOpen.set(false);
     setQuery('');
-    setActiveIndex(0);
   }, []);
 
   const runCommand = useCallback(
-    (index: number) => {
-      const cmd = filtered[index];
-      if (!cmd) {
-        return;
-      }
+    (command: (typeof filtered)[number]) => {
       close();
-      cmd.run();
+      command.run();
     },
-    [filtered, close]
+    [close]
   );
 
   useHotkeys('mod+k', () => $commandPaletteOpen.set(!$commandPaletteOpen.get()), HOTKEY_OPTS, []);
@@ -242,89 +176,67 @@ export const CommandPalette = memo(() => {
     [activateColumn]
   );
 
-  useEffect(() => {
-    if (open) {
-      inputRef.current?.focus();
-    }
-  }, [open]);
-
-  // Clamp the active row when the filter shrinks the list.
-  useEffect(() => {
-    setActiveIndex((i) => Math.min(i, Math.max(0, filtered.length - 1)));
-  }, [filtered.length]);
-
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        close();
-      } else if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        setActiveIndex((i) => Math.min(i + 1, filtered.length - 1));
-      } else if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        setActiveIndex((i) => Math.max(i - 1, 0));
-      } else if (e.key === 'Enter') {
-        e.preventDefault();
-        runCommand(activeIndex);
-      }
-    },
-    [close, filtered.length, runCommand, activeIndex]
-  );
-
-  const handleQueryChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    setQuery(e.target.value);
-    setActiveIndex(0);
-  }, []);
-
-  const stopPropagation = useCallback((e: React.MouseEvent) => e.stopPropagation(), []);
-
-  if (!open) {
-    return null;
-  }
-
   return (
-    <div className={styles.overlay} onClick={close}>
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label="Command palette"
-        className={styles.panel}
-        onClick={stopPropagation}
-        onKeyDown={handleKeyDown}
+    <>
+      <CommandDialog
+        open={open}
+        onOpenChange={(nextOpen) => !nextOpen && close()}
+        title="Command palette"
+        description="Search launcher navigation and actions"
+        className="omni-command-palette-dialog max-w-140 translate-y-0"
+        showCloseButton={false}
       >
-        <input
-          ref={inputRef}
-          className={styles.input}
+        <CommandInput
           value={query}
-          onChange={handleQueryChange}
+          onValueChange={setQuery}
           placeholder="Type a command…"
           aria-label="Search commands"
-          role="combobox"
-          aria-expanded="true"
-          aria-controls="command-palette-list"
-          aria-activedescendant={filtered[activeIndex] ? `palette-cmd-${filtered[activeIndex].id}` : undefined}
         />
-        <div id="command-palette-list" role="listbox" aria-label="Commands" className={styles.list}>
-          {filtered.length === 0 && <div className={styles.empty}>No matching commands</div>}
-          {filtered.map((cmd, index) => (
-            <button
-              key={cmd.id}
-              id={`palette-cmd-${cmd.id}`}
-              type="button"
-              role="option"
-              aria-selected={index === activeIndex}
-              className={mergeClasses(styles.row, index === activeIndex && styles.rowActive)}
-              onMouseEnter={setActiveIndex.bind(null, index)}
-              onClick={runCommand.bind(null, index)}
-            >
-              <span className={styles.rowLabel}>{cmd.label}</span>
-              {cmd.hint && <span className={styles.rowHint}>{cmd.hint}</span>}
-            </button>
-          ))}
-        </div>
-      </div>
-    </div>
+        <CommandList>
+          <CommandEmpty>No matching commands</CommandEmpty>
+          <CommandGroup>
+            {filtered.map((cmd) => (
+              <CommandItem key={cmd.id} value={`${cmd.label} ${cmd.keywords ?? ''}`} onSelect={() => runCommand(cmd)}>
+                <span className="min-w-0 flex-1 truncate">{cmd.label}</span>
+                {cmd.hint && <CommandShortcut>{cmd.hint}</CommandShortcut>}
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        </CommandList>
+      </CommandDialog>
+      <Dialog open={createProjectOpen} onOpenChange={setCreateProjectOpen}>
+        <DialogContent>
+          <form
+            className="grid gap-4"
+            onSubmit={(event) => {
+              event.preventDefault();
+              handleCreateProject();
+            }}
+          >
+            <DialogHeader>
+              <DialogTitle>Create project</DialogTitle>
+            </DialogHeader>
+            <Field>
+              <FieldLabel htmlFor="command-palette-project-name">Project name</FieldLabel>
+              <Input
+                id="command-palette-project-name"
+                value={projectName}
+                onChange={(event) => setProjectName(event.target.value)}
+                autoFocus
+              />
+            </Field>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setCreateProjectOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={!projectName.trim()}>
+                Create
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 });
 CommandPalette.displayName = 'CommandPalette';

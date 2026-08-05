@@ -1,4 +1,8 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Minus, Plus, RotateCcw, X } from 'lucide-react';
+import React, { useCallback, useRef, useState } from 'react';
+
+import { Button } from '@/renderer/ds/ui/button';
+import { Dialog, DialogContent, DialogTitle } from '@/renderer/ds/ui/dialog';
 
 type Props = {
   src: string;
@@ -16,16 +20,6 @@ export function ImageLightbox({ src, alt, onClose }: Props) {
     setScale(1);
     setTranslate({ x: 0, y: 0 });
   }, []);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onClose();
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
 
   const onWheel = useCallback((e: React.WheelEvent) => {
     e.stopPropagation();
@@ -59,56 +53,63 @@ export function ImageLightbox({ src, alt, onClose }: Props) {
   }, []);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/90" onClick={onClose}>
-      {/* Controls */}
-      <div className="absolute top-4 right-4 z-10 flex gap-2" onClick={(e) => e.stopPropagation()}>
-        <button
-          className="w-8 h-8 rounded bg-muted/70 hover:bg-muted text-foreground text-sm"
-          onClick={() => setScale((s) => Math.min(s + 0.5, 5))}
-          aria-label="Zoom in"
-        >
-          +
-        </button>
-        <button
-          className="w-8 h-8 rounded bg-muted/70 hover:bg-muted text-foreground text-sm"
-          onClick={() => setScale((s) => Math.max(s - 0.5, 0.25))}
-          aria-label="Zoom out"
-        >
-          −
-        </button>
-        <button className="h-8 px-2 rounded bg-muted/70 hover:bg-muted text-foreground text-xs" onClick={resetView}>
-          Reset
-        </button>
-        <button
-          className="w-8 h-8 rounded bg-muted/70 hover:bg-muted text-foreground text-sm"
-          onClick={onClose}
-          aria-label="Close"
-        >
-          ✕
-        </button>
-      </div>
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent
+        showCloseButton={false}
+        className="inset-0 top-0 left-0 flex h-screen w-screen max-w-none translate-x-0 translate-y-0 items-center justify-center rounded-none border-0 bg-background/90 p-0"
+        onPointerDownOutside={(event) => event.preventDefault()}
+      >
+        <DialogTitle className="sr-only">{alt}</DialogTitle>
+        {/* Controls */}
+        <div className="absolute top-4 right-4 z-10 flex gap-2" onClick={(e) => e.stopPropagation()}>
+          <Button
+            type="button"
+            variant="secondary"
+            size="icon"
+            onClick={() => setScale((s) => Math.min(s + 0.5, 5))}
+            aria-label="Zoom in"
+          >
+            <Plus />
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            size="icon"
+            onClick={() => setScale((s) => Math.max(s - 0.5, 0.25))}
+            aria-label="Zoom out"
+          >
+            <Minus />
+          </Button>
+          <Button type="button" variant="secondary" size="sm" onClick={resetView}>
+            <RotateCcw />
+            Reset
+          </Button>
+          <Button type="button" variant="secondary" size="icon" onClick={onClose} aria-label="Close">
+            <X />
+          </Button>
+        </div>
 
-      {/* Image */}
-      <img
-        src={src}
-        alt={alt}
-        className="max-w-[90vw] max-h-[90vh] object-contain select-none"
-        style={{
-          transform: `translate(${translate.x}px, ${translate.y}px) scale(${scale})`,
-          cursor: scale > 1 ? 'grab' : 'zoom-in',
-        }}
-        draggable={false}
-        onClick={(e) => {
-          e.stopPropagation();
-          if (scale <= 1) {
-            setScale(2);
-          }
-        }}
-        onWheel={onWheel}
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
-      />
-    </div>
+        {/* Image */}
+        <img
+          src={src}
+          alt={alt}
+          className={`image-lightbox-media select-none object-contain ${scale > 1 ? 'cursor-grab' : 'cursor-zoom-in'}`}
+          style={{
+            transform: `translate(${translate.x}px, ${translate.y}px) scale(${scale})`,
+          }}
+          draggable={false}
+          onClick={(e) => {
+            e.stopPropagation();
+            if (scale <= 1) {
+              setScale(2);
+            }
+          }}
+          onWheel={onWheel}
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+        />
+      </DialogContent>
+    </Dialog>
   );
 }

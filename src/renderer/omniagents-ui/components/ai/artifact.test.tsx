@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
 describe('ArtifactAction', () => {
-  it('renders a tooltip action without passing an invalid ref to Button', async () => {
+  it('composes a tooltip action with the stock trigger without an invalid ref', async () => {
     Object.defineProperty(window, 'matchMedia', {
       configurable: true,
       value: vi.fn().mockReturnValue({ matches: true }),
@@ -26,6 +26,8 @@ describe('ArtifactAction', () => {
 
     const button = container.querySelector('button');
     expect(button).not.toBeNull();
+    expect(button?.dataset.slot).toBe('artifact-action');
+    expect(button?.dataset.variant).toBe('ghost');
     act(() => button?.click());
     expect(onClick).toHaveBeenCalledOnce();
     expect(consoleError.mock.calls.flat().join(' ')).not.toContain('Function components cannot be given refs');

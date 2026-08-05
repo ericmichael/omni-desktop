@@ -1,8 +1,9 @@
-import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useState } from 'react';
 
-import { Body1, Body1Strong, Button, Caption1, SectionLabel } from '@/renderer/ds';
+import { Button } from '@/renderer/ds/ui/button';
+import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '@/renderer/ds/ui/input-group';
+import { SettingsPane, SettingsSection } from '@/renderer/features/SettingsModal/SettingsLayout';
 import {
   $activeTeamId,
   $invites,
@@ -29,29 +30,6 @@ import {
 } from '@/renderer/features/Teams/state';
 import type { TeamMember, TeamSummary } from '@/shared/types';
 
-const useStyles = makeStyles({
-  root: { display: 'flex', flexDirection: 'column', ...shorthands.gap('20px'), ...shorthands.padding('4px') },
-  row: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    ...shorthands.gap('8px'),
-    ...shorthands.padding('8px', '10px'),
-    ...shorthands.borderRadius(tokens.borderRadiusMedium),
-    backgroundColor: tokens.colorNeutralBackground2,
-  },
-  rowActive: { ...shorthands.border('1px', 'solid', tokens.colorBrandStroke1) },
-  inviteForm: { display: 'flex', ...shorthands.gap('8px'), alignItems: 'center' },
-  input: {
-    flex: 1,
-    ...shorthands.padding('6px', '8px'),
-    ...shorthands.borderRadius(tokens.borderRadiusMedium),
-    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
-    backgroundColor: tokens.colorNeutralBackground1,
-    color: tokens.colorNeutralForeground1,
-  },
-});
-
 const TeamRow = memo(function TeamRow({
   team,
   active,
@@ -61,15 +39,21 @@ const TeamRow = memo(function TeamRow({
   active: boolean;
   onSwitch: (id: string) => void;
 }) {
-  const styles = useStyles();
   const handle = useCallback(() => onSwitch(team.id), [onSwitch, team.id]);
   return (
-    <div className={active ? `${styles.row} ${styles.rowActive}` : styles.row}>
+    <div
+      className={
+        active
+          ? `${'flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg border border-border bg-card'} ${'border-primary'}`
+          : 'flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg border border-border bg-card'
+      }
+    >
       <div>
-        <Body1Strong>{team.label}</Body1Strong> <Caption1>· {team.role}</Caption1>
+        <span className="text-sm font-semibold">{team.label}</span>{' '}
+        <span className="text-xs text-muted-foreground">· {team.role}</span>
       </div>
       {active ? (
-        <Caption1>Active</Caption1>
+        <span className="text-xs text-muted-foreground">Active</span>
       ) : (
         <Button size="sm" onClick={handle}>
           Switch
@@ -92,15 +76,15 @@ const MemberRow = memo(function MemberRow({
   onRemove: (userId: string) => void;
   onTransfer: (userId: string) => void;
 }) {
-  const styles = useStyles();
   const handleRemove = useCallback(() => onRemove(member.userId), [onRemove, member.userId]);
   const handleTransfer = useCallback(() => onTransfer(member.userId), [onTransfer, member.userId]);
   return (
-    <div className={styles.row}>
+    <div className="flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg border border-border bg-card">
       <div>
-        <Body1>{member.displayName ?? member.email ?? member.userId}</Body1> <Caption1>· {member.role}</Caption1>
+        <span className="text-sm">{member.displayName ?? member.email ?? member.userId}</span>{' '}
+        <span className="text-xs text-muted-foreground">· {member.role}</span>
       </div>
-      <div style={{ display: 'flex', gap: 6 }}>
+      <div className="flex gap-1.5">
         {isOwner && member.role !== 'owner' ? (
           <Button size="sm" variant="ghost" onClick={handleTransfer}>
             Make owner
@@ -117,7 +101,6 @@ const MemberRow = memo(function MemberRow({
 });
 
 export const SettingsModalTeamsTab = memo(function SettingsModalTeamsTab() {
-  const styles = useStyles();
   const teams = useStore($teams);
   const activeTeamId = useStore($activeTeamId);
   const myRole = useStore($myRole);
@@ -185,124 +168,125 @@ export const SettingsModalTeamsTab = memo(function SettingsModalTeamsTab() {
 
   if (teams.length === 0) {
     return (
-      <div className={styles.root}>
-        <Body1>Teams are available in the hosted (cloud) deployment.</Body1>
-      </div>
+      <SettingsPane>
+        <SettingsSection title="Teams">
+          <span className="text-sm text-muted-foreground">Teams are available in the hosted deployment.</span>
+        </SettingsSection>
+      </SettingsPane>
     );
   }
 
   return (
-    <div className={styles.root}>
-      <div>
-        <SectionLabel>Your teams</SectionLabel>
-        {teams.map((t) => (
-          <TeamRow key={t.id} team={t} active={t.id === activeTeamId} onSwitch={handleSwitch} />
-        ))}
-        <div className={styles.inviteForm}>
-          <input className={styles.input} placeholder="New team name" value={newTeam} onChange={handleNewTeamChange} />
-          <Button onClick={handleCreate}>Create team</Button>
-        </div>
-        <div className={styles.inviteForm}>
-          <input
-            className={styles.input}
-            placeholder="Paste an invite code to join a team"
-            value={acceptToken}
-            onChange={handleAcceptChange}
-          />
-          <Button onClick={handleAccept}>Join</Button>
-        </div>
-      </div>
-
-      <div>
-        <SectionLabel>Members</SectionLabel>
-        {members.map((m) => (
-          <MemberRow
-            key={m.userId}
-            member={m}
-            canManage={isAdmin}
-            isOwner={isOwner}
-            onRemove={handleRemove}
-            onTransfer={handleTransfer}
-          />
-        ))}
-      </div>
-
-      {activeTeam ? (
-        <div>
-          <SectionLabel>Manage “{activeTeam.label}”</SectionLabel>
-          {isAdmin ? (
-            <div className={styles.inviteForm}>
-              <input
-                className={styles.input}
-                placeholder="Rename team…"
-                value={renameValue}
-                onChange={handleRenameChange}
-              />
-              <Button onClick={handleRename}>Rename</Button>
-            </div>
-          ) : null}
-          <div className={styles.inviteForm}>
-            {activeTeam.kind !== 'personal' && myRole !== 'owner' ? (
-              <Button variant="ghost" onClick={handleLeave}>
-                Leave team
-              </Button>
-            ) : null}
-            {canDelete ? (
-              <Button variant="ghost" onClick={handleDelete}>
-                Delete team
-              </Button>
-            ) : null}
-          </div>
-        </div>
-      ) : null}
-
-      {isAdmin ? (
-        <div>
-          <SectionLabel>Invite a member</SectionLabel>
-          <div className={styles.inviteForm}>
-            <input
-              className={styles.input}
-              placeholder="email@example.com"
-              value={inviteEmail}
-              onChange={handleInviteChange}
+    <SettingsPane>
+      <SettingsSection title="Your teams">
+        <div className="flex flex-col gap-2">
+          {teams.map((t) => (
+            <TeamRow key={t.id} team={t} active={t.id === activeTeamId} onSwitch={handleSwitch} />
+          ))}
+          <InputGroup>
+            <InputGroupInput placeholder="New team name" value={newTeam} onChange={handleNewTeamChange} />
+            <InputGroupAddon align="inline-end">
+              <InputGroupButton onClick={handleCreate}>Create team</InputGroupButton>
+            </InputGroupAddon>
+          </InputGroup>
+          <InputGroup>
+            <InputGroupInput
+              placeholder="Paste an invite code to join a team"
+              value={acceptToken}
+              onChange={handleAcceptChange}
             />
-            <Button onClick={handleInvite}>Invite</Button>
-          </div>
-          {invites.map((inv) => (
-            <InviteRow key={inv.id} email={inv.email} id={inv.id} token={inv.token} />
+            <InputGroupAddon align="inline-end">
+              <InputGroupButton onClick={handleAccept}>Join</InputGroupButton>
+            </InputGroupAddon>
+          </InputGroup>
+        </div>
+      </SettingsSection>
+
+      <SettingsSection title="Members">
+        <div className="flex flex-col gap-2">
+          {members.map((m) => (
+            <MemberRow
+              key={m.userId}
+              member={m}
+              canManage={isAdmin}
+              isOwner={isOwner}
+              onRemove={handleRemove}
+              onTransfer={handleTransfer}
+            />
           ))}
         </div>
+      </SettingsSection>
+
+      {activeTeam ? (
+        <SettingsSection title={`Manage “${activeTeam.label}”`}>
+          <div className="flex flex-col gap-2">
+            {isAdmin ? (
+              <InputGroup>
+                <InputGroupInput placeholder="Rename team…" value={renameValue} onChange={handleRenameChange} />
+                <InputGroupAddon align="inline-end">
+                  <InputGroupButton onClick={handleRename}>Rename</InputGroupButton>
+                </InputGroupAddon>
+              </InputGroup>
+            ) : null}
+            <div className="flex gap-2 items-center">
+              {activeTeam.kind !== 'personal' && myRole !== 'owner' ? (
+                <Button variant="ghost" onClick={handleLeave}>
+                  Leave team
+                </Button>
+              ) : null}
+              {canDelete ? (
+                <Button variant="ghost" onClick={handleDelete}>
+                  Delete team
+                </Button>
+              ) : null}
+            </div>
+          </div>
+        </SettingsSection>
       ) : null}
 
       {isAdmin ? (
-        <div>
-          <SectionLabel>Team defaults</SectionLabel>
-          <Caption1>
+        <SettingsSection title="Invite a member">
+          <div className="flex flex-col gap-2">
+            <InputGroup>
+              <InputGroupInput placeholder="email@example.com" value={inviteEmail} onChange={handleInviteChange} />
+              <InputGroupAddon align="inline-end">
+                <InputGroupButton onClick={handleInvite}>Invite</InputGroupButton>
+              </InputGroupAddon>
+            </InputGroup>
+            {invites.map((inv) => (
+              <InviteRow key={inv.id} email={inv.email} id={inv.id} token={inv.token} />
+            ))}
+          </div>
+        </SettingsSection>
+      ) : null}
+
+      {isAdmin ? (
+        <SettingsSection title="Team defaults">
+          <span className="text-sm text-muted-foreground">
             Shared agent config for everyone on the team{' '}
             {defaults.hasModels || defaults.hasMcp || defaults.hasEnv || defaults.hasNetwork
               ? '· configured'
               : '· not set (members use their own)'}
-          </Caption1>
-          <div className={styles.inviteForm}>
+          </span>
+          <div className="flex gap-2 items-center">
             <Button onClick={handlePublishDefaults}>Publish my config as team default</Button>
             <Button variant="ghost" onClick={handleClearDefaults}>
               Clear
             </Button>
           </div>
-        </div>
+        </SettingsSection>
       ) : null}
-    </div>
+    </SettingsPane>
   );
 });
 
 const InviteRow = memo(function InviteRow({ email, id, token }: { email: string; id: string; token: string }) {
-  const styles = useStyles();
   const handleRevoke = useCallback(() => void revokeInvite(id), [id]);
   const handleCopy = useCallback(() => void navigator.clipboard?.writeText(token), [token]);
   return (
-    <div className={styles.row}>
-      <Caption1>{email} · pending</Caption1>
-      <div style={{ display: 'flex', gap: 6 }}>
+    <div className="flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg border border-border bg-card">
+      <span className="text-xs text-muted-foreground">{email} · pending</span>
+      <div className="flex gap-1.5">
         <Button size="sm" variant="ghost" onClick={handleCopy}>
           Copy invite code
         </Button>

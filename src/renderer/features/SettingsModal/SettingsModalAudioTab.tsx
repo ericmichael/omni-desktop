@@ -1,69 +1,21 @@
-import { makeStyles, tokens } from '@fluentui/react-components';
 import { useStore } from '@nanostores/react';
 import type { ChangeEvent } from 'react';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 
-import { Button, Card, FormField, SectionLabel, Select, Switch } from '@/renderer/ds';
+import { Button } from '@/renderer/ds/ui/button';
+import { Card, CardContent } from '@/renderer/ds/ui/card';
+import { Field, FieldLabel } from '@/renderer/ds/ui/field';
+import { NativeSelect as Select } from '@/renderer/ds/ui/native-select';
+import { Progress } from '@/renderer/ds/ui/progress';
+import { Switch } from '@/renderer/ds/ui/switch';
+import {
+  settingsCardContentClassName,
+  SettingsPane,
+  SettingsSection,
+} from '@/renderer/features/SettingsModal/SettingsLayout';
 import { SettingsModalVoicePersonas } from '@/renderer/features/SettingsModal/SettingsModalVoicePersonas';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { AudioSettings } from '@/shared/types';
-
-const useStyles = makeStyles({
-  root: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalXXL },
-  description: { fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground2 },
-  sectionLabelSpaced: { marginTop: tokens.spacingVerticalM },
-  permissionRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalM,
-  },
-  deviceCol: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalXS,
-    flex: 1,
-    minWidth: 0,
-  },
-  deviceRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-  },
-  pickerWrap: { flex: 1, minWidth: 0 },
-  testBtn: { flexShrink: 0, minWidth: '64px' },
-  meter: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-    marginTop: tokens.spacingVerticalXS,
-  },
-  meterTrack: {
-    position: 'relative',
-    flex: 1,
-    height: '6px',
-    backgroundColor: tokens.colorNeutralBackground5,
-    borderRadius: tokens.borderRadiusCircular,
-    overflow: 'hidden',
-  },
-  meterFill: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    bottom: 0,
-    backgroundColor: tokens.colorBrandBackground,
-    transitionProperty: 'width',
-    transitionDuration: '60ms',
-    transitionTimingFunction: 'linear',
-  },
-  meterFillClip: { backgroundColor: tokens.colorPaletteRedBackground3 },
-  meterValue: {
-    minWidth: '32px',
-    textAlign: 'right',
-    fontFamily: tokens.fontFamilyMonospace,
-    fontSize: tokens.fontSizeBase100,
-    color: tokens.colorNeutralForeground3,
-  },
-});
 
 type DeviceOption = { deviceId: string; label: string };
 
@@ -78,7 +30,6 @@ function deviceLabel(d: MediaDeviceInfo, fallbackIndex: number): string {
 }
 
 export const SettingsModalAudioTab = memo(() => {
-  const styles = useStyles();
   const store = useStore(persistedStoreApi.$atom);
   const settings = store.audioSettings;
 
@@ -169,97 +120,121 @@ export const SettingsModalAudioTab = memo(() => {
   const onChangeGain = useCallback((checked: boolean) => update({ autoGainControl: checked }), [update]);
 
   return (
-    <div className={styles.root}>
-      <SectionLabel>Devices</SectionLabel>
-      <Card>
-        {needsPermission && (
-          <div className={styles.permissionRow}>
-            <span className={styles.description}>Grant microphone access once to show device names.</span>
-            <Button size="sm" variant="ghost" onClick={grantPermission}>
-              Allow
-            </Button>
-          </div>
-        )}
-        <FormField label="Input (microphone)">
-          <div className={styles.deviceCol}>
-            <div className={styles.deviceRow}>
-              <div className={styles.pickerWrap}>
-                <Select value={settings.inputDeviceId ?? NONE_OPTION} onChange={onChangeInput}>
-                  <option value={NONE_OPTION}>System default</option>
-                  {inputs.map((d) => (
-                    <option key={d.deviceId} value={d.deviceId}>
-                      {d.label}
-                    </option>
-                  ))}
-                </Select>
+    <SettingsPane>
+      <SettingsSection title="Devices">
+        <Card>
+          <CardContent className={settingsCardContentClassName}>
+            {needsPermission && (
+              <div className="flex items-center gap-4">
+                <span className="text-xs text-muted-foreground">
+                  Grant microphone access once to show device names.
+                </span>
+                <Button size="sm" variant="ghost" onClick={grantPermission}>
+                  Allow
+                </Button>
               </div>
-              <Button size="sm" variant="ghost" onClick={inputMeter.toggle} className={styles.testBtn}>
-                {inputMeter.active ? 'Stop' : 'Test'}
-              </Button>
-            </div>
-            {inputMeter.active && <InputLevelBar level={inputMeter.level} styles={styles} />}
-            {inputMeter.error && <span className={styles.description}>{inputMeter.error}</span>}
-          </div>
-        </FormField>
-        <FormField label="Output (speaker)">
-          <div className={styles.deviceCol}>
-            <div className={styles.deviceRow}>
-              <div className={styles.pickerWrap}>
-                <Select value={settings.outputDeviceId ?? NONE_OPTION} onChange={onChangeOutput}>
-                  <option value={NONE_OPTION}>System default</option>
-                  {outputs.map((d) => (
-                    <option key={d.deviceId} value={d.deviceId}>
-                      {d.label}
-                    </option>
-                  ))}
-                </Select>
+            )}
+            <Field orientation="horizontal" className="justify-between gap-4">
+              <div className="min-w-0">
+                <FieldLabel>Input (microphone)</FieldLabel>
               </div>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={outputTest.play}
-                isDisabled={outputTest.playing}
-                className={styles.testBtn}
-              >
-                {outputTest.playing ? 'Playing…' : 'Test'}
-              </Button>
-            </div>
-            <audio ref={outputAudioElRef} autoPlay style={{ display: 'none' }} />
-            {outputTest.error && <span className={styles.description}>{outputTest.error}</span>}
-          </div>
-        </FormField>
-      </Card>
+              <div className="flex flex-col gap-1 flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 min-w-0">
+                    <Select value={settings.inputDeviceId ?? NONE_OPTION} onChange={onChangeInput}>
+                      <option value={NONE_OPTION}>System default</option>
+                      {inputs.map((d) => (
+                        <option key={d.deviceId} value={d.deviceId}>
+                          {d.label}
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
+                  <Button size="sm" variant="ghost" onClick={inputMeter.toggle} className="shrink-0 min-w-16">
+                    {inputMeter.active ? 'Stop' : 'Test'}
+                  </Button>
+                </div>
+                {inputMeter.active && <InputLevelBar level={inputMeter.level} />}
+                {inputMeter.error && <span className="text-xs text-muted-foreground">{inputMeter.error}</span>}
+              </div>
+            </Field>
+            <Field orientation="horizontal" className="justify-between gap-4">
+              <div className="min-w-0">
+                <FieldLabel>Output (speaker)</FieldLabel>
+              </div>
+              <div className="flex flex-col gap-1 flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 min-w-0">
+                    <Select value={settings.outputDeviceId ?? NONE_OPTION} onChange={onChangeOutput}>
+                      <option value={NONE_OPTION}>System default</option>
+                      {outputs.map((d) => (
+                        <option key={d.deviceId} value={d.deviceId}>
+                          {d.label}
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={outputTest.play}
+                    disabled={outputTest.playing}
+                    className="shrink-0 min-w-16"
+                  >
+                    {outputTest.playing ? 'Playing…' : 'Test'}
+                  </Button>
+                </div>
+                <audio ref={outputAudioElRef} autoPlay className="hidden" />
+                {outputTest.error && <span className="text-xs text-muted-foreground">{outputTest.error}</span>}
+              </div>
+            </Field>
+          </CardContent>
+        </Card>
+      </SettingsSection>
 
-      <SectionLabel className={styles.sectionLabelSpaced}>Processing</SectionLabel>
-      <Card>
-        <FormField label="Echo cancellation">
-          <Switch checked={settings.echoCancellation} onCheckedChange={onChangeEcho} />
-        </FormField>
-        <FormField label="Noise suppression">
-          <Switch checked={settings.noiseSuppression} onCheckedChange={onChangeNoise} />
-        </FormField>
-        <FormField label="Automatic gain control">
-          <Switch checked={settings.autoGainControl} onCheckedChange={onChangeGain} />
-        </FormField>
-        <p className={styles.description}>
-          Applies the next time Voice mode is opened. Disable processing if you use external DSP (e.g. a hardware mixer
-          or system-level noise suppression).
-        </p>
-      </Card>
+      <SettingsSection title="Processing">
+        <Card>
+          <CardContent className={settingsCardContentClassName}>
+            <Field orientation="horizontal" className="justify-between gap-4">
+              <div className="min-w-0">
+                <FieldLabel>Echo cancellation</FieldLabel>
+              </div>
+              <Switch checked={settings.echoCancellation} onCheckedChange={onChangeEcho} />
+            </Field>
+            <Field orientation="horizontal" className="justify-between gap-4">
+              <div className="min-w-0">
+                <FieldLabel>Noise suppression</FieldLabel>
+              </div>
+              <Switch checked={settings.noiseSuppression} onCheckedChange={onChangeNoise} />
+            </Field>
+            <Field orientation="horizontal" className="justify-between gap-4">
+              <div className="min-w-0">
+                <FieldLabel>Automatic gain control</FieldLabel>
+              </div>
+              <Switch checked={settings.autoGainControl} onCheckedChange={onChangeGain} />
+            </Field>
+            <p className="text-xs text-muted-foreground">
+              Applies the next time Voice mode is opened. Disable processing if you use external DSP (e.g. a hardware
+              mixer or system-level noise suppression).
+            </p>
+          </CardContent>
+        </Card>
+      </SettingsSection>
 
       {/* Personas shape the local voice's personality — only meaningful when
-          local voice is on (AI tab → Voice → Local). */}
+           local voice is on (AI tab → Voice → Local). */}
       {store.localVoiceEnabled && (
-        <>
-          <SectionLabel className={styles.sectionLabelSpaced}>Personas</SectionLabel>
+        <SettingsSection title="Personas">
           <Card>
-            <SettingsModalVoicePersonas />
+            <CardContent>
+              <SettingsModalVoicePersonas />
+            </CardContent>
           </Card>
-        </>
+        </SettingsSection>
       )}
 
-      {error && <p className={styles.description}>{error}</p>}
-    </div>
+      {error && <p className="text-xs text-muted-foreground">{error}</p>}
+    </SettingsPane>
   );
 });
 SettingsModalAudioTab.displayName = 'SettingsModalAudioTab';
@@ -376,18 +351,19 @@ function useInputLevelMeter(deviceId: string | null) {
 
 type InputLevelBarProps = {
   level: number;
-  styles: ReturnType<typeof useStyles>;
 };
 
-const InputLevelBar = memo(({ level, styles }: InputLevelBarProps) => {
+const InputLevelBar = memo(({ level }: InputLevelBarProps) => {
   const pct = Math.round(level * 100);
   const clipping = level > 0.92;
   return (
-    <div className={styles.meter}>
-      <div className={styles.meterTrack}>
-        <div className={`${styles.meterFill} ${clipping ? styles.meterFillClip : ''}`} style={{ width: `${pct}%` }} />
-      </div>
-      <span className={styles.meterValue}>{pct}%</span>
+    <div className="mt-1 flex items-center gap-2">
+      <Progress
+        value={pct}
+        aria-label="Input level"
+        className={`h-1.5 flex-1 bg-secondary [&_[data-slot=progress-indicator]]:duration-75 [&_[data-slot=progress-indicator]]:ease-linear ${clipping ? '[&_[data-slot=progress-indicator]]:bg-destructive' : ''}`}
+      />
+      <span className="min-w-8 text-right font-mono text-xs text-muted-foreground">{pct}%</span>
     </div>
   );
 });

@@ -314,23 +314,6 @@ describe('RPCClient generated protocol integration', () => {
     vi.unstubAllGlobals();
   });
 
-  it('sends canonical method params and correlates the response id', async () => {
-    const { client, socket } = await connectedClient();
-    const response = client.deleteSession('session-1');
-    const request = JSON.parse(socket.sent[0]!) as Record<string, unknown>;
-
-    expect(request).toEqual({
-      jsonrpc: '2.0',
-      id: 2,
-      method: 'delete_session',
-      params: { session_id: 'session-1' },
-    });
-
-    socket.receive({ jsonrpc: '2.0', id: request.id, result: true });
-    await expect(response).resolves.toBe(true);
-    client.dispose();
-  });
-
   it('keeps conversation and execution identities separate in server_call', async () => {
     const { client, socket } = await connectedClient();
     const response = client.serverCall('bash_jobs.list', {}, 'session-1', 'environment-1');
@@ -366,7 +349,7 @@ describe('RPCClient generated protocol integration', () => {
 
   it('preserves structured JSON-RPC error code and data', async () => {
     const { client, socket } = await connectedClient();
-    const response = client.deleteSession('session-1');
+    const response = client.getSessionHistory('session-1');
     const request = JSON.parse(socket.sent[0]!) as Record<string, unknown>;
 
     socket.receive({
@@ -375,7 +358,7 @@ describe('RPCClient generated protocol integration', () => {
       error: {
         code: -32602,
         message: 'Invalid params',
-        data: { method: 'delete_session' },
+        data: { method: 'get_session_history' },
       },
     });
 
@@ -383,7 +366,7 @@ describe('RPCClient generated protocol integration', () => {
       name: 'OmniagentsRpcError',
       code: -32602,
       message: 'Invalid params',
-      data: { method: 'delete_session' },
+      data: { method: 'get_session_history' },
     } satisfies Partial<OmniagentsRpcError>);
     client.dispose();
   });

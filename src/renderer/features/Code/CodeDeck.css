@@ -1,0 +1,32 @@
+.omni-code-deck-resize-handle {
+  display: none;
+}
+
+.omni-code-deck-launcher-grid {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.5rem;
+}
+
+.omni-code-deck-launcher-offset {
+  translate: calc((var(--launcher-cell-width) + 20px) / 2) 0;
+}
+
+.omni-code-deck-launcher-cell {
+  width: var(--launcher-cell-width);
+}
+
+.omni-code-deck-launcher-icon {
+  background-image: linear-gradient(145deg, var(--accent), var(--muted));
+  box-shadow:
+    var(--shadow-lg),
+    inset 0 0 0 1px var(--border);
+}
+
+@media (min-width: 541px) {
+  .omni-code-deck-resize-handle {
+    display: flex;
+  }
+}

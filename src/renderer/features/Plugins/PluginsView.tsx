@@ -1,11 +1,13 @@
-import { makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
-import { Add20Regular, ArrowDownload20Regular, Globe20Regular, PlugConnected20Regular } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
+import { Download, Globe, PlugZap, Plus } from 'lucide-react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 
-import { openMobileNav } from '@/renderer/app/mobile-nav';
 import { useIsDesktop } from '@/renderer/common/use-is-desktop';
-import { Button, FormSkeleton, Input, PageHeader, SectionLabel, SegmentedControl } from '@/renderer/ds';
+import { PageHeader } from '@/renderer/ds/PageHeader';
+import { Button } from '@/renderer/ds/ui/button';
+import { Input } from '@/renderer/ds/ui/input';
+import { Skeleton } from '@/renderer/ds/ui/skeleton';
+import { ToggleGroup, ToggleGroupItem } from '@/renderer/ds/ui/toggle-group';
 import { AppFormDialog } from '@/renderer/features/Plugins/AppFormDialog';
 import { ConnectorConfigDialog } from '@/renderer/features/Plugins/ConnectorConfigDialog';
 import { ExploreSection, FEATURED_MARKETPLACES, installKeyOf } from '@/renderer/features/Plugins/ExploreSection';
@@ -24,7 +26,6 @@ import { useFeaturedManifests, usePluginsData } from '@/renderer/features/Plugin
 import { agentConfigApi } from '@/renderer/services/config';
 import { emitter, isElectron } from '@/renderer/services/ipc';
 import { persistedStoreApi } from '@/renderer/services/store';
-import { $glassEnabled } from '@/renderer/theme/use-glass';
 import type { CustomAppEntry } from '@/shared/app-registry';
 import type { BundleUpdateInfo, MarketplaceApp, McpServerEntry } from '@/shared/types';
 
@@ -40,40 +41,6 @@ const FILTER_OPTIONS: { value: PluginKind | 'all'; label: string }[] = [
   { value: 'app', label: 'Apps' },
   { value: 'extension', label: 'Extensions' },
 ];
-
-const useStyles = makeStyles({
-  root: {
-    height: '100%',
-    minHeight: 0,
-    overflowY: 'auto',
-    backgroundColor: tokens.colorNeutralBackground1,
-  },
-  rootGlass: {
-    backgroundColor: tokens.colorNeutralBackground1,
-    backdropFilter: 'var(--glass-blur)',
-    WebkitBackdropFilter: 'var(--glass-blur)',
-  },
-  inner: {
-    maxWidth: '960px',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalL,
-    paddingLeft: tokens.spacingHorizontalL,
-    paddingRight: tokens.spacingHorizontalL,
-    paddingBottom: tokens.spacingVerticalXXL,
-  },
-  search: { width: '220px', maxWidth: '50vw' },
-  errorBanner: {
-    padding: tokens.spacingVerticalM,
-    borderRadius: tokens.borderRadiusMedium,
-    backgroundColor: tokens.colorPaletteRedBackground1,
-    color: tokens.colorPaletteRedForeground1,
-    fontSize: tokens.fontSizeBase200,
-  },
-  addSection: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalS },
-  addRow: { display: 'flex', flexWrap: 'wrap', gap: tokens.spacingHorizontalS },
-  iconMr: { marginRight: tokens.spacingHorizontalXS },
-});
 
 function installMarketplaceApp(app: MarketplaceApp): void {
   const current = persistedStoreApi.$atom.get().customApps ?? [];
@@ -102,10 +69,8 @@ function updateMarketplaceAppEntry(app: MarketplaceApp): void {
 }
 
 export const PluginsView = memo(() => {
-  const styles = useStyles();
   const data = usePluginsData();
   const isDesktop = useIsDesktop();
-  const isGlass = useStore($glassEnabled);
   const store = useStore(persistedStoreApi.$atom);
   const storeCustomApps = store.customApps;
   const customApps = useMemo(() => storeCustomApps ?? [], [storeCustomApps]);
@@ -295,28 +260,47 @@ export const PluginsView = memo(() => {
     connectorDialog?.serverId != null ? (data.mcpConfig?.mcpServers[connectorDialog.serverId] ?? null) : null;
 
   return (
-    <div className={mergeClasses(styles.root, isGlass && styles.rootGlass)}>
+    <div className="h-full min-h-0 overflow-y-auto bg-background">
       <PageHeader
         title="Plugins"
-        onMenu={isDesktop ? undefined : openMobileNav}
+        showMenu={!isDesktop}
         actions={
           <Input
-            size="sm"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search plugins"
             aria-label="Search plugins"
-            className={styles.search}
+            className="w-56 max-w-screen"
           />
         }
       />
-      <div className={styles.inner}>
-        <SegmentedControl value={filter} options={FILTER_OPTIONS} onChange={setFilter} />
+      <div className="max-w-5xl flex flex-col gap-5 pl-5 pr-5 pb-8">
+        <ToggleGroup
+          type="single"
+          variant="outline"
+          spacing={0}
+          value={filter}
+          onValueChange={(value) => value && setFilter(value as PluginKind | 'all')}
+          aria-label="Plugin type"
+        >
+          {FILTER_OPTIONS.map((option) => (
+            <ToggleGroupItem key={option.value} value={option.value}>
+              {option.label}
+            </ToggleGroupItem>
+          ))}
+        </ToggleGroup>
 
-        {error && <div className={styles.errorBanner}>{error}</div>}
+        {error && <div className="p-4 rounded-lg bg-destructive/10 text-destructive text-xs">{error}</div>}
 
         {data.loading ? (
-          <FormSkeleton fields={4} />
+          <div className="flex w-full flex-col gap-5 p-4">
+            {Array.from({ length: 4 }, (_, index) => (
+              <div key={index} className="flex flex-col gap-2">
+                <Skeleton className={`h-3 ${['w-15', 'w-18', 'w-20'][index % 3]}`} />
+                <Skeleton className="h-8 w-full" />
+              </div>
+            ))}
+          </div>
         ) : (
           <>
             <InstalledSection
@@ -345,26 +329,26 @@ export const PluginsView = memo(() => {
               />
             ))}
 
-            <div className={styles.addSection}>
-              <SectionLabel>Add your own</SectionLabel>
-              <div className={styles.addRow}>
+            <div className="flex flex-col gap-2">
+              <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Add your own</span>
+              <div className="flex flex-wrap gap-2">
                 <Button size="sm" variant="ghost" onClick={() => setAppFormOpen(true)}>
-                  <Add20Regular className={styles.iconMr} />
+                  <Plus className="mr-1" />
                   Add custom app
                 </Button>
                 <Button size="sm" variant="ghost" onClick={() => setConnectorDialog({ serverId: null })}>
-                  <PlugConnected20Regular className={styles.iconMr} />
+                  <PlugZap className="mr-1" />
                   Add MCP server
                 </Button>
                 {/* Local-file picker is desktop-only — the server has no client filesystem. */}
                 {isElectron && (
                   <Button size="sm" variant="ghost" onClick={installFromFile}>
-                    <ArrowDownload20Regular className={styles.iconMr} />
+                    <Download className="mr-1" />
                     Install skill from file
                   </Button>
                 )}
                 <Button size="sm" variant="ghost" onClick={() => setMarketplaceOpen(true)}>
-                  <Globe20Regular className={styles.iconMr} />
+                  <Globe className="mr-1" />
                   Browse a marketplace
                 </Button>
               </div>

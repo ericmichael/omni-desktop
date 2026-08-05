@@ -66,7 +66,7 @@ describe('buildInstalledPlugins', () => {
       mcpConfig: mcpConfig({ github: { type: 'stdio', command: 'gh-mcp' } }),
       skills: [skill()],
       updates: {},
-      customApps: [{ id: 'a1', label: 'Teams', icon: 'Globe20Regular', url: 'https://teams', order: 50 }],
+      customApps: [{ id: 'a1', label: 'Teams', icon: 'Globe', url: 'https://teams', order: 50 }],
       extensions: [extension()],
     });
     expect(items.map((i) => i.kind)).toEqual(['connector', 'skill', 'app', 'extension']);
@@ -157,21 +157,15 @@ describe('mergeConnectorUpdate', () => {
 });
 
 describe('appNeedsUpdate', () => {
-  const installed = { id: 'a1', label: 'Teams', icon: 'Globe20Regular', url: 'https://teams', order: 50 };
+  const installed = { id: 'a1', label: 'Teams', icon: 'Globe', url: 'https://teams', order: 50 };
   it('detects label/icon drift but ignores the dock preference', () => {
-    expect(appNeedsUpdate(installed, { id: 'x', label: 'Teams', icon: 'Globe20Regular', url: 'https://teams' })).toBe(
-      false
-    );
-    expect(
-      appNeedsUpdate(installed, { id: 'x', label: 'MS Teams', icon: 'Globe20Regular', url: 'https://teams' })
-    ).toBe(true);
-    expect(appNeedsUpdate(installed, { id: 'x', label: 'Teams', icon: 'People20Regular', url: 'https://teams' })).toBe(
-      true
-    );
+    expect(appNeedsUpdate(installed, { id: 'x', label: 'Teams', icon: 'Globe', url: 'https://teams' })).toBe(false);
+    expect(appNeedsUpdate(installed, { id: 'x', label: 'MS Teams', icon: 'Globe', url: 'https://teams' })).toBe(true);
+    expect(appNeedsUpdate(installed, { id: 'x', label: 'Teams', icon: 'Users', url: 'https://teams' })).toBe(true);
     expect(
       appNeedsUpdate(
         { ...installed, columnScoped: true },
-        { id: 'x', label: 'Teams', icon: 'Globe20Regular', url: 'https://teams', columnScoped: false }
+        { id: 'x', label: 'Teams', icon: 'Globe', url: 'https://teams', columnScoped: false }
       )
     ).toBe(false);
   });
@@ -187,13 +181,13 @@ describe('collectDriftedItems', () => {
           { id: 'teams', label: 'Teams', description: 'Chats', server: { type: 'http', url: 'https://mcp' } },
         ],
         plugins: [{ name: 'dev-tools', description: 'Dev', source: '.', skills: [] }],
-        apps: [{ id: 'x1', label: 'MS Teams', icon: 'Globe20Regular', url: 'https://teams' }],
+        apps: [{ id: 'x1', label: 'MS Teams', icon: 'Globe', url: 'https://teams' }],
       }),
       {
         mcpConfig: mcpConfig({ github: { type: 'stdio', command: 'gh-mcp' } }),
         skills: [skill()],
         updates: { [bundleUpdateKey('omni/official', 'dev-tools')]: update() },
-        customApps: [{ id: 'a1', label: 'Teams', icon: 'Globe20Regular', url: 'https://teams', order: 50 }],
+        customApps: [{ id: 'a1', label: 'Teams', icon: 'Globe', url: 'https://teams', order: 50 }],
       }
     );
     // Same catalog surfaced by a second marketplace — must not double-count.
@@ -217,7 +211,7 @@ describe('buildExplorePlugins', () => {
     mcpConfig: mcpConfig({ github: { type: 'stdio', command: 'gh-mcp' } }),
     skills: [skill()],
     updates: { [bundleUpdateKey('omni/official', 'dev-tools')]: update() },
-    customApps: [{ id: 'a1', label: 'Teams', icon: 'Globe20Regular', url: 'https://teams', order: 50 }],
+    customApps: [{ id: 'a1', label: 'Teams', icon: 'Globe', url: 'https://teams', order: 50 }],
   };
 
   it('detects connector installs by mcpServers key', () => {
@@ -272,8 +266,8 @@ describe('buildExplorePlugins', () => {
       'omni/official',
       manifest({
         apps: [
-          { id: 'x1', label: 'Teams', icon: 'Globe20Regular', url: 'https://teams' },
-          { id: 'x2', label: 'Zoom', icon: 'Video20Regular', url: 'https://zoom' },
+          { id: 'x1', label: 'Teams', icon: 'Globe', url: 'https://teams' },
+          { id: 'x2', label: 'Zoom', icon: 'Video', url: 'https://zoom' },
         ],
       }),
       ctx
@@ -290,7 +284,7 @@ describe('filterPlugins', () => {
     mcpConfig: mcpConfig({ github: { type: 'stdio', command: 'gh-mcp' } }),
     skills: [skill()],
     updates: {},
-    customApps: [{ id: 'a1', label: 'Teams', icon: 'Globe20Regular', url: 'https://teams', order: 50 }],
+    customApps: [{ id: 'a1', label: 'Teams', icon: 'Globe', url: 'https://teams', order: 50 }],
     extensions: [extension()],
   });
 

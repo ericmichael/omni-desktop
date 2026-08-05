@@ -1,39 +1,38 @@
-import { Field, makeStyles, mergeClasses, Switch, tokens } from '@fluentui/react-components';
-import {
-  Add20Regular,
-  Delete20Regular,
-  Edit20Regular,
-  MoreHorizontal20Regular,
-  Open20Regular,
-  Play20Regular,
-} from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
+import { Edit, Ellipsis, ExternalLink, Play, Plus, Trash2 } from 'lucide-react';
 import type { ComponentProps } from 'react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 
 import { formatDuration, formatTimestamp } from '@/lib/format-time';
-import { openMobileNav } from '@/renderer/app/mobile-nav';
 import { useIsDesktop } from '@/renderer/common/use-is-desktop';
+import { cn } from '@/renderer/ds/cn';
+import { TopAppBar } from '@/renderer/ds/TopAppBar';
+import { Alert, AlertDescription } from '@/renderer/ds/ui/alert';
 import {
-  Badge,
-  Button,
-  Caption1,
-  ConfirmDialog,
-  EmptyState,
-  IconButton,
-  Input,
-  Menu,
-  MenuDivider,
-  MenuItem,
-  MenuList,
-  MenuPopover,
-  MenuTrigger,
-  MessageBar,
-  MessageBarBody,
-  Select,
-  Textarea,
-  TopAppBar,
-} from '@/renderer/ds';
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/renderer/ds/ui/alert-dialog';
+import { Badge } from '@/renderer/ds/ui/badge';
+import { Button } from '@/renderer/ds/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/renderer/ds/ui/dropdown-menu';
+import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from '@/renderer/ds/ui/empty';
+import { Field, FieldDescription, FieldLabel } from '@/renderer/ds/ui/field';
+import { Input } from '@/renderer/ds/ui/input';
+import { NativeSelect as Select } from '@/renderer/ds/ui/native-select';
+import { Switch } from '@/renderer/ds/ui/switch';
+import { Textarea } from '@/renderer/ds/ui/textarea';
 import { getProfileMenuLabel } from '@/renderer/features/SandboxProfile/profile-list';
 import { SandboxPicker } from '@/renderer/features/SandboxProfile/SandboxPicker';
 import { toast } from '@/renderer/features/Toast/state';
@@ -41,7 +40,6 @@ import { emitter } from '@/renderer/services/ipc';
 import { $machines } from '@/renderer/services/machines';
 import { scheduledTaskApi } from '@/renderer/services/scheduled-tasks';
 import { persistedStoreApi } from '@/renderer/services/store';
-import { $glassEnabled } from '@/renderer/theme/use-glass';
 import type {
   Project,
   ScheduledTask,
@@ -54,257 +52,6 @@ import type {
 
 import { ensureRoutineSessionTab, formatDayOfWeek } from './routine-session';
 import { $routinesView } from './state';
-
-// ---------------------------------------------------------------------------
-// Styles
-// ---------------------------------------------------------------------------
-
-const useStyles = makeStyles({
-  root: {
-    display: 'flex',
-    width: '100%',
-    height: '100%',
-  },
-  rootGlass: {
-    backgroundColor: 'transparent',
-  },
-  list: {
-    flex: '1 1 0',
-    minHeight: 0,
-    overflowY: 'auto',
-  },
-  detailPane: {
-    flex: '1 1 0',
-    minWidth: 0,
-    display: 'flex',
-    flexDirection: 'column',
-  },
-  detailPaneGlass: {
-    backgroundColor: tokens.colorNeutralBackground1,
-    backdropFilter: 'var(--glass-blur)',
-    WebkitBackdropFilter: 'var(--glass-blur)',
-  },
-  /* List rows — same idiom as the Work tab's task rows. */
-  row: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'stretch',
-    gap: '2px',
-    paddingLeft: tokens.spacingHorizontalL,
-    paddingRight: tokens.spacingHorizontalS,
-    paddingTop: '8px',
-    paddingBottom: '8px',
-    cursor: 'pointer',
-    border: 'none',
-    backgroundColor: 'transparent',
-    width: '100%',
-    textAlign: 'left',
-    ':hover': { backgroundColor: tokens.colorSubtleBackgroundHover },
-    ':focus-visible': {
-      outlineWidth: '2px',
-      outlineStyle: 'solid',
-      outlineColor: tokens.colorBrandStroke1,
-      outlineOffset: '-2px',
-    },
-    '&:hover .routine-row-menu': { opacity: 1 },
-    '&:focus-within .routine-row-menu': { opacity: 1 },
-  },
-  rowMenu: {
-    display: 'flex',
-    alignItems: 'center',
-    flexShrink: 0,
-    opacity: 0,
-    transitionProperty: 'opacity',
-    transitionDuration: tokens.durationFaster,
-  },
-  rowMenuOpen: {
-    opacity: 1,
-  },
-  rowTop: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-  },
-  rowTitle: {
-    flex: '1 1 0',
-    minWidth: 0,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    fontSize: tokens.fontSizeBase300,
-    color: tokens.colorNeutralForeground1,
-  },
-  rowMeta: {
-    fontSize: tokens.fontSizeBase200,
-    color: tokens.colorNeutralForeground3,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-  },
-  /* ── Detail: the standard skeleton — full-bleed header band (title +
-     actions), centered scrollable body, content | properties rail. ── */
-  bandHeader: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '2px',
-    paddingLeft: tokens.spacingHorizontalL,
-    paddingRight: tokens.spacingHorizontalL,
-    paddingTop: tokens.spacingVerticalL,
-    paddingBottom: tokens.spacingVerticalS,
-    borderBottom: `1px solid ${tokens.colorNeutralStroke1}`,
-    flexShrink: 0,
-  },
-  bandTitleRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-    minWidth: 0,
-  },
-  bandTitle: {
-    flex: '0 1 auto',
-    minWidth: 0,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    fontSize: tokens.fontSizeBase600,
-    fontWeight: tokens.fontWeightSemibold,
-    lineHeight: tokens.lineHeightBase600,
-    color: tokens.colorNeutralForeground1,
-  },
-  bandSpacer: {
-    flex: '1 1 0',
-  },
-  detailBody: {
-    flex: '1 1 0',
-    minHeight: 0,
-    overflowY: 'auto',
-    padding: tokens.spacingVerticalXXL,
-  },
-  detailBodyInner: {
-    width: '100%',
-    maxWidth: '56rem',
-    marginLeft: 'auto',
-    marginRight: 'auto',
-  },
-  formInner: {
-    width: '100%',
-    maxWidth: '36rem',
-    marginLeft: 'auto',
-    marginRight: 'auto',
-  },
-  /* Content + properties rail — stacks early: the pane sits next to the
-     320px routine list. */
-  split: {
-    display: 'flex',
-    alignItems: 'flex-start',
-    gap: tokens.spacingHorizontalXXL,
-    '@media (max-width: 1000px)': {
-      flexDirection: 'column',
-    },
-  },
-  main: {
-    flex: '1 1 0',
-    minWidth: 0,
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalXL,
-    '@media (max-width: 1000px)': {
-      width: '100%',
-      flex: '0 0 auto',
-    },
-  },
-  aside: {
-    width: '240px',
-    flexShrink: 0,
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalL,
-    '@media (max-width: 1000px)': {
-      width: '100%',
-    },
-  },
-  prop: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '4px',
-  },
-  propText: {
-    display: 'flex',
-    flexDirection: 'column',
-    rowGap: '2px',
-    fontSize: tokens.fontSizeBase200,
-    color: tokens.colorNeutralForeground3,
-  },
-  muted: {
-    color: tokens.colorNeutralForeground3,
-  },
-  section: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalS,
-  },
-  sectionTitle: {
-    fontSize: tokens.fontSizeBase200,
-    fontWeight: tokens.fontWeightSemibold,
-    color: tokens.colorNeutralForeground2,
-    textTransform: 'uppercase',
-    letterSpacing: '0.05em',
-  },
-  instructions: {
-    fontSize: tokens.fontSizeBase300,
-    color: tokens.colorNeutralForeground2,
-    lineHeight: tokens.lineHeightBase400,
-    whiteSpace: 'pre-wrap',
-    margin: 0,
-  },
-  runItem: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '4px',
-    paddingTop: tokens.spacingVerticalS,
-    paddingBottom: tokens.spacingVerticalS,
-  },
-  runSummary: {
-    display: 'flex',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: tokens.spacingHorizontalS,
-  },
-  toolItem: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: tokens.spacingHorizontalS,
-  },
-  mono: {
-    fontFamily: tokens.fontFamilyMonospace,
-    fontSize: tokens.fontSizeBase200,
-  },
-  dangerMenuItem: {
-    color: tokens.colorPaletteRedForeground1,
-  },
-  form: {
-    display: 'grid',
-    gap: tokens.spacingVerticalM,
-  },
-  formButtons: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-    marginTop: tokens.spacingVerticalS,
-  },
-  sandboxRow: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: tokens.spacingHorizontalM,
-  },
-  helperText: {
-    color: tokens.colorNeutralForeground3,
-    fontSize: tokens.fontSizeBase200,
-    lineHeight: '18px',
-  },
-});
 
 // ---------------------------------------------------------------------------
 // Formatting
@@ -422,10 +169,8 @@ const createEmptyFormState = (defaultProfileName: string | undefined): RoutineFo
  * handle, detail/create levels with a back arrow to this list.
  */
 export const ScheduledTasks = memo(() => {
-  const styles = useStyles();
   const store = useStore(persistedStoreApi.$atom);
   const machines = useStore($machines);
-  const isGlass = useStore($glassEnabled);
   const isDesktop = useIsDesktop();
 
   const [isEnterprise, setIsEnterprise] = useState(false);
@@ -589,33 +334,40 @@ export const ScheduledTasks = memo(() => {
   // on mobile the TopAppBar titles it and the band carries only the action.
   const listSurface = (
     <>
-      <div className={styles.bandHeader}>
-        <div className={styles.bandTitleRow}>
-          {isDesktop && <span className={styles.bandTitle}>Routines</span>}
-          <div className={styles.bandSpacer} />
-          <Button size="sm" leftIcon={<Add20Regular />} onClick={startCreate}>
+      <div className="flex flex-col gap-0.5 pl-5 pr-5 pt-5 pb-2 border-b border-border shrink-0">
+        <div className="flex items-center gap-2 min-w-0">
+          {isDesktop && (
+            <span className="flex-initial min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-2xl font-semibold leading-8 text-foreground">
+              Routines
+            </span>
+          )}
+          <div className="flex-1" />
+          <Button size="sm" onClick={startCreate}>
+            <Plus />
             New routine
           </Button>
         </div>
       </div>
-      <div className={styles.list}>
+      <div className="flex-1 min-h-0 overflow-y-auto">
         {sorted.length === 0 ? (
-          <EmptyState
-            title="No routines yet"
-            description="Routines are scheduled agent sessions that run while the app is open."
-            action={
-              <Button size="sm" leftIcon={<Add20Regular />} onClick={startCreate}>
+          <Empty>
+            <EmptyHeader>
+              <EmptyTitle className="text-base">No routines yet</EmptyTitle>
+              <EmptyDescription>Routines are scheduled agent sessions that run while the app is open.</EmptyDescription>
+            </EmptyHeader>
+            <EmptyContent>
+              <Button size="sm" onClick={startCreate}>
+                <Plus />
                 New routine
               </Button>
-            }
-          />
+            </EmptyContent>
+          </Empty>
         ) : (
           sorted.map((task) => (
             <RoutineRow
               key={task.id}
               task={task}
               projects={store.projects}
-              styles={styles}
               onSelect={selectTask}
               onRunNow={runNow}
               onStartEdit={startEdit}
@@ -630,16 +382,17 @@ export const ScheduledTasks = memo(() => {
   const detailBody = creating ? (
     <>
       {isDesktop && (
-        <div className={styles.bandHeader}>
-          <div className={styles.bandTitleRow}>
-            <span className={styles.bandTitle}>New routine</span>
+        <div className="flex flex-col gap-0.5 pl-5 pr-5 pt-5 pb-2 border-b border-border shrink-0">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="flex-initial min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-2xl font-semibold leading-8 text-foreground">
+              New routine
+            </span>
           </div>
         </div>
       )}
-      <div className={styles.detailBody}>
-        <div className={styles.formInner}>
+      <div className="flex-1 min-h-0 overflow-y-auto p-8">
+        <div className="w-full max-w-xl ml-auto mr-auto">
           <RoutineForm
-            styles={styles}
             value={createForm}
             projects={store.projects}
             sandboxContext={sandboxContext}
@@ -656,16 +409,17 @@ export const ScheduledTasks = memo(() => {
   ) : isEditing && selectedTask && editForm ? (
     <>
       {isDesktop && (
-        <div className={styles.bandHeader}>
-          <div className={styles.bandTitleRow}>
-            <span className={styles.bandTitle}>Edit routine</span>
+        <div className="flex flex-col gap-0.5 pl-5 pr-5 pt-5 pb-2 border-b border-border shrink-0">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="flex-initial min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-2xl font-semibold leading-8 text-foreground">
+              Edit routine
+            </span>
           </div>
         </div>
       )}
-      <div className={styles.detailBody}>
-        <div className={styles.formInner}>
+      <div className="flex-1 min-h-0 overflow-y-auto p-8">
+        <div className="w-full max-w-xl ml-auto mr-auto">
           <RoutineForm
-            styles={styles}
             value={editForm}
             projects={store.projects}
             sandboxContext={sandboxContext}
@@ -683,7 +437,6 @@ export const ScheduledTasks = memo(() => {
     </>
   ) : selectedTask ? (
     <RoutineDetail
-      styles={styles}
       task={selectedTask}
       projects={store.projects}
       machines={machines}
@@ -697,15 +450,22 @@ export const ScheduledTasks = memo(() => {
   ) : null;
 
   const deleteDialog = (
-    <ConfirmDialog
-      open={pendingDelete !== null}
-      onClose={closeDelete}
-      onConfirm={confirmDelete}
-      title={`Delete routine "${pendingDelete?.name ?? ''}"?`}
-      description="Its schedule and run history will be removed. This action cannot be undone."
-      confirmLabel="Delete"
-      destructive
-    />
+    <AlertDialog open={pendingDelete !== null} onOpenChange={(open) => !open && closeDelete()}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{`Delete routine "${pendingDelete?.name ?? ''}"?`}</AlertDialogTitle>
+          <AlertDialogDescription>
+            Its schedule and run history will be removed. This action cannot be undone.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction variant="destructive" onClick={confirmDelete}>
+            Delete
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 
   // One master per tab: the host's sidebar is the only master. This surface
@@ -715,13 +475,13 @@ export const ScheduledTasks = memo(() => {
   const surfaceOpen = creating || selectedTask !== null;
 
   return (
-    <div className={mergeClasses(styles.root, isGlass && styles.rootGlass)}>
-      <div className={mergeClasses(styles.detailPane, isGlass && styles.detailPaneGlass)}>
+    <div className="flex w-full h-full">
+      <div className="flex-1 min-w-0 flex flex-col">
         {!isDesktop &&
           (surfaceOpen ? (
             <TopAppBar title={creating ? 'New routine' : (selectedTask?.name ?? 'Routine')} onBack={handleBack} />
           ) : (
-            <TopAppBar title="Routines" onMenu={openMobileNav} />
+            <TopAppBar title="Routines" showMenu />
           ))}
         {surfaceOpen ? detailBody : listSurface}
       </div>
@@ -739,7 +499,6 @@ ScheduledTasks.displayName = 'ScheduledTasks';
 type RoutineRowProps = {
   task: ScheduledTask;
   projects: Project[];
-  styles: ReturnType<typeof useStyles>;
   onSelect: (taskId: string) => void;
   onRunNow: (task: ScheduledTask) => Promise<void>;
   onStartEdit: (task: ScheduledTask) => void;
@@ -748,67 +507,82 @@ type RoutineRowProps = {
 
 const stopPropagation = (e: React.SyntheticEvent) => e.stopPropagation();
 
-const RoutineRow = memo(
-  ({ task, projects, styles, onSelect, onRunNow, onStartEdit, onRequestDelete }: RoutineRowProps) => {
-    const [menuOpen, setMenuOpen] = useState(false);
-    const handleClick = useCallback(() => onSelect(task.id), [onSelect, task.id]);
-    const handleKeyDown = useCallback(
-      (e: React.KeyboardEvent) => {
-        if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
-          e.preventDefault();
-          onSelect(task.id);
-        }
-      },
-      [onSelect, task.id]
-    );
-    const handleMenuOpenChange = useCallback((_e: unknown, data: { open: boolean }) => setMenuOpen(data.open), []);
-    const handleRunNow = useCallback(() => void onRunNow(task), [onRunNow, task]);
-    const handleEdit = useCallback(() => onStartEdit(task), [onStartEdit, task]);
-    const handleDelete = useCallback(() => onRequestDelete(task), [onRequestDelete, task]);
-    const attention = rowAttention(task);
-    const project = projectLabel(task, projects);
+const RoutineRow = memo(({ task, projects, onSelect, onRunNow, onStartEdit, onRequestDelete }: RoutineRowProps) => {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const handleClick = useCallback(() => onSelect(task.id), [onSelect, task.id]);
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
+        e.preventDefault();
+        onSelect(task.id);
+      }
+    },
+    [onSelect, task.id]
+  );
+  const handleMenuOpenChange = useCallback((open: boolean) => setMenuOpen(open), []);
+  const handleRunNow = useCallback(() => void onRunNow(task), [onRunNow, task]);
+  const handleEdit = useCallback(() => onStartEdit(task), [onStartEdit, task]);
+  const handleDelete = useCallback(() => onRequestDelete(task), [onRequestDelete, task]);
+  const attention = rowAttention(task);
+  const project = projectLabel(task, projects);
 
-    return (
-      // div+role rather than <button>: the row hosts the "…" menu button, and
-      // nesting buttons inside a button is invalid markup.
-      <div role="button" tabIndex={0} className={styles.row} onClick={handleClick} onKeyDown={handleKeyDown}>
-        <span className={styles.rowTop}>
-          <span className={styles.rowTitle}>{task.name}</span>
-          {attention && <Badge color={attention.color}>{attention.label}</Badge>}
-          <span
-            role="presentation"
-            className={mergeClasses(styles.rowMenu, 'routine-row-menu', menuOpen && styles.rowMenuOpen)}
-            onClick={stopPropagation}
-          >
-            <Menu open={menuOpen} onOpenChange={handleMenuOpenChange} positioning={{ position: 'below', align: 'end' }}>
-              <MenuTrigger disableButtonEnhancement>
-                <IconButton aria-label="Routine actions" icon={<MoreHorizontal20Regular />} size="sm" />
-              </MenuTrigger>
-              <MenuPopover>
-                <MenuList>
-                  <MenuItem icon={<Play20Regular />} onClick={handleRunNow}>
-                    Run now
-                  </MenuItem>
-                  <MenuItem icon={<Edit20Regular />} onClick={handleEdit}>
-                    Edit
-                  </MenuItem>
-                  <MenuDivider />
-                  <MenuItem icon={<Delete20Regular />} className={styles.dangerMenuItem} onClick={handleDelete}>
-                    Delete…
-                  </MenuItem>
-                </MenuList>
-              </MenuPopover>
-            </Menu>
-          </span>
+  return (
+    // div+role rather than <button>: the row hosts the "…" menu button, and
+    // nesting buttons inside a button is invalid markup.
+    <div
+      role="button"
+      tabIndex={0}
+      className="flex flex-col items-stretch gap-0.5 pl-5 pr-2 pt-2 pb-2 cursor-pointer border-0 bg-transparent w-full text-left hover:bg-accent focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-primary focus-visible:-outline-offset-2 [&:hover_.routine-row-menu]:opacity-100 [&:focus-within_.routine-row-menu]:opacity-100"
+      onClick={handleClick}
+      onKeyDown={handleKeyDown}
+    >
+      <span className="flex items-center gap-2">
+        <span className="flex-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-sm text-foreground">
+          {task.name}
         </span>
-        <span className={styles.rowMeta}>
-          {scheduleLabel(task.schedule)}
-          {project ? ` · ${project}` : ''}
+        {attention && <Badge variant="secondary">{attention.label}</Badge>}
+        <span
+          role="presentation"
+          className={cn(
+            'flex items-center shrink-0 opacity-0 transition-opacity duration-100',
+            'routine-row-menu',
+            menuOpen && 'opacity-100'
+          )}
+          onClick={stopPropagation}
+        >
+          <DropdownMenu open={menuOpen} onOpenChange={handleMenuOpenChange}>
+            <DropdownMenuTrigger asChild>
+              <Button type="button" variant="ghost" size="icon-sm" aria-label="Routine actions">
+                <Ellipsis />
+              </Button>
+            </DropdownMenuTrigger>
+            <>
+              <DropdownMenuContent>
+                <DropdownMenuItem onClick={handleRunNow}>
+                  <Play />
+                  Run now
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={handleEdit}>
+                  <Edit />
+                  Edit
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem className="text-destructive" onClick={handleDelete}>
+                  <Trash2 />
+                  Delete…
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </>
+          </DropdownMenu>
         </span>
-      </div>
-    );
-  }
-);
+      </span>
+      <span className="text-xs text-muted-foreground overflow-hidden text-ellipsis whitespace-nowrap">
+        {scheduleLabel(task.schedule)}
+        {project ? ` · ${project}` : ''}
+      </span>
+    </div>
+  );
+});
 RoutineRow.displayName = 'RoutineRow';
 
 // ---------------------------------------------------------------------------
@@ -816,7 +590,6 @@ RoutineRow.displayName = 'RoutineRow';
 // ---------------------------------------------------------------------------
 
 type RoutineDetailProps = {
-  styles: ReturnType<typeof useStyles>;
   task: ScheduledTask;
   projects: Project[];
   machines: Parameters<typeof getProfileMenuLabel>[1];
@@ -829,7 +602,6 @@ type RoutineDetailProps = {
 };
 
 const RoutineDetail = ({
-  styles,
   task,
   projects,
   machines,
@@ -849,97 +621,112 @@ const RoutineDetail = ({
   return (
     <>
       {/* Header band — title + actions, like every other detail page. */}
-      <div className={styles.bandHeader}>
-        <div className={styles.bandTitleRow}>
-          <span className={styles.bandTitle}>{task.name}</span>
-          {!task.enabled && <Badge color="default">Paused</Badge>}
-          <div className={styles.bandSpacer} />
-          <Button size="sm" leftIcon={<Play20Regular />} onClick={() => void onRunNow(task)} isDisabled={busy}>
+      <div className="flex flex-col gap-0.5 pl-5 pr-5 pt-5 pb-2 border-b border-border shrink-0">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="flex-initial min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-2xl font-semibold leading-8 text-foreground">
+            {task.name}
+          </span>
+          {!task.enabled && <Badge variant="secondary">Paused</Badge>}
+          <div className="flex-1" />
+          <Button size="sm" onClick={() => void onRunNow(task)} disabled={busy}>
+            <Play />
             Run now
           </Button>
           <Button size="sm" variant="ghost" onClick={() => onStartEdit(task)}>
             Edit
           </Button>
-          <Menu positioning={{ position: 'below', align: 'end' }}>
-            <MenuTrigger disableButtonEnhancement>
-              <IconButton aria-label="More actions" icon={<MoreHorizontal20Regular />} size="sm" />
-            </MenuTrigger>
-            <MenuPopover>
-              <MenuList>
-                <MenuItem className={styles.dangerMenuItem} onClick={() => onRequestDelete(task)}>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button type="button" variant="ghost" size="icon-sm" aria-label="More actions">
+                <Ellipsis />
+              </Button>
+            </DropdownMenuTrigger>
+            <>
+              <DropdownMenuContent>
+                <DropdownMenuItem className="text-destructive" onClick={() => onRequestDelete(task)}>
                   Delete routine…
-                </MenuItem>
-              </MenuList>
-            </MenuPopover>
-          </Menu>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </>
+          </DropdownMenu>
         </div>
       </div>
 
       {/* Centered body: instructions + runs (content) | properties rail. */}
-      <div className={styles.detailBody}>
-        <div className={styles.detailBodyInner}>
-          <div className={styles.split}>
-            <div className={styles.main}>
-              <div className={styles.section}>
-                <span className={styles.sectionTitle}>Instructions</span>
-                <p className={styles.instructions}>{task.instructions}</p>
+      <div className="flex-1 min-h-0 overflow-y-auto p-8">
+        <div className="w-full max-w-4xl ml-auto mr-auto">
+          <div className="flex items-start gap-8 [@media(max-width:1000px)]:flex-col">
+            <div className="flex-1 min-w-0 flex flex-col gap-6 [@media(max-width:1000px)]:w-full [@media(max-width:1000px)]:flex-none">
+              <div className="flex flex-col gap-2">
+                <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                  Instructions
+                </span>
+                <p className="text-sm text-muted-foreground leading-6 whitespace-pre-wrap m-0">{task.instructions}</p>
               </div>
 
-              <div className={styles.section} aria-label={`${task.name} recent runs`}>
-                <span className={styles.sectionTitle}>Recent runs</span>
-                {runs.length === 0 && <Caption1 className={styles.muted}>No runs yet.</Caption1>}
+              <div className="flex flex-col gap-2" aria-label={`${task.name} recent runs`}>
+                <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                  Recent runs
+                </span>
+                {runs.length === 0 && (
+                  <span className={cn('text-xs text-muted-foreground', 'text-muted-foreground')}>No runs yet.</span>
+                )}
                 {runs.map((run) => (
-                  <RunItem key={run.id} styles={styles} task={task} run={run} onOpenSession={onOpenSession} />
+                  <RunItem key={run.id} task={task} run={run} onOpenSession={onOpenSession} />
                 ))}
               </div>
             </div>
 
-            <aside className={styles.aside} aria-label={`${task.name} properties`}>
-              <div className={styles.prop}>
-                <span className={styles.sectionTitle}>Status</span>
-                <Switch
-                  checked={task.enabled}
-                  label={task.enabled ? 'Active' : 'Paused'}
-                  onChange={(_, data) => onToggle(task, data.checked)}
-                />
+            <aside
+              className="w-60 shrink-0 flex flex-col gap-5 [@media(max-width:1000px)]:w-full"
+              aria-label={`${task.name} properties`}
+            >
+              <div className="flex flex-col gap-1">
+                <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Status</span>
+                <label className="inline-flex items-center gap-2 text-sm">
+                  <Switch checked={task.enabled} onCheckedChange={(checked) => onToggle(task, checked)} />
+                  {task.enabled ? 'Active' : 'Paused'}
+                </label>
               </div>
 
-              <div className={styles.prop}>
-                <span className={styles.sectionTitle}>Schedule</span>
-                <div className={styles.propText}>
+              <div className="flex flex-col gap-1">
+                <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Schedule</span>
+                <div className="flex flex-col gap-y-0.5 text-xs text-muted-foreground">
                   <span>{scheduleLabel(task.schedule)}</span>
                   {task.enabled && task.nextRunAt && <span>Next {formatTimestamp(task.nextRunAt)}</span>}
                 </div>
               </div>
 
-              <div className={styles.prop}>
-                <span className={styles.sectionTitle}>Project</span>
-                <div className={styles.propText}>
+              <div className="flex flex-col gap-1">
+                <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Project</span>
+                <div className="flex flex-col gap-y-0.5 text-xs text-muted-foreground">
                   <span>{project ?? 'No project'}</span>
                 </div>
               </div>
 
-              <div className={styles.prop}>
-                <span className={styles.sectionTitle}>Sandbox</span>
-                <div className={styles.propText}>
+              <div className="flex flex-col gap-1">
+                <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Sandbox</span>
+                <div className="flex flex-col gap-y-0.5 text-xs text-muted-foreground">
                   <span>{sandbox}</span>
                 </div>
               </div>
 
-              <div className={styles.prop}>
-                <span className={styles.sectionTitle}>Details</span>
-                <div className={styles.propText}>
+              <div className="flex flex-col gap-1">
+                <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Details</span>
+                <div className="flex flex-col gap-y-0.5 text-xs text-muted-foreground">
                   <span>Created {formatTimestamp(task.createdAt)}</span>
                   {task.updatedAt !== task.createdAt && <span>Updated {formatTimestamp(task.updatedAt)}</span>}
                 </div>
               </div>
 
               {(allowedToolNames.length > 0 || allowedMcpTools.length > 0) && (
-                <div className={styles.prop} aria-label={`${task.name} always allowed tools`}>
-                  <span className={styles.sectionTitle}>Allowed tools</span>
+                <div className="flex flex-col gap-1" aria-label={`${task.name} always allowed tools`}>
+                  <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                    Allowed tools
+                  </span>
                   {allowedToolNames.map((toolName) => (
-                    <div key={toolName} className={styles.toolItem}>
-                      <code className={styles.mono}>{toolName}</code>
+                    <div key={toolName} className="flex items-center justify-between gap-2">
+                      <code className="font-mono text-xs">{toolName}</code>
                       <Button
                         size="sm"
                         variant="ghost"
@@ -950,8 +737,11 @@ const RoutineDetail = ({
                     </div>
                   ))}
                   {allowedMcpTools.map((tool) => (
-                    <div key={`${tool.serverLabel}\u0000${tool.toolName}`} className={styles.toolItem}>
-                      <code className={styles.mono}>
+                    <div
+                      key={`${tool.serverLabel}\u0000${tool.toolName}`}
+                      className="flex items-center justify-between gap-2"
+                    >
+                      <code className="font-mono text-xs">
                         {tool.serverLabel} / {tool.toolName}
                       </code>
                       <Button
@@ -974,13 +764,12 @@ const RoutineDetail = ({
 };
 
 type RunItemProps = {
-  styles: ReturnType<typeof useStyles>;
   task: ScheduledTask;
   run: ScheduledTaskRun;
   onOpenSession: (task: ScheduledTask, run: ScheduledTaskRun) => Promise<void>;
 };
 
-const RunItem = memo(({ styles, task, run, onOpenSession }: RunItemProps) => {
+const RunItem = memo(({ task, run, onOpenSession }: RunItemProps) => {
   const status = RUN_STATUS[run.status];
   const waiting = isWaitingForApproval(run);
   const pendingToolLabel =
@@ -1005,23 +794,24 @@ const RunItem = memo(({ styles, task, run, onOpenSession }: RunItemProps) => {
   }, [run, task.id]);
 
   return (
-    <div className={styles.runItem}>
-      <div className={styles.runSummary}>
-        <Badge color={status.color}>{status.label}</Badge>
-        <Caption1 className={styles.muted}>{formatRunTime(run)}</Caption1>
+    <div className="flex flex-col gap-1 pt-2 pb-2">
+      <div className="flex items-center flex-wrap gap-2">
+        <Badge variant="secondary">{status.label}</Badge>
+        <span className={cn('text-xs text-muted-foreground', 'text-muted-foreground')}>{formatRunTime(run)}</span>
         {run.sessionId && (
-          <Button size="sm" variant="ghost" leftIcon={<Open20Regular />} onClick={handleOpen}>
+          <Button size="sm" variant="ghost" onClick={handleOpen}>
+            <ExternalLink />
             Open session
           </Button>
         )}
       </div>
       {waiting && (
-        <div className={styles.runSummary}>
-          <Caption1 className={styles.muted}>
+        <div className="flex items-center flex-wrap gap-2">
+          <span className={cn('text-xs text-muted-foreground', 'text-muted-foreground')}>
             {pendingToolLabel
               ? `Waiting on “${pendingToolLabel}” — approve it in the session.`
               : 'Waiting on a tool approval — approve it in the session.'}
-          </Caption1>
+          </span>
           {pendingToolLabel && (
             <Button size="sm" variant="ghost" onClick={handleAllow}>
               Always allow
@@ -1029,7 +819,7 @@ const RunItem = memo(({ styles, task, run, onOpenSession }: RunItemProps) => {
           )}
         </div>
       )}
-      {run.reason && <Caption1 className={styles.muted}>{run.reason}</Caption1>}
+      {run.reason && <span className={cn('text-xs text-muted-foreground', 'text-muted-foreground')}>{run.reason}</span>}
     </div>
   );
 });
@@ -1040,7 +830,6 @@ RunItem.displayName = 'RunItem';
 // ---------------------------------------------------------------------------
 
 type RoutineFormProps = {
-  styles: ReturnType<typeof useStyles>;
   value: RoutineFormState;
   projects: Project[];
   sandboxContext: ComponentProps<typeof SandboxPicker>['context'];
@@ -1055,7 +844,6 @@ type RoutineFormProps = {
 };
 
 const RoutineForm = ({
-  styles,
   value,
   projects,
   sandboxContext,
@@ -1073,15 +861,17 @@ const RoutineForm = ({
   };
 
   return (
-    <div className={styles.form}>
-      <Field label="Name">
+    <div className="grid gap-4">
+      <Field>
+        <FieldLabel>Name</FieldLabel>
         <Input
           value={value.name}
           onChange={(e) => setField('name', e.target.value)}
           placeholder="Morning code review"
         />
       </Field>
-      <Field label="Instructions">
+      <Field>
+        <FieldLabel>Instructions</FieldLabel>
         <Textarea
           value={value.instructions}
           onChange={(e) => setField('instructions', e.target.value)}
@@ -1089,7 +879,8 @@ const RoutineForm = ({
           rows={4}
         />
       </Field>
-      <Field label="Project" hint="Without a project, each run gets a fresh session workspace.">
+      <Field>
+        <FieldLabel>Project</FieldLabel>
         <Select value={value.projectId} onChange={(e) => setField('projectId', e.currentTarget.value)}>
           <option value="">No project</option>
           {projects.map((project) => (
@@ -1098,18 +889,24 @@ const RoutineForm = ({
             </option>
           ))}
         </Select>
+        <FieldDescription>Without a project, each run gets a fresh session workspace.</FieldDescription>
       </Field>
-      <Field label="Sandbox">
-        <div className={styles.sandboxRow}>
+      <Field>
+        <FieldLabel>Sandbox</FieldLabel>
+        <div className="flex items-center justify-between gap-4">
           <SandboxPicker
             value={value.profileName}
             onChange={(profileName) => setField('profileName', profileName)}
             context={sandboxContext}
           />
-          <span className={styles.helperText}>{getProfileMenuLabel(value.profileName, machines)}</span>
+
+          <span className="text-muted-foreground text-xs leading-5">
+            {getProfileMenuLabel(value.profileName, machines)}
+          </span>
         </div>
       </Field>
-      <Field label="Schedule">
+      <Field>
+        <FieldLabel>Schedule</FieldLabel>
         <Select
           value={value.scheduleKind}
           onChange={(e) => setField('scheduleKind', e.currentTarget.value as ScheduleKind)}
@@ -1122,12 +919,14 @@ const RoutineForm = ({
         </Select>
       </Field>
       {value.scheduleKind !== 'manual' && value.scheduleKind !== 'hourly' && (
-        <Field label="Time">
+        <Field>
+          <FieldLabel>Time</FieldLabel>
           <Input type="time" value={value.time} onChange={(e) => setField('time', e.target.value)} />
         </Field>
       )}
       {value.scheduleKind === 'weekly' && (
-        <Field label="Day">
+        <Field>
+          <FieldLabel>Day</FieldLabel>
           <Select value={value.dayOfWeek} onChange={(e) => setField('dayOfWeek', e.currentTarget.value)}>
             <option value="1">Monday</option>
             <option value="2">Tuesday</option>
@@ -1140,27 +939,26 @@ const RoutineForm = ({
         </Field>
       )}
       {showEnabled && (
-        <Switch
-          checked={value.enabled}
-          label={value.enabled ? 'Active' : 'Paused'}
-          onChange={(_, data) => setField('enabled', data.checked)}
-        />
+        <label className="inline-flex items-center gap-2 text-sm">
+          <Switch checked={value.enabled} onCheckedChange={(checked) => setField('enabled', checked)} />
+          {value.enabled ? 'Active' : 'Paused'}
+        </label>
       )}
-      <div className={styles.helperText}>
+      <div className="text-muted-foreground text-xs leading-5">
         Runs ask before using tools. When a run is waiting on a specific tool, you can always-allow it for this routine
         from its run entry.
       </div>
       {error && (
-        <MessageBar intent="error">
-          <MessageBarBody>{error}</MessageBarBody>
-        </MessageBar>
+        <Alert variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
       )}
-      <div className={styles.formButtons}>
-        <Button onClick={onSubmit} isDisabled={busy || !value.name.trim() || !value.instructions.trim()}>
+      <div className="flex items-center gap-2 mt-2">
+        <Button onClick={onSubmit} disabled={busy || !value.name.trim() || !value.instructions.trim()}>
           {submitLabel}
         </Button>
         {onCancel && (
-          <Button variant="ghost" onClick={onCancel} isDisabled={busy}>
+          <Button variant="ghost" onClick={onCancel} disabled={busy}>
             Cancel
           </Button>
         )}

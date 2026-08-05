@@ -827,10 +827,6 @@ export class RPCClient {
     }
   }
 
-  async deleteSession(sessionId: string): Promise<boolean> {
-    return this.call('delete_session', { session_id: sessionId });
-  }
-
   async clientResponse(
     requestId: string,
     ok: boolean,

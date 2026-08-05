@@ -1,41 +1,30 @@
-import { makeStyles, tokens } from '@fluentui/react-components';
 import { useStore } from '@nanostores/react';
 import type { ChangeEvent } from 'react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 
-import { Button, Card, FormField, MessageBar, MessageBarBody, SectionLabel, Select } from '@/renderer/ds';
+import { Alert, AlertDescription } from '@/renderer/ds/ui/alert';
+import { Button } from '@/renderer/ds/ui/button';
+import { Card, CardContent } from '@/renderer/ds/ui/card';
+import { Field, FieldLabel } from '@/renderer/ds/ui/field';
+import { NativeSelect as Select } from '@/renderer/ds/ui/native-select';
 import { $launcherVersion } from '@/renderer/features/Banner/state';
 import { $omniInstallProcessStatus, $omniRuntimeInfo, omniInstallApi } from '@/renderer/features/Omni/state';
 import { $sandboxProfiles } from '@/renderer/features/Sandboxes/state';
 import { getAvailableProfileNames, getProfileMenuLabel } from '@/renderer/features/SandboxProfile/profile-list';
+import { RemoteBackendCard } from '@/renderer/features/SettingsModal/RemoteBackendCard';
+import {
+  settingsCardContentClassName,
+  SettingsPane,
+  SettingsSection,
+} from '@/renderer/features/SettingsModal/SettingsLayout';
 import { emitter, isElectron } from '@/renderer/services/ipc';
 import { persistedStoreApi, selectWorkspaceDir } from '@/renderer/services/store';
-
-const useStyles = makeStyles({
-  root: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalM },
-  sectionLabelSpaced: { marginTop: tokens.spacingVerticalS },
-  text: {
-    fontSize: tokens.fontSizeBase300,
-    color: tokens.colorNeutralForeground2,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    maxWidth: '200px',
-    '@media (min-width: 640px)': { fontSize: tokens.fontSizeBase200 },
-  },
-  textSimple: {
-    fontSize: tokens.fontSizeBase300,
-    color: tokens.colorNeutralForeground2,
-    '@media (min-width: 640px)': { fontSize: tokens.fontSizeBase200 },
-  },
-});
 
 /**
  * Developer band: where sessions run and what runs them — workspace
  * directory, sandbox profile, the omni runtime, and the CLI symlink.
  */
 export const SettingsModalWorkspaceTab = memo(() => {
-  const styles = useStyles();
   const store = useStore(persistedStoreApi.$atom);
   const runtimeInfo = useStore($omniRuntimeInfo);
   const installStatus = useStore($omniInstallProcessStatus);
@@ -95,90 +84,122 @@ export const SettingsModalWorkspaceTab = memo(() => {
   const showSandboxSection = isEnterprise || store.previewFeatures || import.meta.env.MODE === 'development';
 
   return (
-    <div className={styles.root}>
+    <SettingsPane>
+      {isElectron && (
+        <SettingsSection title="Backend">
+          <RemoteBackendCard />
+        </SettingsSection>
+      )}
+
       {/* Host-filesystem concept; hosted mode mounts a workspace via Azure Files. */}
       {isElectron && (
-        <>
-          <SectionLabel>Workspace</SectionLabel>
+        <SettingsSection title="Workspace">
           <Card>
-            <FormField label="Workspace directory">
-              <span className={styles.text}>{store.workspaceDir ?? 'Default'}</span>
-              <Button size="sm" variant="ghost" onClick={selectWorkspaceDir}>
-                Change
-              </Button>
-            </FormField>
+            <CardContent>
+              <Field orientation="horizontal" className="justify-between gap-4">
+                <div className="min-w-0">
+                  <FieldLabel>Workspace directory</FieldLabel>
+                </div>
+                <span className="text-sm text-muted-foreground overflow-hidden text-ellipsis whitespace-nowrap max-w-50 sm:text-xs">
+                  {store.workspaceDir ?? 'Default'}
+                </span>
+                <Button size="sm" variant="ghost" onClick={selectWorkspaceDir}>
+                  Change
+                </Button>
+              </Field>
+            </CardContent>
           </Card>
-        </>
+        </SettingsSection>
       )}
 
       {showSandboxSection && (
-        <>
-          <SectionLabel className={styles.sectionLabelSpaced}>Sandbox</SectionLabel>
+        <SettingsSection title="Sandbox">
           <Card>
-            <FormField label="Default sandbox profile">
-              <Select value={currentProfile} onChange={onChangeProfile}>
-                {availableProfiles.map((name) => (
-                  <option key={name} value={name}>
-                    {getProfileMenuLabel(name)}
-                  </option>
-                ))}
-              </Select>
-            </FormField>
+            <CardContent>
+              <Field orientation="horizontal" className="justify-between gap-4">
+                <div className="min-w-0">
+                  <FieldLabel>Default sandbox profile</FieldLabel>
+                </div>
+                <Select value={currentProfile} onChange={onChangeProfile}>
+                  {availableProfiles.map((name) => (
+                    <option key={name} value={name}>
+                      {getProfileMenuLabel(name)}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+            </CardContent>
           </Card>
-        </>
+        </SettingsSection>
       )}
 
       {/* Runtime install + CLI-in-PATH are host operations; in cloud the runtime is image-baked. */}
       {!isEnterprise && isElectron && (
-        <>
-          <SectionLabel className={styles.sectionLabelSpaced}>Runtime</SectionLabel>
+        <SettingsSection title="Runtime">
           <Card>
-            <FormField label={`Runtime${runtimeInfo.isInstalled ? ` (v${runtimeInfo.version})` : ''}`}>
-              <Button size="sm" variant="ghost" onClick={reinstallRuntime} isDisabled={isInstalling}>
-                {isInstalling
-                  ? runtimeInfo.isInstalled
-                    ? 'Reinstalling…'
-                    : 'Installing…'
-                  : runtimeInfo.isInstalled
-                    ? 'Reinstall'
-                    : 'Install'}
-              </Button>
-            </FormField>
-            <FormField label="'omni' command in PATH">
-              {cliInPath?.installed ? (
-                <span className={styles.textSimple}>Installed</span>
-              ) : (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={installCliToPath}
-                  isDisabled={!runtimeInfo.isInstalled || cliInstalling}
-                >
-                  {cliInstalling ? 'Installing…' : 'Install'}
+            <CardContent className={settingsCardContentClassName}>
+              <Field orientation="horizontal" className="justify-between gap-4">
+                <div className="min-w-0">
+                  <FieldLabel>{`Runtime${runtimeInfo.isInstalled ? ` (v${runtimeInfo.version})` : ''}`}</FieldLabel>
+                </div>
+                <Button size="sm" variant="ghost" onClick={reinstallRuntime} disabled={isInstalling}>
+                  {isInstalling
+                    ? runtimeInfo.isInstalled
+                      ? 'Reinstalling…'
+                      : 'Installing…'
+                    : runtimeInfo.isInstalled
+                      ? 'Reinstall'
+                      : 'Install'}
                 </Button>
+              </Field>
+              <Field orientation="horizontal" className="justify-between gap-4">
+                <div className="min-w-0">
+                  <FieldLabel>&apos;omni&apos; command in PATH</FieldLabel>
+                </div>
+                {cliInPath?.installed ? (
+                  <span className="text-sm text-muted-foreground sm:text-xs">Installed</span>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={installCliToPath}
+                    disabled={!runtimeInfo.isInstalled || cliInstalling}
+                  >
+                    {cliInstalling ? 'Installing…' : 'Install'}
+                  </Button>
+                )}
+              </Field>
+              {cliError && (
+                <Alert variant="destructive">
+                  <AlertDescription>{cliError}</AlertDescription>
+                </Alert>
               )}
-            </FormField>
-            {cliError && (
-              <MessageBar intent="error">
-                <MessageBarBody>{cliError}</MessageBarBody>
-              </MessageBar>
-            )}
+            </CardContent>
           </Card>
-        </>
+        </SettingsSection>
       )}
 
-      <SectionLabel className={styles.sectionLabelSpaced}>About</SectionLabel>
-      <Card>
-        <FormField label="Launcher version">
-          <span className={styles.textSimple}>{launcherVersion ?? '—'}</span>
-        </FormField>
-        <FormField label="Compute">
-          <span className={styles.textSimple}>
-            {currentProfile === 'platform' ? 'Managed' : currentProfile === 'host' ? 'None' : 'Local'}
-          </span>
-        </FormField>
-      </Card>
-    </div>
+      <SettingsSection title="About">
+        <Card>
+          <CardContent className={settingsCardContentClassName}>
+            <Field orientation="horizontal" className="justify-between gap-4">
+              <div className="min-w-0">
+                <FieldLabel>Launcher version</FieldLabel>
+              </div>
+              <span className="text-sm text-muted-foreground sm:text-xs">{launcherVersion ?? '—'}</span>
+            </Field>
+            <Field orientation="horizontal" className="justify-between gap-4">
+              <div className="min-w-0">
+                <FieldLabel>Compute</FieldLabel>
+              </div>
+              <span className="text-sm text-muted-foreground sm:text-xs">
+                {currentProfile === 'platform' ? 'Managed' : currentProfile === 'host' ? 'None' : 'Local'}
+              </span>
+            </Field>
+          </CardContent>
+        </Card>
+      </SettingsSection>
+    </SettingsPane>
   );
 });
 SettingsModalWorkspaceTab.displayName = 'SettingsModalWorkspaceTab';

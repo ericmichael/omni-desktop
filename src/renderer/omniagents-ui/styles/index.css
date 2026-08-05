@@ -1,363 +1,19 @@
-:root {
-  /* Default dark theme — indigo brand on zinc neutrals. Matches the Fluent
-     `default` theme overrides in fluent-themes.ts so components using the
-     --omni-* tokens paint on the same palette as Fluent's colorNeutral*. */
-  --omni-brand: 99 102 241; /* #6366f1  indigo (Fluent brand) */
-  --omni-bgMain: 9 9 11; /* #09090b  zinc-950 (bg1) */
-  --omni-bgColumn: 24 24 27; /* #18181b  zinc-900 (bg2) */
-  --omni-bgCard: 24 24 27; /* #18181b  zinc-900 (bg2) */
-  --omni-bgCardAlt: 39 39 42; /* #27272a  zinc-800 (bg3) */
-  --omni-textSubtle: 113 113 122; /* #71717a  zinc-500 (fg3) */
-  --omni-successGreen: 74 222 128; /* #4ade80  green-400 */
-  --omni-warningOrange: 251 191 36; /* #fbbf24  amber-400 */
-  --omni-errorRed: 248 113 113; /* #f87171  red-400 */
-  --omni-textPrimary: 250 250 250; /* #fafafa  zinc-50 (fg1) */
-  --omni-textHeading: 250 250 250; /* #fafafa  zinc-50 */
-  --omni-textSecondary: 161 161 170; /* #a1a1aa  zinc-400 (fg2) */
-}
-
-[data-theme='teams-light'] {
-  --omni-brand: 0 120 212; /* #0078D4  M365 brand blue */
-  --omni-bgMain: 255 255 255; /* #FFFFFF  page background */
-  --omni-bgColumn: 250 250 250; /* #FAFAFA  sidebar */
-  --omni-bgCard: 245 245 245; /* #F5F5F5  card surface */
-  --omni-bgCardAlt: 235 235 235; /* #EBEBEB  input / alt surface */
-  --omni-textSubtle: 97 97 97; /* #616161  placeholder */
-  --omni-successGreen: 14 122 13; /* #0E7A0D  Teams green */
-  --omni-warningOrange: 138 116 0; /* #8A7400  Teams warning */
-  --omni-errorRed: 196 49 75; /* #C4314B  Teams red */
-  --omni-textPrimary: 66 66 66; /* #424242  body text */
-  --omni-textHeading: 36 36 36; /* #242424  heading text */
-  --omni-textSecondary: 97 97 97; /* #616161  secondary text */
-}
-
-[data-theme='teams-dark'] {
-  --omni-brand: 58 159 232; /* #3A9FE8  M365 brand blue (dark) */
-  --omni-bgMain: 31 31 31; /* #1F1F1F  page background */
-  --omni-bgColumn: 43 43 43; /* #2B2B2B  sidebar */
-  --omni-bgCard: 51 51 51; /* #333333  card surface */
-  --omni-bgCardAlt: 64 64 64; /* #404040  input / alt surface */
-  --omni-textSubtle: 158 158 158; /* #9E9E9E  placeholder */
-  --omni-successGreen: 19 161 14; /* #13A10E  Teams green (dark) */
-  --omni-warningOrange: 252 225 0; /* #FCE100  Teams warning (dark) */
-  --omni-errorRed: 231 72 86; /* #E74856  Teams red (dark) */
-  --omni-textPrimary: 200 200 200; /* #C8C8C8  body text */
-  --omni-textHeading: 224 224 224; /* #E0E0E0  heading text */
-  --omni-textSecondary: 158 158 158; /* #9E9E9E  secondary text */
-}
-
-[data-theme='tokyo-night'] {
-  --omni-brand: 61 89 161; /* #3d59a1  button.background */
-  --omni-bgMain: 26 27 38; /* #1a1b26  editor.background */
-  --omni-bgColumn: 22 22 30; /* #16161e  sideBar.background */
-  --omni-bgCard: 28 29 41; /* #1c1d29  list.inactiveSelectionBackground */
-  --omni-bgCardAlt: 41 46 66; /* #292e42  bg_highlight */
-  --omni-textSubtle: 84 92 126; /* #545c7e  disabledForeground */
-  --omni-successGreen: 158 206 106; /* #9ece6a  green */
-  --omni-warningOrange: 224 175 104; /* #e0af68  yellow */
-  --omni-errorRed: 247 118 142; /* #f7768e  terminal.ansiRed */
-  --omni-textPrimary: 169 177 214; /* #a9b1d6  foreground */
-  --omni-textHeading: 192 202 245; /* #c0caf5  editor.foreground */
-  --omni-textSecondary: 120 124 153; /* #787c99  comment */
-}
-
-[data-theme='vscode-dark'] {
-  --omni-brand: 0 120 212; /* #0078D4  button.background */
-  --omni-bgMain: 31 31 31; /* #1F1F1F  editor.background */
-  --omni-bgColumn: 24 24 24; /* #181818  sideBar.background */
-  --omni-bgCard: 43 43 43; /* #2B2B2B  panel.border */
-  --omni-bgCardAlt: 49 49 49; /* #313131  input.background */
-  --omni-textSubtle: 157 157 157; /* #9D9D9D  descriptionForeground */
-  --omni-successGreen: 13 188 121; /* #0DBC79  terminal.ansiGreen */
-  --omni-warningOrange: 204 167 0; /* #CCA700  list.warningForeground */
-  --omni-errorRed: 248 81 73; /* #F85149  errorForeground */
-}
-
-[data-theme='vscode-light'] {
-  --omni-brand: 0 95 184; /* #005FB8  button.background */
-  --omni-bgMain: 255 255 255; /* #FFFFFF  editor.background */
-  --omni-bgColumn: 248 248 248; /* #F8F8F8  sideBar.background */
-  --omni-bgCard: 243 243 243; /* #F3F3F3  welcomePage.tileBackground */
-  --omni-bgCardAlt: 229 229 229; /* #E5E5E5  sideBar.border */
-  --omni-textSubtle: 118 118 118; /* #767676  input.placeholderForeground */
-  --omni-successGreen: 46 160 67; /* #2EA043  editorGutter.addedBackground */
-  --omni-warningOrange: 204 167 0; /* #CCA700  list.warningForeground */
-  --omni-errorRed: 248 81 73; /* #F85149  errorForeground */
-  --omni-textPrimary: 59 59 59; /* #3B3B3B  editor.foreground */
-  --omni-textHeading: 31 31 31; /* #1F1F1F  foreground */
-  --omni-textSecondary: 97 97 97; /* #616161  descriptionForeground */
-}
-
-[data-theme='utrgv'] {
-  --omni-brand: 240 80 35; /* #F05023  UTRGV brand orange */
-  --omni-bgMain: 247 247 248; /* #F7F7F8  soft off-white page */
-  --omni-bgColumn: 241 241 243; /* #F1F1F3  sidebar */
-  --omni-bgCard: 255 255 255; /* #FFFFFF  white cards */
-  --omni-bgCardAlt: 255 255 255; /* #FFFFFF  white input/surfaces */
-  --omni-textSubtle: 142 142 147; /* #8E8E93  subtle/placeholder text */
-  --omni-successGreen: 26 127 55; /* #1A7F37  green */
-  --omni-warningOrange: 180 120 0; /* #B47800  warm amber warning */
-  --omni-errorRed: 200 30 30; /* #C81E1E  strong red */
-  --omni-textPrimary: 36 36 40; /* #242428  body text */
-  --omni-textHeading: 26 26 30; /* #1A1A1E  heading text */
-  --omni-textSecondary: 100 100 105; /* #646469  UTRGV gray */
-}
-
-/* UTRGV: give the input container a visible border on the off-white page */
-[data-theme='utrgv'] .border-bgCardAlt {
-  border-color: rgb(210 210 215) !important;
-}
-
-/* UTRGV: fix white icons/text on white input — except on colored button backgrounds */
-[data-theme='utrgv'] .bg-bgCardAlt .text-white {
-  color: rgb(var(--omni-textSecondary)) !important;
-}
-[data-theme='utrgv'] .bg-bgCardAlt .bg-brand.text-white,
-[data-theme='utrgv'] .bg-bgCardAlt .bg-errorRed.text-white {
-  color: #ffffff !important;
-}
-[data-theme='utrgv'] .bg-bgCardAlt button:disabled {
-  background-color: rgb(230 230 233) !important;
-  color: rgb(160 160 168) !important;
-}
-
-[data-theme='utrgv'] .prose-invert {
-  --tw-prose-body: rgb(var(--omni-textPrimary));
-  --tw-prose-headings: rgb(var(--omni-textHeading));
-  --tw-prose-bold: rgb(var(--omni-textHeading));
-  --tw-prose-links: rgb(var(--omni-brand));
-  --tw-prose-code: rgb(var(--omni-textPrimary));
-  --tw-prose-pre-code: rgb(var(--omni-textPrimary));
-  --tw-prose-counters: rgb(var(--omni-textSecondary));
-  --tw-prose-bullets: rgb(var(--omni-textSecondary));
-  --tw-prose-hr: rgb(var(--omni-bgCardAlt));
-  --tw-prose-quotes: rgb(var(--omni-textPrimary));
-  --tw-prose-quote-borders: rgb(var(--omni-bgCardAlt));
-  --tw-prose-captions: rgb(var(--omni-textSecondary));
-  --tw-prose-th-borders: rgb(var(--omni-bgCardAlt));
-  --tw-prose-td-borders: rgb(var(--omni-bgCardAlt));
-}
-
-[data-theme='teams-light'] .prose-invert {
-  --tw-prose-body: rgb(var(--omni-textPrimary));
-  --tw-prose-headings: rgb(var(--omni-textHeading));
-  --tw-prose-bold: rgb(var(--omni-textHeading));
-  --tw-prose-links: rgb(var(--omni-brand));
-  --tw-prose-code: rgb(var(--omni-textPrimary));
-  --tw-prose-pre-code: rgb(var(--omni-textPrimary));
-  --tw-prose-counters: rgb(var(--omni-textSecondary));
-  --tw-prose-bullets: rgb(var(--omni-textSecondary));
-  --tw-prose-hr: rgb(var(--omni-bgCardAlt));
-  --tw-prose-quotes: rgb(var(--omni-textPrimary));
-  --tw-prose-quote-borders: rgb(var(--omni-bgCardAlt));
-  --tw-prose-captions: rgb(var(--omni-textSecondary));
-  --tw-prose-th-borders: rgb(var(--omni-bgCardAlt));
-  --tw-prose-td-borders: rgb(var(--omni-bgCardAlt));
-}
-
-[data-theme='vscode-light'] .prose-invert {
-  --tw-prose-body: rgb(var(--omni-textPrimary));
-  --tw-prose-headings: rgb(var(--omni-textHeading));
-  --tw-prose-bold: rgb(var(--omni-textHeading));
-  --tw-prose-links: rgb(var(--omni-brand));
-  --tw-prose-code: rgb(var(--omni-textPrimary));
-  --tw-prose-pre-code: rgb(var(--omni-textPrimary));
-  --tw-prose-counters: rgb(var(--omni-textSecondary));
-  --tw-prose-bullets: rgb(var(--omni-textSecondary));
-  --tw-prose-hr: rgb(var(--omni-bgCardAlt));
-  --tw-prose-quotes: rgb(var(--omni-textPrimary));
-  --tw-prose-quote-borders: rgb(var(--omni-bgCardAlt));
-  --tw-prose-captions: rgb(var(--omni-textSecondary));
-  --tw-prose-th-borders: rgb(var(--omni-bgCardAlt));
-  --tw-prose-td-borders: rgb(var(--omni-bgCardAlt));
-}
-
-/* ── shadcn semantic tokens (HSL triplets) ───────────────────────────
-   Standard shadcn convention: each theme defines `--primary`,
-   `--secondary`, etc. as **space-separated HSL triplets** so that
-   `hsl(var(--primary))` resolves correctly.
-
-   This is the format yoopta (@yoopta/themes-shadcn), radix, the
-   AI-elements library, and every shadcn-aware tool assume. The earlier
-   attempt to redefine these as `rgb(var(--omni-*))` broke every
-   `hsl(var(--X))` call-site (invalid CSS → transparent).
-
-   Tailwind utilities (`bg-primary`, etc.) are wired in tailwind.css
-   through `--color-primary: hsl(var(--primary))` so there is a single
-   source of truth for semantic color per theme. The `--omni-*` RGB
-   tokens above remain only for places that need a full `rgb()` form
-   (e.g. `color-mix(in srgb, rgb(var(--omni-bgMain)) 22%, transparent)`).
-   ------------------------------------------------------------------ */
-:root {
-  /* Default dark theme — shadcn "new-york" dark values on zinc neutrals
-     with indigo primary/ring. HSL triplets here mirror the --omni-* RGB
-     values above (zinc-950/900/800) so both color systems agree. */
-  --background: 240 10% 3.9%;
-  --foreground: 0 0% 98%;
-  --card: 240 5.9% 10%;
-  --card-foreground: 0 0% 98%;
-  --popover: 240 5.9% 10%;
-  --popover-foreground: 0 0% 98%;
-  --primary: 239 84% 67%;
-  --primary-foreground: 0 0% 100%;
-  --secondary: 240 3.7% 15.9%;
-  --secondary-foreground: 0 0% 98%;
-  --muted: 240 5.9% 10%;
-  --muted-foreground: 240 5% 64.9%;
-  --accent: 240 3.7% 15.9%;
-  --accent-foreground: 0 0% 98%;
-  --destructive: 0 84% 65%;
-  --destructive-foreground: 0 0% 98%;
-  --border: 240 3.7% 15.9%;
-  --input: 240 3.7% 15.9%;
-  --ring: 239 84% 67%;
-  --sidebar: 240 5.9% 10%;
-  --sidebar-foreground: 0 0% 98%;
-  --radius: 0.5rem;
-}
-
-[data-theme='teams-light'] {
-  --background: 0 0% 100%;
-  --foreground: 0 0% 25.9%;
-  --card: 0 0% 96.1%;
-  --card-foreground: 0 0% 25.9%;
-  --popover: 0 0% 96.1%;
-  --popover-foreground: 0 0% 25.9%;
-  --primary: 206 100% 41.6%;
-  --primary-foreground: 0 0% 100%;
-  --secondary: 0 0% 92.2%;
-  --secondary-foreground: 0 0% 14.1%;
-  --muted: 0 0% 98%;
-  --muted-foreground: 0 0% 38%;
-  --accent: 0 0% 92.2%;
-  --accent-foreground: 0 0% 14.1%;
-  --destructive: 349 60% 48%;
-  --destructive-foreground: 0 0% 100%;
-  --border: 0 0% 92.2%;
-  --input: 0 0% 92.2%;
-  --ring: 206 100% 41.6%;
-  --sidebar: 0 0% 98%;
-  --sidebar-foreground: 0 0% 25.9%;
-}
-
-[data-theme='teams-dark'] {
-  --background: 0 0% 12.2%;
-  --foreground: 0 0% 78.4%;
-  --card: 0 0% 20%;
-  --card-foreground: 0 0% 78.4%;
-  --popover: 0 0% 20%;
-  --popover-foreground: 0 0% 78.4%;
-  --primary: 205 79.1% 56.9%;
-  --primary-foreground: 0 0% 100%;
-  --secondary: 0 0% 25.1%;
-  --secondary-foreground: 0 0% 87.8%;
-  --muted: 0 0% 16.9%;
-  --muted-foreground: 0 0% 62%;
-  --accent: 0 0% 25.1%;
-  --accent-foreground: 0 0% 87.8%;
-  --destructive: 355 76.8% 59.4%;
-  --destructive-foreground: 0 0% 100%;
-  --border: 0 0% 25.1%;
-  --input: 0 0% 25.1%;
-  --ring: 205 79.1% 56.9%;
-  --sidebar: 0 0% 16.9%;
-  --sidebar-foreground: 0 0% 78.4%;
-}
-
-[data-theme='tokyo-night'] {
-  --background: 235 18.8% 12.5%;
-  --foreground: 229 35.4% 75.1%;
-  --card: 235 18.8% 13.5%;
-  --card-foreground: 229 35.4% 75.1%;
-  --popover: 235 18.8% 13.5%;
-  --popover-foreground: 229 35.4% 75.1%;
-  --primary: 223 45% 43.5%;
-  --primary-foreground: 0 0% 100%;
-  --secondary: 228 23.4% 21%;
-  --secondary-foreground: 229 72.6% 85.7%;
-  --muted: 240 15.4% 10.2%;
-  --muted-foreground: 229 20% 41.2%;
-  --accent: 228 23.4% 21%;
-  --accent-foreground: 229 72.6% 85.7%;
-  --destructive: 349 89% 71.6%;
-  --destructive-foreground: 0 0% 100%;
-  --border: 228 23.4% 21%;
-  --input: 228 23.4% 21%;
-  --ring: 223 45% 43.5%;
-  --sidebar: 240 15.4% 10.2%;
-  --sidebar-foreground: 229 35.4% 75.1%;
-}
-
-[data-theme='vscode-dark'] {
-  --background: 0 0% 12.2%;
-  --foreground: 0 0% 80%;
-  --card: 0 0% 16.9%;
-  --card-foreground: 0 0% 80%;
-  --popover: 0 0% 16.9%;
-  --popover-foreground: 0 0% 80%;
-  --primary: 206 100% 41.6%;
-  --primary-foreground: 0 0% 100%;
-  --secondary: 0 0% 19.2%;
-  --secondary-foreground: 0 0% 100%;
-  --muted: 0 0% 9.4%;
-  --muted-foreground: 0 0% 61.6%;
-  --accent: 0 0% 19.2%;
-  --accent-foreground: 0 0% 100%;
-  --destructive: 3 92.6% 62.9%;
-  --destructive-foreground: 0 0% 100%;
-  --border: 0 0% 19.2%;
-  --input: 0 0% 19.2%;
-  --ring: 206 100% 41.6%;
-  --sidebar: 0 0% 9.4%;
-  --sidebar-foreground: 0 0% 80%;
-}
-
-[data-theme='vscode-light'] {
-  --background: 0 0% 100%;
-  --foreground: 0 0% 23.1%;
-  --card: 0 0% 95.3%;
-  --card-foreground: 0 0% 23.1%;
-  --popover: 0 0% 95.3%;
-  --popover-foreground: 0 0% 23.1%;
-  --primary: 209 100% 36.1%;
-  --primary-foreground: 0 0% 100%;
-  --secondary: 0 0% 89.8%;
-  --secondary-foreground: 0 0% 12.2%;
-  --muted: 0 0% 97.3%;
-  --muted-foreground: 0 0% 46.3%;
-  --accent: 0 0% 89.8%;
-  --accent-foreground: 0 0% 12.2%;
-  --destructive: 3 92.6% 62.9%;
-  --destructive-foreground: 0 0% 100%;
-  --border: 0 0% 89.8%;
-  --input: 0 0% 89.8%;
-  --ring: 209 100% 36.1%;
-  --sidebar: 0 0% 97.3%;
-  --sidebar-foreground: 0 0% 23.1%;
-}
-
-[data-theme='utrgv'] {
-  --background: 240 6.7% 97.1%;
-  --foreground: 240 7.1% 11%;
-  --card: 0 0% 100%;
-  --card-foreground: 240 7.1% 11%;
-  --popover: 0 0% 100%;
-  --popover-foreground: 240 7.1% 11%;
-  --primary: 13 87.2% 53.9%;
-  --primary-foreground: 0 0% 100%;
-  --secondary: 0 0% 92%;
-  --secondary-foreground: 240 7.1% 11%;
-  --muted: 240 7.7% 94.9%;
-  --muted-foreground: 240 2.3% 56.7%;
-  --accent: 0 0% 92%;
-  --accent-foreground: 240 7.1% 11%;
-  --destructive: 0 72.2% 50.6%;
-  --destructive-foreground: 0 0% 100%;
-  --border: 240 5% 86.7%;
-  --input: 240 5% 86.7%;
-  --ring: 13 87.2% 53.9%;
-  --sidebar: 240 7.7% 94.9%;
-  --sidebar-foreground: 240 7.1% 11%;
+/* Markdown typography follows the active shadcn semantic theme. */
+.prose-invert {
+  --tw-prose-body: var(--foreground);
+  --tw-prose-headings: var(--foreground);
+  --tw-prose-bold: var(--foreground);
+  --tw-prose-links: var(--primary);
+  --tw-prose-code: var(--foreground);
+  --tw-prose-pre-code: var(--foreground);
+  --tw-prose-counters: var(--muted-foreground);
+  --tw-prose-bullets: var(--muted-foreground);
+  --tw-prose-hr: var(--border);
+  --tw-prose-quotes: var(--foreground);
+  --tw-prose-quote-borders: var(--border);
+  --tw-prose-captions: var(--muted-foreground);
+  --tw-prose-th-borders: var(--border);
+  --tw-prose-td-borders: var(--border);
 }
 
 /* Default border color for bare `border` utilities (shadcn convention) */
@@ -383,6 +39,68 @@ body,
   width: 100%;
   margin-left: auto;
   margin-right: auto;
+}
+
+.max-h-dialog {
+  max-height: 80vh;
+}
+
+.image-lightbox-media {
+  max-width: 90vw;
+  max-height: 90vh;
+}
+
+.terminal-panel-height {
+  height: 50vh;
+}
+
+@media (min-width: 40rem) {
+  .terminal-panel-height {
+    height: 70vh;
+  }
+}
+
+.mcp-app-frame {
+  height: 70vh;
+  min-height: 20rem;
+}
+
+.approval-rich-body-collapsed {
+  max-height: 40vh;
+}
+
+.markdown-overflow-wrap :where(a, code) {
+  overflow-wrap: anywhere;
+}
+
+.code-block-lines {
+  counter-increment: line 0;
+  counter-reset: line;
+}
+
+.code-block-line-number::before {
+  content: counter(line);
+  counter-increment: line;
+}
+
+.optimize-offscreen-content {
+  contain-intrinsic-size: auto 200px;
+  content-visibility: auto;
+}
+
+@keyframes slide-in-right {
+  from {
+    opacity: 0;
+    transform: translateX(1rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.animate-slide-in-right {
+  animation: slide-in-right 300ms ease-out;
 }
 
 body.resizing {
@@ -426,7 +144,7 @@ body.resizing {
 }
 
 .text-shimmer {
-  background: linear-gradient(90deg, rgb(var(--omni-textSubtle)) 0%, #cbd5e1 50%, rgb(var(--omni-textSubtle)) 100%);
+  background: linear-gradient(90deg, var(--muted-foreground) 0%, var(--foreground) 50%, var(--muted-foreground) 100%);
   background-size: 200% 100%;
   -webkit-background-clip: text;
   background-clip: text;
@@ -436,7 +154,7 @@ body.resizing {
 
 /* Force prose content to inherit wrapper color (for orange preamble) */
 .prose-warning {
-  color: rgb(var(--omni-warningOrange));
+  color: var(--color-warning);
 }
 .prose-warning {
   --tw-prose-body: currentColor;
@@ -460,29 +178,4 @@ body.resizing {
 }
 .prose-warning :where(ol > li::marker, ul > li::marker) {
   color: inherit !important;
-}
-
-/* ── Global agent (orchestrator) surface ───────────────────────────────────
-   A faint brand (indigo) wash on the omniagents surfaces so the workspace-agent
-   panel reads as visually distinct from code-deck columns. Scoped to
-   `.omni-global-agent`; the overrides cascade into the omniagents tree rendered
-   inside the panel (a closer ancestor than `:root`/`[data-theme]`), so columns
-   elsewhere are unaffected. Tune the triplets here to taste. */
-.omni-global-agent {
-  --omni-bgMain: 17 17 27; /* zinc-950 nudged toward indigo */
-  --omni-bgColumn: 28 28 40;
-  --omni-bgCard: 28 28 40;
-  --omni-bgCardAlt: 44 44 60;
-}
-[data-theme='teams-light'] .omni-global-agent {
-  --omni-bgMain: 248 248 255; /* faint lavender on white */
-  --omni-bgColumn: 244 244 252;
-  --omni-bgCard: 240 240 250;
-  --omni-bgCardAlt: 230 230 245;
-}
-[data-theme='teams-dark'] .omni-global-agent {
-  --omni-bgMain: 33 33 46;
-  --omni-bgColumn: 45 45 60;
-  --omni-bgCard: 50 50 66;
-  --omni-bgCardAlt: 64 64 84;
 }

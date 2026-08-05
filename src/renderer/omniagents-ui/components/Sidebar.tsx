@@ -1,49 +1,33 @@
-import {
-  Button,
-  Caption1,
-  Dialog,
-  DialogActions,
-  DialogBody,
-  DialogContent,
-  DialogSurface,
-  DialogTitle,
-  DialogTrigger,
-  makeStyles,
-  Menu,
-  MenuItem,
-  MenuList,
-  MenuPopover,
-  MenuTrigger,
-  mergeClasses,
-  NavDrawer,
-  NavDrawerBody,
-  NavDrawerHeader,
-  NavItem,
-  NavSectionHeader,
-  SearchBox,
-  Subtitle2,
-  tokens,
-  Tooltip,
-} from '@fluentui/react-components';
-import {
-  Add20Regular,
-  Chat48Regular,
-  Delete20Regular,
-  Dismiss20Regular,
-  MoreHorizontal20Regular,
-} from '@fluentui/react-icons';
+import './Sidebar.css';
+
+import { MessageCircle, Plus, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 
-import { formatRelativeTime, generateSessionTitle } from '@/renderer/omniagents-ui/lib/utils';
-
-import type { SessionItem } from './SessionList';
-
+import { cn } from '@/renderer/ds/cn';
+import { Button } from '@/renderer/ds/ui/button';
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/renderer/ds/ui/sheet';
 // Pick desktop vs mobile layout via matchMedia rather than relying on
 // `hidden md:flex` / `md:hidden` utilities. Those patterns are broken in this
 // app because a pre-compiled shadcn/ai-elements CSS bundle ships a plain
 // `.hidden{display:none}` rule that loads AFTER Tailwind v4's output and wins
 // the cascade over `.md:flex`, so the desktop-inline sidebar would stay
 // `display: none` at every viewport size.
+import {
+  Sidebar as ShadcnSidebar,
+  SidebarContent,
+  SidebarGroup,
+  SidebarGroupLabel,
+  SidebarHeader,
+  SidebarInput,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarProvider,
+} from '@/renderer/ds/ui/sidebar';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/renderer/ds/ui/tooltip';
+import { formatRelativeTime, generateSessionTitle } from '@/renderer/omniagents-ui/lib/utils';
+
+import type { SessionItem } from './SessionList';
 function useIsDesktop(breakpointPx = 768): boolean {
   const [isDesktop, setIsDesktop] = useState(() =>
     typeof window !== 'undefined' ? window.matchMedia(`(min-width: ${breakpointPx}px)`).matches : true
@@ -102,125 +86,6 @@ function bucketFor(ts: number): Bucket {
   return 'older';
 }
 
-const useStyles = makeStyles({
-  /* Drawer sizes: NavDrawer defaults to 260px; we bump to 288px to match the
-     prior design and give room for two-line items.
-
-     Explicit bg1 to match the Settings and Projects sidebars. NavDrawer's
-     default (from @fluentui/react-drawer) is also bg1, but in this tree it
-     ends up picking up a darker hover/selected layer — forcing bg1 here
-     aligns it with the other internal sidebars. */
-  drawer: {
-    minWidth: '288px',
-    maxWidth: '288px',
-    backgroundColor: tokens.colorNeutralBackground1,
-  },
-  drawerOverlay: {
-    boxSizing: 'border-box',
-    paddingLeft: 'env(safe-area-inset-left, 0px)',
-    paddingRight: 'env(safe-area-inset-right, 0px)',
-  },
-  /* 24px top to match the Settings sidebar and app nav rail. */
-  headerStack: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalS,
-    paddingTop: tokens.spacingVerticalXXL,
-    paddingBottom: tokens.spacingVerticalL,
-  },
-  headerStackOverlay: {
-    paddingTop: `calc(${tokens.spacingVerticalXXL} + env(safe-area-inset-top, 0px))`,
-  },
-  headerRow: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: tokens.spacingHorizontalS,
-  },
-  headerActions: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalXXS,
-  },
-  /* Session row = NavItem + kebab Menu side-by-side. NavItem takes the
-     remaining flex space; kebab button appears on row hover/focus (the
-     :focus-within branch keeps it visible during keyboard nav). */
-  sessionRow: {
-    position: 'relative',
-    display: 'flex',
-    alignItems: 'center',
-    '&:hover [data-reveal="kebab"], &:focus-within [data-reveal="kebab"]': {
-      opacity: 1,
-    },
-    /* Touch devices have no hover — keep the kebab always visible there,
-       otherwise delete/actions are unreachable. */
-    '@media (hover: none)': {
-      '& [data-reveal="kebab"]': {
-        opacity: 1,
-      },
-    },
-  },
-  sessionNavItem: {
-    flex: '1 1 0',
-    minWidth: 0,
-    /* Reserve room for the always-visible kebab on touch so it doesn't
-       overlap the session title/timestamp. */
-    '@media (hover: none)': {
-      paddingRight: '36px',
-    },
-  },
-  sessionLabel: {
-    display: 'flex',
-    flexDirection: 'column',
-    minWidth: 0,
-    gap: '2px',
-  },
-  sessionTitle: {
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-  },
-  sessionMeta: {
-    color: tokens.colorNeutralForeground3,
-  },
-  kebabWrap: {
-    position: 'absolute',
-    top: '50%',
-    right: tokens.spacingHorizontalXS,
-    transform: 'translateY(-50%)',
-    opacity: 0,
-    transitionProperty: 'opacity',
-    transitionDuration: '150ms',
-  },
-  /* Empty + no-match states */
-  emptyState: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    height: '100%',
-    color: tokens.colorNeutralForeground3,
-    paddingLeft: tokens.spacingHorizontalXL,
-    paddingRight: tokens.spacingHorizontalXL,
-    paddingTop: tokens.spacingVerticalXL,
-    paddingBottom: tokens.spacingVerticalXL,
-    textAlign: 'center',
-  },
-  emptyIcon: {
-    marginBottom: tokens.spacingVerticalS,
-    opacity: 0.5,
-  },
-  noMatches: {
-    textAlign: 'center',
-    color: tokens.colorNeutralForeground3,
-    paddingTop: tokens.spacingVerticalM,
-    paddingBottom: tokens.spacingVerticalM,
-  },
-  bodyOverlay: {
-    paddingBottom: `calc(${tokens.spacingVerticalL} + var(--safe-area-bottom, env(safe-area-inset-bottom, 0px)))`,
-  },
-});
-
 export function Sidebar({
   open,
   sessions,
@@ -228,7 +93,6 @@ export function Sidebar({
   onClose,
   onNewChat,
   onSelect,
-  onDelete,
 }: {
   open: boolean;
   sessions: SessionItem[];
@@ -236,11 +100,8 @@ export function Sidebar({
   onClose: () => void;
   onNewChat: () => void;
   onSelect: (id: string) => void;
-  onDelete?: (id: string) => void;
 }) {
-  const styles = useStyles();
   const [searchQuery, setSearchQuery] = useState('');
-  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
   const isDesktop = useIsDesktop();
 
   const nonEmpty = useMemo(() => sessions.filter((s) => s.message_count > 0), [sessions]);
@@ -281,13 +142,6 @@ export function Sidebar({
     }
   };
 
-  const confirmDelete = () => {
-    if (deleteTargetId && onDelete) {
-      onDelete(deleteTargetId);
-    }
-    setDeleteTargetId(null);
-  };
-
   const renderSessionRow = (s: SessionItem) => {
     const title = generateSessionTitle(s);
     const timestamp = formatRelativeTime(
@@ -296,138 +150,109 @@ export function Sidebar({
     );
 
     return (
-      <div key={s.id} className={styles.sessionRow}>
-        <NavItem className={styles.sessionNavItem} value={s.id} onClick={() => handleSelect(s.id)}>
-          <div className={styles.sessionLabel}>
-            <span className={styles.sessionTitle}>{title}</span>
-            {/* Date only — message counts read as noise at a glance and say
-                nothing about what the conversation contains. */}
-            <Caption1 className={styles.sessionMeta}>{timestamp}</Caption1>
-          </div>
-        </NavItem>
-        {onDelete ? (
-          <div data-reveal="kebab" className={styles.kebabWrap}>
-            <Menu>
-              <MenuTrigger disableButtonEnhancement>
-                <Button appearance="subtle" size="small" icon={<MoreHorizontal20Regular />} aria-label="More actions" />
-              </MenuTrigger>
-              <MenuPopover>
-                <MenuList>
-                  <MenuItem icon={<Delete20Regular />} onClick={() => setDeleteTargetId(s.id)}>
-                    Delete conversation
-                  </MenuItem>
-                </MenuList>
-              </MenuPopover>
-            </Menu>
-          </div>
-        ) : null}
-      </div>
+      <SidebarMenuButton
+        key={s.id}
+        className="min-w-0"
+        isActive={selectedId === s.id}
+        onClick={() => handleSelect(s.id)}
+      >
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <span className="truncate">{title}</span>
+          {/* Date only — message counts read as noise at a glance and say
+                   nothing about what the conversation contains. */}
+          <span className="text-xs text-muted-foreground">{timestamp}</span>
+        </div>
+      </SidebarMenuButton>
     );
   };
 
   const hasAnySession = nonEmpty.length > 0;
   const hasResults = filtered.length > 0;
 
-  return (
-    <>
-      <NavDrawer
-        className={mergeClasses(styles.drawer, !isDesktop && styles.drawerOverlay)}
-        type={isDesktop ? 'inline' : 'overlay'}
-        open={open}
-        onOpenChange={(_e, d) => {
-          if (!d.open) {
-            onClose();
-          }
-        }}
-        // Always-defined so the drawer stays controlled: sessionId is
-        // undefined until the boot machine resolves, and undefined→string
-        // flips Fluent's useControllableState into the uncontrolled→
-        // controlled console error. '' selects nothing.
-        selectedValue={selectedId ?? ''}
-        density="small"
-        separator
-      >
-        <NavDrawerHeader>
-          <div className={mergeClasses(styles.headerStack, !isDesktop && styles.headerStackOverlay)}>
-            <div className={styles.headerRow}>
-              <Subtitle2>Conversations</Subtitle2>
-              <div className={styles.headerActions}>
-                <Tooltip content="New chat" relationship="label">
-                  <Button
-                    appearance="subtle"
-                    size="small"
-                    icon={<Add20Regular />}
-                    aria-label="New chat"
-                    onClick={onNewChat}
-                  />
-                </Tooltip>
-                <Button
-                  appearance="subtle"
-                  size="small"
-                  icon={<Dismiss20Regular />}
-                  aria-label="Close sidebar"
-                  onClick={onClose}
-                />
-              </div>
-            </div>
-            {hasAnySession ? (
-              <SearchBox
-                placeholder="Search conversations…"
-                value={searchQuery}
-                onChange={(_e, data) => setSearchQuery(data.value ?? '')}
-              />
-            ) : null}
-          </div>
-        </NavDrawerHeader>
-
-        <NavDrawerBody className={!isDesktop ? styles.bodyOverlay : undefined}>
-          {!hasAnySession ? (
-            <div className={styles.emptyState}>
-              <Chat48Regular className={styles.emptyIcon} />
-              <div>No conversations yet</div>
-              <Caption1>Start chatting to create your first session</Caption1>
-            </div>
-          ) : !hasResults ? (
-            <div className={styles.noMatches}>No matching conversations</div>
-          ) : (
-            BUCKET_ORDER.flatMap((bucket) => {
-              const items = grouped[bucket];
-              if (items.length === 0) {
-                return [];
-              }
-              return [
-                <NavSectionHeader key={`h-${bucket}`}>{BUCKET_LABELS[bucket]}</NavSectionHeader>,
-                ...items.map(renderSessionRow),
-              ];
-            })
-          )}
-        </NavDrawerBody>
-      </NavDrawer>
-
-      <Dialog
-        open={deleteTargetId !== null}
-        onOpenChange={(_e, data) => {
-          if (!data.open) {
-            setDeleteTargetId(null);
-          }
-        }}
-      >
-        <DialogSurface>
-          <DialogBody>
-            <DialogTitle>Delete conversation?</DialogTitle>
-            <DialogContent>This conversation will be permanently deleted. You can&apos;t undo this.</DialogContent>
-            <DialogActions>
-              <DialogTrigger disableButtonEnhancement>
-                <Button appearance="secondary">Cancel</Button>
-              </DialogTrigger>
-              <Button appearance="primary" onClick={confirmDelete}>
-                Delete
+  const contents = (
+    <ShadcnSidebar
+      collapsible={isDesktop ? 'offcanvas' : 'none'}
+      className={cn('min-w-72 max-w-72 bg-background', !isDesktop && 'omniagents-sidebar-overlay w-full')}
+    >
+      <SidebarHeader>
+        <div className={cn('flex flex-col gap-2 pt-8 pb-5', !isDesktop && 'omniagents-sidebar-overlay-header')}>
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="font-display text-lg font-semibold tracking-tight">Conversations</h2>
+            <div className="flex items-center gap-0.5">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button type="button" variant="ghost" size="icon-sm" aria-label="New chat" onClick={onNewChat}>
+                    <Plus />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>New chat</TooltipContent>
+              </Tooltip>
+              <Button type="button" variant="ghost" size="icon-sm" aria-label="Close sidebar" onClick={onClose}>
+                <X />
               </Button>
-            </DialogActions>
-          </DialogBody>
-        </DialogSurface>
-      </Dialog>
-    </>
+            </div>
+          </div>
+          {hasAnySession ? (
+            <SidebarInput
+              placeholder="Search conversations…"
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+            />
+          ) : null}
+        </div>
+      </SidebarHeader>
+
+      <SidebarContent className={!isDesktop ? 'omniagents-sidebar-overlay-body' : undefined}>
+        {!hasAnySession ? (
+          <div className="flex h-full flex-col items-center justify-center px-6 py-6 text-center text-muted-foreground">
+            <MessageCircle className="mb-2 size-8 opacity-50" />
+            <div>No conversations yet</div>
+            <span className="text-xs text-muted-foreground">Start chatting to create your first session</span>
+          </div>
+        ) : !hasResults ? (
+          <div className="py-4 text-center text-muted-foreground">No matching conversations</div>
+        ) : (
+          BUCKET_ORDER.map((bucket) => {
+            const items = grouped[bucket];
+            if (items.length === 0) {
+              return null;
+            }
+            return (
+              <SidebarGroup key={bucket}>
+                <SidebarGroupLabel>{BUCKET_LABELS[bucket]}</SidebarGroupLabel>
+                <SidebarMenu>
+                  {items.map(renderSessionRow).map((row) => (
+                    <SidebarMenuItem key={row.key}>{row}</SidebarMenuItem>
+                  ))}
+                </SidebarMenu>
+              </SidebarGroup>
+            );
+          })
+        )}
+      </SidebarContent>
+    </ShadcnSidebar>
+  );
+
+  return (
+    <SidebarProvider
+      open={isDesktop ? open : true}
+      onOpenChange={(nextOpen) => !nextOpen && onClose()}
+      className="omniagents-sidebar-provider min-h-0 w-auto"
+    >
+      {isDesktop ? (
+        contents
+      ) : (
+        <Sheet open={open} onOpenChange={(nextOpen) => !nextOpen && onClose()}>
+          <SheetContent side="left" showCloseButton={false} className="w-72 p-0">
+            <SheetHeader className="sr-only">
+              <SheetTitle>Conversations</SheetTitle>
+              <SheetDescription>Browse and open conversations.</SheetDescription>
+            </SheetHeader>
+            {contents}
+          </SheetContent>
+        </Sheet>
+      )}
+    </SidebarProvider>
   );
 }
 

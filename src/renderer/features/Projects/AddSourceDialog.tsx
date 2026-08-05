@@ -11,22 +11,15 @@
  * option + body branch. Reached from the sidebar's Sources branch and the
  * project page's ⋯ menu, so source management lives where sources are shown.
  */
-import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useState } from 'react';
 
-import {
-  AnimatedDialog,
-  Button,
-  Caption1,
-  Checkbox,
-  DialogBody,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  Input,
-  Select,
-} from '@/renderer/ds';
+import { cn } from '@/renderer/ds/cn';
+import { Button } from '@/renderer/ds/ui/button';
+import { Checkbox } from '@/renderer/ds/ui/checkbox';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/renderer/ds/ui/dialog';
+import { Input } from '@/renderer/ds/ui/input';
+import { NativeSelect as Select } from '@/renderer/ds/ui/native-select';
 import { GitCredentialDialog } from '@/renderer/features/SettingsModal/GitCredentialDialog';
 import { DirectoryBrowserDialog } from '@/renderer/features/Tickets/DirectoryBrowserDialog';
 import { emitter } from '@/renderer/services/ipc';
@@ -42,29 +35,6 @@ import { projectsApi } from './state';
 type Provider = 'github' | 'azure' | 'local' | 'url';
 
 const AZURE_HOST = 'dev.azure.com';
-
-const useStyles = makeStyles({
-  body: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalL },
-  field: { display: 'flex', flexDirection: 'column', gap: '4px' },
-  label: { fontSize: tokens.fontSizeBase300, color: tokens.colorNeutralForeground1 },
-  hint: { fontSize: tokens.fontSizeBase100, color: tokens.colorNeutralForeground3 },
-  full: { width: '100%' },
-  dirRow: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS },
-  dirDisplay: {
-    flex: '1 1 0',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    borderRadius: tokens.borderRadiusMedium,
-    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
-    backgroundColor: tokens.colorNeutralBackground1,
-    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
-    fontSize: tokens.fontSizeBase300,
-    color: tokens.colorNeutralForeground2,
-  },
-  notLinked: { color: tokens.colorNeutralForeground3 },
-  footer: { gap: tokens.spacingHorizontalS, justifyContent: 'flex-end' },
-});
 
 /** Make a mount name unique within the project by suffixing -2, -3, … */
 function uniqueMount(base: string, taken: Set<string>): string {
@@ -85,7 +55,6 @@ type AddSourceDialogProps = {
 };
 
 export const AddSourceDialog = memo(({ open, onClose, project }: AddSourceDialogProps) => {
-  const styles = useStyles();
   const storeData = useStore(persistedStoreApi.$atom);
   const credentials = storeData.gitCredentials ?? [];
   const githubLinked = Boolean(storeData.githubAccount);
@@ -243,13 +212,15 @@ export const AddSourceDialog = memo(({ open, onClose, project }: AddSourceDialog
 
   return (
     <>
-      <AnimatedDialog open={open} onClose={onClose}>
+      <Dialog open={open} onOpenChange={(nextOpen) => !nextOpen && onClose()}>
         <DialogContent className="max-w-md">
-          <DialogHeader>Add source</DialogHeader>
-          <DialogBody className={styles.body}>
-            <div className={styles.field}>
-              <label className={styles.label}>Source</label>
-              <Select aria-label="Source type" value={provider} onChange={handleProvider} className={styles.full}>
+          <DialogHeader>
+            <DialogTitle>Add source</DialogTitle>
+          </DialogHeader>
+          <div className={cn('min-h-0 overflow-y-auto', 'flex flex-col gap-5')}>
+            <div className="flex flex-col gap-1">
+              <label className="text-sm text-foreground">Source</label>
+              <Select aria-label="Source type" value={provider} onChange={handleProvider} className="w-full">
                 {githubLinked && <option value="github">GitHub</option>}
                 <option value="azure">Azure DevOps</option>
                 <option value="local">Local folder</option>
@@ -267,9 +238,9 @@ export const AddSourceDialog = memo(({ open, onClose, project }: AddSourceDialog
                   emptyHint={githubEmptyHint}
                 />
               ) : (
-                <Caption1 className={styles.notLinked}>
+                <span className={cn('text-xs text-muted-foreground', 'text-muted-foreground')}>
                   Connect a GitHub account in Settings → Git to browse repos, or use Git URL.
-                </Caption1>
+                </span>
               ))}
 
             {provider === 'azure' &&
@@ -281,10 +252,10 @@ export const AddSourceDialog = memo(({ open, onClose, project }: AddSourceDialog
                   onSelect={handleRepoPick}
                 />
               ) : (
-                <div className={styles.field}>
-                  <Caption1 className={styles.notLinked}>
+                <div className="flex flex-col gap-1">
+                  <span className={cn('text-xs text-muted-foreground', 'text-muted-foreground')}>
                     Add an Azure DevOps personal access token (Code: Read) to browse your repos.
-                  </Caption1>
+                  </span>
                   <Button size="sm" onClick={openAzureToken}>
                     Add Azure DevOps token
                   </Button>
@@ -293,18 +264,20 @@ export const AddSourceDialog = memo(({ open, onClose, project }: AddSourceDialog
 
             {provider === 'local' && (
               <>
-                <div className={styles.field}>
-                  <label className={styles.label}>Workspace directory</label>
-                  <div className={styles.dirRow}>
-                    <span className={styles.dirDisplay}>{localDir || 'No directory selected'}</span>
+                <div className="flex flex-col gap-1">
+                  <label className="text-sm text-foreground">Workspace directory</label>
+                  <div className="flex items-center gap-2">
+                    <span className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap rounded-lg border border-border bg-background px-4 py-2 text-sm text-muted-foreground">
+                      {localDir || 'No directory selected'}
+                    </span>
                     <Button size="sm" variant="ghost" onClick={openBrowse}>
                       Browse
                     </Button>
                   </div>
                 </div>
-                <div className={styles.field}>
-                  <label className={styles.label}>
-                    Mount name <span className={styles.hint}>(folder under /workspace/)</span>
+                <div className="flex flex-col gap-1">
+                  <label className="text-sm text-foreground">
+                    Mount name <span className="text-xs text-muted-foreground">(folder under /workspace/)</span>
                   </label>
                   <Input
                     aria-label="Source mount name"
@@ -312,7 +285,7 @@ export const AddSourceDialog = memo(({ open, onClose, project }: AddSourceDialog
                     value={localMount}
                     onChange={handleLocalMount}
                     placeholder={localPlaceholder || 'e.g. launcher'}
-                    className={styles.full}
+                    className="w-full"
                   />
                 </div>
               </>
@@ -320,21 +293,22 @@ export const AddSourceDialog = memo(({ open, onClose, project }: AddSourceDialog
 
             {provider === 'url' && (
               <>
-                <div className={styles.field}>
-                  <label className={styles.label}>Repo URL</label>
+                <div className="flex flex-col gap-1">
+                  <label className="text-sm text-foreground">Repo URL</label>
                   <Input
                     aria-label="Repo URL"
                     type="text"
                     value={repoUrl}
                     onChange={handleRepoUrl}
                     placeholder="https://github.com/owner/name"
-                    className={styles.full}
+                    className="w-full"
                   />
+
                   <CredentialStatus repoUrl={repoUrl} credentials={credentials} onAddToken={setAddTokenHost} />
                 </div>
-                <div className={styles.field}>
-                  <label className={styles.label}>
-                    Mount name <span className={styles.hint}>(folder under /workspace/)</span>
+                <div className="flex flex-col gap-1">
+                  <label className="text-sm text-foreground">
+                    Mount name <span className="text-xs text-muted-foreground">(folder under /workspace/)</span>
                   </label>
                   <Input
                     aria-label="Source mount name"
@@ -342,12 +316,12 @@ export const AddSourceDialog = memo(({ open, onClose, project }: AddSourceDialog
                     value={urlMount}
                     onChange={handleUrlMount}
                     placeholder={urlPlaceholder || 'e.g. launcher'}
-                    className={styles.full}
+                    className="w-full"
                   />
                 </div>
-                <div className={styles.field}>
-                  <label className={styles.label}>
-                    Default branch <span className={styles.hint}>(optional)</span>
+                <div className="flex flex-col gap-1">
+                  <label className="text-sm text-foreground">
+                    Default branch <span className="text-xs text-muted-foreground">(optional)</span>
                   </label>
                   <Input
                     aria-label="Default branch"
@@ -355,47 +329,53 @@ export const AddSourceDialog = memo(({ open, onClose, project }: AddSourceDialog
                     value={branch}
                     onChange={handleBranch}
                     placeholder="Leave blank for the repo's default branch"
-                    className={styles.full}
+                    className="w-full"
                   />
                 </div>
               </>
             )}
 
-            <div className={styles.field}>
-              <Checkbox checked={readOnly} onCheckedChange={setReadOnly} label="Read-only source" />
-              <span className={styles.hint}>Omni’s file editor can inspect this source but cannot change its files.</span>
+            <div className="flex flex-col gap-1">
+              <label className="inline-flex items-center gap-2 text-sm">
+                <Checkbox checked={readOnly} onCheckedChange={(checked) => setReadOnly(checked === true)} />
+                Read-only source
+              </label>
+              <span className="text-xs text-muted-foreground">
+                Omni’s file editor can inspect this source but cannot change its files.
+              </span>
             </div>
 
             {error && (
-              <div role="alert" style={{ color: 'var(--colorPaletteRedForeground1)' }}>
+              <div role="alert" className="text-sm text-destructive">
                 {error}
               </div>
             )}
-          </DialogBody>
-          <DialogFooter className={styles.footer}>
+          </div>
+          <DialogFooter className="gap-2 justify-end">
             <Button variant="ghost" onClick={onClose}>
               Cancel
             </Button>
             {/* GitHub adds on row click; local / URL fill then Add. */}
             {provider === 'local' && (
-              <Button onClick={handleAddLocal} isDisabled={saving}>
+              <Button onClick={handleAddLocal} disabled={saving}>
                 {saving ? 'Adding…' : 'Add source'}
               </Button>
             )}
             {provider === 'url' && (
-              <Button onClick={handleAddUrl} isDisabled={saving}>
+              <Button onClick={handleAddUrl} disabled={saving}>
                 {saving ? 'Adding…' : 'Add source'}
               </Button>
             )}
           </DialogFooter>
         </DialogContent>
-      </AnimatedDialog>
+      </Dialog>
       <DirectoryBrowserDialog
         open={browseDir}
         onClose={closeBrowse}
         onSelect={handleDirSelected}
         initialPath={localDir || undefined}
       />
+
       <GitCredentialDialog open={addTokenHost !== null} onClose={closeAddToken} initialHost={addTokenHost ?? ''} />
     </>
   );

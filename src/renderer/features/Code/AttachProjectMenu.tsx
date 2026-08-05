@@ -1,14 +1,8 @@
-import { FolderOpen20Regular } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
+import { FolderOpen } from 'lucide-react';
 import { memo, useCallback, useState } from 'react';
 
-import { Button, Menu, MenuDivider, MenuItem, MenuList, MenuPopover, MenuTrigger } from '@/renderer/ds';
-import { ProjectCreateDialog } from '@/renderer/features/Projects/ProjectCreateDialog';
-import { persistedStoreApi } from '@/renderer/services/store';
-import type { CodeTabId, Project } from '@/shared/types';
-
-import { codeApi } from './state';
-
+import { Button } from '@/renderer/ds/ui/button';
 /**
  * "Attach project" affordance for a chat (projectless) column. A project is
  * deferrable context here, not an admission gate: picking one binds
@@ -18,7 +12,18 @@ import { codeApi } from './state';
  *
  * Renders its own trigger by default (greeting-shell extras row); pass
  * ``trigger`` to embed it behind existing chrome (e.g. a header icon button).
- */
+ */ import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/renderer/ds/ui/dropdown-menu';
+import { ProjectCreateDialog } from '@/renderer/features/Projects/ProjectCreateDialog';
+import { persistedStoreApi } from '@/renderer/services/store';
+import type { CodeTabId, Project } from '@/shared/types';
+
+import { codeApi } from './state';
 export const AttachProjectMenu = memo(({ tabId, trigger }: { tabId: CodeTabId; trigger?: React.ReactElement }) => {
   const store = useStore(persistedStoreApi.$atom);
   const [showNewProject, setShowNewProject] = useState(false);
@@ -40,26 +45,27 @@ export const AttachProjectMenu = memo(({ tabId, trigger }: { tabId: CodeTabId; t
 
   return (
     <>
-      <Menu positioning={{ position: 'below', align: 'start' }}>
-        <MenuTrigger>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
           {trigger ?? (
-            <Button size="sm" variant="ghost" leftIcon={<FolderOpen20Regular style={{ width: 14, height: 14 }} />}>
+            <Button size="sm" variant="ghost">
+              <FolderOpen className="size-4" />
               Attach project
             </Button>
           )}
-        </MenuTrigger>
-        <MenuPopover>
-          <MenuList>
+        </DropdownMenuTrigger>
+        <>
+          <DropdownMenuContent>
             {store.projects.map((project) => (
-              <MenuItem key={project.id} onClick={() => handlePick(project.id)}>
+              <DropdownMenuItem key={project.id} onClick={() => handlePick(project.id)}>
                 {project.label}
-              </MenuItem>
+              </DropdownMenuItem>
             ))}
-            {store.projects.length > 0 && <MenuDivider />}
-            <MenuItem onClick={handleOpenNewProject}>New project…</MenuItem>
-          </MenuList>
-        </MenuPopover>
-      </Menu>
+            {store.projects.length > 0 && <DropdownMenuSeparator />}
+            <DropdownMenuItem onClick={handleOpenNewProject}>New project…</DropdownMenuItem>
+          </DropdownMenuContent>
+        </>
+      </DropdownMenu>
       <ProjectCreateDialog
         open={showNewProject}
         onClose={handleCloseNewProject}

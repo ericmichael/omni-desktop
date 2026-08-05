@@ -1,11 +1,15 @@
-import { makeStyles, mergeClasses, shorthands, Skeleton, SkeletonItem, tokens } from '@fluentui/react-components';
 import { useStore } from '@nanostores/react';
 import { useSelector } from '@xstate/react';
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 
+import { cn } from '@/renderer/ds/cn';
+import { Alert, AlertDescription } from '@/renderer/ds/ui/alert';
+import { Button } from '@/renderer/ds/ui/button';
+import { ButtonGroup } from '@/renderer/ds/ui/button-group';
+import { Input } from '@/renderer/ds/ui/input';
+import { Skeleton } from '@/renderer/ds/ui/skeleton';
 import { NotebookView } from '@/renderer/features/Notebooks/NotebookView';
 import { acquirePageEditor, releasePageEditor } from '@/renderer/features/Pages/page-editor-registry';
-import { $glassEnabled } from '@/renderer/theme/use-glass';
 import type { PageId, ProjectId } from '@/shared/types';
 
 import { PageBreadcrumb } from './Breadcrumb';
@@ -29,181 +33,6 @@ const ContextEditor = lazy(() => contextEditorPromise.then((m) => ({ default: m.
 const SAVED_AFFORDANCE_MS = 1200;
 
 // ---------------------------------------------------------------------------
-// Styles
-// ---------------------------------------------------------------------------
-
-const useStyles = makeStyles({
-  root: {
-    display: 'flex',
-    flexDirection: 'column',
-    height: '100%',
-    width: '100%',
-  },
-  rootGlass: {
-    backgroundColor: 'transparent',
-  },
-  header: {
-    flexShrink: 0,
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalL,
-    paddingLeft: tokens.spacingHorizontalXXL,
-    paddingRight: tokens.spacingHorizontalXXL,
-    paddingTop: tokens.spacingVerticalXXL,
-    paddingBottom: tokens.spacingVerticalS,
-    maxWidth: '900px',
-    width: '100%',
-    boxSizing: 'border-box',
-  },
-  /* Hidden on mobile — the TopAppBar in Tickets.tsx already provides back
-     navigation there; only desktop needs the in-page back + breadcrumb row. */
-  backRow: {
-    display: 'none',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalXS,
-    '@media (min-width: 640px)': {
-      display: 'flex',
-    },
-  },
-  titleRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalM,
-  },
-  titleInput: {
-    flex: 1,
-    fontSize: tokens.fontSizeBase600,
-    fontWeight: tokens.fontWeightSemibold,
-    border: 'none',
-    backgroundColor: 'transparent',
-    padding: '0',
-    outline: 'none',
-    color: tokens.colorNeutralForeground1,
-    lineHeight: tokens.lineHeightBase600,
-    '::placeholder': {
-      color: tokens.colorNeutralForeground4,
-    },
-  },
-  /* The context page's title is fixed — renaming the project lives in the
-     Home hero and the sidebar menu, not in a page title input. */
-  titleStatic: {
-    flex: 1,
-    fontSize: tokens.fontSizeBase600,
-    fontWeight: tokens.fontWeightSemibold,
-    lineHeight: tokens.lineHeightBase600,
-    color: tokens.colorNeutralForeground1,
-  },
-  /* Subtle save affordance — appears briefly, never demands attention. */
-  saveIndicator: {
-    fontSize: tokens.fontSizeBase200,
-    color: tokens.colorNeutralForeground3,
-    userSelect: 'none',
-    whiteSpace: 'nowrap',
-    transition: 'opacity 200ms ease',
-  },
-  banner: {
-    marginLeft: tokens.spacingHorizontalXXL,
-    marginRight: tokens.spacingHorizontalXXL,
-    marginTop: tokens.spacingVerticalS,
-    marginBottom: tokens.spacingVerticalS,
-    padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalL}`,
-    backgroundColor: tokens.colorNeutralBackground3,
-    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
-    borderRadius: tokens.borderRadiusLarge,
-    maxWidth: '900px',
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalM,
-    flexWrap: 'wrap',
-  },
-  bannerGlass: {
-    backgroundColor: tokens.colorNeutralBackground3,
-    backdropFilter: 'var(--glass-blur-light)',
-    WebkitBackdropFilter: 'var(--glass-blur-light)',
-    boxShadow: tokens.shadow8,
-  },
-  bannerText: {
-    flex: '1 1 auto',
-    fontSize: tokens.fontSizeBase300,
-    color: tokens.colorNeutralForeground1,
-  },
-  bannerButtons: {
-    display: 'flex',
-    gap: tokens.spacingHorizontalS,
-    flexShrink: 0,
-  },
-  bannerButton: {
-    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
-    borderRadius: tokens.borderRadiusMedium,
-    border: 'none',
-    cursor: 'pointer',
-    fontSize: tokens.fontSizeBase300,
-    fontWeight: tokens.fontWeightSemibold,
-    backgroundColor: tokens.colorNeutralBackground1,
-    color: tokens.colorNeutralForeground1,
-    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
-    ':hover': {
-      backgroundColor: tokens.colorSubtleBackgroundHover,
-    },
-  },
-  bannerButtonPrimary: {
-    backgroundColor: tokens.colorBrandBackground,
-    color: tokens.colorNeutralForegroundOnBrand,
-    ...shorthands.border('1px', 'solid', tokens.colorBrandBackground),
-    ':hover': {
-      backgroundColor: tokens.colorBrandBackgroundHover,
-    },
-  },
-  body: {
-    flex: '1 1 0',
-    minHeight: 0,
-    overflowY: 'auto',
-  },
-  /**
-   * Content column for everything inside the scroll viewport. Width and
-   * horizontal padding are split between this wrapper (spacingHorizontalM)
-   * and ContextEditor's internal root padding (spacingHorizontalM), so
-   * blocks end up exactly `spacingHorizontalXXL` from the left edge — the
-   * same offset the header uses for the title and PropertyStrip. This is
-   * what keeps paragraphs, headings, and list items visually aligned with
-   * the title above them.
-   *
-   * The editor keeps its own internal padding so Yoopta's floating block
-   * actions (drag handle, "+" menu) still have a gutter to render into
-   * without clipping.
-   */
-  bodyInner: {
-    maxWidth: '900px',
-    width: '100%',
-    boxSizing: 'border-box',
-    paddingLeft: tokens.spacingHorizontalM,
-    paddingRight: tokens.spacingHorizontalM,
-  },
-  // Skeleton shown while the editor chunk downloads (cold start) or while the
-  // initial page content is being read from disk. The horizontal padding here
-  // (spacingHorizontalM) combines with the bodyInner wrapper's same padding
-  // to match ContextEditor's total left offset of spacingHorizontalXXL, so
-  // there is no horizontal layout shift when the editor replaces the skeleton.
-  editorSkeleton: {
-    paddingLeft: tokens.spacingHorizontalM,
-    paddingRight: tokens.spacingHorizontalM,
-    paddingTop: tokens.spacingVerticalM,
-    paddingBottom: tokens.spacingVerticalM,
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalM,
-  },
-  skelLine1: { width: '92%' },
-  skelLine2: { width: '78%' },
-  skelLine3: { width: '88%' },
-  skelLine4: { width: '65%' },
-  notebookBody: {
-    flex: '1 1 0',
-    minHeight: 0,
-  },
-});
-
-// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
@@ -213,9 +42,7 @@ type PageViewProps = {
 };
 
 const DocPageView = memo(({ pageId, projectId }: PageViewProps) => {
-  const styles = useStyles();
   const pages = useStore($pages);
-  const isGlass = useStore($glassEnabled);
   const page = pages[pageId];
 
   // -------------------------------------------------------------------------
@@ -339,40 +166,49 @@ const DocPageView = memo(({ pageId, projectId }: PageViewProps) => {
     !page.isRoot && !!leadingH1 && leadingH1.trim().toLowerCase() === page.title.trim().toLowerCase();
 
   return (
-    <div className={mergeClasses(styles.root, isGlass && styles.rootGlass)} data-slot="page-view">
+    <div className="flex flex-col h-full w-full" data-slot="page-view">
       {/* Header: the standard sub-page recipe — ancestors-only breadcrumb
           above the page title. The context page (root) titles itself
           "Context"; renaming the project lives on Home, not here. */}
-      <div className={styles.header}>
-        <div className={styles.backRow}>
+      <div className="shrink-0 flex flex-col gap-5 pl-8 pr-8 pt-8 pb-2 max-w-4xl w-full ml-auto mr-auto box-border">
+        <div className="hidden items-center gap-1 sm:flex">
           <PageBreadcrumb projectId={projectId} pageId={pageId} />
         </div>
         {page.isRoot ? (
-          <div className={styles.titleRow}>
-            <span className={styles.titleStatic}>Context</span>
-            <span className={styles.saveIndicator} aria-live="polite">
+          <div className="flex items-center gap-4">
+            <span className="flex-1 text-2xl font-semibold leading-8 text-foreground">Context</span>
+            <span
+              className="text-xs text-muted-foreground select-none whitespace-nowrap transition-opacity duration-200 ease-in-out"
+              aria-live="polite"
+            >
               {saveLabel}
             </span>
           </div>
         ) : !contentLeadsWithTitle ? (
-          <div className={styles.titleRow}>
-            <input
+          <div className="flex items-center gap-4">
+            <Input
               aria-label="Page title"
-              className={styles.titleInput}
+              className={`${'flex-1 text-2xl font-semibold border-0 bg-transparent p-0 outline-none text-foreground leading-8 placeholder:text-muted-foreground'} h-auto`}
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               onBlur={handleTitleBlur}
               onKeyDown={handleTitleKeyDown}
               placeholder="Untitled"
             />
-            <span className={styles.saveIndicator} aria-live="polite">
+            <span
+              className="text-xs text-muted-foreground select-none whitespace-nowrap transition-opacity duration-200 ease-in-out"
+              aria-live="polite"
+            >
               {saveLabel}
             </span>
           </div>
         ) : (
           saveLabel && (
-            <div className={styles.titleRow}>
-              <span className={styles.saveIndicator} aria-live="polite">
+            <div className="flex items-center gap-4">
+              <span
+                className="text-xs text-muted-foreground select-none whitespace-nowrap transition-opacity duration-200 ease-in-out"
+                aria-live="polite"
+              >
                 {saveLabel}
               </span>
             </div>
@@ -382,32 +218,22 @@ const DocPageView = memo(({ pageId, projectId }: PageViewProps) => {
 
       {/* External-change banner */}
       {showConflict && (
-        <div
-          className={mergeClasses(styles.banner, isGlass && styles.bannerGlass)}
-          role="status"
-          data-slot="page-conflict-banner"
-        >
-          <span className={styles.bannerText}>
+        <Alert className="mx-8 my-2 flex max-w-4xl items-center gap-4" role="status" data-slot="page-conflict-banner">
+          <AlertDescription className="min-w-0 flex-1 text-foreground">
             This page was updated somewhere else. Your changes haven’t been saved over it yet.
-          </span>
-          <div className={styles.bannerButtons}>
-            <button type="button" className={styles.bannerButton} onClick={handleUseDisk}>
+          </AlertDescription>
+          <ButtonGroup className="shrink-0">
+            <Button variant="outline" onClick={handleUseDisk}>
               Use the newer version
-            </button>
-            <button
-              type="button"
-              className={`${styles.bannerButton} ${styles.bannerButtonPrimary}`}
-              onClick={handleKeepLocal}
-            >
-              Keep my version
-            </button>
-          </div>
-        </div>
+            </Button>
+            <Button onClick={handleKeepLocal}>Keep my version</Button>
+          </ButtonGroup>
+        </Alert>
       )}
 
       {/* Editor body */}
-      <div className={styles.body}>
-        <div className={styles.bodyInner}>
+      <div className="flex-1 min-h-0 overflow-y-auto">
+        <div className="max-w-4xl w-full ml-auto mr-auto box-border pl-4 pr-4">
           {phase === 'loading' ? (
             <EditorSkeleton />
           ) : (
@@ -433,7 +259,6 @@ const DocPageView = memo(({ pageId, projectId }: PageViewProps) => {
 DocPageView.displayName = 'DocPageView';
 
 const NotebookPageView = memo(({ pageId, projectId }: PageViewProps) => {
-  const styles = useStyles();
   const pages = useStore($pages);
   const page = pages[pageId];
   const [title, setTitle] = useState(page?.title ?? '');
@@ -466,18 +291,18 @@ const NotebookPageView = memo(({ pageId, projectId }: PageViewProps) => {
   }
 
   return (
-    <div className={styles.root}>
-      <div className={styles.header}>
-        <div className={styles.backRow}>
+    <div className="flex flex-col h-full w-full">
+      <div className="shrink-0 flex flex-col gap-5 pl-8 pr-8 pt-8 pb-2 max-w-4xl w-full ml-auto mr-auto box-border">
+        <div className="hidden items-center gap-1 sm:flex">
           <PageBreadcrumb projectId={projectId} pageId={pageId} />
         </div>
-        <div className={styles.titleRow}>
+        <div className="flex items-center gap-4">
           {page.isRoot ? (
-            <span className={styles.titleStatic}>Context</span>
+            <span className="flex-1 text-2xl font-semibold leading-8 text-foreground">Context</span>
           ) : (
-            <input
+            <Input
               aria-label="Page title"
-              className={styles.titleInput}
+              className={`${'flex-1 text-2xl font-semibold border-0 bg-transparent p-0 outline-none text-foreground leading-8 placeholder:text-muted-foreground'} h-auto`}
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               onBlur={handleTitleBlur}
@@ -487,7 +312,7 @@ const NotebookPageView = memo(({ pageId, projectId }: PageViewProps) => {
           )}
         </div>
       </div>
-      <div className={styles.notebookBody}>
+      <div className="flex-1 min-h-0">
         <NotebookView pageId={pageId} />
       </div>
     </div>
@@ -516,15 +341,12 @@ PageView.displayName = 'PageView';
  * and max-width so swapping to the real editor causes no layout shift.
  */
 const EditorSkeleton = memo(() => {
-  const styles = useStyles();
   return (
-    <div className={styles.editorSkeleton} aria-label="Loading editor" role="status">
-      <Skeleton>
-        <SkeletonItem size={16} className={styles.skelLine1} />
-        <SkeletonItem size={16} className={styles.skelLine2} />
-        <SkeletonItem size={16} className={styles.skelLine3} />
-        <SkeletonItem size={16} className={styles.skelLine4} />
-      </Skeleton>
+    <div className="pl-4 pr-4 pt-4 pb-4 flex flex-col gap-4" aria-label="Loading editor" role="status">
+      <Skeleton className={cn('h-4', 'w-11/12')} />
+      <Skeleton className={cn('h-4', 'w-4/5')} />
+      <Skeleton className={cn('h-4', 'w-11/12')} />
+      <Skeleton className={cn('h-4', 'w-2/3')} />
     </div>
   );
 });

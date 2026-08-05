@@ -136,9 +136,8 @@ Medium — one quarter of 20% time across the platform team. Not a crunch.
       description: 'List every runbook, owner, last-edited date. Output to a pinned page.',
       columnId: 'completed',
       priority: 'high',
-      resolution: 'completed',
       createdAgo: 28 * day,
-      resolvedAgo: 20 * day,
+      completedAgo: 20 * day,
       phase: 'completed',
     },
     {
@@ -147,9 +146,8 @@ Medium — one quarter of 20% time across the platform team. Not a crunch.
       description: "Walk through with someone who hasn't seen it. Fix any ambiguities.",
       columnId: 'completed',
       priority: 'high',
-      resolution: 'completed',
       createdAgo: 25 * day,
-      resolvedAgo: 14 * day,
+      completedAgo: 14 * day,
       phase: 'completed',
       blockedBy: ['done-inventory'],
     },
@@ -223,8 +221,7 @@ Medium — one quarter of 20% time across the platform team. Not a crunch.
         columnId: t.columnId,
         priority: t.priority,
         createdAt: now - t.createdAgo,
-        resolvedAt: t.resolvedAgo !== undefined ? now - t.resolvedAgo : undefined,
-        resolution: t.resolution,
+        completedAt: t.completedAgo !== undefined ? now - t.completedAgo : undefined,
         phase: t.phase,
       })
     );

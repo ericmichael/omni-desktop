@@ -1,8 +1,10 @@
-import { makeStyles, tokens } from '@fluentui/react-components';
-import { Lightbulb20Regular, PlugConnected20Regular } from '@fluentui/react-icons';
+import { Lightbulb, PlugZap } from 'lucide-react';
 import { memo } from 'react';
 
-import { Button, SectionLabel, Spinner } from '@/renderer/ds';
+import { Badge } from '@/renderer/ds/ui/badge';
+import { Button } from '@/renderer/ds/ui/button';
+import { Item, ItemActions, ItemContent, ItemDescription, ItemMedia, ItemTitle } from '@/renderer/ds/ui/item';
+import { Spinner } from '@/renderer/ds/ui/spinner';
 import { AppIcon } from '@/renderer/features/Code/AppIcon';
 import { formatUpdateSummary } from '@/renderer/features/Plugins/InstalledSection';
 import type { ExplorePlugin, PluginKind } from '@/renderer/features/Plugins/plugin-cards';
@@ -37,81 +39,14 @@ export function installKeyOf(item: ExplorePlugin): string {
 /** Context an explore card list needs to derive per-item installed state. */
 export type ExploreContext = Parameters<typeof buildExplorePlugins>[2];
 
-const useStyles = makeStyles({
-  section: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalS },
-  grid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
-    gap: tokens.spacingHorizontalS,
-  },
-  card: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalM,
-    padding: tokens.spacingHorizontalL,
-    border: `1px solid ${tokens.colorNeutralStroke2}`,
-    borderRadius: tokens.borderRadiusMedium,
-    backgroundColor: tokens.colorNeutralBackground2,
-  },
-  cardIcon: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    width: '36px',
-    height: '36px',
-    borderRadius: tokens.borderRadiusMedium,
-    backgroundColor: tokens.colorNeutralBackground4,
-    color: tokens.colorNeutralForeground2,
-    flexShrink: 0,
-  },
-  cardText: {
-    flex: 1,
-    minWidth: 0,
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalXXS,
-  },
-  cardLabel: {
-    fontWeight: 600,
-    fontSize: tokens.fontSizeBase300,
-    color: tokens.colorNeutralForeground1,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-  },
-  cardDescription: {
-    fontSize: tokens.fontSizeBase200,
-    color: tokens.colorNeutralForeground3,
-    lineHeight: tokens.lineHeightBase200,
-    display: '-webkit-box',
-    WebkitBoxOrient: 'vertical',
-    WebkitLineClamp: 2,
-    overflow: 'hidden',
-  },
-  updateBadge: {
-    fontSize: tokens.fontSizeBase100,
-    color: tokens.colorPaletteGreenForeground1,
-    fontWeight: tokens.fontWeightSemibold,
-  },
-  loadingCard: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: tokens.spacingVerticalL,
-    border: `1px solid ${tokens.colorNeutralStroke2}`,
-    borderRadius: tokens.borderRadiusMedium,
-    backgroundColor: tokens.colorNeutralBackground2,
-  },
-});
-
 function cardIcon(item: ExplorePlugin) {
   switch (item.kind) {
     case 'connector':
-      return item.connector.icon ? <AppIcon icon={item.connector.icon} size={18} /> : <PlugConnected20Regular />;
+      return item.connector.icon ? <AppIcon icon={item.connector.icon} size={20} /> : <PlugZap className="size-5" />;
     case 'skill':
-      return <Lightbulb20Regular />;
+      return <Lightbulb className="size-5" />;
     case 'app':
-      return <AppIcon icon={item.app.icon} size={18} />;
+      return <AppIcon icon={item.app.icon} size={20} />;
   }
 }
 
@@ -133,7 +68,6 @@ type ExploreCardProps = {
 };
 
 export const ExploreCard = memo(({ item, installingKey, onInstall }: ExploreCardProps) => {
-  const styles = useStyles();
   const key = installKeyOf(item);
   const installing = installingKey === key;
   const otherInstalling = installingKey !== null && !installing;
@@ -153,26 +87,28 @@ export const ExploreCard = memo(({ item, installingKey, onInstall }: ExploreCard
   const disabled = otherInstalling || (item.installed && !hasUpdate);
 
   return (
-    <div className={styles.card}>
-      <div className={styles.cardIcon}>{cardIcon(item)}</div>
-      <div className={styles.cardText}>
-        <span className={styles.cardLabel}>{displayName(item)}</span>
-        <span className={styles.cardDescription}>{cardDescription(item)}</span>
+    <Item variant="outline">
+      <ItemMedia variant="icon">{cardIcon(item)}</ItemMedia>
+      <ItemContent className="min-w-0">
+        <ItemTitle className="max-w-full truncate">{displayName(item)}</ItemTitle>
+        <ItemDescription>{cardDescription(item)}</ItemDescription>
         {hasUpdate && (
-          <span className={styles.updateBadge}>
+          <Badge variant="outline" className="mt-1 text-success">
             {item.kind === 'skill' && item.update ? formatUpdateSummary(item.update) : 'Update available'}
-          </span>
+          </Badge>
         )}
-      </div>
-      <Button
-        size="sm"
-        variant={disabled ? 'ghost' : 'primary'}
-        onClick={() => onInstall(item, mode)}
-        isDisabled={disabled}
-      >
-        {installing ? <Spinner size="sm" /> : label}
-      </Button>
-    </div>
+      </ItemContent>
+      <ItemActions>
+        <Button
+          size="sm"
+          variant={disabled ? 'ghost' : 'default'}
+          onClick={() => onInstall(item, mode)}
+          disabled={disabled}
+        >
+          {installing ? <Spinner /> : label}
+        </Button>
+      </ItemActions>
+    </Item>
   );
 });
 ExploreCard.displayName = 'ExploreCard';
@@ -196,19 +132,19 @@ type ExploreSectionProps = {
  */
 export const ExploreSection = memo(
   ({ marketplace, manifest, failed, filter, query, ctx, installingKey, onInstall }: ExploreSectionProps) => {
-    const styles = useStyles();
-
     if (failed) {
       return null;
     }
 
     if (manifest === null) {
       return (
-        <div className={styles.section}>
-          <SectionLabel>{marketplace.label}</SectionLabel>
-          <div className={styles.loadingCard}>
-            <Spinner size="sm" />
-          </div>
+        <div className="flex flex-col gap-2">
+          <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            {marketplace.label}
+          </span>
+          <Item variant="outline" className="justify-center">
+            <Spinner />
+          </Item>
         </div>
       );
     }
@@ -219,9 +155,11 @@ export const ExploreSection = memo(
     }
 
     return (
-      <div className={styles.section}>
-        <SectionLabel>{marketplace.label}</SectionLabel>
-        <div className={styles.grid}>
+      <div className="flex flex-col gap-2">
+        <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          {marketplace.label}
+        </span>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
           {items.map((item) => (
             <ExploreCard key={installKeyOf(item)} item={item} installingKey={installingKey} onInstall={onInstall} />
           ))}

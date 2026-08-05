@@ -1,20 +1,12 @@
-import { makeStyles, tokens } from '@fluentui/react-components';
-import { Add20Regular, Delete20Regular } from '@fluentui/react-icons';
+import { Plus, Trash2 } from 'lucide-react';
 import { memo, useEffect, useState } from 'react';
 
-import {
-  AnimatedDialog,
-  Button,
-  DialogBody,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  FormField,
-  IconButton,
-  Input,
-  Select,
-  Spinner,
-} from '@/renderer/ds';
+import { Button } from '@/renderer/ds/ui/button';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/renderer/ds/ui/dialog';
+import { Field, FieldLabel } from '@/renderer/ds/ui/field';
+import { Input } from '@/renderer/ds/ui/input';
+import { NativeSelect as Select } from '@/renderer/ds/ui/native-select';
+import { Spinner } from '@/renderer/ds/ui/spinner';
 import type { McpServerEntry } from '@/shared/types';
 
 const SERVER_TYPES: NonNullable<McpServerEntry['type']>[] = ['stdio', 'sse', 'http', 'streamable_http'];
@@ -22,28 +14,6 @@ const SERVER_TYPES: NonNullable<McpServerEntry['type']>[] = ['stdio', 'sse', 'ht
 export function emptyServer(): McpServerEntry {
   return { type: 'stdio', command: '', args: [] };
 }
-
-const useStyles = makeStyles({
-  form: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalM },
-  kvSection: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalS },
-  kvLabel: {
-    fontSize: tokens.fontSizeBase200,
-    fontWeight: tokens.fontWeightMedium,
-    color: tokens.colorNeutralForeground3,
-  },
-  kvRow: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS },
-  flex1: { flex: '1 1 0' },
-  flex2: { flex: '2 1 0' },
-  selfStart: { alignSelf: 'flex-start' },
-  iconMr: { marginRight: tokens.spacingHorizontalXS },
-  errorBanner: {
-    padding: tokens.spacingVerticalM,
-    borderRadius: tokens.borderRadiusMedium,
-    backgroundColor: tokens.colorPaletteRedBackground1,
-    color: tokens.colorPaletteRedForeground1,
-    fontSize: tokens.fontSizeBase200,
-  },
-});
 
 type KeyValueEditorProps = {
   label: string;
@@ -53,7 +23,6 @@ type KeyValueEditorProps = {
 
 /** Ordered key/value editor over a Record — index-based so keys can be typed freely. */
 const KeyValueEditor = memo(({ label, entries, onChange }: KeyValueEditorProps) => {
-  const styles = useStyles();
   const entryList = Object.entries(entries);
 
   const setAt = (index: number, key: string, value: string) => {
@@ -63,38 +32,39 @@ const KeyValueEditor = memo(({ label, entries, onChange }: KeyValueEditorProps) 
   };
 
   return (
-    <div className={styles.kvSection}>
-      <span className={styles.kvLabel}>{label}</span>
+    <div className="flex flex-col gap-2">
+      <span className="text-xs font-medium text-muted-foreground">{label}</span>
       {entryList.map(([key, value], i) => (
-        <div key={i} className={styles.kvRow}>
+        <div key={i} className="flex items-center gap-2">
           <Input
-            size="sm"
             type="text"
             value={key}
             onChange={(e) => setAt(i, e.target.value, value)}
             placeholder="KEY"
-            mono
-            className={styles.flex1}
+            className="flex-1"
           />
+
           <Input
-            size="sm"
             type="text"
             value={value}
             onChange={(e) => setAt(i, key, e.target.value)}
             placeholder="value"
-            mono
-            className={styles.flex2}
+            className="grow-2 basis-0"
           />
-          <IconButton
+
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
             aria-label="Remove"
-            icon={<Delete20Regular />}
-            size="sm"
             onClick={() => onChange(Object.fromEntries(entryList.filter((_, j) => j !== i)))}
-          />
+          >
+            <Trash2 />
+          </Button>
         </div>
       ))}
-      <Button size="sm" variant="ghost" onClick={() => onChange({ ...entries, '': '' })} className={styles.selfStart}>
-        <Add20Regular className={styles.iconMr} />
+      <Button size="sm" variant="ghost" onClick={() => onChange({ ...entries, '': '' })} className="self-start">
+        <Plus className="mr-1" />
         Add
       </Button>
     </div>
@@ -120,7 +90,6 @@ type ConnectorConfigDialogProps = {
  */
 export const ConnectorConfigDialog = memo(
   ({ open, serverId, initial, existingIds, onSave, onClose }: ConnectorConfigDialogProps) => {
-    const styles = useStyles();
     const creating = serverId === null;
     const [id, setId] = useState('');
     const [draft, setDraft] = useState<McpServerEntry>(emptyServer);
@@ -154,33 +123,47 @@ export const ConnectorConfigDialog = memo(
     };
 
     return (
-      <AnimatedDialog open={open} onClose={onClose}>
+      <Dialog open={open} onOpenChange={(nextOpen) => !nextOpen && onClose()}>
         <DialogContent>
-          <DialogHeader>{creating ? 'Add MCP server' : `Configure "${serverId}"`}</DialogHeader>
-          <DialogBody>
-            <div className={styles.form}>
-              {error && <div className={styles.errorBanner}>{error}</div>}
+          <DialogHeader>
+            <DialogTitle>{creating ? 'Add MCP server' : `Configure "${serverId}"`}</DialogTitle>
+          </DialogHeader>
+          <div className="min-h-0 overflow-y-auto">
+            <div className="flex flex-col gap-4">
+              {error && <div className="p-4 rounded-lg bg-destructive/10 text-destructive text-xs">{error}</div>}
 
               {creating && (
-                <FormField label="Name">
+                <Field orientation="horizontal" className="justify-between gap-4">
+                  <div className="min-w-0">
+                    <FieldLabel>Name</FieldLabel>
+                  </div>
                   <Input
                     type="text"
                     value={id}
                     onChange={(e) => setId(e.target.value)}
                     placeholder="my-server"
-                    mono
                     autoFocus
                   />
-                </FormField>
+                </Field>
               )}
               {idTaken && (
-                <div className={styles.errorBanner}>A server named &quot;{trimmedId}&quot; already exists.</div>
+                <div className="p-4 rounded-lg bg-destructive/10 text-destructive text-xs">
+                  A server named &quot;{trimmedId}&quot; already exists.
+                </div>
               )}
 
-              <FormField label="Type">
+              <Field orientation="horizontal" className="justify-between gap-4">
+                <div className="min-w-0">
+                  <FieldLabel>Type</FieldLabel>
+                </div>
                 <Select
                   value={draft.type ?? 'stdio'}
-                  onChange={(e) => setDraft({ ...draft, type: e.target.value as McpServerEntry['type'] })}
+                  onChange={(e) =>
+                    setDraft({
+                      ...draft,
+                      type: e.target.value as McpServerEntry['type'],
+                    })
+                  }
                 >
                   {SERVER_TYPES.map((t) => (
                     <option key={t} value={t}>
@@ -188,39 +171,60 @@ export const ConnectorConfigDialog = memo(
                     </option>
                   ))}
                 </Select>
-              </FormField>
+              </Field>
 
               {isStdio ? (
                 <>
-                  <FormField label="Command">
+                  <Field orientation="horizontal" className="justify-between gap-4">
+                    <div className="min-w-0">
+                      <FieldLabel>Command</FieldLabel>
+                    </div>
                     <Input
                       type="text"
                       value={draft.command ?? ''}
-                      onChange={(e) => setDraft({ ...draft, command: e.target.value })}
+                      onChange={(e) =>
+                        setDraft({
+                          ...draft,
+                          command: e.target.value,
+                        })
+                      }
                       placeholder="npx"
-                      mono
                     />
-                  </FormField>
-                  <FormField label="Args">
+                  </Field>
+                  <Field orientation="horizontal" className="justify-between gap-4">
+                    <div className="min-w-0">
+                      <FieldLabel>Args</FieldLabel>
+                    </div>
                     <Input
                       type="text"
                       value={(draft.args ?? []).join(', ')}
-                      onChange={(e) => setDraft({ ...draft, args: e.target.value.split(',').map((a) => a.trim()) })}
+                      onChange={(e) =>
+                        setDraft({
+                          ...draft,
+                          args: e.target.value.split(',').map((a) => a.trim()),
+                        })
+                      }
                       placeholder="arg1, arg2"
-                      mono
                     />
-                  </FormField>
+                  </Field>
                 </>
               ) : (
-                <FormField label="URL">
+                <Field orientation="horizontal" className="justify-between gap-4">
+                  <div className="min-w-0">
+                    <FieldLabel>URL</FieldLabel>
+                  </div>
                   <Input
                     type="text"
                     value={draft.url ?? ''}
-                    onChange={(e) => setDraft({ ...draft, url: e.target.value })}
+                    onChange={(e) =>
+                      setDraft({
+                        ...draft,
+                        url: e.target.value,
+                      })
+                    }
                     placeholder="https://..."
-                    mono
                   />
-                </FormField>
+                </Field>
               )}
 
               {!isStdio && (
@@ -237,17 +241,17 @@ export const ConnectorConfigDialog = memo(
                 onChange={(env) => setDraft({ ...draft, env })}
               />
             </div>
-          </DialogBody>
+          </div>
           <DialogFooter>
             <Button variant="ghost" onClick={onClose}>
               Cancel
             </Button>
-            <Button onClick={save} isDisabled={!canSave}>
-              {saving ? <Spinner size="sm" /> : 'Save'}
+            <Button onClick={save} disabled={!canSave}>
+              {saving ? <Spinner /> : 'Save'}
             </Button>
           </DialogFooter>
         </DialogContent>
-      </AnimatedDialog>
+      </Dialog>
     );
   }
 );

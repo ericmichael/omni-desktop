@@ -597,14 +597,14 @@ export const renderIdentityInstructions = (
         `\`list_apps\` shows every app across all columns (each with a \`handle_id\`) plus the global dock apps.\n` +
         `- Act inside a column with \`column_send\` (instruct its agent), \`column_decide\` (approve/reject what ` +
         `it is blocked on), \`column_cancel\` (stop it), and \`start_ticket\` / \`stop_ticket\` (autopilot). ` +
-        `Shape the deck with \`open_column\`, \`close_column\`, and \`launch_app\`.\n` +
+        `Shape the deck with \`open_column\`, \`archive_session\`, and \`launch_app\`.\n` +
         `- Drive any column's apps with the \`app_*\` tools using the \`handle_id\` from \`list_apps\` — not a ` +
         `bare name, because the same app (e.g. \`terminal\`) exists in many columns.\n` +
         `- When you dispatch work with \`column_send\`, you are woken when that run ends — no need to poll.\n` +
         `- These tools live in the user's app window: when it is closed they return an error. That is normal — ` +
         `note it, work with what you have, and try again later.\n` +
         `- Report through your speech tools like everything else (\`dm\` the user, post to channels). ` +
-        `Confirm with the user before anything destructive (closing a column, cancelling a run).`
+        `Confirm with the user before cancelling a run.`
     );
   }
   if (handbook?.trim()) {

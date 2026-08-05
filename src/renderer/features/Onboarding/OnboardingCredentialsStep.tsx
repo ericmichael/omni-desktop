@@ -1,8 +1,8 @@
-import { makeStyles, tokens } from '@fluentui/react-components';
 import type { ChangeEvent } from 'react';
 import { memo, useCallback } from 'react';
 
-import { Body1Strong, Button, Caption1, Input } from '@/renderer/ds';
+import { Button } from '@/renderer/ds/ui/button';
+import { Input } from '@/renderer/ds/ui/input';
 import type { ProviderEntry } from '@/shared/types';
 
 type Props = {
@@ -15,18 +15,8 @@ type Props = {
   onBack: () => void;
 };
 
-const useStyles = makeStyles({
-  root: { display: 'flex', flexDirection: 'column', gap: '24px' },
-  header: { display: 'flex', flexDirection: 'column', gap: '4px' },
-  fields: { display: 'flex', flexDirection: 'column', gap: '16px' },
-  field: { display: 'flex', flexDirection: 'column', gap: '6px' },
-  required: { color: tokens.colorPaletteRedForeground1 },
-  actions: { display: 'flex', justifyContent: 'space-between' },
-});
-
 export const OnboardingCredentialsStep = memo(
   ({ providerType, apiKey, baseUrl, onChangeApiKey, onChangeBaseUrl, onNext, onBack }: Props) => {
-    const styles = useStyles();
     const showBaseUrl = providerType === 'openai-compatible' || providerType === 'litellm';
     const apiKeyRequired = providerType !== 'openai-compatible';
     const baseUrlRequired = providerType === 'openai-compatible';
@@ -54,48 +44,50 @@ export const OnboardingCredentialsStep = memo(
       providerType === 'openai-compatible' ? 'http://localhost:11434/v1' : 'https://api.example.com/v1';
 
     return (
-      <div className={styles.root}>
-        <div className={styles.header}>
-          <Body1Strong>Enter credentials</Body1Strong>
-          <Caption1>
+      <div className="flex flex-col gap-6">
+        <div className="flex flex-col gap-1">
+          <span className="text-sm font-semibold">Enter credentials</span>
+          <span className="text-xs text-muted-foreground">
             {providerType === 'openai' && 'Enter your OpenAI API key.'}
             {providerType === 'openai-compatible' && 'Enter the base URL for your OpenAI-compatible server.'}
             {providerType === 'litellm' && 'Enter your API key and optional base URL.'}
-          </Caption1>
+          </span>
         </div>
 
-        <div className={styles.fields}>
+        <div className="flex flex-col gap-4">
           {showBaseUrl && (
-            <div className={styles.field}>
-              <Caption1>Base URL {baseUrlRequired && <span className={styles.required}>*</span>}</Caption1>
+            <div className="flex flex-col gap-1.5">
+              <span className="text-xs text-muted-foreground">
+                Base URL {baseUrlRequired && <span className="text-destructive">*</span>}
+              </span>
               <Input
                 value={baseUrl}
                 onChange={handleBaseUrlChange}
                 placeholder={baseUrlPlaceholder}
                 autoFocus={providerType === 'openai-compatible'}
-                size="sm"
               />
             </div>
           )}
 
-          <div className={styles.field}>
-            <Caption1>API Key {apiKeyRequired && <span className={styles.required}>*</span>}</Caption1>
+          <div className="flex flex-col gap-1.5">
+            <span className="text-xs text-muted-foreground">
+              API Key {apiKeyRequired && <span className="text-destructive">*</span>}
+            </span>
             <Input
               type="password"
               value={apiKey}
               onChange={handleApiKeyChange}
               placeholder={apiKeyPlaceholder}
               autoFocus={!showBaseUrl}
-              size="sm"
             />
           </div>
         </div>
 
-        <div className={styles.actions}>
+        <div className="flex justify-between">
           <Button variant="ghost" size="sm" onClick={onBack}>
             Back
           </Button>
-          <Button variant="primary" size="sm" onClick={onNext} isDisabled={!canContinue}>
+          <Button variant="default" size="sm" onClick={onNext} disabled={!canContinue}>
             Continue
           </Button>
         </div>

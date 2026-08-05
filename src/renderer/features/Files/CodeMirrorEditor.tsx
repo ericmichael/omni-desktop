@@ -1,6 +1,5 @@
 import { Compartment, EditorState, Prec } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
-import { makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
 import { basicSetup } from 'codemirror';
 import { useEffect, useRef } from 'react';
 
@@ -18,51 +17,8 @@ export type CodeMirrorEditorProps = {
   readOnly?: boolean;
   ariaLabel?: string;
   autoFocus?: boolean;
-  isGlass?: boolean;
   revealRequest?: CodeMirrorRevealRequest;
 };
-
-const useStyles = makeStyles({
-  root: {
-    minWidth: 0,
-    minHeight: 0,
-    height: '100%',
-    overflow: 'hidden',
-    backgroundColor: tokens.colorNeutralBackground1,
-    '& .cm-editor': {
-      height: '100%',
-      color: tokens.colorNeutralForeground1,
-      backgroundColor: tokens.colorNeutralBackground1,
-    },
-    '& .cm-scroller': {
-      overflow: 'auto',
-      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-      fontSize: tokens.fontSizeBase300,
-      lineHeight: '1.55',
-    },
-    '& .cm-gutters': {
-      color: tokens.colorNeutralForeground4,
-      backgroundColor: tokens.colorNeutralBackground2,
-      borderRightColor: tokens.colorNeutralStroke2,
-    },
-    '& .cm-activeLine, & .cm-activeLineGutter': {
-      backgroundColor: tokens.colorSubtleBackground,
-    },
-    '& .cm-selectionBackground, & .cm-content ::selection': {
-      backgroundColor: `${tokens.colorBrandBackground2} !important`,
-    },
-    '& .cm-focused': {
-      outline: `2px solid ${tokens.colorStrokeFocus2}`,
-      outlineOffset: '-2px',
-    },
-    '& .cm-cursor': { borderLeftColor: tokens.colorNeutralForeground1 },
-  },
-  rootGlass: {
-    backgroundColor: 'transparent',
-    '& .cm-editor': { backgroundColor: 'transparent' },
-    '& .cm-gutters': { backgroundColor: tokens.colorNeutralBackground3 },
-  },
-});
 
 /**
  * Controlled CodeMirror 6 wrapper for source files. Saving is deliberately
@@ -75,10 +31,8 @@ export function CodeMirrorEditor({
   readOnly = false,
   ariaLabel = 'Source editor',
   autoFocus = false,
-  isGlass = false,
   revealRequest,
 }: CodeMirrorEditorProps) {
-  const styles = useStyles();
   const hostRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<EditorView | null>(null);
   const onChangeRef = useRef(onChange);
@@ -193,6 +147,10 @@ export function CodeMirrorEditor({
   }, [revealRequest]);
 
   return (
-    <div ref={hostRef} className={mergeClasses(styles.root, isGlass && styles.rootGlass)} data-testid="source-editor" />
+    <div
+      ref={hostRef}
+      className="h-full min-h-0 min-w-0 overflow-hidden bg-background [&_.cm-activeLine,_&_.cm-activeLineGutter]:bg-transparent [&_.cm-cursor]:border-l-foreground [&_.cm-editor]:h-full [&_.cm-editor]:bg-background [&_.cm-editor]:text-foreground [&_.cm-focused]:outline-2 [&_.cm-gutters]:border-r-border [&_.cm-gutters]:bg-card [&_.cm-gutters]:text-muted-foreground [&_.cm-scroller]:overflow-auto [&_.cm-scroller]:font-mono [&_.cm-scroller]:text-sm [&_.cm-scroller]:leading-relaxed [&_.cm-selectionBackground,_&_.cm-content_::selection]:!bg-primary/10 -outline-offset-2 outline-ring"
+      data-testid="source-editor"
+    />
   );
 }

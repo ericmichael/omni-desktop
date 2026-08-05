@@ -1,3 +1,5 @@
+import { Button } from '@/renderer/ds/ui/button';
+import { Card } from '@/renderer/ds/ui/card';
 import type { QueuedMessage } from '@/renderer/omniagents-ui/rpc/client';
 
 type Props = {
@@ -15,8 +17,8 @@ type Props = {
  *   - the drainer pops them to actually fire start_run
  *   (both paths broadcast queue_changed which replaces this list)
  *
- * Styling follows the Tasks panel vocabulary — bgCardAlt container, the
- * custom textSubtle/textPrimary tokens, and the launcher's brand color
+ * Styling follows the Tasks panel vocabulary — a semantic card container,
+ * muted/foreground text, and the active theme's primary color
  * for emphasis — so the panel feels like part of the same family.
  */
 export function QueuedMessages({ items, onCancel }: Props) {
@@ -25,32 +27,33 @@ export function QueuedMessages({ items, onCancel }: Props) {
   }
   return (
     <div className="px-3 pt-2">
-      <div className="rounded-md border border-bgCardAlt bg-bgCardAlt/60 p-2.5">
-        <div className="flex items-center gap-2 text-xs text-textSubtle">
-          <span className="font-medium text-textPrimary">Up next</span>
+      <Card className="gap-0 rounded-md border-accent bg-accent/60 p-2.5 shadow-none">
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <span className="font-medium text-foreground">Up next</span>
           <span aria-hidden>·</span>
           <span>
-            <span className="text-brand">{items.length}</span> queued
+            <span className="text-primary">{items.length}</span> queued
           </span>
         </div>
         <ul className="mt-1.5 space-y-1">
           {items.map((item, idx) => (
             <li key={item.id} className="flex items-start gap-2 text-xs leading-5">
-              <span className="mt-0.5 w-5 shrink-0 text-right tabular-nums text-textSubtle">{idx + 1}</span>
-              <span className="min-w-0 flex-1 whitespace-pre-wrap break-words text-textPrimary">{item.content}</span>
-              <button
-                type="button"
-                className="shrink-0 rounded px-1.5 text-textSubtle transition-colors hover:bg-bgCardAlt hover:text-textPrimary"
+              <span className="mt-0.5 w-5 shrink-0 text-right tabular-nums text-muted-foreground">{idx + 1}</span>
+              <span className="min-w-0 flex-1 whitespace-pre-wrap break-words text-foreground">{item.content}</span>
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                className="shrink-0 text-muted-foreground"
                 onClick={() => onCancel(item.id)}
                 aria-label="Cancel queued message"
                 title="Cancel"
               >
                 ×
-              </button>
+              </Button>
             </li>
           ))}
         </ul>
-      </div>
+      </Card>
     </div>
   );
 }

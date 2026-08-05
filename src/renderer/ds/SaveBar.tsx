@@ -1,7 +1,7 @@
-import { makeStyles, MessageBar, MessageBarActions, MessageBarBody, tokens } from '@fluentui/react-components';
 import { memo } from 'react';
 
-import { Button } from '@/renderer/ds/Button';
+import { Alert, AlertDescription } from '@/renderer/ds/ui/alert';
+import { Button } from '@/renderer/ds/ui/button';
 
 type SaveBarProps = {
   onSave: () => void;
@@ -10,40 +10,26 @@ type SaveBarProps = {
   error?: string | null;
 };
 
-const useStyles = makeStyles({
-  root: {
-    marginTop: '4px',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '8px',
-  },
-  error: {
-    color: tokens.colorPaletteRedForeground1,
-  },
-});
-
 export const SaveBar = memo(({ onSave, dirty, saving, error }: SaveBarProps) => {
-  const styles = useStyles();
-
   if (!dirty && !error && !saving) {
     return null;
   }
 
   return (
-    <div className={styles.root}>
+    <div className="mt-1 flex flex-col gap-2">
       {error && (
-        <MessageBar intent="error">
-          <MessageBarBody>{error}</MessageBarBody>
-        </MessageBar>
+        <Alert variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
       )}
-      <MessageBar intent={dirty ? 'warning' : 'info'}>
-        <MessageBarBody>{saving ? 'Saving\u2026' : 'Unsaved changes'}</MessageBarBody>
-        <MessageBarActions>
-          <Button variant="primary" size="sm" onClick={onSave} isDisabled={!dirty || saving}>
+      <Alert>
+        <AlertDescription>{saving ? 'Saving\u2026' : 'Unsaved changes'}</AlertDescription>
+        <div className="col-start-2 flex gap-2">
+          <Button variant="default" size="sm" onClick={onSave} disabled={!dirty || saving}>
             {saving ? 'Saving\u2026' : 'Save'}
           </Button>
-        </MessageBarActions>
-      </MessageBar>
+        </div>
+      </Alert>
     </div>
   );
 });

@@ -1,8 +1,8 @@
-import { makeStyles, tokens } from '@fluentui/react-components';
 import { motion } from 'framer-motion';
 import { memo } from 'react';
 
-import { Body1Strong, Button, Caption1 } from '@/renderer/ds';
+import { cn } from '@/renderer/ds/cn';
+import { Button } from '@/renderer/ds/ui/button';
 
 type Props = {
   providerLabel: string;
@@ -12,40 +12,20 @@ type Props = {
   onFinish: () => void;
 };
 
-const useStyles = makeStyles({
-  root: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '20px', textAlign: 'center' },
-  check: { color: tokens.colorPaletteGreenForeground1 },
-  card: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '4px',
-    alignItems: 'center',
-    width: '100%',
-    padding: '16px',
-    borderRadius: tokens.borderRadiusLarge,
-    border: `1px solid ${tokens.colorNeutralStroke1}`,
-    backgroundColor: tokens.colorNeutralBackground2,
-  },
-  detail: { color: tokens.colorNeutralForeground2 },
-  cta: { width: '100%', display: 'flex', justifyContent: 'center' },
-});
-
 /**
  * The handshake moment — the one screen in setup that celebrates instead of
  * configures. Check draws in, then the connection card materializes.
  * framer-motion inherits the app-level reduced-motion config.
  */
 export const OnboardingConnectedStep = memo(({ providerLabel, modelLabel, maskedKey, onFinish }: Props) => {
-  const styles = useStyles();
-
   return (
-    <div className={styles.root}>
+    <div className="flex flex-col items-center gap-5 text-center">
       <motion.svg
         width="56"
         height="56"
         viewBox="0 0 56 56"
         fill="none"
-        className={styles.check}
+        className="text-success"
         initial={{ scale: 0.8, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
         transition={{ type: 'spring', stiffness: 260, damping: 20 }}
@@ -60,6 +40,7 @@ export const OnboardingConnectedStep = memo(({ providerLabel, modelLabel, masked
           animate={{ pathLength: 1 }}
           transition={{ duration: 0.5, ease: 'easeOut' }}
         />
+
         <motion.path
           d="M17 29.5 L24.5 37 L39 20.5"
           stroke="currentColor"
@@ -73,23 +54,23 @@ export const OnboardingConnectedStep = memo(({ providerLabel, modelLabel, masked
       </motion.svg>
 
       <motion.div
-        className={styles.card}
+        className="flex flex-col gap-1 items-center w-full p-4 rounded-xl border border-border bg-card"
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3, delay: 0.55, ease: 'easeOut' }}
       >
-        <Body1Strong>Connected to {providerLabel}</Body1Strong>
-        <Caption1 className={styles.detail}>{modelLabel}</Caption1>
-        {maskedKey && <Caption1 className={styles.detail}>{maskedKey}</Caption1>}
+        <span className="text-sm font-semibold">Connected to {providerLabel}</span>
+        <span className={cn('text-xs text-muted-foreground', 'text-muted-foreground')}>{modelLabel}</span>
+        {maskedKey && <span className={cn('text-xs text-muted-foreground', 'text-muted-foreground')}>{maskedKey}</span>}
       </motion.div>
 
       <motion.div
-        className={styles.cta}
+        className="w-full flex justify-center"
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ duration: 0.3, delay: 0.75 }}
       >
-        <Button variant="primary" onClick={onFinish}>
+        <Button variant="default" onClick={onFinish}>
           Start chatting
         </Button>
       </motion.div>

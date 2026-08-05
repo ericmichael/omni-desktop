@@ -58,9 +58,9 @@ describe('isProjectPinned', () => {
 });
 
 describe('milestoneProgress', () => {
-  it('returns {resolved:0,total:0,pct:1} for empty milestones', () => {
-    expect(milestoneProgress(makeMilestone({ id: 'm1' }), [])).toEqual({
-      resolved: 0,
+  it('returns {completed:0,total:0,pct:1} for empty milestones', () => {
+    expect(milestoneProgress(makeMilestone({ id: 'm1' }), [], new Set(['done']))).toEqual({
+      completed: 0,
       total: 0,
       pct: 1,
     });
@@ -69,21 +69,21 @@ describe('milestoneProgress', () => {
   it('counts only tickets in the milestone', () => {
     const m = makeMilestone({ id: 'm1' });
     const tickets = [
-      makeTicket({ id: 't1', milestoneId: 'm1', resolution: 'completed' }),
+      makeTicket({ id: 't1', milestoneId: 'm1', columnId: 'done' }),
       makeTicket({ id: 't2', milestoneId: 'm1' }),
-      makeTicket({ id: 't3', milestoneId: 'm2', resolution: 'completed' }),
+      makeTicket({ id: 't3', milestoneId: 'm2', columnId: 'done' }),
       makeTicket({ id: 't4' }),
     ];
-    expect(milestoneProgress(m, tickets)).toEqual({ resolved: 1, total: 2, pct: 0.5 });
+    expect(milestoneProgress(m, tickets, new Set(['done']))).toEqual({ completed: 1, total: 2, pct: 0.5 });
   });
 });
 
 describe('projectOpenTicketCount', () => {
-  it('counts only unresolved, non-terminal tickets in the project', () => {
+  it('counts only non-archived, non-done tickets in the project', () => {
     const p = makeProject({ id: 'p1' });
     const tickets = [
       makeTicket({ id: 't1', projectId: 'p1' }),
-      makeTicket({ id: 't2', projectId: 'p1', resolution: 'completed' }),
+      makeTicket({ id: 't2', projectId: 'p1', archivedAt: NOW }),
       makeTicket({ id: 't3', projectId: 'p1', columnId: 'done' }),
       makeTicket({ id: 't4', projectId: 'p2' }),
     ];
@@ -104,7 +104,15 @@ describe('rankFocusForProject', () => {
 
   it('returns null when the project has no open tickets', () => {
     const p = makeProject({ id: 'p1' });
-    const tickets = [makeTicket({ id: 't1', projectId: 'p1', resolution: 'completed' })];
-    expect(rankFocusForProject({ project: p, tickets, milestones: {}, now: NOW })).toBeNull();
+    const tickets = [makeTicket({ id: 't1', projectId: 'p1', columnId: 'done' })];
+    expect(
+      rankFocusForProject({
+        project: p,
+        tickets,
+        milestones: {},
+        terminalColumnIds: new Set(['done']),
+        now: NOW,
+      })
+    ).toBeNull();
   });
 });

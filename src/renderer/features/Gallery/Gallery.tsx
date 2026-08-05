@@ -1,8 +1,8 @@
-import { makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
-import { useStore } from '@nanostores/react';
 import { BookmarkIcon, CodeIcon, FileTextIcon, GlobeIcon, SendHorizontalIcon } from 'lucide-react';
 import { memo, useState } from 'react';
 
+import { Button } from '@/renderer/ds/ui/button';
+import { TooltipProvider } from '@/renderer/ds/ui/tooltip';
 import type { ToolState } from '@/renderer/omniagents-ui/ai-types';
 import {
   Artifact,
@@ -63,26 +63,7 @@ import {
   PromptInputActions,
   PromptInputTextarea,
 } from '@/renderer/omniagents-ui/components/promptkit/PromptInput';
-import { Button } from '@/renderer/omniagents-ui/components/ui/button';
-import { TooltipProvider } from '@/renderer/omniagents-ui/components/ui/tooltip';
-import { $glassEnabled } from '@/renderer/theme/use-glass';
 import type { ToolItem } from '@/shared/chat-types';
-
-const useStyles = makeStyles({
-  // Inner shadcn surface colors (--color-card, --color-muted, --color-secondary, etc.)
-  // are overridden to glass scrim values at the deck-bg root in MainContent. This
-  // class only adds the blur layer to the page shell and tints the primary CTA.
-  glassRoot: {
-    backdropFilter: 'var(--glass-blur)',
-    WebkitBackdropFilter: 'var(--glass-blur)',
-    '& .bg-primary': {
-      backgroundColor: `color-mix(in srgb, ${tokens.colorBrandBackground} 70%, transparent)`,
-      backdropFilter: 'var(--glass-blur-light)',
-      WebkitBackdropFilter: 'var(--glass-blur-light)',
-      boxShadow: `0 1px 0 0 rgba(255,255,255,0.14) inset, 0 2px 8px -2px rgba(0,0,0,0.15)`,
-    },
-  },
-});
 
 const Section = ({ title, children }: { title: string; children: React.ReactNode }) => (
   <section className="mb-12">
@@ -406,7 +387,7 @@ export const auth = () => {
           rows: [
             ['t-11', 'Fix login redirect'],
             ['t-12', 'Add CSV export'],
-            ['t-13', 'Upgrade Fluent to v9.60'],
+            ['t-13', 'Migrate components to shadcn'],
           ],
         },
       },
@@ -441,18 +422,10 @@ const TOOL_STATES: { state: ToolState; label: string }[] = [
 
 export const Gallery = memo(() => {
   const [promptValue, setPromptValue] = useState('');
-  const styles = useStyles();
-  const isGlass = useStore($glassEnabled);
 
   return (
     <TooltipProvider>
-      <div
-        className={mergeClasses(
-          'h-full w-full overflow-auto p-8 text-foreground',
-          !isGlass && 'bg-background',
-          isGlass && styles.glassRoot
-        )}
-      >
+      <div className="h-full w-full overflow-auto bg-background p-8 text-foreground">
         <div className="mx-auto max-w-3xl">
           <header className="mb-8">
             <h1 className="text-2xl font-bold">Component Gallery</h1>

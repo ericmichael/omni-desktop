@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Omni shadcn registry drift approvals",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "approvals"],
+  "properties": {
+    "version": { "const": 1 },
+    "approvals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["component", "upstreamSha256", "localSemanticSha256", "reason"],
+        "properties": {
+          "component": { "type": "string", "pattern": "^[a-z0-9-]+\\.tsx$" },
+          "upstreamSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "localSemanticSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "reason": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+}

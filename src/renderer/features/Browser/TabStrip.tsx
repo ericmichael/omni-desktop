@@ -1,107 +1,15 @@
 import { DndContext, type DragEndEvent, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { arrayMove, horizontalListSortingStrategy, SortableContext, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { makeStyles, mergeClasses, shorthands, tokens } from '@fluentui/react-components';
-import { Add20Regular, Dismiss16Regular, Globe16Regular, Pin16Regular, PinOff16Regular } from '@fluentui/react-icons';
+import { Globe, Pin, PinOff, Plus, X } from 'lucide-react';
 import { memo, useCallback, useMemo } from 'react';
 
 import { fallbackTitle } from '@/lib/url';
-import { Menu, MenuItem, MenuList, MenuPopover, MenuTrigger } from '@/renderer/ds';
+import { cn } from '@/renderer/ds/cn';
+import { Button } from '@/renderer/ds/ui/button';
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/renderer/ds/ui/context-menu';
 import { browserApi } from '@/renderer/features/Browser/state';
 import type { BrowserTab, BrowserTabId, BrowserTabset } from '@/shared/types';
-
-const useStyles = makeStyles({
-  root: {
-    display: 'flex',
-    alignItems: 'stretch',
-    minHeight: '34px',
-    paddingLeft: '4px',
-    paddingRight: '4px',
-    gap: '2px',
-    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
-    backgroundColor: tokens.colorNeutralBackground2,
-    overflowX: 'auto',
-    overflowY: 'hidden',
-    scrollbarWidth: 'thin',
-  },
-  rootGlass: {
-    backgroundColor: 'transparent',
-    borderBottomColor: 'rgba(255, 255, 255, 0.14)',
-  },
-  tab: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '6px',
-    paddingLeft: '10px',
-    paddingRight: '6px',
-    marginTop: '4px',
-    minWidth: '120px',
-    maxWidth: '220px',
-    height: '26px',
-    borderRadius: tokens.borderRadiusMedium,
-    border: 'none',
-    cursor: 'pointer',
-    userSelect: 'none',
-    WebkitUserSelect: 'none',
-    color: tokens.colorNeutralForeground2,
-    backgroundColor: 'transparent',
-    transitionProperty: 'background-color, color',
-    transitionDuration: tokens.durationFaster,
-    ':hover': { backgroundColor: tokens.colorSubtleBackgroundHover, color: tokens.colorNeutralForeground1 },
-  },
-  tabActive: {
-    backgroundColor: tokens.colorNeutralBackground1,
-    color: tokens.colorNeutralForeground1,
-    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
-    borderBottomColor: 'transparent',
-  },
-  tabPinned: {
-    minWidth: '38px',
-    maxWidth: '38px',
-    paddingLeft: '8px',
-    paddingRight: '8px',
-  },
-  tabDragging: { opacity: 0.6 },
-  favicon: { width: '14px', height: '14px', flexShrink: 0 },
-  title: {
-    flex: '1 1 0',
-    minWidth: 0,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    fontSize: tokens.fontSizeBase200,
-  },
-  close: {
-    display: 'inline-flex',
-    width: '18px',
-    height: '18px',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: tokens.borderRadiusSmall,
-    border: 'none',
-    backgroundColor: 'transparent',
-    color: tokens.colorNeutralForeground3,
-    cursor: 'pointer',
-    flexShrink: 0,
-    ':hover': { backgroundColor: tokens.colorSubtleBackgroundHover, color: tokens.colorNeutralForeground1 },
-  },
-  newTab: {
-    display: 'inline-flex',
-    width: '26px',
-    height: '26px',
-    marginTop: '4px',
-    marginLeft: '4px',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: tokens.borderRadiusMedium,
-    border: 'none',
-    backgroundColor: 'transparent',
-    color: tokens.colorNeutralForeground2,
-    cursor: 'pointer',
-    flexShrink: 0,
-    ':hover': { backgroundColor: tokens.colorSubtleBackgroundHover, color: tokens.colorNeutralForeground1 },
-  },
-});
 
 type TabItemProps = {
   tab: BrowserTab;
@@ -113,7 +21,6 @@ type TabItemProps = {
 };
 
 const TabItem = memo(({ tab, active, onSelect, onClose, onPinToggle, onDuplicate }: TabItemProps) => {
-  const styles = useStyles();
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: tab.id });
   const style = { transform: CSS.Transform.toString(transform), transition };
 
@@ -148,155 +55,150 @@ const TabItem = memo(({ tab, active, onSelect, onClose, onPinToggle, onDuplicate
   }, []);
 
   return (
-    <div
-      ref={setNodeRef}
-      style={style}
-      className={mergeClasses(
-        styles.tab,
-        active && styles.tabActive,
-        tab.pinned && styles.tabPinned,
-        isDragging && styles.tabDragging
-      )}
-      {...attributes}
-      {...listeners}
-      onClick={() => onSelect(tab.id)}
-      onMouseDown={handleMouseDown}
-      role="tab"
-      aria-selected={active}
-      title={title}
-    >
-      {tab.favicon ? (
-        <img src={tab.favicon} alt="" className={styles.favicon} />
-      ) : (
-        <Globe16Regular className={styles.favicon} />
-      )}
-      {!tab.pinned && <span className={styles.title}>{title}</span>}
-      <Menu positioning={{ position: 'below', align: 'start' }}>
-        <MenuTrigger>
-          {/*
-            A context-menu trigger hidden behind the right-click. The button
-            is invisible — right-click anywhere on the tab opens it via the
-            ctx handler below.
-          */}
-          <span style={{ display: 'none' }} aria-hidden />
-        </MenuTrigger>
-        <MenuPopover>
-          <MenuList>
-            <MenuItem onClick={() => onDuplicate(tab.id)}>Duplicate tab</MenuItem>
-            <MenuItem
-              icon={tab.pinned ? <PinOff16Regular /> : <Pin16Regular />}
-              onClick={() => onPinToggle(tab.id, !tab.pinned)}
-            >
-              {tab.pinned ? 'Unpin tab' : 'Pin tab'}
-            </MenuItem>
-            <MenuItem onClick={() => onClose(tab.id)}>Close tab</MenuItem>
-          </MenuList>
-        </MenuPopover>
-      </Menu>
-      {!tab.pinned && (
-        <button
-          type="button"
-          className={styles.close}
-          onClick={handleClose}
-          onPointerDown={stopPointer}
-          onMouseDown={stopPointer}
-          aria-label={`Close ${title}`}
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <div
+          ref={setNodeRef}
+          style={style}
+          className={cn(
+            'flex items-center gap-1.5 pl-2.5 pr-1.5 mt-1 min-w-30 max-w-55 h-6.5 rounded-lg border-0 cursor-pointer select-none select-none text-muted-foreground bg-transparent transition-colors duration-100 hover:bg-accent hover:text-foreground',
+            active && 'bg-background text-foreground border border-border border-b-transparent',
+            tab.pinned && 'min-w-9.5 max-w-9.5 pl-2 pr-2',
+            isDragging && 'opacity-60'
+          )}
+          {...attributes}
+          {...listeners}
+          onClick={() => onSelect(tab.id)}
+          onMouseDown={handleMouseDown}
+          role="tab"
+          aria-selected={active}
+          title={title}
         >
-          <Dismiss16Regular />
-        </button>
-      )}
-    </div>
+          {tab.favicon ? (
+            <img src={tab.favicon} alt="" className="size-3.5 shrink-0" />
+          ) : (
+            <Globe className="size-3.5 shrink-0" />
+          )}
+          {!tab.pinned && (
+            <span className="flex-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-xs">{title}</span>
+          )}
+          {!tab.pinned && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              className="inline-flex size-6 items-center justify-center rounded-md border-0 bg-transparent text-muted-foreground cursor-pointer shrink-0 hover:bg-accent hover:text-foreground"
+              onClick={handleClose}
+              onPointerDown={stopPointer}
+              onMouseDown={stopPointer}
+              aria-label={`Close ${title}`}
+            >
+              <X />
+            </Button>
+          )}
+        </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem onSelect={() => onDuplicate(tab.id)}>Duplicate tab</ContextMenuItem>
+        <ContextMenuItem onSelect={() => onPinToggle(tab.id, !tab.pinned)}>
+          {tab.pinned ? <PinOff /> : <Pin />}
+          {tab.pinned ? 'Unpin tab' : 'Pin tab'}
+        </ContextMenuItem>
+        <ContextMenuItem onSelect={() => onClose(tab.id)}>Close tab</ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 });
 TabItem.displayName = 'TabItem';
 
-export const TabStrip = memo(
-  ({ tabset, isGlass, onNewTab }: { tabset: BrowserTabset; isGlass?: boolean; onNewTab: () => void }) => {
-    const styles = useStyles();
-    const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
+export const TabStrip = memo(({ tabset, onNewTab }: { tabset: BrowserTabset; onNewTab: () => void }) => {
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
-    // Pinned tabs render first, in their own stable order. Drag reorder
-    // operates across the whole list but we sort so pinned stay leftmost.
-    const orderedTabs = useMemo(() => {
-      const pinned = tabset.tabs.filter((t) => t.pinned);
-      const rest = tabset.tabs.filter((t) => !t.pinned);
-      return [...pinned, ...rest];
-    }, [tabset.tabs]);
+  // Pinned tabs render first, in their own stable order. Drag reorder
+  // operates across the whole list but we sort so pinned stay leftmost.
+  const orderedTabs = useMemo(() => {
+    const pinned = tabset.tabs.filter((t) => t.pinned);
+    const rest = tabset.tabs.filter((t) => !t.pinned);
+    return [...pinned, ...rest];
+  }, [tabset.tabs]);
 
-    const handleSelect = useCallback(
-      (id: BrowserTabId) => {
-        void browserApi.activateTab(tabset.id, id);
-      },
-      [tabset.id]
-    );
+  const handleSelect = useCallback(
+    (id: BrowserTabId) => {
+      void browserApi.activateTab(tabset.id, id);
+    },
+    [tabset.id]
+  );
 
-    const handleClose = useCallback(
-      (id: BrowserTabId) => {
-        void browserApi.closeTab(tabset.id, id);
-      },
-      [tabset.id]
-    );
+  const handleClose = useCallback(
+    (id: BrowserTabId) => {
+      void browserApi.closeTab(tabset.id, id);
+    },
+    [tabset.id]
+  );
 
-    const handlePinToggle = useCallback(
-      (id: BrowserTabId, pinned: boolean) => {
-        void browserApi.pinTab(tabset.id, id, pinned);
-      },
-      [tabset.id]
-    );
+  const handlePinToggle = useCallback(
+    (id: BrowserTabId, pinned: boolean) => {
+      void browserApi.pinTab(tabset.id, id, pinned);
+    },
+    [tabset.id]
+  );
 
-    const handleDuplicate = useCallback(
-      (id: BrowserTabId) => {
-        void browserApi.duplicateTab(tabset.id, id);
-      },
-      [tabset.id]
-    );
+  const handleDuplicate = useCallback(
+    (id: BrowserTabId) => {
+      void browserApi.duplicateTab(tabset.id, id);
+    },
+    [tabset.id]
+  );
 
-    const handleDragEnd = useCallback(
-      (event: DragEndEvent) => {
-        const { active, over } = event;
-        if (!over || active.id === over.id) {
-          return;
-        }
-        const ids = orderedTabs.map((t) => t.id);
-        const oldIndex = ids.indexOf(String(active.id));
-        const newIndex = ids.indexOf(String(over.id));
-        if (oldIndex < 0 || newIndex < 0) {
-          return;
-        }
-        const next = arrayMove(ids, oldIndex, newIndex);
-        void browserApi.reorderTabs(tabset.id, next);
-      },
-      [orderedTabs, tabset.id]
-    );
+  const handleDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      const { active, over } = event;
+      if (!over || active.id === over.id) {
+        return;
+      }
+      const ids = orderedTabs.map((t) => t.id);
+      const oldIndex = ids.indexOf(String(active.id));
+      const newIndex = ids.indexOf(String(over.id));
+      if (oldIndex < 0 || newIndex < 0) {
+        return;
+      }
+      const next = arrayMove(ids, oldIndex, newIndex);
+      void browserApi.reorderTabs(tabset.id, next);
+    },
+    [orderedTabs, tabset.id]
+  );
 
-    return (
-      <div className={mergeClasses(styles.root, isGlass && styles.rootGlass)} role="tablist">
-        <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
-          <SortableContext items={orderedTabs.map((t) => t.id)} strategy={horizontalListSortingStrategy}>
-            {orderedTabs.map((tab) => (
-              <TabItem
-                key={tab.id}
-                tab={tab}
-                active={tab.id === tabset.activeTabId}
-                onSelect={handleSelect}
-                onClose={handleClose}
-                onPinToggle={handlePinToggle}
-                onDuplicate={handleDuplicate}
-              />
-            ))}
-          </SortableContext>
-        </DndContext>
-        <button
-          type="button"
-          className={styles.newTab}
-          aria-label="New tab"
-          title="New tab (Ctrl+T)"
-          onClick={onNewTab}
-        >
-          <Add20Regular style={{ width: 14, height: 14 }} />
-        </button>
-      </div>
-    );
-  }
-);
+  return (
+    <div
+      className="flex items-stretch min-h-8.5 pl-1 pr-1 gap-0.5 border-b border-border bg-card overflow-x-auto overflow-y-hidden scrollbar-thin"
+      role="tablist"
+    >
+      <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
+        <SortableContext items={orderedTabs.map((t) => t.id)} strategy={horizontalListSortingStrategy}>
+          {orderedTabs.map((tab) => (
+            <TabItem
+              key={tab.id}
+              tab={tab}
+              active={tab.id === tabset.activeTabId}
+              onSelect={handleSelect}
+              onClose={handleClose}
+              onPinToggle={handlePinToggle}
+              onDuplicate={handleDuplicate}
+            />
+          ))}
+        </SortableContext>
+      </DndContext>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-xs"
+        className="mt-1 ml-1 size-6.5 shrink-0"
+        aria-label="New tab"
+        onClick={onNewTab}
+      >
+        <Plus className="size-4" />
+      </Button>
+    </div>
+  );
+});
 TabStrip.displayName = 'TabStrip';

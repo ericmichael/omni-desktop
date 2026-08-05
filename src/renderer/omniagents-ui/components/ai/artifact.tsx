@@ -2,14 +2,9 @@ import type { LucideIcon } from 'lucide-react';
 import { XIcon } from 'lucide-react';
 import type { ComponentProps, HTMLAttributes } from 'react';
 
-import { Button } from '@/renderer/omniagents-ui/components/ui/button';
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@/renderer/omniagents-ui/components/ui/tooltip';
-import { cn } from '@/renderer/omniagents-ui/lib/utils';
+import { cn } from '@/renderer/ds/cn';
+import { Button, buttonVariants } from '@/renderer/ds/ui/button';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/renderer/ds/ui/tooltip';
 
 export type ArtifactProps = HTMLAttributes<HTMLDivElement>;
 
@@ -70,7 +65,7 @@ export const ArtifactActions = ({ className, ...props }: ArtifactActionsProps) =
   <div className={cn('flex items-center gap-1', className)} {...props} />
 );
 
-export type ArtifactActionProps = ComponentProps<typeof Button> & {
+export type ArtifactActionProps = Omit<ComponentProps<typeof Button>, 'asChild'> & {
   tooltip?: string;
   label?: string;
   icon?: LucideIcon;
@@ -86,24 +81,31 @@ export const ArtifactAction = ({
   variant = 'ghost',
   ...props
 }: ArtifactActionProps) => {
-  const button = (
-    <Button
-      className={cn('size-8 p-0 text-muted-foreground hover:text-foreground', className)}
-      size={size}
-      type="button"
-      variant={variant}
-      {...props}
-    >
+  const content = (
+    <>
       {Icon ? <Icon className="size-4" /> : children}
       <span className="sr-only">{label || tooltip}</span>
-    </Button>
+    </>
   );
 
   if (tooltip) {
     return (
       <TooltipProvider>
         <Tooltip>
-          <TooltipTrigger asChild>{button}</TooltipTrigger>
+          <TooltipTrigger
+            className={cn(
+              buttonVariants({ variant, size }),
+              'size-8 p-0 text-muted-foreground hover:text-foreground',
+              className
+            )}
+            data-size={size}
+            data-slot="artifact-action"
+            data-variant={variant}
+            type="button"
+            {...props}
+          >
+            {content}
+          </TooltipTrigger>
           <TooltipContent>
             <p>{tooltip}</p>
           </TooltipContent>
@@ -112,7 +114,17 @@ export const ArtifactAction = ({
     );
   }
 
-  return button;
+  return (
+    <Button
+      className={cn('size-8 p-0 text-muted-foreground hover:text-foreground', className)}
+      size={size}
+      type="button"
+      variant={variant}
+      {...props}
+    >
+      {content}
+    </Button>
+  );
 };
 
 export type ArtifactContentProps = HTMLAttributes<HTMLDivElement>;

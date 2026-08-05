@@ -1,12 +1,8 @@
 import { ChevronDownIcon, SearchIcon } from 'lucide-react';
 import type { ComponentProps } from 'react';
 
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from '@/renderer/omniagents-ui/components/ui/collapsible';
-import { cn } from '@/renderer/omniagents-ui/lib/utils';
+import { cn } from '@/renderer/ds/cn';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/renderer/ds/ui/collapsible';
 
 export type TaskItemFileProps = ComponentProps<'div'>;
 

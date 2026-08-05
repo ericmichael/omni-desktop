@@ -16,6 +16,10 @@ import {
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 
+import { Button } from '@/renderer/ds/ui/button';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/renderer/ds/ui/collapsible';
+import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '@/renderer/ds/ui/input-group';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/renderer/ds/ui/table';
 import { getGreeting } from '@/renderer/omniagents-ui/greeting';
 import { useRPCClient } from '@/renderer/omniagents-ui/rpc-context';
 
@@ -172,16 +176,14 @@ export function MessageList({
       <div className="flex-1 relative">
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
           <div className="mx-auto max-w-full sm:max-w-2xl text-center px-6">
-            <div className="text-2xl sm:text-4xl font-normal tracking-tight text-textHeading font-serif">
-              {greeting}
-            </div>
+            <div className="text-2xl sm:text-4xl font-normal tracking-tight text-foreground font-serif">{greeting}</div>
             <motion.div
               initial={{ height: 0, opacity: 0 }}
               animate={welcomeText ? { height: 'auto', opacity: 1 } : { height: 0, opacity: 0 }}
               transition={{ duration: 0.5, delay: 0.3, ease: [0.25, 0.1, 0.25, 1] }}
               className="overflow-hidden"
             >
-              <div className="mt-3 text-sm text-textSubtle">{welcomeText}</div>
+              <div className="mt-3 text-sm text-muted-foreground">{welcomeText}</div>
             </motion.div>
             {suggestions && suggestions.length > 0 && onSubmitMessage ? (
               <motion.div
@@ -192,14 +194,15 @@ export function MessageList({
                 className="mt-6 flex flex-wrap justify-center gap-2 pointer-events-auto"
               >
                 {suggestions.map((s) => (
-                  <button
+                  <Button
                     key={s.label}
                     type="button"
+                    variant="outline"
                     onClick={() => void onSubmitMessage(s.prompt)}
-                    className="rounded-full border border-border bg-bgCardAlt px-4 py-2 text-sm text-textPrimary hover:brightness-110 active:opacity-70"
+                    className="rounded-full"
                   >
                     {s.label}
-                  </button>
+                  </Button>
                 ))}
               </motion.div>
             ) : null}
@@ -301,31 +304,23 @@ export function MessageList({
  */
 function StagedContextRibbon({ entries }: { entries: NonNullable<ChatMessage['staged_context']> }) {
   const [expanded, setExpanded] = useState(false);
-  const toggle = useCallback(() => setExpanded((v) => !v), []);
   const summary =
     entries.length === 1
       ? (entries[0]?.text.split(/\r?\n/)[0]?.slice(0, 60) ?? '')
       : `${entries.length} context blocks attached`;
   return (
-    <div className="w-full flex flex-col items-end gap-1">
-      <button
-        type="button"
-        onClick={toggle}
-        className="inline-flex items-center gap-1 rounded-full border border-border bg-secondary px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground"
-        aria-expanded={expanded}
-      >
+    <Collapsible open={expanded} onOpenChange={setExpanded} className="flex w-full flex-col items-end gap-1">
+      <CollapsibleTrigger className="inline-flex items-center gap-1 rounded-full border border-border bg-secondary px-2 py-0.5 text-xs text-muted-foreground hover:text-foreground">
         📎 {expanded ? 'Hide' : entries.length === 1 ? summary : summary}
-      </button>
-      {expanded ? (
-        <div className="w-full rounded-md border border-border bg-secondary/40 px-3 py-2 text-[12px] text-muted-foreground space-y-2">
-          {entries.map((c) => (
-            <pre key={c.source} className="whitespace-pre-wrap break-words font-sans">
-              {c.text}
-            </pre>
-          ))}
-        </div>
-      ) : null}
-    </div>
+      </CollapsibleTrigger>
+      <CollapsibleContent className="w-full space-y-2 rounded-md border border-border bg-secondary/40 px-3 py-2 text-xs text-muted-foreground">
+        {entries.map((c) => (
+          <pre key={c.source} className="whitespace-pre-wrap break-words font-sans">
+            {c.text}
+          </pre>
+        ))}
+      </CollapsibleContent>
+    </Collapsible>
   );
 }
 
@@ -357,7 +352,7 @@ function MessageBubble({
   if (role === 'user') {
     return (
       <div className="flex justify-end">
-        <div className="flex min-w-0 max-w-[85%] flex-col items-end space-y-2 sm:max-w-[70%]">
+        <div className="flex min-w-0 max-w-5/6 flex-col items-end space-y-2 sm:max-w-2/3">
           {attachments && attachments.length > 0 ? (
             <div className="flex flex-wrap gap-2 w-full justify-end">
               {attachments.map((att, i) => (
@@ -366,7 +361,7 @@ function MessageBubble({
             </div>
           ) : null}
           {stagedContext && stagedContext.length > 0 ? <StagedContextRibbon entries={stagedContext} /> : null}
-          <div className="max-w-full overflow-hidden rounded-[18px] bg-primary text-primary-foreground px-4 py-3 text-sm">
+          <div className="max-w-full overflow-hidden rounded-2xl bg-primary px-4 py-3 text-sm text-primary-foreground">
             <MessageResponse>{content}</MessageResponse>
           </div>
         </div>
@@ -414,69 +409,82 @@ function MessageBubble({
           <div
             className={`mt-1 flex items-center gap-1 transition-opacity duration-150 focus-within:pointer-events-auto focus-within:opacity-100 group-hover:pointer-events-auto group-hover:opacity-100 ${hasReaction ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0'}`}
           >
-            <button
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
               onClick={() => {
                 try {
                   navigator.clipboard.writeText(content);
                 } catch {}
               }}
-              className="hover:bg-accent rounded p-1 text-muted-foreground hover:text-foreground active:opacity-50 pointer-coarse:p-3"
+              className="text-muted-foreground pointer-coarse:p-3"
               aria-label="Copy"
             >
-              <CopyIcon size={16} />
-            </button>
-            <button
+              <CopyIcon className="size-4" />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
               onClick={() => onReact && onReact(index, 'like')}
-              className={`hover:bg-accent rounded p-1 hover:text-foreground pointer-coarse:p-3 ${reactions && reactions[index] === 'like' ? 'text-successGreen' : 'text-muted-foreground'}`}
+              className={`pointer-coarse:p-3 ${reactions && reactions[index] === 'like' ? 'text-success' : 'text-muted-foreground'}`}
               aria-label="Like"
             >
-              <ThumbsUpIcon size={16} />
-            </button>
-            <button
+              <ThumbsUpIcon className="size-4" />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
               onClick={() => onReact && onReact(index, 'dislike')}
-              className={`hover:bg-accent rounded p-1 hover:text-foreground pointer-coarse:p-3 ${reactions && reactions[index] === 'dislike' ? 'text-errorRed' : 'text-muted-foreground'}`}
+              className={`pointer-coarse:p-3 ${reactions && reactions[index] === 'dislike' ? 'text-destructive' : 'text-muted-foreground'}`}
               aria-label="Dislike"
             >
-              <ThumbsDownIcon size={16} />
-            </button>
+              <ThumbsDownIcon className="size-4" />
+            </Button>
           </div>
           {showFeedback && (
             <div className="mt-2 flex items-center gap-2 w-full">
-              <input
-                type="text"
-                autoFocus
-                value={feedbackText}
-                onChange={(e) => setFeedbackText(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    onFeedbackSubmit?.(index, feedbackText);
-                    setFeedbackText('');
-                  } else if (e.key === 'Escape') {
-                    onFeedbackDismiss?.();
-                    setFeedbackText('');
-                  }
-                }}
-                placeholder="Add a note (optional)…"
-                className="flex-1 h-9 px-3 rounded-lg bg-secondary text-sm text-foreground placeholder-muted-foreground border border-transparent focus:border-primary focus:outline-none"
-              />
-              <button
-                onClick={() => {
-                  onFeedbackSubmit?.(index, feedbackText);
-                  setFeedbackText('');
-                }}
-                className="h-9 px-3 rounded-lg bg-primary text-primary-foreground text-sm hover:brightness-110"
-              >
-                Submit
-              </button>
-              <button
+              <InputGroup className="flex-1">
+                <InputGroupInput
+                  type="text"
+                  autoFocus
+                  value={feedbackText}
+                  onChange={(e) => setFeedbackText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      onFeedbackSubmit?.(index, feedbackText);
+                      setFeedbackText('');
+                    } else if (e.key === 'Escape') {
+                      onFeedbackDismiss?.();
+                      setFeedbackText('');
+                    }
+                  }}
+                  placeholder="Add a note (optional)…"
+                />
+                <InputGroupAddon align="inline-end">
+                  <InputGroupButton
+                    variant="default"
+                    onClick={() => {
+                      onFeedbackSubmit?.(index, feedbackText);
+                      setFeedbackText('');
+                    }}
+                  >
+                    Submit
+                  </InputGroupButton>
+                </InputGroupAddon>
+              </InputGroup>
+              <Button
+                type="button"
+                variant="ghost"
                 onClick={() => {
                   onFeedbackDismiss?.();
                   setFeedbackText('');
                 }}
-                className="h-9 px-3 rounded-lg text-muted-foreground text-sm hover:text-foreground hover:bg-accent"
               >
                 Skip
-              </button>
+              </Button>
             </div>
           )}
         </div>
@@ -642,19 +650,16 @@ function InlineHtmlPreview({ content, maximized }: { content: string; maximized?
     return () => window.removeEventListener('message', handler);
   }, []);
 
-  return (
-    <iframe
-      srcDoc={srcDoc}
-      sandbox="allow-scripts"
-      style={{
-        width: '100%',
-        height: maximized ? '100%' : height,
-        border: 'none',
-        borderRadius: 6,
-        background: 'var(--color-background)',
-      }}
-    />
-  );
+  const sharedProps = {
+    srcDoc,
+    sandbox: 'allow-scripts' as const,
+  };
+
+  if (maximized) {
+    return <iframe {...sharedProps} className="h-full w-full rounded-md border-0 bg-background" />;
+  }
+
+  return <iframe {...sharedProps} className="w-full rounded-md border-0 bg-background" style={{ height }} />;
 }
 
 function AttachmentChip({ attachment }: { attachment: Attachment }) {
@@ -664,15 +669,15 @@ function AttachmentChip({ attachment }: { attachment: Attachment }) {
         <img
           src={attachment.url}
           alt={attachment.filename || 'image'}
-          className="block max-h-[160px] max-w-[240px] object-cover"
+          className="block max-h-40 max-w-60 object-cover"
         />
       </div>
     );
   }
   return (
     <div className="bg-card flex items-center gap-2 rounded-lg px-3 py-2 text-sm border border-border">
-      <PaperclipIcon size={16} className="text-foreground" />
-      <span className="max-w-[180px] truncate text-foreground" title={attachment.filename || 'file'}>
+      <PaperclipIcon className="size-4 text-foreground" />
+      <span className="max-w-45 truncate text-foreground" title={attachment.filename || 'file'}>
         {attachment.filename || 'file'}
       </span>
     </div>
@@ -685,7 +690,7 @@ function PreambleRow({ text }: { text?: string }) {
   }
   return (
     <div className="flex min-w-0 max-w-full items-start gap-2 overflow-hidden">
-      <span className="text-warning animate-pulse mt-[2px]">✶</span>
+      <span className="mt-0.5 animate-pulse text-warning">✶</span>
       <div className="prose-sm prose-warning min-w-0 max-w-full overflow-hidden">
         <MessageResponse>{text}</MessageResponse>
       </div>
@@ -1049,8 +1054,7 @@ function McpUiSurface({
     // every other webview-style host. Avoid stacking outer + inner
     // scrollbars by keeping the wrapper ``overflow-hidden``.
     <div
-      className="relative w-full overflow-hidden [&_iframe]:!w-full [&_iframe]:!h-full [&_iframe]:!max-w-full [&_iframe]:!max-h-full [&_iframe]:!block"
-      style={maximized ? { width: '100%', height: '100%' } : { height: '70vh', minHeight: 320 }}
+      className={`relative w-full overflow-hidden [&_iframe]:!block [&_iframe]:!h-full [&_iframe]:!max-h-full [&_iframe]:!max-w-full [&_iframe]:!w-full ${maximized ? 'h-full' : 'mcp-app-frame'}`}
     >
       <AppRenderer
         toolName={payload.tool_name}
@@ -1118,7 +1122,6 @@ export function ToolCard({ item, defaultOpen }: { item: ToolItem; defaultOpen?: 
   const paramsCollapsed =
     hasResult && !!richBody && typeof displayType === 'string' && SELF_CONTAINED_DISPLAY_TYPES.has(displayType);
   const [paramsOpen, setParamsOpen] = useState(false);
-  const toggleParams = useCallback(() => setParamsOpen((v) => !v), []);
 
   return (
     <div className="flex justify-start">
@@ -1130,17 +1133,17 @@ export function ToolCard({ item, defaultOpen }: { item: ToolItem; defaultOpen?: 
               the gap, and anything more leaves the small line adrift */}
           <ToolContent className={parsedInput && paramsCollapsed ? 'pt-0' : undefined}>
             {parsedInput && paramsCollapsed ? (
-              <div>
-                <button
-                  type="button"
-                  className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground"
-                  onClick={toggleParams}
-                >
-                  {paramsOpen ? <ChevronUpIcon className="size-3" /> : <ChevronDownIcon className="size-3" />}
-                  {paramsOpen ? 'Hide parameters' : 'Show parameters'}
-                </button>
-                {paramsOpen ? <ToolInput className="mt-2" input={parsedInput} /> : null}
-              </div>
+              <Collapsible open={paramsOpen} onOpenChange={setParamsOpen}>
+                <CollapsibleTrigger asChild>
+                  <Button type="button" variant="ghost" size="xs" className="h-6 px-1 text-xs">
+                    {paramsOpen ? <ChevronUpIcon className="size-3" /> : <ChevronDownIcon className="size-3" />}
+                    {paramsOpen ? 'Hide parameters' : 'Show parameters'}
+                  </Button>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <ToolInput className="mt-2" input={parsedInput} />
+                </CollapsibleContent>
+              </Collapsible>
             ) : parsedInput ? (
               <ToolInput input={parsedInput} />
             ) : null}
@@ -1232,7 +1235,7 @@ function ApprovalCard({
   return (
     <div className="relative min-w-0 max-w-full overflow-hidden rounded-md border border-warning bg-secondary p-3">
       {showQueueBadge ? (
-        <div className="absolute top-2 right-2 text-[10px] uppercase tracking-wide text-warning bg-warning/10 border border-warning/40 rounded px-1.5 py-0.5">
+        <div className="absolute top-2 right-2 rounded border border-warning/40 bg-warning/10 px-1.5 py-0.5 text-xs tracking-wide text-warning uppercase">
           {queuePosition} of {queueTotal} pending
         </div>
       ) : null}
@@ -1244,19 +1247,17 @@ function ApprovalCard({
       <div className="mt-2">
         {richBody ? (
           <>
-            <div className={`${expanded ? 'max-h-none' : 'max-h-[40vh]'} min-w-0 max-w-full overflow-auto`}>
+            <div
+              className={`${expanded ? 'max-h-none' : 'approval-rich-body-collapsed'} min-w-0 max-w-full overflow-auto`}
+            >
               {richBody}
             </div>
             {canCollapse ? (
               <div className="mt-1 flex justify-end">
-                <button
-                  type="button"
-                  className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground"
-                  onClick={toggleExpanded}
-                >
+                <Button type="button" variant="ghost" size="xs" className="h-6 px-1 text-xs" onClick={toggleExpanded}>
                   {expanded ? <ChevronUpIcon className="size-3" /> : <ChevronDownIcon className="size-3" />}
                   {expanded ? 'Collapse' : 'Show all'}
-                </button>
+                </Button>
               </div>
             ) : null}
           </>
@@ -1267,29 +1268,30 @@ function ApprovalCard({
         )}
       </div>
       <div className="mt-3 flex gap-2 justify-end">
-        <button
-          className="px-3 py-1.5 text-xs rounded-md border border-destructive text-destructive bg-transparent hover:bg-destructive/20"
+        <Button
+          variant="outline"
+          size="sm"
+          className="border-destructive text-destructive hover:bg-destructive/10 hover:text-destructive"
           onClick={() => onDecision && onDecision(item.request_id, 'no', item.kind)}
         >
           Reject
-        </button>
+        </Button>
         {/* The MCP approval path has no ``always_approve`` flag —
             omniagents 0.16 intentionally omits it. Hide the button so
             we don't expose a no-op affordance. */}
         {!isMcp && (
-          <button
-            className="px-3 py-1.5 text-xs rounded-md border border-primary text-primary bg-transparent hover:bg-muted"
+          <Button
+            variant="outline"
+            size="sm"
+            className="border-primary text-primary"
             onClick={() => onDecision && onDecision(item.request_id, 'always', item.kind)}
           >
             Always
-          </button>
+          </Button>
         )}
-        <button
-          className="px-3 py-1.5 text-xs rounded-md bg-primary hover:brightness-110 text-primary-foreground"
-          onClick={() => onDecision && onDecision(item.request_id, 'yes', item.kind)}
-        >
+        <Button size="sm" onClick={() => onDecision && onDecision(item.request_id, 'yes', item.kind)}>
           {isMcp ? 'Approve' : 'Approve Once'}
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -1318,18 +1320,17 @@ function PlanCard({ item, onDecision }: { item: PlanItem; onDecision?: (approved
         </ol>
       </PlanContent>
       <PlanFooter className="justify-end gap-2">
-        <button
-          className="px-3 py-1.5 text-xs rounded-md border border-destructive text-destructive bg-transparent hover:bg-destructive/20"
+        <Button
+          variant="outline"
+          size="sm"
+          className="border-destructive text-destructive hover:bg-destructive/10 hover:text-destructive"
           onClick={() => onDecision?.(false)}
         >
           Reject
-        </button>
-        <button
-          className="px-3 py-1.5 text-xs rounded-md bg-primary hover:brightness-110 text-primary-foreground"
-          onClick={() => onDecision?.(true)}
-        >
+        </Button>
+        <Button size="sm" onClick={() => onDecision?.(true)}>
           Approve Plan
-        </button>
+        </Button>
       </PlanFooter>
     </Plan>
   );
@@ -1402,28 +1403,28 @@ function tableView(metadata: any) {
     : [];
   return (
     <div className="overflow-x-auto rounded-md border bg-muted/50">
-      <table className="min-w-full text-xs">
-        <thead>
-          <tr>
+      <Table className="min-w-full text-xs">
+        <TableHeader>
+          <TableRow>
             {cols.map((c, i) => (
-              <th key={i} className="text-left font-semibold pr-4 pb-1 px-3 pt-2">
+              <TableHead key={i} className="px-3 pt-2 pr-4 pb-1 text-left font-semibold">
                 {c}
-              </th>
+              </TableHead>
             ))}
-          </tr>
-        </thead>
-        <tbody>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
           {rows.map((r, i) => (
-            <tr key={i} className="align-top">
+            <TableRow key={i} className="align-top">
               {r.map((cell, j) => (
-                <td key={j} className="pr-4 py-1 px-3 whitespace-nowrap">
+                <TableCell key={j} className="px-3 py-1 pr-4 whitespace-nowrap">
                   {cell}
-                </td>
+                </TableCell>
               ))}
-            </tr>
+            </TableRow>
           ))}
-        </tbody>
-      </table>
+        </TableBody>
+      </Table>
     </div>
   );
 }
@@ -1484,7 +1485,7 @@ function commandView(metadata: any, plainOutput: string) {
   return (
     <div className="space-y-2">
       <CodeBlock code={`$ ${String(command)}`} language="bash" />
-      {status.length ? <div className={['text-[12px]', statusColor].join(' ')}>{status.join(' \u00b7 ')}</div> : null}
+      {status.length ? <div className={['text-xs', statusColor].join(' ')}>{status.join(' \u00b7 ')}</div> : null}
       {output.trim().length ? <CodeBlock code={output.trimEnd()} language="text" /> : null}
     </div>
   );
@@ -1509,7 +1510,7 @@ function fileContentView(metadata: any, plainOutput: string) {
   const lang = meta?.language || guessLanguage(meta?.file_path) || 'text';
   return (
     <div className="space-y-2">
-      {stats.length ? <div className="text-[12px] text-muted-foreground">{stats.join(' \u00b7 ')}</div> : null}
+      {stats.length ? <div className="text-xs text-muted-foreground">{stats.join(' \u00b7 ')}</div> : null}
       <CodeBlock code={preview} language={lang as any} showLineNumbers={!!meta?.start_line} />
     </div>
   );
@@ -1540,7 +1541,7 @@ function directoryListingView(metadata: any, plainOutput: string) {
 
   return (
     <div className="space-y-2">
-      {stats.length ? <div className="text-[12px] text-muted-foreground">{stats.join(' \u00b7 ')}</div> : null}
+      {stats.length ? <div className="text-xs text-muted-foreground">{stats.join(' \u00b7 ')}</div> : null}
       <CodeBlock code={preview} language="text" />
     </div>
   );
@@ -1577,7 +1578,7 @@ function searchResultsView(metadata: any, plainOutput: string) {
 
   return (
     <div className="space-y-2">
-      {stats.length ? <div className="text-[12px] text-muted-foreground">{stats.join(' \u00b7 ')}</div> : null}
+      {stats.length ? <div className="text-xs text-muted-foreground">{stats.join(' \u00b7 ')}</div> : null}
       <CodeBlock code={preview} language="text" />
     </div>
   );
@@ -1605,7 +1606,7 @@ function webContentView(metadata: any, plainOutput: string) {
 
   return (
     <div className="space-y-2">
-      {stats.length ? <div className="text-[12px] text-muted-foreground">{stats.join(' \u00b7 ')}</div> : null}
+      {stats.length ? <div className="text-xs text-muted-foreground">{stats.join(' \u00b7 ')}</div> : null}
       <CodeBlock code={preview} language="text" />
     </div>
   );
@@ -1619,11 +1620,9 @@ function errorView(metadata: any, plainOutput: string) {
 
   return (
     <div className="space-y-2">
-      {summary || errorType ? (
-        <div className="text-[12px] text-destructive font-medium">{summary || errorType}</div>
-      ) : null}
+      {summary || errorType ? <div className="text-xs font-medium text-destructive">{summary || errorType}</div> : null}
       <div className="w-full overflow-x-auto p-2 rounded border border-destructive/30 bg-destructive/10">
-        <pre className="whitespace-pre-wrap text-[12px] text-destructive">
+        <pre className="whitespace-pre-wrap text-xs text-destructive">
           <code>{preview}</code>
         </pre>
       </div>

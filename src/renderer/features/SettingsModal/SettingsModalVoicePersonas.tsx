@@ -9,12 +9,17 @@
  * a persona switches both what the agent says and how it sounds.
  */
 
-import { Delete20Regular } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
+import { Trash2 } from 'lucide-react';
 import { nanoid } from 'nanoid';
 import { type ChangeEvent, useCallback, useMemo, useRef, useState } from 'react';
 
-import { Button, Caption1, FormField, IconButton, Input, Radio, RadioGroup, Select, Textarea } from '@/renderer/ds';
+import { Button } from '@/renderer/ds/ui/button';
+import { Field, FieldLabel } from '@/renderer/ds/ui/field';
+import { Input } from '@/renderer/ds/ui/input';
+import { NativeSelect as Select } from '@/renderer/ds/ui/native-select';
+import { RadioGroup, RadioGroupItem } from '@/renderer/ds/ui/radio-group';
+import { Textarea } from '@/renderer/ds/ui/textarea';
 import { persistedStoreApi } from '@/renderer/services/store';
 import { getVoiceClient } from '@/renderer/services/voice-client';
 import {
@@ -110,11 +115,6 @@ export function SettingsModalVoicePersonas(): React.ReactElement {
     [patchActive]
   );
 
-  const onChangeVoiceKindRadio = useCallback(
-    (_: unknown, data: { value: string }) => onChangeVoiceKind(data.value),
-    [onChangeVoiceKind]
-  );
-
   const onUpload = useCallback(
     async (e: ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
@@ -161,9 +161,12 @@ export function SettingsModalVoicePersonas(): React.ReactElement {
 
   return (
     <>
-      <FormField label="Persona">
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <Select value={active.id} onChange={onSelect} style={{ flex: 1 }}>
+      <Field orientation="horizontal" className="justify-between gap-4">
+        <div className="min-w-0">
+          <FieldLabel>Persona</FieldLabel>
+        </div>
+        <div className="flex items-center gap-2">
+          <Select value={active.id} onChange={onSelect} className="flex-1">
             {personas.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.name}
@@ -173,41 +176,63 @@ export function SettingsModalVoicePersonas(): React.ReactElement {
           </Select>
           <Button onClick={onCreate}>New</Button>
           <Button onClick={onDuplicate}>Duplicate</Button>
-          <Button onClick={onPreview} isDisabled={!!busy}>
+          <Button onClick={onPreview} disabled={!!busy}>
             Preview
           </Button>
           {!active.builtin ? (
-            <IconButton icon={<Delete20Regular />} aria-label="Delete persona" onClick={onDelete} />
+            <Button type="button" variant="ghost" size="icon" aria-label="Delete persona" onClick={onDelete}>
+              <Trash2 />
+            </Button>
           ) : null}
         </div>
-      </FormField>
+      </Field>
 
       {active.builtin ? (
-        <Caption1>Built-in persona — duplicate it to customize the prompt or voice.</Caption1>
+        <span className="text-xs text-muted-foreground">
+          Built-in persona — duplicate it to customize the prompt or voice.
+        </span>
       ) : (
         <>
-          <FormField label="Name">
+          <Field orientation="horizontal" className="justify-between gap-4">
+            <div className="min-w-0">
+              <FieldLabel>Name</FieldLabel>
+            </div>
             <Input value={active.name} onChange={onChangeName} />
-          </FormField>
-          <FormField label="Personality (system prompt)">
+          </Field>
+          <Field orientation="horizontal" className="justify-between gap-4">
+            <div className="min-w-0">
+              <FieldLabel>Personality (system prompt)</FieldLabel>
+            </div>
             <Textarea
               rows={6}
               value={active.instructions}
               placeholder="Describe how this persona talks and behaves…"
               onChange={onChangeInstructions}
             />
-          </FormField>
+          </Field>
         </>
       )}
 
-      <FormField label="Voice">
-        <RadioGroup layout="horizontal" value={voiceKind} onChange={onChangeVoiceKindRadio}>
-          <Radio value="predefined" label="Predefined" disabled={active.builtin} />
-          <Radio value="clone" label="Cloned (upload)" disabled={active.builtin} />
+      <Field orientation="horizontal" className="justify-between gap-4">
+        <div className="min-w-0">
+          <FieldLabel>Voice</FieldLabel>
+        </div>
+        <RadioGroup className="flex flex-wrap" value={voiceKind} onValueChange={onChangeVoiceKind}>
+          <label className="inline-flex items-center gap-2 text-sm">
+            <RadioGroupItem value="predefined" disabled={active.builtin} />
+            Predefined
+          </label>
+          <label className="inline-flex items-center gap-2 text-sm">
+            <RadioGroupItem value="clone" disabled={active.builtin} />
+            Cloned (upload)
+          </label>
         </RadioGroup>
-      </FormField>
+      </Field>
       {voiceKind === 'predefined' ? (
-        <FormField label="Predefined voice">
+        <Field orientation="horizontal" className="justify-between gap-4">
+          <div className="min-w-0">
+            <FieldLabel>Predefined voice</FieldLabel>
+          </div>
           <Select
             value={active.voice.kind === 'predefined' ? active.voice.name : 'alba'}
             onChange={onChangePredefined}
@@ -219,17 +244,19 @@ export function SettingsModalVoicePersonas(): React.ReactElement {
               </option>
             ))}
           </Select>
-        </FormField>
+        </Field>
       ) : (
-        <Caption1>{cloneLabel} · embedding is computed once on upload and reused.</Caption1>
+        <span className="text-xs text-muted-foreground">
+          {cloneLabel} · embedding is computed once on upload and reused.
+        </span>
       )}
 
-      {busy ? <Caption1>{busy}</Caption1> : null}
+      {busy ? <span className="text-xs text-muted-foreground">{busy}</span> : null}
       <input
         ref={fileInput}
         type="file"
         accept="audio/wav,audio/flac,audio/mpeg,audio/ogg,.wav,.flac,.mp3,.ogg"
-        style={{ display: 'none' }}
+        className="hidden"
         onChange={onUpload}
       />
     </>

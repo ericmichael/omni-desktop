@@ -1,13 +1,11 @@
-import { makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
-import {
-  ArrowClockwise20Regular,
-  Document20Regular,
-  Folder20Regular,
-  FolderOpen20Regular,
-} from '@fluentui/react-icons';
+import { File, Folder, FolderOpen, RefreshCw } from 'lucide-react';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 
-import { Button, Spinner, Tree, TreeItem, TreeItemLayout, type TreeItemOpenChangeData } from '@/renderer/ds';
+import { cn } from '@/renderer/ds/cn';
+import type { TreeItemOpenChangeData } from '@/renderer/ds/Tree';
+import { Tree, TreeItem, TreeItemLayout } from '@/renderer/ds/Tree';
+import { Button } from '@/renderer/ds/ui/button';
+import { Spinner } from '@/renderer/ds/ui/spinner';
 import type { FsClient, FsEntry, FsListResult, WatchCallbacks } from '@/renderer/omniagents-ui/rpc/fs';
 import { WatchRegistry } from '@/renderer/omniagents-ui/rpc/fs';
 
@@ -24,7 +22,6 @@ export type WorkspaceFileTreeProps = {
   /** Test/embedding seam. When omitted, the tree owns a WatchRegistry. */
   watchRegistry?: WorkspaceTreeWatchRegistry;
   className?: string;
-  isGlass?: boolean;
 };
 
 type DirectoryStatus = 'idle' | 'loading' | 'loaded' | 'error';
@@ -36,57 +33,6 @@ type DirectoryState = {
 };
 
 const emptyDirectory: DirectoryState = { status: 'idle', entries: [] };
-
-const useStyles = makeStyles({
-  root: {
-    display: 'flex',
-    flexDirection: 'column',
-    minHeight: 0,
-    height: '100%',
-    color: tokens.colorNeutralForeground1,
-    backgroundColor: tokens.colorNeutralBackground1,
-  },
-  rootGlass: { backgroundColor: 'transparent' },
-  header: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: tokens.spacingHorizontalS,
-    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
-    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
-  },
-  heading: {
-    margin: 0,
-    minWidth: 0,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    fontSize: tokens.fontSizeBase300,
-    fontWeight: tokens.fontWeightSemibold,
-  },
-  body: { minHeight: 0, flex: '1 1 auto', overflow: 'auto', padding: tokens.spacingVerticalXS },
-  tree: { minWidth: 'max-content' },
-  layout: {
-    '& > .fui-TreeItemLayout__main': { minWidth: 0 },
-  },
-  selected: { backgroundColor: tokens.colorSubtleBackgroundSelected },
-  folderIcon: { color: tokens.colorPaletteYellowForeground1 },
-  fileIcon: { color: tokens.colorNeutralForeground2 },
-  state: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: tokens.spacingVerticalS,
-    minHeight: '7rem',
-    padding: tokens.spacingVerticalL,
-    textAlign: 'center',
-    color: tokens.colorNeutralForeground3,
-  },
-  inlineState: { color: tokens.colorNeutralForeground3, fontStyle: 'italic' },
-  inlineError: { color: tokens.colorPaletteRedForeground1 },
-  asideSpinner: { marginLeft: tokens.spacingHorizontalS },
-});
 
 function entryName(entry: FsEntry): string {
   return entry.path.split('/').at(-1) ?? entry.path;
@@ -117,20 +63,19 @@ type WorkspaceTreeNodeProps = {
 
 const WorkspaceTreeNode = memo(
   ({ entry, state, openItems, selectedPath, directoryStates, onOpenFile, onRetry }: WorkspaceTreeNodeProps) => {
-    const styles = useStyles();
     const name = entryName(entry);
     if (entry.type === 'file') {
       const selected = selectedPath === entry.path;
       return (
         <TreeItem
           aria-selected={selected}
-          className={mergeClasses(styles.layout, selected && styles.selected)}
+          className={cn(selected && 'bg-accent')}
           itemType="leaf"
           onClick={() => onOpenFile(entry.path)}
           title={entry.path}
           value={entry.path}
         >
-          <TreeItemLayout iconBefore={<Document20Regular className={styles.fileIcon} />}>{name}</TreeItemLayout>
+          <TreeItemLayout iconBefore={<File className="text-muted-foreground" />}>{name}</TreeItemLayout>
         </TreeItem>
       );
     }
@@ -140,19 +85,8 @@ const WorkspaceTreeNode = memo(
     return (
       <TreeItem itemType="branch" title={entry.path} value={entry.path}>
         <TreeItemLayout
-          className={styles.layout}
-          iconBefore={
-            expanded ? (
-              <FolderOpen20Regular className={styles.folderIcon} />
-            ) : (
-              <Folder20Regular className={styles.folderIcon} />
-            )
-          }
-          aside={
-            expanded && directory.status === 'loading' ? (
-              <Spinner className={styles.asideSpinner} size="sm" />
-            ) : undefined
-          }
+          iconBefore={expanded ? <FolderOpen className="text-chart-4" /> : <Folder className="text-chart-4" />}
+          aside={expanded && directory.status === 'loading' ? <Spinner className="ml-2" /> : undefined}
         >
           {name}
         </TreeItemLayout>
@@ -173,7 +107,7 @@ const WorkspaceTreeNode = memo(
             {directory.status === 'loading' && directory.entries.length === 0 && (
               <TreeItem itemType="leaf" value={`${entry.path}:loading`}>
                 <TreeItemLayout>
-                  <span className={styles.inlineState} role="status">
+                  <span className="text-muted-foreground italic" role="status">
                     Loading {name}…
                   </span>
                 </TreeItemLayout>
@@ -182,7 +116,7 @@ const WorkspaceTreeNode = memo(
             {directory.status === 'loaded' && directory.entries.length === 0 && (
               <TreeItem itemType="leaf" value={`${entry.path}:empty`}>
                 <TreeItemLayout>
-                  <span className={styles.inlineState} role="status">
+                  <span className="text-muted-foreground italic" role="status">
                     This folder is empty.
                   </span>
                 </TreeItemLayout>
@@ -191,7 +125,7 @@ const WorkspaceTreeNode = memo(
             {directory.status === 'error' && (
               <TreeItem itemType="leaf" value={`${entry.path}:error`}>
                 <TreeItemLayout>
-                  <span className={styles.inlineError} role="alert">
+                  <span className="text-destructive" role="alert">
                     {directory.error}
                   </span>
                   <Button size="sm" variant="ghost" onClick={() => onRetry(entry.path)}>
@@ -209,16 +143,7 @@ const WorkspaceTreeNode = memo(
 WorkspaceTreeNode.displayName = 'WorkspaceTreeNode';
 
 export const WorkspaceFileTree = memo(
-  ({
-    fsClient,
-    environmentId,
-    selectedPath = null,
-    onOpenFile,
-    watchRegistry,
-    className,
-    isGlass,
-  }: WorkspaceFileTreeProps) => {
-    const styles = useStyles();
+  ({ fsClient, environmentId, selectedPath = null, onOpenFile, watchRegistry, className }: WorkspaceFileTreeProps) => {
     const [directoryStates, setDirectoryStates] = useState<Map<string, DirectoryState>>(new Map());
     const [openItems, setOpenItems] = useState<Set<string>>(new Set());
     const registryRef = useRef<WorkspaceTreeWatchRegistry | null>(null);
@@ -401,7 +326,7 @@ export const WorkspaceFileTree = memo(
     );
 
     const handleOpenChange = useCallback(
-      (_event: unknown, data: TreeItemOpenChangeData) => {
+      (data: TreeItemOpenChangeData) => {
         const path = String(data.value);
         if (data.open) {
           setOpenItems((previous) => new Set(previous).add(path));
@@ -429,47 +354,57 @@ export const WorkspaceFileTree = memo(
     return (
       <section
         aria-label="Read-only workspace files"
-        className={mergeClasses(styles.root, isGlass && styles.rootGlass, className)}
+        className={cn('flex flex-col min-h-0 h-full text-foreground bg-card', className)}
         data-workspace-root="."
       >
-        <header className={styles.header}>
-          <h2 className={styles.heading}>Files</h2>
+        <header className="flex items-center justify-between gap-2 px-4 py-2 border-b border-border">
+          <h2 className="m-0 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-sm font-semibold">Files</h2>
           <Button
-            isDisabled={rootState.status === 'loading'}
-            leftIcon={<ArrowClockwise20Regular />}
+            disabled={rootState.status === 'loading'}
             onClick={() => void refreshDirectory('.')}
             size="sm"
             variant="ghost"
           >
+            <RefreshCw />
             Refresh
           </Button>
         </header>
-        <div className={styles.body}>
+        <div className="min-h-0 flex-auto overflow-auto p-1">
           {rootState.status === 'loading' && rootState.entries.length === 0 ? (
-            <div className={styles.state} role="status" aria-live="polite">
-              <Spinner size="lg" />
+            <div
+              className="flex min-h-28 flex-col items-center justify-center gap-2 p-5 text-center text-muted-foreground"
+              role="status"
+              aria-live="polite"
+            >
+              <Spinner />
               <span>Loading workspace files…</span>
             </div>
           ) : rootState.status === 'error' && rootState.entries.length === 0 ? (
-            <div className={styles.state} role="alert">
+            <div
+              className="flex min-h-28 flex-col items-center justify-center gap-2 p-5 text-center text-muted-foreground"
+              role="alert"
+            >
               <span>{rootState.error}</span>
               <Button onClick={() => handleRetry('.')} size="sm" variant="ghost">
                 Retry
               </Button>
             </div>
           ) : rootState.status === 'loaded' && rootState.entries.length === 0 ? (
-            <div className={styles.state} role="status">
+            <div
+              className="flex min-h-28 flex-col items-center justify-center gap-2 p-5 text-center text-muted-foreground"
+              role="status"
+            >
               This workspace is empty.
             </div>
           ) : (
             <>
               {rootState.status === 'loading' && (
-                <div className={styles.inlineState} role="status" aria-live="polite">
+                <div className="text-muted-foreground italic" role="status" aria-live="polite">
                   Refreshing workspace files…
                 </div>
               )}
               {rootState.status === 'error' && (
-                <div className={styles.inlineError} role="alert">
+                <div className="text-destructive" role="alert">
                   <span>{rootState.error}</span>
                   <Button onClick={() => handleRetry('.')} size="sm" variant="ghost">
                     Retry
@@ -478,7 +413,7 @@ export const WorkspaceFileTree = memo(
               )}
               <Tree
                 aria-label="Workspace files"
-                className={styles.tree}
+                className="min-w-max"
                 onOpenChange={handleOpenChange}
                 openItems={openItems}
               >

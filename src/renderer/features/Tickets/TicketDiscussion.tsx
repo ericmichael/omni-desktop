@@ -1,94 +1,19 @@
-import { makeStyles, tokens } from '@fluentui/react-components';
-import { Bot20Regular, Person20Regular, Send20Regular } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
+import { Bot, Send, User } from 'lucide-react';
 import { nanoid } from 'nanoid';
 import { memo, useCallback, useState } from 'react';
 
 import { formatTimestamp } from '@/lib/format-time';
 import { parseResidentPrincipal } from '@/lib/resident-agent';
-import { IconButton, Textarea } from '@/renderer/ds';
+import { Avatar, AvatarFallback } from '@/renderer/ds/ui/avatar';
+import { Button } from '@/renderer/ds/ui/button';
+import { Textarea } from '@/renderer/ds/ui/textarea';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { Ticket, TicketComment } from '@/shared/types';
 
 import { ticketApi } from './state';
 
-/**
- * The ticket's comment thread, inlined under the description in the Overview
- * (the GitHub issue shape) — comments flow with the page scroll and the
- * composer sits at the end of the thread.
- */
-const useStyles = makeStyles({
-  root: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalM,
-  },
-  empty: {
-    fontSize: tokens.fontSizeBase200,
-    color: tokens.colorNeutralForeground3,
-    fontStyle: 'italic',
-  },
-  comment: {
-    display: 'flex',
-    gap: tokens.spacingHorizontalS,
-  },
-  avatar: {
-    width: '28px',
-    height: '28px',
-    borderRadius: '50%',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexShrink: 0,
-    marginTop: '2px',
-  },
-  avatarAgent: {
-    backgroundColor: tokens.colorBrandBackground2,
-    color: tokens.colorBrandForeground2,
-  },
-  avatarHuman: {
-    backgroundColor: tokens.colorNeutralBackground3,
-    color: tokens.colorNeutralForeground2,
-  },
-  commentBody: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalXS,
-    minWidth: 0,
-  },
-  commentMeta: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-  },
-  commentAuthor: {
-    fontWeight: tokens.fontWeightSemibold,
-    fontSize: tokens.fontSizeBase200,
-    color: tokens.colorNeutralForeground1,
-  },
-  commentTime: {
-    fontSize: tokens.fontSizeBase200,
-    color: tokens.colorNeutralForeground3,
-  },
-  commentContent: {
-    fontSize: tokens.fontSizeBase300,
-    color: tokens.colorNeutralForeground2,
-    whiteSpace: 'pre-wrap',
-    lineHeight: tokens.lineHeightBase300,
-  },
-  composer: {
-    display: 'flex',
-    alignItems: 'flex-end',
-    gap: tokens.spacingHorizontalS,
-  },
-  composerField: {
-    flex: '1 1 0',
-    minWidth: 0,
-  },
-});
-
 const CommentRow = memo(({ comment }: { comment: TicketComment }) => {
-  const styles = useStyles();
   // Resident-authored comments carry the agent's principal (`agent:<id>`);
   // resolve it to the roster display name. Plain 'agent' stays the generic
   // task-scoped agent; anything else is the human.
@@ -98,20 +23,20 @@ const CommentRow = memo(({ comment }: { comment: TicketComment }) => {
   const isAgent = comment.author === 'agent' || residentId !== null;
 
   return (
-    <div className={styles.comment}>
-      <div className={`${styles.avatar} ${isAgent ? styles.avatarAgent : styles.avatarHuman}`}>
-        {isAgent ? (
-          <Bot20Regular style={{ width: 16, height: 16 }} />
-        ) : (
-          <Person20Regular style={{ width: 16, height: 16 }} />
-        )}
-      </div>
-      <div className={styles.commentBody}>
-        <div className={styles.commentMeta}>
-          <span className={styles.commentAuthor}>{residentName ?? (isAgent ? 'Agent' : 'You')}</span>
-          <span className={styles.commentTime}>{formatTimestamp(comment.createdAt)}</span>
+    <div className="flex gap-2">
+      <Avatar className="mt-0.5 size-7">
+        <AvatarFallback className={isAgent ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'}>
+          {isAgent ? <Bot className="size-4" /> : <User className="size-4" />}
+        </AvatarFallback>
+      </Avatar>
+      <div className="flex flex-col gap-1 min-w-0">
+        <div className="flex items-center gap-2">
+          <span className="font-semibold text-xs text-foreground">{residentName ?? (isAgent ? 'Agent' : 'You')}</span>
+          <span className="text-xs text-muted-foreground">{formatTimestamp(comment.createdAt)}</span>
         </div>
-        <div className={styles.commentContent}>{comment.content}</div>
+        <div className="max-w-full wrap-anywhere text-sm text-muted-foreground whitespace-pre-wrap leading-5">
+          {comment.content}
+        </div>
       </div>
     </div>
   );
@@ -119,7 +44,6 @@ const CommentRow = memo(({ comment }: { comment: TicketComment }) => {
 CommentRow.displayName = 'CommentRow';
 
 export const TicketDiscussion = memo(({ ticket }: { ticket: Ticket }) => {
-  const styles = useStyles();
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const comments = ticket.comments ?? [];
@@ -163,29 +87,33 @@ export const TicketDiscussion = memo(({ ticket }: { ticket: Ticket }) => {
   );
 
   return (
-    <div className={styles.root}>
+    <div className="flex flex-col min-w-0 max-w-full gap-4">
       {comments.length === 0 ? (
-        <span className={styles.empty}>No comments yet.</span>
+        <span className="text-xs text-muted-foreground italic">No comments yet.</span>
       ) : (
         comments.map((c) => <CommentRow key={c.id} comment={c} />)
       )}
 
-      <div className={styles.composer}>
+      <div className="flex items-end gap-2">
         <Textarea
           value={draft}
           onChange={handleChange}
           onKeyDown={handleKeyDown}
           placeholder="Add a comment..."
           rows={1}
-          className={styles.composerField}
+          className="flex-1 min-w-0"
         />
-        <IconButton
+
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
           aria-label="Send comment"
-          icon={<Send20Regular />}
-          size="sm"
           onClick={handleSend}
-          isDisabled={!draft.trim() || sending}
-        />
+          disabled={!draft.trim() || sending}
+        >
+          <Send />
+        </Button>
       </div>
     </div>
   );

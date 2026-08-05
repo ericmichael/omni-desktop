@@ -6,11 +6,8 @@ import type { ColumnId, Milestone, Ticket, TicketId, TicketPriority } from '@/sh
  * state, returns a ranked short list of tickets the user should work on next,
  * each with a human-readable reason. Deterministic and side-effect-free.
  *
- * Tickets are excluded from ranking if either:
- *   - they carry a `resolution` (user explicitly closed), or
- *   - their `columnId` is in the caller-supplied `terminalColumnIds` set
- *     (user dragged the card into the Done column without setting a
- *     resolution — matches how the rest of the system treats "done").
+ * Tickets are excluded from ranking when archived or when their `columnId`
+ * is in the caller-supplied Done-category set.
  *
  * Ordering rules (applied in order):
  *   1. In-flight first — any ticket whose phase is active (not idle/error/completed).
@@ -59,15 +56,16 @@ export function rankFocus({ tickets, milestones, terminalColumnIds, now, limit =
   const selfBlocked: FocusItem[] = [];
   const nextUp: FocusItem[] = [];
 
-  const isDone = (t: Ticket): boolean => t.resolution !== undefined || (terminalColumnIds?.has(t.columnId) ?? false);
+  const isUnavailable = (t: Ticket): boolean =>
+    t.archivedAt !== undefined || (terminalColumnIds?.has(t.columnId) ?? false);
 
   // Unblocked = every blocker is "done". Tickets in terminal columns count
   // as unblocking even without a resolution, mirroring project-manager's
   // isTerminalColumn blocker rule.
-  const openTicketIds = new Set<TicketId>(tickets.filter((t) => !isDone(t)).map((t) => t.id));
+  const openTicketIds = new Set<TicketId>(tickets.filter((t) => !isUnavailable(t)).map((t) => t.id));
 
   for (const ticket of tickets) {
-    if (isDone(ticket)) {
+    if (isUnavailable(ticket)) {
       continue;
     }
 

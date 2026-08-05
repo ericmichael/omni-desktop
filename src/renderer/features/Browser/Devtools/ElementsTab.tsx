@@ -4,105 +4,44 @@
  * for understanding what `app_snapshot` refs correspond to while iterating
  * on an automation script.
  */
-import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
-import { ArrowClockwise16Regular, ChevronDown16Regular, ChevronRight16Regular } from '@fluentui/react-icons';
+import { ChevronDown, ChevronRight, RefreshCw } from 'lucide-react';
 import { memo, useCallback, useEffect, useState } from 'react';
 
+import { Button } from '@/renderer/ds/ui/button';
 import { emitter } from '@/renderer/services/ipc';
 import type { AppHandleId, AxNode } from '@/shared/app-control-types';
 
-const useStyles = makeStyles({
-  root: { display: 'flex', flexDirection: 'column', flex: '1 1 0', minHeight: 0 },
-  toolbar: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-    height: '28px',
-    paddingLeft: tokens.spacingHorizontalM,
-    paddingRight: tokens.spacingHorizontalM,
-    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
-    backgroundColor: tokens.colorNeutralBackground2,
-    fontSize: tokens.fontSizeBase200,
-  },
-  spacer: { flex: '1 1 0' },
-  iconBtn: {
-    display: 'inline-flex',
-    width: '22px',
-    height: '22px',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: tokens.borderRadiusSmall,
-    border: 'none',
-    backgroundColor: 'transparent',
-    color: tokens.colorNeutralForeground2,
-    cursor: 'pointer',
-    ':hover': { backgroundColor: tokens.colorSubtleBackgroundHover, color: tokens.colorNeutralForeground1 },
-  },
-  tree: {
-    flex: '1 1 0',
-    minHeight: 0,
-    overflow: 'auto',
-    padding: '4px 0',
-    fontFamily: "ui-monospace, 'SFMono-Regular', Menlo, monospace",
-    fontSize: '12px',
-  },
-  row: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '4px',
-    padding: '1px 4px',
-    cursor: 'pointer',
-    whiteSpace: 'nowrap',
-    ':hover': { backgroundColor: tokens.colorSubtleBackgroundHover },
-  },
-  caret: {
-    display: 'inline-flex',
-    width: '14px',
-    height: '14px',
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexShrink: 0,
-    color: tokens.colorNeutralForeground3,
-  },
-  ref: {
-    flex: '0 0 auto',
-    color: tokens.colorNeutralForeground4,
-    fontSize: '10px',
-  },
-  role: { color: tokens.colorPaletteBlueForeground2, fontWeight: tokens.fontWeightSemibold },
-  name: { color: tokens.colorNeutralForeground1, marginLeft: '8px' },
-  value: { color: tokens.colorNeutralForeground2, marginLeft: '8px', fontStyle: 'italic' },
-  loading: { padding: '16px', textAlign: 'center', color: tokens.colorNeutralForeground4 },
-});
-
 const Node = memo(({ node, depth }: { node: AxNode; depth: number }) => {
-  const styles = useStyles();
   const hasChildren = !!node.children && node.children.length > 0;
   const [open, setOpen] = useState(depth < 2);
 
   return (
     <>
       <div
-        className={styles.row}
-        style={{ paddingLeft: 6 + depth * 14 }}
+        className="flex cursor-pointer items-center gap-1 whitespace-nowrap py-px pr-1 pl-1.5 hover:bg-accent"
         onClick={hasChildren ? () => setOpen((v) => !v) : undefined}
       >
-        <span className={styles.caret}>
-          {hasChildren ? open ? <ChevronDown16Regular /> : <ChevronRight16Regular /> : null}
+        <span className="inline-flex size-3.5 items-center justify-center shrink-0 text-muted-foreground">
+          {hasChildren ? open ? <ChevronDown /> : <ChevronRight /> : null}
         </span>
-        <span className={styles.ref}>{node.ref}</span>
-        <span className={styles.role}>{node.role}</span>
-        {node.name && <span className={styles.name}>“{node.name}”</span>}
-        {node.value && <span className={styles.value}>= {node.value}</span>}
+        <span className="flex-none text-muted-foreground text-xs">{node.ref}</span>
+        <span className="text-primary font-semibold">{node.role}</span>
+        {node.name && <span className="text-foreground ml-2">“{node.name}”</span>}
+        {node.value && <span className="text-muted-foreground ml-2 italic">= {node.value}</span>}
       </div>
-      {hasChildren && open && node.children!.map((c, i) => <Node key={`${c.ref}-${i}`} node={c} depth={depth + 1} />)}
+      {hasChildren && open && (
+        <div className="pl-3.5">
+          {node.children!.map((c, i) => (
+            <Node key={`${c.ref}-${i}`} node={c} depth={depth + 1} />
+          ))}
+        </div>
+      )}
     </>
   );
 });
 Node.displayName = 'ElementsTab.Node';
 
 export const ElementsTab = memo(({ handleId }: { handleId: AppHandleId }) => {
-  const styles = useStyles();
   const [tree, setTree] = useState<AxNode | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -123,21 +62,23 @@ export const ElementsTab = memo(({ handleId }: { handleId: AppHandleId }) => {
   }, [refresh]);
 
   return (
-    <div className={styles.root}>
-      <div className={styles.toolbar}>
-        <span style={{ color: tokens.colorNeutralForeground3, fontSize: '11px' }}>Accessibility tree (snapshot)</span>
-        <div className={styles.spacer} />
-        <button type="button" className={styles.iconBtn} onClick={() => void refresh()} title="Re-snapshot">
-          <ArrowClockwise16Regular />
-        </button>
+    <div className="flex flex-col flex-1 min-h-0">
+      <div className="flex items-center gap-2 h-7 pl-4 pr-4 border-b border-border bg-card text-xs">
+        <span className="text-xs text-muted-foreground">Accessibility tree (snapshot)</span>
+        <div className="flex-1" />
+        <Button type="button" variant="ghost" size="icon-xs" onClick={() => void refresh()} aria-label="Re-snapshot">
+          <RefreshCw />
+        </Button>
       </div>
-      <div className={styles.tree}>
+      <div className="flex-1 min-h-0 overflow-auto py-1 font-mono text-xs">
         {loading && !tree ? (
-          <div className={styles.loading}>Loading…</div>
+          <div className="p-4 text-center text-muted-foreground">Loading…</div>
         ) : tree ? (
           <Node node={tree} depth={0} />
         ) : (
-          <div className={styles.loading}>Could not capture the tree. Try again after the page loads.</div>
+          <div className="p-4 text-center text-muted-foreground">
+            Could not capture the tree. Try again after the page loads.
+          </div>
         )}
       </div>
     </div>

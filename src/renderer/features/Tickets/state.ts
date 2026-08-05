@@ -79,10 +79,10 @@ export const $assigneeFilter = atom<'all' | 'me' | 'unassigned' | string>('all')
  * these; detail views (page / milestone / ticket) are separate view types
  * that render inside the shell with the matching tab highlighted.
  */
-export type ProjectTab = 'home' | 'board' | 'pages' | 'settings';
+export type ProjectTab = 'home' | 'pages' | 'tasks' | 'settings';
 
 /**
- * Which Work-tab view is active: the global all-work list, the project shell
+ * Which Tasks view is active: the global task list, the project shell
  * (with tab), or a project-scoped detail view. Home and Inbox are separate
  * rail tabs with their own state — they are not Work views.
  */
@@ -263,8 +263,6 @@ export const $activeTickets = computed([$tickets, $tasks], (ticketMap, taskMap) 
   });
 });
 
-export const $autopilotLaunchTicketId = atom<TicketId | null>(null);
-
 export const ticketApi = {
   // Projects (delegated to shared Projects module)
   addProject: projectsApi.addProject,
@@ -327,16 +325,6 @@ export const ticketApi = {
       $tickets.setKey(ticketId, { ...existing, milestoneId, updatedAt: Date.now() });
     }
   },
-  removeTicket: async (ticketId: TicketId): Promise<void> => {
-    await emitter.invoke('project:remove-ticket', ticketId);
-    const current = { ...$tickets.get() };
-    delete current[ticketId];
-    $tickets.set(current);
-    // Clear active ticket if it was the one removed
-    if (persistedStoreApi.$atom.get().activeTicketId === ticketId) {
-      persistedStoreApi.setKey('activeTicketId', null);
-    }
-  },
   fetchTickets: async (projectId: ProjectId): Promise<void> => {
     const tickets = await emitter.invoke('project:get-tickets', projectId);
     // Merge: replace this project's tickets, keep others untouched so
@@ -385,13 +373,6 @@ export const ticketApi = {
       $tickets.setKey(ticketId, { ...existing, assignee: assignee || undefined, updatedAt: Date.now() });
     }
   },
-  resolveTicket: async (ticketId: TicketId, resolution: import('@/shared/types').TicketResolution): Promise<void> => {
-    await emitter.invoke('project:resolve-ticket', ticketId, resolution);
-    const existing = $tickets.get()[ticketId];
-    if (existing) {
-      $tickets.setKey(ticketId, { ...existing, resolution, updatedAt: Date.now() });
-    }
-  },
   // Supervisor
   ensureSupervisorInfra: async (ticketId: TicketId): Promise<void> => {
     await emitter.invoke('project:ensure-supervisor-infra', ticketId);
@@ -406,7 +387,11 @@ export const ticketApi = {
     void ticketApi.fetchTasks();
   },
   requestStartSupervisor: (ticketId: TicketId): void => {
-    $autopilotLaunchTicketId.set(ticketId);
+    const store = persistedStoreApi.$atom.get();
+    const ticket = $tickets.get()[ticketId] ?? store.tickets.find((candidate) => candidate.id === ticketId);
+    const project = store.projects.find((candidate) => candidate.id === ticket?.projectId);
+    const profileName = project?.sandboxProfile ?? store.defaultProfileName;
+    void ticketApi.startSupervisor(ticketId, { profileName });
   },
   startSupervisor: async (ticketId: TicketId, opts?: { profileName?: string }): Promise<void> => {
     // Clear old messages when starting a fresh supervisor session
@@ -487,9 +472,9 @@ export const ticketApi = {
   goToMilestone: (milestoneId: MilestoneId, projectId: ProjectId): void => {
     navigateTo({ type: 'milestone', milestoneId, projectId });
   },
-  /** Sugar for the shell's Work tab — keeps existing call sites terse. */
+  /** Open the project's Tasks tab in its optional board view. */
   goToBoard: (projectId: ProjectId): void => {
-    ticketApi.goToProject(projectId, 'board');
+    ticketApi.goToProject(projectId, 'tasks');
   },
   goToTicket: (ticketId: TicketId): void => {
     navigateTo({ type: 'ticket', ticketId });

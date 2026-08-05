@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import { getStoreFile, getUserDataDir } from './paths.mjs';
 
 /** Current schema version — must match the last migration in src/lib/project-migrations.ts. */
-export const CURRENT_SCHEMA_VERSION = 17;
+export const CURRENT_SCHEMA_VERSION = 29;
 
 /** Defaults for a fresh store. Matches `schema` in src/shared/types.ts. */
 function defaultStoreData() {
@@ -30,7 +30,6 @@ function defaultStoreData() {
     codeTabs: [],
     activeCodeTabId: null,
     codeLayoutMode: 'deck',
-    codeDeckBackground: null,
     activeTicketId: null,
     enabledExtensions: {},
     skillSources: {},

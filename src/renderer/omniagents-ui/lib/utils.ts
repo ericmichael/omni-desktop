@@ -1,9 +1,3 @@
-import clsx, { type ClassValue } from 'clsx';
-
-export function cn(...inputs: ClassValue[]) {
-  return clsx(inputs);
-}
-
 /**
  * Format a timestamp as relative time (e.g., "2 minutes ago", "Yesterday")
  */

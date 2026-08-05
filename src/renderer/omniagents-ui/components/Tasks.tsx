@@ -1,5 +1,7 @@
 import React from 'react';
 
+import { Card } from '@/renderer/ds/ui/card';
+
 export type TaskSummary = {
   id: string;
   subject: string;
@@ -12,9 +14,9 @@ export type TaskSummary = {
 const MAX_VISIBLE = 5;
 
 const DOT_CLASS: Record<TaskSummary['status'], string> = {
-  pending: 'bg-textSubtle/50',
+  pending: 'bg-muted-foreground/50',
   in_progress: 'bg-primary',
-  completed: 'bg-successGreen',
+  completed: 'bg-success',
 };
 
 // Docked task panel rendered just above the input. Mirrors the upstream
@@ -36,22 +38,22 @@ export function Tasks({ tasks }: { tasks: TaskSummary[] }) {
 
   return (
     <div className="px-3 pt-2">
-      <div className="rounded-md border border-bgCardAlt bg-bgCardAlt/60 p-2.5">
-        <div className="flex items-center gap-2 text-xs text-textSubtle">
-          <span className="font-medium text-textPrimary">Tasks</span>
+      <Card className="gap-0 rounded-md border-accent bg-accent/60 p-2.5 shadow-none">
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <span className="font-medium text-foreground">Tasks</span>
           <span aria-hidden>·</span>
           <span>
-            <span className="text-brand">{inProgress.length}</span> active
+            <span className="text-primary">{inProgress.length}</span> active
           </span>
           <span aria-hidden>·</span>
           <span>{pending.length} pending</span>
           <span aria-hidden>·</span>
           <span>
-            <span className="text-successGreen">{completed.length}</span> done
+            <span className="text-success">{completed.length}</span> done
           </span>
         </div>
         {live ? (
-          <div className="mt-1.5 flex items-center gap-2 text-xs text-brand">
+          <div className="mt-1.5 flex items-center gap-2 text-xs text-primary">
             <span className="inline-block w-1.5 h-1.5 rounded-full bg-primary animate-pulse flex-shrink-0" />
             <span className="italic text-shimmer truncate">{live.activeForm || live.subject}</span>
           </div>
@@ -68,24 +70,25 @@ export function Tasks({ tasks }: { tasks: TaskSummary[] }) {
                     className={['inline-block w-1.5 h-1.5 rounded-full flex-shrink-0', DOT_CLASS[t.status]].join(' ')}
                     aria-hidden
                   />
-                  <span className="text-textSubtle font-mono">#{t.id}</span>
+                  <span className="text-muted-foreground font-mono">#{t.id}</span>
                   <span
-                    className={['min-w-0 truncate', isDone ? 'text-textSubtle line-through' : 'text-textPrimary'].join(
-                      ' '
-                    )}
+                    className={[
+                      'min-w-0 truncate',
+                      isDone ? 'text-muted-foreground line-through' : 'text-foreground',
+                    ].join(' ')}
                   >
                     {t.subject}
                   </span>
                   {isBlocked ? (
-                    <span className="text-warningOrange whitespace-nowrap">› blocked by #{blockers.join(', #')}</span>
+                    <span className="text-warning whitespace-nowrap">› blocked by #{blockers.join(', #')}</span>
                   ) : null}
                 </li>
               );
             })}
           </ul>
         ) : null}
-        {overflow > 0 ? <div className="mt-1 text-[11px] text-textSubtle">… +{overflow} more</div> : null}
-      </div>
+        {overflow > 0 ? <div className="mt-1 text-xs text-muted-foreground">… +{overflow} more</div> : null}
+      </Card>
     </div>
   );
 }

@@ -1,104 +1,15 @@
-import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
-import { ArrowUp20Regular, Folder20Regular, Home20Regular } from '@fluentui/react-icons';
+import { ArrowUp, Folder, Home } from 'lucide-react';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 
-import {
-  AnimatedDialog,
-  Button,
-  DialogBody,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  Input,
-  ListSkeleton,
-} from '@/renderer/ds';
+import { cn } from '@/renderer/ds/cn';
+import { Button } from '@/renderer/ds/ui/button';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/renderer/ds/ui/dialog';
+import { Empty, EmptyHeader, EmptyMedia, EmptyTitle } from '@/renderer/ds/ui/empty';
+import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '@/renderer/ds/ui/input-group';
+import { Item, ItemContent, ItemGroup, ItemMedia, ItemTitle } from '@/renderer/ds/ui/item';
+import { ScrollArea } from '@/renderer/ds/ui/scroll-area';
+import { Skeleton } from '@/renderer/ds/ui/skeleton';
 import { emitter } from '@/renderer/services/ipc';
-
-const useStyles = makeStyles({
-  directoryRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '10px',
-    width: '100%',
-    textAlign: 'left',
-    paddingTop: '10px',
-    paddingBottom: '10px',
-    paddingLeft: '14px',
-    paddingRight: '14px',
-    fontSize: tokens.fontSizeBase300,
-    cursor: 'pointer',
-    transitionProperty: 'background-color',
-    transitionDuration: '150ms',
-    color: tokens.colorNeutralForeground1,
-    backgroundColor: 'transparent',
-    border: 'none',
-    ':hover': {
-      backgroundColor: tokens.colorNeutralBackground2,
-    },
-    ':active': {
-      backgroundColor: tokens.colorNeutralBackground2,
-    },
-  },
-  folderIcon: {
-    flexShrink: 0,
-    color: tokens.colorPaletteYellowForeground1,
-  },
-  truncate: {
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-  },
-  body: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalM,
-  },
-  pathBar: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '6px',
-  },
-  navButton: {
-    flexShrink: 0,
-    borderRadius: tokens.borderRadiusMedium,
-    padding: tokens.spacingVerticalS,
-    color: tokens.colorNeutralForeground2,
-    transitionProperty: 'color, background-color',
-    transitionDuration: '150ms',
-    backgroundColor: 'transparent',
-    border: 'none',
-    cursor: 'pointer',
-    ':hover': {
-      backgroundColor: tokens.colorNeutralBackground2,
-      color: tokens.colorNeutralForeground1,
-    },
-  },
-  pathInput: {
-    flex: '1 1 0',
-    minWidth: 0,
-  },
-  listing: {
-    height: '256px',
-    overflowY: 'auto',
-    borderRadius: tokens.borderRadiusXLarge,
-    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
-    backgroundColor: tokens.colorNeutralBackground1,
-  },
-  emptyMessage: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    height: '100%',
-    fontSize: tokens.fontSizeBase300,
-    color: tokens.colorNeutralForeground2,
-  },
-  entriesColumn: {
-    display: 'flex',
-    flexDirection: 'column',
-    paddingTop: '4px',
-    paddingBottom: '4px',
-  },
-});
 
 type DirectoryEntry = { name: string; path: string; isDirectory: boolean };
 
@@ -108,16 +19,21 @@ type DirectoryRowProps = {
 };
 
 const DirectoryRow = memo(({ entry, onNavigate }: DirectoryRowProps) => {
-  const styles = useStyles();
   const handleClick = useCallback(() => {
     onNavigate(entry.path);
   }, [entry.path, onNavigate]);
 
   return (
-    <button type="button" onClick={handleClick} className={styles.directoryRow}>
-      <Folder20Regular style={{ width: 14, height: 14 }} className={styles.folderIcon} />
-      <span className={styles.truncate}>{entry.name}</span>
-    </button>
+    <Item asChild size="sm" className="w-full cursor-pointer hover:bg-accent">
+      <button type="button" onClick={handleClick}>
+        <ItemMedia>
+          <Folder className={`size-4 ${'shrink-0 text-chart-4'}`} />
+        </ItemMedia>
+        <ItemContent>
+          <ItemTitle className="overflow-hidden text-ellipsis whitespace-nowrap">{entry.name}</ItemTitle>
+        </ItemContent>
+      </button>
+    </Item>
   );
 });
 DirectoryRow.displayName = 'DirectoryRow';
@@ -130,7 +46,6 @@ type DirectoryBrowserDialogProps = {
 };
 
 export const DirectoryBrowserDialog = memo(({ open, onClose, onSelect, initialPath }: DirectoryBrowserDialogProps) => {
-  const styles = useStyles();
   const [currentPath, setCurrentPath] = useState('');
   const [pathInput, setPathInput] = useState('');
   const [entries, setEntries] = useState<DirectoryEntry[]>([]);
@@ -204,52 +119,77 @@ export const DirectoryBrowserDialog = memo(({ open, onClose, onSelect, initialPa
   }, [currentPath, onSelect, onClose]);
 
   return (
-    <AnimatedDialog open={open} onClose={onClose}>
+    <Dialog open={open} onOpenChange={(nextOpen) => !nextOpen && onClose()}>
       <DialogContent className="sm:max-w-lg">
-        <DialogHeader>Select Directory</DialogHeader>
-        <DialogBody className={styles.body}>
+        <DialogHeader>
+          <DialogTitle>Select Directory</DialogTitle>
+        </DialogHeader>
+        <div className={cn('min-h-0 overflow-y-auto', 'flex flex-col gap-4')}>
           {/* Path bar */}
-          <div className={styles.pathBar}>
-            <button type="button" onClick={handleHome} className={styles.navButton} title="Home">
-              <Home20Regular style={{ width: 16, height: 16 }} />
-            </button>
-            <button type="button" onClick={handleUp} className={styles.navButton} title="Parent directory">
-              <ArrowUp20Regular style={{ width: 16, height: 16 }} />
-            </button>
-            <Input
+          <InputGroup>
+            <InputGroupAddon>
+              <InputGroupButton size="icon-xs" onClick={handleHome} aria-label="Home" title="Home">
+                <Home />
+              </InputGroupButton>
+              <InputGroupButton
+                size="icon-xs"
+                onClick={handleUp}
+                aria-label="Parent directory"
+                title="Parent directory"
+              >
+                <ArrowUp />
+              </InputGroupButton>
+            </InputGroupAddon>
+            <InputGroupInput
               type="text"
               value={pathInput}
               onChange={handlePathInputChange}
               onKeyDown={handlePathInputKeyDown}
-              className={styles.pathInput}
             />
-          </div>
+          </InputGroup>
 
           {/* Directory listing */}
-          <div className={styles.listing}>
+          <ScrollArea className="h-64 rounded-xl border bg-background">
             {loading ? (
-              <ListSkeleton rows={6} />
+              <div className="flex w-full flex-col gap-3 p-4">
+                {Array.from({ length: 6 }, (_, index) => (
+                  <div key={index} className="flex items-center gap-3">
+                    <Skeleton className="size-8 rounded-full" />
+                    <div className="flex flex-1 flex-col gap-1.5">
+                      <Skeleton className={`h-4 ${['w-3/5', 'w-3/4', 'w-11/12'][index % 3]}`} />
+                      <Skeleton className={`h-3 ${['w-2/5', 'w-3/5'][index % 2]}`} />
+                    </div>
+                  </div>
+                ))}
+              </div>
             ) : entries.length === 0 ? (
-              <div className={styles.emptyMessage}>No subdirectories</div>
+              <Empty className="h-full border-0 p-6">
+                <EmptyHeader>
+                  <EmptyMedia variant="icon">
+                    <Folder />
+                  </EmptyMedia>
+                  <EmptyTitle>No subdirectories</EmptyTitle>
+                </EmptyHeader>
+              </Empty>
             ) : (
-              <div className={styles.entriesColumn}>
+              <ItemGroup className="p-1">
                 {entries.map((entry) => (
                   <DirectoryRow key={entry.path} entry={entry} onNavigate={handleNavigate} />
                 ))}
-              </div>
+              </ItemGroup>
             )}
-          </div>
-        </DialogBody>
+          </ScrollArea>
+        </div>
         <DialogFooter>
           <Button variant="ghost" onClick={onClose}>
             Cancel
           </Button>
-          <Button onClick={handleConfirm} isDisabled={!currentPath}>
+          <Button onClick={handleConfirm} disabled={!currentPath}>
             Select
           </Button>
         </DialogFooter>
       </DialogContent>
-    </AnimatedDialog>
+    </Dialog>
   );
 });
 DirectoryBrowserDialog.displayName = 'DirectoryBrowserDialog';

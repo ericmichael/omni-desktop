@@ -2,14 +2,10 @@ import { CheckCircleIcon, ChevronDownIcon, CircleIcon, ClockIcon, WrenchIcon, XC
 import type { ComponentProps, ReactNode } from 'react';
 import { isValidElement } from 'react';
 
+import { cn } from '@/renderer/ds/cn';
+import { Badge } from '@/renderer/ds/ui/badge';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/renderer/ds/ui/collapsible';
 import type { DynamicToolUIPart, ToolUIPart } from '@/renderer/omniagents-ui/ai-types';
-import { Badge } from '@/renderer/omniagents-ui/components/ui/badge';
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from '@/renderer/omniagents-ui/components/ui/collapsible';
-import { cn } from '@/renderer/omniagents-ui/lib/utils';
 
 import { CodeBlock } from './code-block';
 
@@ -49,7 +45,7 @@ const statusLabels: Record<ToolPart['state'], string> = {
 
 const statusIcons: Record<ToolPart['state'], ReactNode> = {
   'approval-requested': <ClockIcon className="size-4 text-warning" />,
-  'approval-responded': <CheckCircleIcon className="size-4 text-info" />,
+  'approval-responded': <CheckCircleIcon className="size-4 text-muted-foreground" />,
   'input-available': <ClockIcon className="size-4 animate-pulse" />,
   'input-streaming': <CircleIcon className="size-4" />,
   'output-available': <CheckCircleIcon className="size-4 text-success" />,
@@ -119,7 +115,7 @@ const renderParamValue = (value: unknown): ReactNode => {
   if (typeof value === 'string') {
     if (value.includes('\n') || value.length > INLINE_STRING_MAX) {
       return (
-        <pre className="max-h-32 overflow-auto whitespace-pre-wrap break-words rounded bg-muted px-2 py-1 font-mono text-[11px]">
+        <pre className="max-h-32 overflow-auto whitespace-pre-wrap break-words rounded bg-muted px-2 py-1 font-mono text-xs">
           {value}
         </pre>
       );
@@ -134,7 +130,7 @@ const renderParamValue = (value: unknown): ReactNode => {
     json = String(value);
   }
   return (
-    <pre className="max-h-32 overflow-auto whitespace-pre-wrap break-words rounded bg-muted px-2 py-1 font-mono text-[11px]">
+    <pre className="max-h-32 overflow-auto whitespace-pre-wrap break-words rounded bg-muted px-2 py-1 font-mono text-xs">
       {json}
     </pre>
   );

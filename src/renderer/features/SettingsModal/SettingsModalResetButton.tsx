@@ -1,6 +1,16 @@
 import { memo, useCallback, useState } from 'react';
 
-import { Button, ConfirmDialog } from '@/renderer/ds';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/renderer/ds/ui/alert-dialog';
+import { Button } from '@/renderer/ds/ui/button';
 import { persistedStoreApi } from '@/renderer/services/store';
 
 export const SettingsModalResetButton = memo(() => {
@@ -19,15 +29,23 @@ export const SettingsModalResetButton = memo(() => {
       <Button size="sm" variant="destructive" onClick={openConfirm}>
         Reset Launcher Settings
       </Button>
-      <ConfirmDialog
-        open={confirmOpen}
-        onClose={closeConfirm}
-        onConfirm={handleReset}
-        title="Reset all settings?"
-        description="This will restore all launcher settings to their defaults. Your projects and data will not be deleted, but configuration such as theme, models, and sandbox options will be lost."
-        confirmLabel="Reset"
-        destructive
-      />
+      <AlertDialog open={confirmOpen} onOpenChange={(open) => !open && closeConfirm()}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Reset all settings?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will restore all launcher settings to their defaults. Your projects and data will not be deleted, but
+              configuration such as theme, models, and sandbox options will be lost.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={handleReset}>
+              Reset
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 });

@@ -71,10 +71,10 @@ try {
   const upsertTicket = db.prepare(
     `INSERT OR IGNORE INTO tickets (
        id, project_id, milestone_id, column_id, title, description, priority, branch,
-       blocked_by, shaping, resolution, resolved_at, archived_at, column_changed_at,
+       blocked_by, shaping, completed_at, archived_at, column_changed_at,
        use_worktree, worktree_path, worktree_name, supervisor_session_id, phase,
        phase_changed_at, supervisor_task_id, token_usage, runs, created_at, updated_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   );
   const upsertComment = db.prepare(
     `INSERT OR IGNORE INTO ticket_comments (id, ticket_id, author, content, created_at)
@@ -83,18 +83,26 @@ try {
   // Pre-build a column lookup keyed by `${projectId}:${logicalId}` so we
   // can remap electron-store's project-local column ids (e.g. "backlog")
   // to SQLite's globally-unique ids (e.g. "<projectId>__backlog").
-  const allCols = db.prepare('SELECT id, project_id FROM pipeline_columns').all();
+  const allCols = db.prepare('SELECT id, project_id, category FROM pipeline_columns').all();
   const colMap = new Map();
+  const doneColumnMap = new Map();
   for (const c of allCols) {
     const logical = c.id.includes('__') ? c.id.split('__').slice(-1)[0] : c.id;
     colMap.set(`${c.project_id}:${logical}`, c.id);
+    if (c.category === 'done') doneColumnMap.set(c.project_id, c.id);
   }
   for (const t of store.tickets ?? []) {
     if (!projectIds.has(t.projectId)) {
       skipped.tickets++;
       continue;
     }
-    const resolvedColumnId = colMap.get(`${t.projectId}:${t.columnId}`) ?? t.columnId;
+    const resolvedColumnId =
+      t.resolution === 'completed'
+        ? (doneColumnMap.get(t.projectId) ?? colMap.get(`${t.projectId}:${t.columnId}`) ?? t.columnId)
+        : (colMap.get(`${t.projectId}:${t.columnId}`) ?? t.columnId);
+    const legacyTimestamp = t.resolvedAt ?? t.updatedAt;
+    const completedAt = t.completedAt ?? (t.resolution === 'completed' ? legacyTimestamp : undefined);
+    const archivedAt = t.archivedAt ?? (t.resolution && t.resolution !== 'completed' ? legacyTimestamp : undefined);
     const res = upsertTicket.run(
       t.id,
       t.projectId,
@@ -106,9 +114,8 @@ try {
       t.branch ?? null,
       JSON.stringify(t.blockedBy ?? []),
       jsonStr(t.shaping),
-      t.resolution ?? null,
-      t.resolvedAt ? toIso(t.resolvedAt) : null,
-      t.archivedAt ? toIso(t.archivedAt) : null,
+      completedAt ? toIso(completedAt) : null,
+      archivedAt ? toIso(archivedAt) : null,
       t.columnChangedAt ? toIso(t.columnChangedAt) : null,
       t.useWorktree ? 1 : 0,
       t.worktreePath ?? null,

@@ -10,20 +10,14 @@
  * scope guidance + a "Create token" link, so non-OAuth providers (Azure DevOps
  * especially) are discoverable here instead of only in source-picker contexts.
  */
-import { makeStyles, tokens } from '@fluentui/react-components';
-import { Open16Regular } from '@fluentui/react-icons';
+import { ExternalLink } from 'lucide-react';
 import { memo, useCallback, useEffect, useState } from 'react';
 
-import {
-  AnimatedDialog,
-  Button,
-  DialogBody,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  Input,
-  Select,
-} from '@/renderer/ds';
+import { cn } from '@/renderer/ds/cn';
+import { Button } from '@/renderer/ds/ui/button';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/renderer/ds/ui/dialog';
+import { Input } from '@/renderer/ds/ui/input';
+import { NativeSelect as Select } from '@/renderer/ds/ui/native-select';
 import { emitter } from '@/renderer/services/ipc';
 import { defaultUsernameForHost } from '@/shared/git-credentials';
 
@@ -102,15 +96,6 @@ function presetById(id: PresetId): ProviderPreset {
   return ALL_PRESETS.find((p) => p.id === id) ?? CUSTOM_PRESET;
 }
 
-const useStyles = makeStyles({
-  body: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalL },
-  field: { display: 'flex', flexDirection: 'column', gap: '6px' },
-  label: { fontSize: tokens.fontSizeBase300, color: tokens.colorNeutralForeground1 },
-  hint: { fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 },
-  full: { width: '100%' },
-  footer: { gap: tokens.spacingHorizontalS, justifyContent: 'flex-end' },
-});
-
 type GitCredentialDialogProps = {
   open: boolean;
   onClose: () => void;
@@ -119,7 +104,6 @@ type GitCredentialDialogProps = {
 };
 
 export const GitCredentialDialog = memo(({ open, onClose, initialHost = '' }: GitCredentialDialogProps) => {
-  const styles = useStyles();
   const [preset, setPreset] = useState<PresetId>('custom');
   const [host, setHost] = useState(initialHost);
   const [username, setUsername] = useState('');
@@ -219,90 +203,90 @@ export const GitCredentialDialog = memo(({ open, onClose, initialHost = '' }: Gi
   const activePreset = presetById(preset);
 
   return (
-    <AnimatedDialog open={open} onClose={onClose}>
+    <Dialog open={open} onOpenChange={(nextOpen) => !nextOpen && onClose()}>
       <DialogContent className="max-w-md">
-        <DialogHeader>Add git credential</DialogHeader>
-        <DialogBody className={styles.body}>
-          <div className={styles.field}>
-            <label className={styles.label}>Provider</label>
-            <Select value={preset} onChange={handlePresetChange} className={styles.full}>
+        <DialogHeader>
+          <DialogTitle>Add git credential</DialogTitle>
+        </DialogHeader>
+        <div className={cn('min-h-0 overflow-y-auto', 'flex flex-col gap-5')}>
+          <div className="flex flex-col gap-1.5">
+            <label className="text-sm text-foreground">Provider</label>
+            <Select value={preset} onChange={handlePresetChange} className="w-full">
               {ALL_PRESETS.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.label}
                 </option>
               ))}
             </Select>
-            <span className={styles.hint}>{activePreset.scopeHint}</span>
+            <span className="text-xs text-muted-foreground">{activePreset.scopeHint}</span>
           </div>
-          <div className={styles.field}>
-            <label className={styles.label}>Host</label>
-            <Input
-              type="text"
-              value={host}
-              onChange={handleHostChange}
-              placeholder="github.com"
-              className={styles.full}
-            />
-            <span className={styles.hint}>Bare host — used to clone and push every repo on it.</span>
+          <div className="flex flex-col gap-1.5">
+            <label className="text-sm text-foreground">Host</label>
+            <Input type="text" value={host} onChange={handleHostChange} placeholder="github.com" className="w-full" />
+
+            <span className="text-xs text-muted-foreground">Bare host — used to clone and push every repo on it.</span>
           </div>
-          <div className={styles.field}>
-            <label className={styles.label}>Username</label>
+          <div className="flex flex-col gap-1.5">
+            <label className="text-sm text-foreground">Username</label>
             <Input
               type="text"
               value={username}
               onChange={handleUsernameChange}
               placeholder="x-access-token"
-              className={styles.full}
+              className="w-full"
             />
-            <span className={styles.hint}>
+
+            <span className="text-xs text-muted-foreground">
               Most hosts use a fixed username (GitHub: <code>x-access-token</code>, GitLab: <code>oauth2</code>) — the
               token in the next field is what authenticates.
             </span>
           </div>
-          <div className={styles.field}>
-            <label className={styles.label}>Token</label>
+          <div className="flex flex-col gap-1.5">
+            <label className="text-sm text-foreground">Token</label>
             <Input
               type="password"
               value={token}
               onChange={handleTokenChange}
               placeholder="Personal access token"
-              className={styles.full}
+              className="w-full"
             />
-            <span className={styles.hint}>Stored encrypted on this machine; never shown again.</span>
+
+            <span className="text-xs text-muted-foreground">Stored encrypted on this machine; never shown again.</span>
             {activePreset.patUrl && (
-              <Button size="sm" variant="ghost" onClick={openPatUrl} leftIcon={<Open16Regular />}>
+              <Button size="sm" variant="ghost" onClick={openPatUrl}>
+                <ExternalLink />
                 Create token on {activePreset.host}
               </Button>
             )}
           </div>
-          <div className={styles.field}>
-            <label className={styles.label}>
-              Label <span className={styles.hint}>(optional)</span>
+          <div className="flex flex-col gap-1.5">
+            <label className="text-sm text-foreground">
+              Label <span className="text-xs text-muted-foreground">(optional)</span>
             </label>
             <Input
               type="text"
               value={label}
               onChange={handleLabelChange}
               placeholder="work GitHub PAT"
-              className={styles.full}
+              className="w-full"
             />
           </div>
           {error && (
-            <div role="alert" style={{ color: 'var(--colorPaletteRedForeground1)' }}>
+            <div role="alert" className="text-sm text-destructive">
               {error}
             </div>
           )}
-        </DialogBody>
-        <DialogFooter className={styles.footer}>
+        </div>
+        <DialogFooter className="gap-2 justify-end">
           <Button variant="ghost" onClick={onClose}>
             Cancel
           </Button>
-          <Button onClick={handleSave} isDisabled={saving || !host.trim() || !token}>
+          <Button onClick={handleSave} disabled={saving || !host.trim() || !token}>
             {saving ? 'Saving…' : 'Save'}
           </Button>
         </DialogFooter>
       </DialogContent>
-    </AnimatedDialog>
+    </Dialog>
   );
 });
 GitCredentialDialog.displayName = 'GitCredentialDialog';

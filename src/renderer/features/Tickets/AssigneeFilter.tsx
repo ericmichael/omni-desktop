@@ -1,18 +1,17 @@
-import { Filter20Regular } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
+import { Filter } from 'lucide-react';
 import { memo, useCallback } from 'react';
 
 import { residentPrincipalId } from '@/lib/resident-agent';
+import { Button } from '@/renderer/ds/ui/button';
 import {
-  Button,
-  Menu,
-  type MenuCheckedValueChangeData,
-  MenuDivider,
-  MenuItemRadio,
-  MenuList,
-  MenuPopover,
-  MenuTrigger,
-} from '@/renderer/ds';
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/renderer/ds/ui/dropdown-menu';
 import { $currentPrincipal, $members } from '@/renderer/features/Teams/state';
 import { $assigneeFilter } from '@/renderer/features/Tickets/state';
 import { persistedStoreApi } from '@/renderer/services/store';
@@ -28,11 +27,7 @@ export const AssigneeFilter = memo(function AssigneeFilter() {
   const me = useStore($currentPrincipal);
   const residents = useStore(persistedStoreApi.$atom).residentAgents.filter((a) => a.enabled);
 
-  const handleCheckedChange = useCallback((_e: unknown, data: MenuCheckedValueChangeData) => {
-    if (data.name === 'assignee') {
-      $assigneeFilter.set(data.checkedItems[0] ?? 'all');
-    }
-  }, []);
+  const handleCheckedChange = useCallback((value: string) => $assigneeFilter.set(value), []);
 
   // Nobody to filter by.
   if (members.length === 0 && residents.length === 0) {
@@ -52,39 +47,32 @@ export const AssigneeFilter = memo(function AssigneeFilter() {
             'Assignee');
 
   return (
-    <Menu checkedValues={{ assignee: [filter] }} onCheckedValueChange={handleCheckedChange}>
-      <MenuTrigger disableButtonEnhancement>
-        <Button size="sm" variant="ghost" leftIcon={<Filter20Regular />}>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button size="sm" variant="ghost">
+          <Filter />
           {label}
         </Button>
-      </MenuTrigger>
-      <MenuPopover>
-        <MenuList>
-          <MenuItemRadio name="assignee" value="all">
-            All assignees
-          </MenuItemRadio>
-          {me ? (
-            <MenuItemRadio name="assignee" value="me">
-              Assigned to me
-            </MenuItemRadio>
-          ) : null}
-          <MenuItemRadio name="assignee" value="unassigned">
-            Unassigned
-          </MenuItemRadio>
-          {members.length > 0 && <MenuDivider />}
+      </DropdownMenuTrigger>
+      <DropdownMenuContent>
+        <DropdownMenuRadioGroup value={filter} onValueChange={handleCheckedChange}>
+          <DropdownMenuRadioItem value="all">All assignees</DropdownMenuRadioItem>
+          {me ? <DropdownMenuRadioItem value="me">Assigned to me</DropdownMenuRadioItem> : null}
+          <DropdownMenuRadioItem value="unassigned">Unassigned</DropdownMenuRadioItem>
+          {members.length > 0 && <DropdownMenuSeparator />}
           {members.map((m) => (
-            <MenuItemRadio key={m.userId} name="assignee" value={m.userId}>
+            <DropdownMenuRadioItem key={m.userId} value={m.userId}>
               {m.displayName ?? m.email ?? m.userId}
-            </MenuItemRadio>
+            </DropdownMenuRadioItem>
           ))}
-          {residents.length > 0 && <MenuDivider />}
+          {residents.length > 0 && <DropdownMenuSeparator />}
           {residents.map((a) => (
-            <MenuItemRadio key={a.id} name="assignee" value={residentPrincipalId(a.id)}>
+            <DropdownMenuRadioItem key={a.id} value={residentPrincipalId(a.id)}>
               {a.name}
-            </MenuItemRadio>
+            </DropdownMenuRadioItem>
           ))}
-        </MenuList>
-      </MenuPopover>
-    </Menu>
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 });

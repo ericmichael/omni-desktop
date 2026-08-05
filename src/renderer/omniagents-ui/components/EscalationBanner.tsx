@@ -23,11 +23,11 @@ export function EscalationBanner({ escalation }: Props) {
 
   return (
     <div className="px-3 pt-2">
-      <div className="rounded-md border border-warningOrange/60 bg-warningOrange/10 p-2.5">
-        <div className="text-xs text-warningOrange font-medium">
+      <div className="rounded-md border border-warning/60 bg-warning/10 p-2.5">
+        <div className="text-xs text-warning font-medium">
           Agent escalated — your next message will be sent back as the reply.
         </div>
-        <div className="mt-1 text-sm text-textPrimary">{escalation.message}</div>
+        <div className="mt-1 text-sm text-foreground">{escalation.message}</div>
       </div>
     </div>
   );

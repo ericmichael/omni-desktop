@@ -3,49 +3,31 @@
  * push private repositories. The list is metadata only (host, username, last4)
  * — tokens are write-only and live in the main/server `SecretStore`.
  */
-import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
-import { Add20Regular, Delete20Regular, Key20Regular } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
+import { Key, Plus, Trash2 } from 'lucide-react';
 import { memo, useCallback, useState } from 'react';
 
-import { Body1, Button, Caption1, ConfirmDialog, IconButton, SectionLabel } from '@/renderer/ds';
+import { cn } from '@/renderer/ds/cn';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/renderer/ds/ui/alert-dialog';
+import { Button } from '@/renderer/ds/ui/button';
 import { emitter } from '@/renderer/services/ipc';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { GitCredential } from '@/shared/types';
 
 import { ConnectGithubCard } from './ConnectGithubCard';
 import { GitCredentialDialog } from './GitCredentialDialog';
-
-const useStyles = makeStyles({
-  root: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalM },
-  intro: { color: tokens.colorNeutralForeground2 },
-  list: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalS },
-  row: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalM,
-    padding: tokens.spacingVerticalM,
-    borderRadius: tokens.borderRadiusMedium,
-    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke2),
-    backgroundColor: tokens.colorNeutralBackground2,
-  },
-  rowIcon: { color: tokens.colorNeutralForeground3, flexShrink: 0 },
-  rowMain: { flex: '1 1 0', minWidth: 0, display: 'flex', flexDirection: 'column', gap: '2px' },
-  rowHost: { fontWeight: tokens.fontWeightSemibold },
-  rowMeta: { color: tokens.colorNeutralForeground3 },
-  mono: { fontFamily: tokens.fontFamilyMonospace },
-  empty: {
-    padding: tokens.spacingVerticalXL,
-    textAlign: 'center',
-    color: tokens.colorNeutralForeground3,
-    borderRadius: tokens.borderRadiusMedium,
-    ...shorthands.border('1px', 'dashed', tokens.colorNeutralStroke2),
-  },
-  addBtn: { alignSelf: 'flex-start' },
-});
+import { SettingsPane, SettingsSection } from './SettingsLayout';
 
 export const SettingsModalGitTab = memo(() => {
-  const styles = useStyles();
   const storeData = useStore(persistedStoreApi.$atom);
   const credentials = storeData.gitCredentials ?? [];
 
@@ -63,67 +45,83 @@ export const SettingsModalGitTab = memo(() => {
   }, [pendingDelete]);
 
   return (
-    <div className={styles.root}>
-      <ConnectGithubCard />
+    <SettingsPane>
+      <SettingsSection title="GitHub">
+        <ConnectGithubCard />
+      </SettingsSection>
 
-      <SectionLabel>Git credentials</SectionLabel>
-      <Caption1 className={styles.intro}>
-        Tokens used to clone and push private repositories. A credential is matched to a repo by its host, so you add a
-        token once per host (e.g. github.com) and every project reuses it.
-      </Caption1>
+      <SettingsSection
+        title="Git credentials"
+        description="Tokens used to clone and push private repositories. Credentials are matched to repositories by host."
+      >
+        {credentials.length === 0 ? (
+          <div className="p-6 text-center text-muted-foreground rounded-lg border border-dashed border-border">
+            No git credentials yet. Add one to use private remote repos.
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {credentials.map((cred) => (
+              <CredentialRow key={cred.id} cred={cred} onDelete={setPendingDelete} />
+            ))}
+          </div>
+        )}
 
-      {credentials.length === 0 ? (
-        <div className={styles.empty}>No git credentials yet. Add one to use private remote repos.</div>
-      ) : (
-        <div className={styles.list}>
-          {credentials.map((cred) => (
-            <CredentialRow key={cred.id} cred={cred} styles={styles} onDelete={setPendingDelete} />
-          ))}
-        </div>
-      )}
-
-      <Button size="sm" variant="ghost" onClick={openAdd} leftIcon={<Add20Regular />} className={styles.addBtn}>
-        Add credential
-      </Button>
+        <Button size="sm" variant="ghost" onClick={openAdd} className="self-start">
+          <Plus />
+          Add credential
+        </Button>
+      </SettingsSection>
 
       <GitCredentialDialog open={dialogOpen} onClose={closeDialog} />
-      <ConfirmDialog
-        open={pendingDelete !== null}
-        onClose={clearPendingDelete}
-        onConfirm={confirmDelete}
-        title="Delete git credential?"
-        description={
-          pendingDelete
-            ? `Remove the stored token for ${pendingDelete.host}? Private repos on that host will stop authenticating.`
-            : ''
-        }
-        confirmLabel="Delete"
-        destructive
-      />
-    </div>
+      <AlertDialog open={pendingDelete !== null} onOpenChange={(open) => !open && clearPendingDelete()}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete git credential?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingDelete
+                ? `Remove the stored token for ${pendingDelete.host}? Private repos on that host will stop authenticating.`
+                : ''}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={confirmDelete}>
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </SettingsPane>
   );
 });
 SettingsModalGitTab.displayName = 'SettingsModalGitTab';
 
 type CredentialRowProps = {
   cred: GitCredential;
-  styles: ReturnType<typeof useStyles>;
   onDelete: (cred: GitCredential) => void;
 };
 
-const CredentialRow = memo(({ cred, styles, onDelete }: CredentialRowProps) => {
+const CredentialRow = memo(({ cred, onDelete }: CredentialRowProps) => {
   const handleDelete = useCallback(() => onDelete(cred), [cred, onDelete]);
   return (
-    <div className={styles.row}>
-      <Key20Regular className={styles.rowIcon} />
-      <div className={styles.rowMain}>
-        <Body1 className={styles.rowHost}>{cred.host}</Body1>
-        <Caption1 className={styles.rowMeta}>
-          {cred.username} · <span className={styles.mono}>••••{cred.last4}</span>
+    <div className="flex items-center gap-4 p-4 rounded-lg border border-border bg-card">
+      <Key className="text-muted-foreground shrink-0" />
+      <div className="flex-1 min-w-0 flex flex-col gap-0.5">
+        <span className={cn('text-sm', 'font-semibold')}>{cred.host}</span>
+        <span className={cn('text-xs text-muted-foreground', 'text-muted-foreground')}>
+          {cred.username} · <span className="font-mono">••••{cred.last4}</span>
           {cred.label ? ` · ${cred.label}` : ''}
-        </Caption1>
+        </span>
       </div>
-      <IconButton aria-label={`Delete credential for ${cred.host}`} icon={<Delete20Regular />} onClick={handleDelete} />
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        aria-label={`Delete credential for ${cred.host}`}
+        onClick={handleDelete}
+      >
+        <Trash2 />
+      </Button>
     </div>
   );
 });

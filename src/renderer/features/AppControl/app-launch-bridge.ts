@@ -1,11 +1,10 @@
 /**
  * Bridge between the `launch_app` client tool and the deck UI.
  *
- * Dock apps mount lazily — only the active non-chat app per column has a live
- * webview. The client-tool handler can't reach CodeDeck's local `activeApps`
- * React state directly, so it calls `requestAppLaunch(tabId, appId)`, which sets
- * an atom CodeDeck subscribes to and *opens* (not toggles) that app in the
- * column. Once the webview mounts it registers itself and becomes drivable.
+ * The client-tool handler can't directly open a persisted sidecar tab, so it
+ * calls `requestAppLaunch(tabId, appId)`. CodeDeck consumes that request and
+ * opens or activates the app in the column's right-side tab strip. Once the
+ * app mounts it registers itself and becomes drivable.
  *
  * Mirrors `preview-bridge` — non-blocking, the tool returns immediately.
  */

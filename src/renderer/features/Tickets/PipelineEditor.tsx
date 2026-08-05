@@ -1,87 +1,18 @@
-import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
-import { Add20Regular, ArrowDown20Regular, ArrowUp20Regular, Delete20Filled } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
+import { ArrowDown, ArrowUp, Plus, Trash2 } from 'lucide-react';
 import { memo, useCallback, useMemo, useState } from 'react';
 
 import { CATEGORY_LABELS, columnCategory, validatePipelineCategories } from '@/lib/pipeline-category';
-import { Button, IconButton, Input, Select, Switch, Textarea } from '@/renderer/ds';
+import { cn } from '@/renderer/ds/cn';
+import { Button } from '@/renderer/ds/ui/button';
+import { Input } from '@/renderer/ds/ui/input';
+import { NativeSelect as Select } from '@/renderer/ds/ui/native-select';
+import { Switch } from '@/renderer/ds/ui/switch';
+import { Textarea } from '@/renderer/ds/ui/textarea';
 import type { Column, ColumnCategory, ProjectId } from '@/shared/types';
 
 import { $pipeline, ticketApi } from './state';
 import { getColumnColors } from './ticket-constants';
-
-const useStyles = makeStyles({
-  root: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalM,
-  },
-  columnCard: {
-    borderRadius: tokens.borderRadiusMedium,
-    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
-    backgroundColor: tokens.colorNeutralBackground2,
-    padding: tokens.spacingVerticalM,
-  },
-  columnHeader: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-    marginBottom: tokens.spacingVerticalS,
-  },
-  actionsGroup: {
-    marginLeft: 'auto',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '4px',
-  },
-  fieldRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '6px',
-  },
-  fieldLabel: {
-    fontSize: tokens.fontSizeBase300,
-    color: tokens.colorNeutralForeground2,
-    '@media (min-width: 640px)': {
-      fontSize: tokens.fontSizeBase200,
-    },
-  },
-  helpText: {
-    fontSize: tokens.fontSizeBase300,
-    color: tokens.colorNeutralForeground2,
-    '@media (min-width: 640px)': {
-      fontSize: tokens.fontSizeBase200,
-    },
-  },
-  addRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-    marginTop: '4px',
-  },
-  flex1: {
-    flex: '1 1 0',
-  },
-  fieldColumn: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '4px',
-  },
-  saveRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-    paddingTop: tokens.spacingVerticalS,
-  },
-  dirtyHint: {
-    fontSize: tokens.fontSizeBase200,
-    color: tokens.colorPaletteYellowForeground1,
-  },
-  categoryError: {
-    fontSize: tokens.fontSizeBase200,
-    color: tokens.colorPaletteRedForeground1,
-  },
-});
 
 const CATEGORIES: ColumnCategory[] = ['todo', 'doing', 'done'];
 
@@ -132,7 +63,6 @@ const ColumnEditor = memo(
     onRemoveColumn: (columnId: string) => void;
     isRemovable: boolean;
   }) => {
-    const styles = useStyles();
     const [editing, setEditing] = useState(false);
     const [editLabel, setEditLabel] = useState(column.label);
 
@@ -205,11 +135,10 @@ const ColumnEditor = memo(
     );
 
     return (
-      <div className={styles.columnCard}>
-        <div className={styles.columnHeader}>
+      <div className="rounded-lg border border-border bg-card p-4">
+        <div className="flex items-center gap-2 mb-2">
           {editing ? (
             <Input
-              size="sm"
               value={editLabel}
               onChange={handleLabelChange}
               onBlur={handleFinishRename}
@@ -217,47 +146,64 @@ const ColumnEditor = memo(
               autoFocus
             />
           ) : (
-            <button
+            <Button
+              type="button"
+              variant="ghost"
+              size="xs"
               onClick={handleStartRename}
-              className="text-xs px-1.5 py-0.5 rounded-full font-medium cursor-pointer hover:ring-1 hover:ring-accent-500/50"
-              style={{
-                color: getColumnColors(column.id).badgeColor,
-                backgroundColor: getColumnColors(column.id).badgeBg,
-              }}
+              className={cn(
+                'cursor-pointer rounded-full px-1.5 py-0.5 text-xs font-medium hover:ring-1 hover:ring-primary/50',
+                getColumnColors(column.id).badgeClassName
+              )}
               title="Click to rename"
             >
               {column.label}
-            </button>
+            </Button>
           )}
 
-          <div className={styles.actionsGroup}>
-            <IconButton
+          <div className="ml-auto flex items-center gap-1">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
               aria-label="Move up"
-              icon={<ArrowUp20Regular />}
-              size="sm"
               onClick={handleMoveUp}
-              isDisabled={index === 0}
-            />
-            <IconButton
+              disabled={index === 0}
+            >
+              <ArrowUp />
+            </Button>
+
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
               aria-label="Move down"
-              icon={<ArrowDown20Regular />}
-              size="sm"
               onClick={handleMoveDown}
-              isDisabled={index === total - 1}
-            />
+              disabled={index === total - 1}
+            >
+              <ArrowDown />
+            </Button>
+
             {isRemovable && (
-              <IconButton aria-label="Remove column" icon={<Delete20Filled />} size="sm" onClick={handleRemoveColumn} />
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Remove column"
+                onClick={handleRemoveColumn}
+              >
+                <Trash2 />
+              </Button>
             )}
           </div>
         </div>
 
-        <div className={styles.fieldRow}>
-          <label className={styles.fieldLabel}>Category</label>
+        <div className="flex items-center gap-1.5">
+          <label className="text-sm text-muted-foreground sm:text-xs">Category</label>
           <Select
             aria-label={`Status category for ${column.label}`}
             value={columnCategory(column, index, total)}
             onChange={handleCategoryChange}
-            size="sm"
           >
             {CATEGORIES.map((cat) => (
               <option key={cat} value={cat}>
@@ -266,41 +212,38 @@ const ColumnEditor = memo(
             ))}
           </Select>
         </div>
-        <div className={styles.fieldRow}>
-          <label className={styles.fieldLabel}>Max concurrent</label>
+        <div className="flex items-center gap-1.5">
+          <label className="text-sm text-muted-foreground sm:text-xs">Max concurrent</label>
           <Input
             type="number"
-            size="sm"
             value={column.maxConcurrent?.toString() ?? ''}
             onChange={handleMaxConcurrentChange}
             placeholder="&#x221E;"
           />
         </div>
-        <div className={styles.fieldRow}>
-          <label className={styles.fieldLabel}>Gate</label>
+        <div className="flex items-center gap-1.5">
+          <label className="text-sm text-muted-foreground sm:text-xs">Gate</label>
           <Switch checked={column.gate ?? false} onCheckedChange={handleGateCheckedChange} />
         </div>
-        <div className={styles.fieldRow}>
-          <label className={styles.fieldLabel}>Description</label>
+        <div className="flex items-center gap-1.5">
+          <label className="text-sm text-muted-foreground sm:text-xs">Description</label>
           <Input
-            size="sm"
             value={column.description ?? ''}
             onChange={handleDescriptionInputChange}
             placeholder="What does this column mean?"
-            className={styles.flex1}
+            className="flex-1"
           />
         </div>
-        <div className={styles.fieldColumn}>
-          <label className={styles.fieldLabel}>Purpose</label>
+        <div className="flex flex-col gap-1">
+          <label className="text-sm text-muted-foreground sm:text-xs">Purpose</label>
           <Input
-            size="sm"
             value={column.workflow?.purpose ?? ''}
             onChange={handlePurposeChange}
             placeholder="What should happen in this column?"
           />
         </div>
-        <div className={styles.fieldColumn}>
-          <label className={styles.fieldLabel}>Definition of done</label>
+        <div className="flex flex-col gap-1">
+          <label className="text-sm text-muted-foreground sm:text-xs">Definition of done</label>
           <Textarea
             aria-label={`Definition of done for ${column.label}`}
             value={linesToText(column.workflow?.definitionOfDone)}
@@ -309,8 +252,8 @@ const ColumnEditor = memo(
             rows={4}
           />
         </div>
-        <div className={styles.fieldColumn}>
-          <label className={styles.fieldLabel}>Agent instructions</label>
+        <div className="flex flex-col gap-1">
+          <label className="text-sm text-muted-foreground sm:text-xs">Agent instructions</label>
           <Textarea
             aria-label={`Agent instructions for ${column.label}`}
             value={column.workflow?.agentInstructions ?? ''}
@@ -319,10 +262,9 @@ const ColumnEditor = memo(
             rows={3}
           />
         </div>
-        <div className={styles.fieldColumn}>
-          <label className={styles.fieldLabel}>Recommended skills</label>
+        <div className="flex flex-col gap-1">
+          <label className="text-sm text-muted-foreground sm:text-xs">Recommended skills</label>
           <Input
-            size="sm"
             value={skillsToText(column.workflow?.recommendedSkills)}
             onChange={handleRecommendedSkillsChange}
             placeholder="software-planning, debug"
@@ -340,7 +282,6 @@ ColumnEditor.displayName = 'ColumnEditor';
  * so nothing is written until the user explicitly saves.
  */
 export const PipelineEditor = memo(({ projectId }: { projectId: ProjectId }) => {
-  const styles = useStyles();
   const pipeline = useStore($pipeline);
 
   const [editColumns, setEditColumns] = useState<Column[] | null>(null);
@@ -503,8 +444,8 @@ export const PipelineEditor = memo(({ projectId }: { projectId: ProjectId }) => 
   })();
 
   return (
-    <div className={styles.root}>
-      <p className={styles.helpText}>
+    <div className="flex flex-col gap-4">
+      <p className="text-sm text-muted-foreground sm:text-xs">
         Columns are the stages agents move work through. Each column&apos;s category (To do / Doing / Done) is how tasks
         group in global views — the last column must be the Done one.
       </p>
@@ -526,37 +467,40 @@ export const PipelineEditor = memo(({ projectId }: { projectId: ProjectId }) => 
           isRemovable={editColumns.length > 2}
         />
       ))}
-      <div className={styles.addRow}>
+      <div className="flex items-center gap-2 mt-1">
         <Input
-          size="sm"
           value={newColumnLabel}
           onChange={handleNewColumnLabelChange}
           placeholder="Add column..."
           onKeyDown={handleAddColumnKeyDown}
-          className={styles.flex1}
+          className="flex-1"
         />
-        <IconButton
+
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
           aria-label="Add column"
-          icon={<Add20Regular />}
-          size="sm"
           onClick={handleAddColumn}
-          isDisabled={!newColumnLabel.trim()}
-        />
+          disabled={!newColumnLabel.trim()}
+        >
+          <Plus />
+        </Button>
       </div>
       {isDirty && categoryError && (
-        <div role="alert" className={styles.categoryError}>
+        <div role="alert" className="text-xs text-destructive">
           {categoryError}
         </div>
       )}
       {isDirty && (
-        <div className={styles.saveRow}>
-          <Button onClick={handleSave} isDisabled={saving || categoryError !== null}>
+        <div className="flex items-center gap-2 pt-2">
+          <Button onClick={handleSave} disabled={saving || categoryError !== null}>
             {saving ? 'Saving…' : 'Save pipeline'}
           </Button>
-          <Button variant="ghost" onClick={handleDiscard} isDisabled={saving}>
+          <Button variant="ghost" onClick={handleDiscard} disabled={saving}>
             Discard
           </Button>
-          <span className={styles.dirtyHint}>Unsaved pipeline changes</span>
+          <span className="text-xs text-warning">Unsaved pipeline changes</span>
         </div>
       )}
     </div>

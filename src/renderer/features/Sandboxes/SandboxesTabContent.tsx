@@ -1,16 +1,16 @@
-import { makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
 import { useStore } from '@nanostores/react';
 import { memo } from 'react';
 
-import { openMobileNav } from '@/renderer/app/mobile-nav';
 import { useIsDesktop } from '@/renderer/common/use-is-desktop';
-import { PageHeader, TopAppBar } from '@/renderer/ds';
+import { PageHeader } from '@/renderer/ds/PageHeader';
+import { PageTabsList, PageTabsTrigger } from '@/renderer/ds/PageTabs';
+import { TopAppBar } from '@/renderer/ds/TopAppBar';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/renderer/ds/ui/tabs';
 import { HealthPane } from '@/renderer/features/Sandboxes/HealthPane';
 import { ProfilesPane } from '@/renderer/features/Sandboxes/ProfilesPane';
 import { RunningPane } from '@/renderer/features/Sandboxes/RunningPane';
 import { SnapshotsPane } from '@/renderer/features/Sandboxes/SnapshotsPane';
 import { $sandboxesSelectedPane, type SandboxesPane } from '@/renderer/features/Sandboxes/state';
-import { $glassEnabled } from '@/renderer/theme/use-glass';
 
 /**
  * The tab's fixed master list — four nodes mapping to detail panes
@@ -24,89 +24,6 @@ const PANES: { id: SandboxesPane; title: string; meta: string }[] = [
   { id: 'snapshots', title: 'Snapshots', meta: 'Workspace rehydration tars' },
 ];
 
-const useStyles = makeStyles({
-  root: {
-    display: 'flex',
-    width: '100%',
-    height: '100%',
-  },
-  rootGlass: {
-    backgroundColor: 'transparent',
-  },
-  /* Desktop only — mobile renders the list inside the single content pane. */
-  listPane: {
-    display: 'flex',
-    flexDirection: 'column',
-    height: '100%',
-    width: '320px',
-    flexShrink: 0,
-    borderRight: `1px solid ${tokens.colorNeutralStroke1}`,
-  },
-  listPaneGlass: {
-    backgroundColor: tokens.colorNeutralBackground2,
-    backdropFilter: 'var(--glass-blur)',
-    WebkitBackdropFilter: 'var(--glass-blur)',
-  },
-  list: {
-    flex: '1 1 0',
-    minHeight: 0,
-    overflowY: 'auto',
-  },
-  detailPane: {
-    flex: '1 1 0',
-    minWidth: 0,
-    display: 'flex',
-    flexDirection: 'column',
-  },
-  detailPaneGlass: {
-    backgroundColor: tokens.colorNeutralBackground1,
-    backdropFilter: 'var(--glass-blur)',
-    WebkitBackdropFilter: 'var(--glass-blur)',
-  },
-  row: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'stretch',
-    gap: '2px',
-    paddingLeft: tokens.spacingHorizontalL,
-    paddingRight: tokens.spacingHorizontalS,
-    paddingTop: '8px',
-    paddingBottom: '8px',
-    cursor: 'pointer',
-    border: 'none',
-    backgroundColor: 'transparent',
-    width: '100%',
-    textAlign: 'left',
-    ':hover': { backgroundColor: tokens.colorSubtleBackgroundHover },
-    ':focus-visible': {
-      outlineWidth: '2px',
-      outlineStyle: 'solid',
-      outlineColor: tokens.colorBrandStroke1,
-      outlineOffset: '-2px',
-    },
-  },
-  rowSelected: {
-    backgroundColor: tokens.colorSubtleBackgroundSelected,
-  },
-  rowTitle: {
-    fontWeight: tokens.fontWeightRegular,
-    fontSize: tokens.fontSizeBase300,
-  },
-  rowMeta: {
-    color: tokens.colorNeutralForeground3,
-    fontSize: tokens.fontSizeBase200,
-  },
-  detailBody: {
-    flex: '1 1 0',
-    minHeight: 0,
-    overflowY: 'auto',
-    padding: tokens.spacingHorizontalL,
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalM,
-  },
-});
-
 const selectPane = (pane: SandboxesPane): void => {
   $sandboxesSelectedPane.set(pane);
 };
@@ -115,39 +32,50 @@ const clearPane = (): void => {
 };
 
 export const SandboxesTabContent = memo(() => {
-  const styles = useStyles();
   const selectedPane = useStore($sandboxesSelectedPane);
   const isDesktop = useIsDesktop();
-  const isGlass = useStore($glassEnabled);
 
-  // Desktop shows both panes at once, so it always has something selected.
-  const shownPane = selectedPane ?? 'health';
+  // Desktop always has an active section; mobile starts at the section list.
+  const tabsValue = selectedPane ?? (isDesktop ? 'health' : '');
 
   const list = (
-    <div className={styles.list}>
+    <TabsList variant="line" className="w-full flex-1 items-stretch justify-start rounded-none bg-transparent p-0">
       {PANES.map((pane) => (
-        <button
+        <TabsTrigger
           key={pane.id}
-          type="button"
-          className={mergeClasses(styles.row, isDesktop && shownPane === pane.id && styles.rowSelected)}
-          onClick={selectPane.bind(null, pane.id)}
+          value={pane.id}
+          className={`${'flex flex-col items-stretch gap-0.5 pl-5 pr-2 pt-2 pb-2 cursor-pointer border-0 bg-transparent w-full text-left hover:bg-accent focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-primary focus-visible:-outline-offset-2'} h-auto flex-none flex-col items-stretch justify-start rounded-none after:hidden ${tabsValue === pane.id ? 'bg-accent' : ''}`}
         >
-          <span className={styles.rowTitle}>{pane.title}</span>
-          <span className={styles.rowMeta}>{pane.meta}</span>
-        </button>
+          <span className="font-normal text-sm">{pane.title}</span>
+          <span className="text-muted-foreground text-xs">{pane.meta}</span>
+        </TabsTrigger>
       ))}
-    </div>
+    </TabsList>
   );
 
   const detail = (
-    <div className={styles.detailBody}>
-      {/* Only the active pane mounts — pane-local pollers (containers,
-          wsl:status) start on mount and clear on pane-switch. */}
-      {shownPane === 'health' && <HealthPane />}
-      {shownPane === 'profiles' && <ProfilesPane />}
-      {shownPane === 'running' && <RunningPane />}
-      {shownPane === 'snapshots' && <SnapshotsPane />}
-    </div>
+    <>
+      <TabsContent value="health" className="flex-1 min-h-0 overflow-y-auto p-5 flex flex-col gap-4">
+        <div className="w-full max-w-5xl ml-auto mr-auto">
+          <HealthPane />
+        </div>
+      </TabsContent>
+      <TabsContent value="profiles" className="flex-1 min-h-0 overflow-y-auto p-5 flex flex-col gap-4">
+        <div className="w-full max-w-5xl ml-auto mr-auto">
+          <ProfilesPane />
+        </div>
+      </TabsContent>
+      <TabsContent value="running" className="flex-1 min-h-0 overflow-y-auto p-5 flex flex-col gap-4">
+        <div className="w-full max-w-5xl ml-auto mr-auto">
+          <RunningPane />
+        </div>
+      </TabsContent>
+      <TabsContent value="snapshots" className="flex-1 min-h-0 overflow-y-auto p-5 flex flex-col gap-4">
+        <div className="w-full max-w-5xl ml-auto mr-auto">
+          <SnapshotsPane />
+        </div>
+      </TabsContent>
+    </>
   );
 
   // Mobile: one master per tab — the list fills the plane and a drilled-in
@@ -155,27 +83,43 @@ export const SandboxesTabContent = memo(() => {
   // here would squeeze the detail to zero width (it did).
   if (!isDesktop) {
     return (
-      <div className={mergeClasses(styles.root, isGlass && styles.rootGlass)}>
-        <div className={mergeClasses(styles.detailPane, isGlass && styles.detailPaneGlass)}>
+      <Tabs
+        value={tabsValue}
+        onValueChange={(value) => selectPane(value as SandboxesPane)}
+        orientation="vertical"
+        className="flex w-full h-full gap-0"
+      >
+        <div className="flex-1 min-w-0 min-h-0 overflow-hidden flex flex-col">
           {selectedPane ? (
             <TopAppBar title={PANES.find((p) => p.id === selectedPane)?.title ?? 'Sandboxes'} onBack={clearPane} />
           ) : (
-            <TopAppBar title="Sandboxes" onMenu={openMobileNav} />
+            <TopAppBar title="Sandboxes" showMenu />
           )}
           {selectedPane ? detail : list}
         </div>
-      </div>
+      </Tabs>
     );
   }
 
   return (
-    <div className={mergeClasses(styles.root, isGlass && styles.rootGlass)}>
-      <div className={mergeClasses(styles.listPane, isGlass && styles.listPaneGlass)}>
-        <PageHeader title="Sandboxes" />
-        {list}
+    <Tabs
+      value={tabsValue}
+      onValueChange={(value) => selectPane(value as SandboxesPane)}
+      orientation="horizontal"
+      className="flex flex-col w-full h-full min-h-0 gap-0"
+    >
+      <PageHeader title="Sandboxes" />
+      <div className="px-5">
+        <PageTabsList>
+          {PANES.map((pane) => (
+            <PageTabsTrigger key={pane.id} value={pane.id}>
+              {pane.title}
+            </PageTabsTrigger>
+          ))}
+        </PageTabsList>
       </div>
-      <div className={mergeClasses(styles.detailPane, isGlass && styles.detailPaneGlass)}>{detail}</div>
-    </div>
+      <div className="flex-1 min-w-0 min-h-0 overflow-hidden flex flex-col">{detail}</div>
+    </Tabs>
   );
 });
 SandboxesTabContent.displayName = 'SandboxesTabContent';

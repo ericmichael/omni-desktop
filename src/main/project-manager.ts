@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import fs from 'fs/promises';
 import { nanoid } from 'nanoid';
 import type { ColumnRow, IProjectsRepo, ProjectsRepo, TicketRemap } from 'omni-projects-db';
-import { commentId } from 'omni-projects-db';
+import { commentId, logicalColumnId } from 'omni-projects-db';
 import path from 'path';
 
 import { appendActivityEvent } from '@/lib/activity-log';
@@ -12,12 +12,7 @@ import { getArtifactsDir, getContainerArtifactsDir } from '@/lib/artifacts';
 import { detectContainerPullRequests } from '@/lib/container-pull-request';
 import { mirrorContainerChangesToHost } from '@/lib/container-sync';
 import { INBOX_SWEEP_INTERVAL_MS } from '@/lib/inbox-expiry';
-import {
-  doneColumnIds,
-  isDoneColumn,
-  normalizePipelineCategories,
-  validatePipelineCategories,
-} from '@/lib/pipeline-category';
+import { isDoneColumn, normalizePipelineCategories, validatePipelineCategories } from '@/lib/pipeline-category';
 import type { ProjectManagerDeps } from '@/lib/project-manager-deps';
 import { runMigrations as runSchemaMigrations } from '@/lib/project-migrations';
 import type { ProjectConfigDefaults } from '@/lib/project-to-config';
@@ -733,7 +728,32 @@ export class ProjectManager {
       const rows = columns.map((col, sortOrder) => columnToRow(col, id, sortOrder));
       this.cache.columns.set(id, rows);
       this.enqueuePersist(async () => {
-        await repo.replaceColumnsForProject(id, rows);
+        const result = await repo.syncColumnsForProject(
+          id,
+          columns.map((column) => ({
+            logicalId: logicalColumnId(id, column.id),
+            label: column.label,
+            description: column.description,
+            gate: column.gate,
+            maxConcurrent: column.maxConcurrent,
+            workflow: column.workflow,
+            category: column.category,
+          }))
+        );
+        for (const remap of result.remappedTickets) {
+          if (remap.gateLost) {
+            await this.appendGateLostComment(repo, id, remap);
+          }
+        }
+
+        this.cache.columns.set(id, await repo.listColumns(id));
+        const ticketRows = await repo.listTicketsByProject(id);
+        const refreshed = await Promise.all(
+          ticketRows.map(async (row) => rowToTicket(row, await repo.listCommentsByTicket(row.id)))
+        );
+        const refreshedById = new Map(refreshed.map((ticket) => [ticket.id, ticket]));
+        this.cache.tickets = this.cache.tickets.map((ticket) => refreshedById.get(ticket.id) ?? ticket);
+        this.broadcastStoreSnapshot();
       });
       this.noteLocalWriteAndBroadcast();
     }
@@ -989,15 +1009,6 @@ export class ProjectManager {
     return pipeline.columns[0]?.id ?? 'backlog';
   };
 
-  /** The 'done'-category column (terminal — stops supervisor). Validation
-   *  keeps it last, so the positional fallback inside categoryOf only fires
-   *  for legacy in-store pipelines. */
-  private getTerminalColumnId = (projectId: ProjectId): ColumnId => {
-    const pipeline = this.getPipeline(projectId);
-    const done = [...doneColumnIds(pipeline)];
-    return done[done.length - 1] ?? pipeline.columns[pipeline.columns.length - 1]?.id ?? 'completed';
-  };
-
   /** Check if a column counts as shipped ('done' category) for a project. */
   private isTerminalColumn = (projectId: ProjectId, columnId: ColumnId): boolean => {
     return isDoneColumn(this.getPipeline(projectId), columnId);
@@ -1131,32 +1142,6 @@ export class ProjectManager {
         this.onAssign(assignee, ticket);
       }
     }
-  };
-
-  removeTicket = (id: TicketId): void => {
-    // Stop supervisor state if active, ask renderer to release its column binding,
-    // and stop the Code tab's sandbox if one is still running.
-    const machineEntry = this.supervisors.machines.get(id);
-    if (machineEntry) {
-      void this.bridge.dispose(id).catch(() => {});
-      if (machineEntry.tabId && this.processManager) {
-        void this.processManager.stop(machineEntry.tabId).catch(() => {});
-      }
-      machineEntry.state.dispose();
-      this.supervisors.machines.delete(id);
-    }
-
-    if (this.repo) {
-      const repo = this.repo;
-      // Per-row delete. `ticket_comments` cascades automatically via the
-      // FK; supervisor `tasks.ticket_id` is SET NULL so tasks survive.
-      this.cache.tickets = this.cache.tickets.filter((t) => t.id !== id);
-      this.enqueuePersist(() => repo.deleteTicket(id));
-      this.noteLocalWriteAndBroadcast();
-      return;
-    }
-    const tickets = this.getTickets().filter((t) => t.id !== id);
-    this.setTickets(tickets);
   };
 
   getTicketsByProject = (projectId: ProjectId): Ticket[] => {
@@ -1564,22 +1549,6 @@ export class ProjectManager {
 
   // #region Column movement
 
-  resolveTicket = (ticketId: TicketId, resolution: import('@/shared/types').TicketResolution): void => {
-    const ticket = this.getTicketById(ticketId);
-    if (!ticket) {
-      return;
-    }
-    const patch: Partial<Ticket> = { resolution, archivedAt: undefined };
-    if (ticket.resolvedAt === undefined) {
-      patch.resolvedAt = Date.now();
-    }
-    this.updateTicket(ticketId, patch);
-    const terminalColumnId = this.getTerminalColumnId(ticket.projectId);
-    if (ticket.columnId !== terminalColumnId) {
-      this.moveTicketToColumn(ticketId, terminalColumnId);
-    }
-  };
-
   moveTicketToColumn = (ticketId: TicketId, columnId: ColumnId): void => {
     const ticket = this.getTicketById(ticketId);
     if (!ticket) {
@@ -1593,25 +1562,19 @@ export class ProjectManager {
 
     this.updateTicket(ticketId, { columnId, columnChangedAt: Date.now() });
 
-    // Moving into the terminal column implicitly resolves the ticket as completed
-    // unless it already has an explicit outcome like won't-do/duplicate/cancelled.
+    // Completion is the Done-category workflow state. Keep only its timestamp
+    // as metadata for recency/reporting; there is no second close state.
     const movedTicket = this.getTicketById(ticketId);
-    if (movedTicket && this.isTerminalColumn(ticket.projectId, columnId) && !movedTicket.resolution) {
-      const patch: Partial<Ticket> = { resolution: 'completed', archivedAt: undefined };
-      if (movedTicket.resolvedAt === undefined) {
-        patch.resolvedAt = Date.now();
-      }
-      this.updateTicket(ticketId, patch);
+    if (movedTicket && this.isTerminalColumn(ticket.projectId, columnId) && movedTicket.completedAt === undefined) {
+      this.updateTicket(ticketId, { completedAt: Date.now() });
     }
 
-    // Clear resolution/archive when moving away from terminal column (reopen).
-    // Also clear any deferred-cleanup flag since the ticket is active again.
+    // Moving away from Done reopens the task. Archive is independent and is
+    // changed only through the explicit archive/restore action.
     const ticket2 = this.getTicketById(ticketId);
-    if (ticket2?.resolution && !this.isTerminalColumn(ticket.projectId, columnId)) {
+    if (ticket2?.completedAt !== undefined && !this.isTerminalColumn(ticket.projectId, columnId)) {
       this.updateTicket(ticketId, {
-        resolution: undefined,
-        resolvedAt: undefined,
-        archivedAt: undefined,
+        completedAt: undefined,
         cleanupPending: undefined,
       });
     }

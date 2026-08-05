@@ -1,0 +1,3 @@
+.omni-quick-capture-actions {
+  padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
+}

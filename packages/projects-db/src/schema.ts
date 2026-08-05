@@ -490,4 +490,40 @@ CREATE TABLE team_handbook (
 ALTER TABLE resident_agents ADD COLUMN superuser INTEGER NOT NULL DEFAULT 0;
 `,
   },
+  {
+    version: 19,
+    sql: `
+-- Completion is the ticket's Done-category pipeline state. Retire the
+-- Jira-style resolution field so status and presentation cannot diverge.
+-- Legacy completed tickets move to the project's Done column; the other
+-- retired close outcomes become archived tasks.
+UPDATE tickets
+SET archived_at = COALESCE(archived_at, resolved_at, updated_at),
+    resolved_at = NULL
+WHERE resolution IN ('wont_do', 'duplicate', 'cancelled');
+
+UPDATE tickets
+SET column_id = (
+      SELECT id FROM pipeline_columns
+      WHERE project_id = tickets.project_id AND category = 'done'
+      ORDER BY sort_order DESC, id DESC LIMIT 1
+    ),
+    column_changed_at = COALESCE(resolved_at, updated_at)
+WHERE resolution = 'completed'
+  AND EXISTS (
+    SELECT 1 FROM pipeline_columns
+    WHERE project_id = tickets.project_id AND category = 'done'
+  );
+
+UPDATE tickets
+SET resolved_at = COALESCE(resolved_at, column_changed_at, updated_at)
+WHERE resolution IN ('completed') OR (
+  resolution IS NULL
+  AND column_id IN (SELECT id FROM pipeline_columns WHERE category = 'done')
+);
+
+ALTER TABLE tickets RENAME COLUMN resolved_at TO completed_at;
+ALTER TABLE tickets DROP COLUMN resolution;
+`,
+  },
 ];

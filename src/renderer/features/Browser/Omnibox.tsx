@@ -1,95 +1,12 @@
-import { makeStyles, mergeClasses, shorthands, tokens } from '@fluentui/react-components';
-import {
-  Bookmark16Regular,
-  Globe16Regular,
-  History16Regular,
-  LockClosed16Regular,
-  LockOpen16Regular,
-  Search16Regular,
-} from '@fluentui/react-icons';
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import { Bookmark, Globe, History, Lock, Search, Unlock } from 'lucide-react';
+import { forwardRef, useCallback, useEffect, useId, useImperativeHandle, useRef, useState } from 'react';
 
 import { normalizeAddress, parseOrigin } from '@/lib/url';
+import { Command, CommandItem, CommandList } from '@/renderer/ds/ui/command';
+import { InputGroup, InputGroupAddon, InputGroupInput } from '@/renderer/ds/ui/input-group';
+import { Popover, PopoverAnchor, PopoverContent } from '@/renderer/ds/ui/popover';
 import { browserApi } from '@/renderer/features/Browser/state';
 import type { BrowserSuggestion } from '@/shared/types';
-
-const useStyles = makeStyles({
-  wrap: { position: 'relative', flex: '1 1 0', minWidth: 0 },
-  bar: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '6px',
-    height: '28px',
-    paddingLeft: '8px',
-    paddingRight: '8px',
-    borderRadius: '14px',
-    backgroundColor: tokens.colorNeutralBackground1,
-    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
-    transitionProperty: 'border-color, box-shadow',
-    transitionDuration: tokens.durationFaster,
-    ':focus-within': {
-      ...shorthands.borderColor(tokens.colorBrandStroke1),
-      boxShadow: `0 0 0 2px ${tokens.colorBrandStroke2}`,
-    },
-  },
-  secure: { color: tokens.colorPaletteGreenForeground1 },
-  insecure: { color: tokens.colorNeutralForeground3 },
-  input: {
-    flex: '1 1 0',
-    minWidth: 0,
-    height: '22px',
-    padding: 0,
-    fontSize: tokens.fontSizeBase200,
-    color: tokens.colorNeutralForeground1,
-    backgroundColor: 'transparent',
-    border: 'none',
-    outline: 'none',
-  },
-  popover: {
-    position: 'absolute',
-    top: 'calc(100% + 6px)',
-    left: 0,
-    right: 0,
-    zIndex: 20,
-    maxHeight: '360px',
-    overflowY: 'auto',
-    padding: '4px',
-    backgroundColor: tokens.colorNeutralBackground1,
-    borderRadius: tokens.borderRadiusMedium,
-    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
-    boxShadow: tokens.shadow16,
-  },
-  suggestion: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '10px',
-    paddingLeft: '8px',
-    paddingRight: '8px',
-    paddingTop: '6px',
-    paddingBottom: '6px',
-    borderRadius: tokens.borderRadiusSmall,
-    cursor: 'pointer',
-    color: tokens.colorNeutralForeground1,
-    fontSize: tokens.fontSizeBase200,
-  },
-  suggestionActive: { backgroundColor: tokens.colorSubtleBackgroundHover },
-  suggestionTitle: {
-    flex: '1 1 0',
-    minWidth: 0,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-  },
-  suggestionUrl: {
-    fontSize: tokens.fontSizeBase100,
-    color: tokens.colorNeutralForeground3,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    maxWidth: '40%',
-    flexShrink: 0,
-  },
-});
 
 export type OmniboxHandle = {
   focus: () => void;
@@ -105,7 +22,7 @@ export const Omnibox = forwardRef<
     placeholder?: string;
   }
 >(({ value, onSubmit, onValueChange, placeholder = 'Search or enter URL' }, handleRef) => {
-  const styles = useStyles();
+  const suggestionListId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
   const [draft, setDraft] = useState(value);
   const [open, setOpen] = useState(false);
@@ -217,61 +134,91 @@ export const Omnibox = forwardRef<
   }, []);
 
   const origin = parseOrigin(value);
-  const LockIcon = origin?.secure ? LockClosed16Regular : LockOpen16Regular;
+  const LockIcon = origin?.secure ? Lock : Unlock;
 
   return (
-    <div className={styles.wrap}>
-      <div className={styles.bar}>
-        <LockIcon className={origin?.secure ? styles.secure : styles.insecure} />
-        <input
-          ref={inputRef}
-          type="text"
-          className={styles.input}
-          value={draft}
-          onChange={handleChange}
-          onKeyDown={handleKeyDown}
-          onFocus={handleFocus}
-          onBlur={handleBlur}
-          placeholder={placeholder}
-          spellCheck={false}
-          autoComplete="off"
-          aria-autocomplete="list"
-          aria-expanded={open}
-        />
+    <Popover open={open && suggestions.length > 0} onOpenChange={setOpen}>
+      <div className="relative flex-1 min-w-0">
+        <PopoverAnchor className="block w-full">
+          <InputGroup className="h-7 rounded-full bg-background">
+            <InputGroupAddon className="pl-2.5">
+              <LockIcon className={origin?.secure ? 'text-success' : 'text-muted-foreground'} />
+            </InputGroupAddon>
+            <InputGroupInput
+              ref={inputRef}
+              type="text"
+              className="h-6 text-xs"
+              value={draft}
+              onChange={handleChange}
+              onKeyDown={handleKeyDown}
+              onFocus={handleFocus}
+              onBlur={handleBlur}
+              placeholder={placeholder}
+              spellCheck={false}
+              autoComplete="off"
+              role="combobox"
+              aria-autocomplete="list"
+              aria-expanded={open && suggestions.length > 0}
+              aria-controls={suggestionListId}
+            />
+          </InputGroup>
+        </PopoverAnchor>
+        {open && suggestions.length > 0 && (
+          <PopoverContent
+            align="start"
+            sideOffset={6}
+            className="w-[var(--radix-popover-trigger-width)] p-0"
+            onOpenAutoFocus={(event) => event.preventDefault()}
+            onCloseAutoFocus={(event) => event.preventDefault()}
+          >
+            <Command
+              shouldFilter={false}
+              value={highlight >= 0 ? `${suggestions[highlight]?.kind}:${suggestions[highlight]?.url}` : ''}
+              onValueChange={(nextValue) => {
+                const index = suggestions.findIndex(
+                  (suggestion) => `${suggestion.kind}:${suggestion.url}` === nextValue
+                );
+                setHighlight(index);
+              }}
+            >
+              <CommandList id={suggestionListId} className="max-h-90">
+                {suggestions.map((suggestion, index) => {
+                  const Icon =
+                    suggestion.kind === 'bookmark'
+                      ? Bookmark
+                      : suggestion.kind === 'history'
+                        ? History
+                        : suggestion.kind === 'search'
+                          ? Search
+                          : Globe;
+                  const commandValue = `${suggestion.kind}:${suggestion.url}`;
+                  return (
+                    <CommandItem
+                      key={commandValue}
+                      value={commandValue}
+                      className="gap-2.5 text-xs"
+                      onMouseEnter={() => setHighlight(index)}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onSelect={() => commit(suggestion.url)}
+                    >
+                      <Icon className="shrink-0" />
+                      <span className="flex-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
+                        {suggestion.title ?? suggestion.url}
+                      </span>
+                      {suggestion.kind !== 'search' && (
+                        <span className="max-w-2/5 shrink-0 overflow-hidden text-ellipsis whitespace-nowrap text-xs text-muted-foreground">
+                          {suggestion.url}
+                        </span>
+                      )}
+                    </CommandItem>
+                  );
+                })}
+              </CommandList>
+            </Command>
+          </PopoverContent>
+        )}
       </div>
-      {open && suggestions.length > 0 && (
-        <div className={styles.popover} role="listbox">
-          {suggestions.map((s, i) => {
-            const Icon =
-              s.kind === 'bookmark'
-                ? Bookmark16Regular
-                : s.kind === 'history'
-                  ? History16Regular
-                  : s.kind === 'search'
-                    ? Search16Regular
-                    : Globe16Regular;
-            return (
-              <div
-                key={`${s.kind}-${s.url}`}
-                className={mergeClasses(styles.suggestion, i === highlight && styles.suggestionActive)}
-                role="option"
-                aria-selected={i === highlight}
-                onMouseEnter={() => setHighlight(i)}
-                onMouseDown={(e) => {
-                  // Prevent the input blur from firing before click lands.
-                  e.preventDefault();
-                  commit(s.url);
-                }}
-              >
-                <Icon style={{ flexShrink: 0 }} />
-                <span className={styles.suggestionTitle}>{s.title ?? s.url}</span>
-                {s.kind !== 'search' && <span className={styles.suggestionUrl}>{s.url}</span>}
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
+    </Popover>
   );
 });
 Omnibox.displayName = 'Omnibox';

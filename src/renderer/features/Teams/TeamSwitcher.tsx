@@ -1,16 +1,19 @@
-import { Menu, MenuItem, MenuList, MenuPopover, MenuTrigger } from '@fluentui/react-components';
-import { Checkmark16Regular, People20Regular } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
+import { Check, Users } from 'lucide-react';
 import { memo, useCallback } from 'react';
 
-import { Button } from '@/renderer/ds';
-import { $activeTeamId, $teams, switchTeam } from '@/renderer/features/Teams/state';
-
+import { Button } from '@/renderer/ds/ui/button';
 /**
  * Always-visible active-team indicator + quick switcher. Renders only when the
  * user is in more than one team (or any shared team) — solo users on a single
  * personal team see nothing, keeping the personal-first experience clean.
- */
+ */ import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/renderer/ds/ui/dropdown-menu';
+import { $activeTeamId, $teams, switchTeam } from '@/renderer/features/Teams/state';
 export const TeamSwitcher = memo(function TeamSwitcher() {
   const teams = useStore($teams);
   const activeTeamId = useStore($activeTeamId);
@@ -25,25 +28,23 @@ export const TeamSwitcher = memo(function TeamSwitcher() {
   const active = teams.find((t) => t.id === activeTeamId);
 
   return (
-    <Menu>
-      <MenuTrigger disableButtonEnhancement>
-        <Button size="sm" variant="ghost" leftIcon={<People20Regular />} aria-label="Switch team">
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button size="sm" variant="ghost" aria-label="Switch team">
+          <Users />
           {active?.label ?? 'Team'}
         </Button>
-      </MenuTrigger>
-      <MenuPopover>
-        <MenuList>
+      </DropdownMenuTrigger>
+      <>
+        <DropdownMenuContent>
           {teams.map((t) => (
-            <MenuItem
-              key={t.id}
-              icon={t.id === activeTeamId ? <Checkmark16Regular /> : <span style={{ width: 16 }} />}
-              onClick={handleSwitch(t.id)}
-            >
+            <DropdownMenuItem key={t.id} onClick={handleSwitch(t.id)}>
+              {t.id === activeTeamId ? <Check /> : <span className="w-4" />}
               {t.label}
-            </MenuItem>
+            </DropdownMenuItem>
           ))}
-        </MenuList>
-      </MenuPopover>
-    </Menu>
+        </DropdownMenuContent>
+      </>
+    </DropdownMenu>
   );
 });

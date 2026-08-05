@@ -14,50 +14,24 @@
  * own error surface (CodeErrorView, ChatShell `phase: 'error'`); the
  * banner is silent there.
  */
-import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
-import { Warning20Filled } from '@fluentui/react-icons';
+import './Banner.css';
+
+import { TriangleAlert } from 'lucide-react';
 import { memo, useCallback } from 'react';
 
 import { classifyAgentError } from '@/lib/provider-config';
-import { Button, Caption1 } from '@/renderer/ds';
+import { Alert, AlertDescription, AlertTitle } from '@/renderer/ds/ui/alert';
+import { Button } from '@/renderer/ds/ui/button';
 import { openSettingsTab } from '@/renderer/features/SettingsModal/settings-nav';
 import type { AgentProcessStatus, WithTimestamp } from '@/shared/types';
 
-const useStyles = makeStyles({
-  root: {
-    // Float over the session content (anchored to the parent `fullSizeRelative`
-    // container) instead of taking a row in normal flow — a transient warning
-    // shouldn't reflow / shrink the chat or code surface beneath it.
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    zIndex: 100,
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
-    borderRadius: tokens.borderRadiusMedium,
-    backgroundColor: tokens.colorPaletteYellowBackground1,
-    color: tokens.colorPaletteYellowForeground1,
-    ...shorthands.border('1px', 'solid', tokens.colorPaletteYellowBorder1),
-    margin: tokens.spacingVerticalS,
-    boxShadow: tokens.shadow8,
-  },
-  capacity: {
-    backgroundColor: tokens.colorPaletteRedBackground1,
-    color: tokens.colorPaletteRedForeground1,
-    ...shorthands.border('1px', 'solid', tokens.colorPaletteRedBorder1),
-  },
-  body: { flex: '1 1 0', minWidth: 0 },
-});
+const bannerClassName = 'absolute inset-x-0 top-0 z-100 m-2 border-warning/50 bg-warning/10 text-warning shadow-md';
 
 export type SessionStatusBannerProps = {
   status: WithTimestamp<AgentProcessStatus> | undefined;
 };
 
 export const SessionStatusBanner = memo(({ status }: SessionStatusBannerProps) => {
-  const styles = useStyles();
   const handleOpenAiSettings = useCallback(() => openSettingsTab('AI'), []);
   if (!status) {
     return null;
@@ -69,13 +43,13 @@ export const SessionStatusBanner = memo(({ status }: SessionStatusBannerProps) =
   // cloud rebuilds the sandbox; the `hostOffline` flag clears on the next poll).
   if (status.type === 'running' && status.data.hostOffline) {
     return (
-      <div className={styles.root} role="status">
-        <Warning20Filled />
-        <div className={styles.body}>
-          <strong>{status.data.hostOfflineMachineLabel ?? 'Your computer'} is offline.</strong>{' '}
-          <Caption1 as="span">The agent can&apos;t run tools until it reconnects — it resumes automatically.</Caption1>
-        </div>
-      </div>
+      <Alert className={bannerClassName} role="status">
+        <TriangleAlert />
+        <AlertTitle>{status.data.hostOfflineMachineLabel ?? 'Your computer'} is offline.</AlertTitle>
+        <AlertDescription>
+          The agent can&apos;t run tools until it reconnects — it resumes automatically.
+        </AlertDescription>
+      </Alert>
     );
   }
   if (status.type !== 'error') {
@@ -84,42 +58,36 @@ export const SessionStatusBanner = memo(({ status }: SessionStatusBannerProps) =
   const { kind, machineLabel, message, maxSessions, currentSessions } = status.error;
   if (kind === 'host-offline') {
     return (
-      <div className={styles.root} role="status">
-        <Warning20Filled />
-        <div className={styles.body}>
-          <strong>{machineLabel ?? 'Your computer'} is offline.</strong>{' '}
-          <Caption1 as="span">The session will resume when it reconnects.</Caption1>
-        </div>
-      </div>
+      <Alert className={bannerClassName} role="status">
+        <TriangleAlert />
+        <AlertTitle>{machineLabel ?? 'Your computer'} is offline.</AlertTitle>
+        <AlertDescription>The session will resume when it reconnects.</AlertDescription>
+      </Alert>
     );
   }
   if (kind === 'machine-at-capacity') {
     return (
-      <div className={`${styles.root} ${styles.capacity}`} role="status">
-        <Warning20Filled />
-        <div className={styles.body}>
-          <strong>{machineLabel ?? 'Your computer'} is at capacity</strong>{' '}
-          <Caption1 as="span">
-            ({currentSessions ?? '?'}/{maxSessions ?? '?'} sessions). Stop one or switch this session to cloud.
-          </Caption1>
-        </div>
-      </div>
+      <Alert variant="destructive" className="absolute inset-x-0 top-0 z-100 m-2" role="status">
+        <TriangleAlert />
+        <AlertTitle>{machineLabel ?? 'Your computer'} is at capacity</AlertTitle>
+        <AlertDescription>
+          ({currentSessions ?? '?'}/{maxSessions ?? '?'} sessions). Stop one or switch this session to cloud.
+        </AlertDescription>
+      </Alert>
     );
   }
   // Auth failures get a fix-it path: the user's key/subscription is the
   // problem, and the AI tab's connection cards can diagnose and repair it.
   if (message && classifyAgentError(message) === 'auth') {
     return (
-      <div className={`${styles.root} ${styles.capacity}`} role="status">
-        <Warning20Filled />
-        <div className={styles.body}>
-          <strong>Your AI provider rejected the request.</strong>{' '}
-          <Caption1 as="span">The key may have expired or been revoked.</Caption1>
-        </div>
-        <Button size="sm" variant="ghost" onClick={handleOpenAiSettings}>
+      <Alert variant="destructive" className="omni-status-banner-grid absolute inset-x-0 top-0 z-100 m-2" role="status">
+        <TriangleAlert />
+        <AlertTitle>Your AI provider rejected the request.</AlertTitle>
+        <AlertDescription>The key may have expired or been revoked.</AlertDescription>
+        <Button className="col-start-3 row-span-2 row-start-1" size="sm" variant="ghost" onClick={handleOpenAiSettings}>
           Check AI settings
         </Button>
-      </div>
+      </Alert>
     );
   }
   // No `kind` set — host-level error UI owns the surface, nothing here.

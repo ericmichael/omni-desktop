@@ -1,13 +1,5 @@
-import { Field, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
-import {
-  Add20Regular,
-  Delete20Regular,
-  Edit20Regular,
-  MoreHorizontal20Regular,
-  NumberSymbol20Regular,
-  PeopleTeamRegular,
-} from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
+import { Edit, Ellipsis, Hash, Plus, Trash2, UsersRound } from 'lucide-react';
 import type { ChangeEvent, KeyboardEvent } from 'react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 
@@ -18,36 +10,44 @@ import {
   TEAM_CHANNEL,
   USER_PARTICIPANT,
 } from '@/lib/resident-agent';
-import { useNavTreeStyles } from '@/renderer/common/nav-tree';
 import { NavSection } from '@/renderer/common/NavSection';
+import { SidebarRow, SidebarRowActions } from '@/renderer/common/SidebarRow';
+import { cn } from '@/renderer/ds/cn';
+import { Alert, AlertDescription } from '@/renderer/ds/ui/alert';
 import {
-  AnimatedDialog,
-  Button,
-  Caption1,
-  ConfirmDialog,
-  CounterBadge,
-  DialogBody,
-  DialogContent,
-  DialogHeader,
-  IconButton,
-  Input,
-  Menu,
-  MenuDivider,
-  MenuItem,
-  MenuList,
-  MenuPopover,
-  MenuTrigger,
-  MessageBar,
-  MessageBarBody,
-  Tree,
-  TreeItem,
-  TreeItemLayout,
-} from '@/renderer/ds';
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/renderer/ds/ui/alert-dialog';
+import { Button } from '@/renderer/ds/ui/button';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/renderer/ds/ui/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/renderer/ds/ui/dropdown-menu';
+import { Field, FieldDescription, FieldLabel } from '@/renderer/ds/ui/field';
+import { Input } from '@/renderer/ds/ui/input';
+import {
+  SidebarGroupAction,
+  SidebarMenu,
+  SidebarMenuAction,
+  SidebarMenuBadge,
+  SidebarMenuButton,
+} from '@/renderer/ds/ui/sidebar';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/renderer/ds/ui/tooltip';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { ResidentChannelDef, ResidentChannelMessage } from '@/shared/types';
 
 import type { AgentPresence } from './agent-avatar';
-import { AgentAvatar, presenceStatus } from './agent-avatar';
+import { AgentAvatar, AgentPresenceBadge, presenceStatus } from './agent-avatar';
 import {
   $activityUnread,
   $residentStatus,
@@ -64,58 +64,6 @@ import {
  * mobile list render the same components.
  */
 
-const useStyles = makeStyles({
-  rowActions: {
-    display: 'flex',
-    alignItems: 'center',
-  },
-  /* Unread rows follow the mainstream convention: weight, not just a badge. */
-  unreadLabel: {
-    fontWeight: tokens.fontWeightSemibold,
-  },
-  dangerMenuItem: {
-    color: tokens.colorPaletteRedForeground1,
-  },
-  newChannelWrap: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '2px',
-    paddingBottom: '8px',
-  },
-  newChannelRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-    paddingLeft: tokens.spacingHorizontalL,
-    paddingRight: tokens.spacingHorizontalS,
-    paddingTop: '4px',
-  },
-  newChannelInput: {
-    flex: '1 1 0',
-  },
-  newChannelHint: {
-    paddingLeft: tokens.spacingHorizontalL,
-    paddingRight: tokens.spacingHorizontalL,
-  },
-  newChannelError: {
-    paddingLeft: tokens.spacingHorizontalL,
-    paddingRight: tokens.spacingHorizontalL,
-    color: tokens.colorPaletteRedForeground1,
-  },
-  dialogForm: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalM,
-  },
-  dialogButtons: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-  },
-});
-
-const stopPropagation = (e: React.SyntheticEvent) => e.stopPropagation();
-
 // ---------------------------------------------------------------------------
 // Channel rows
 // ---------------------------------------------------------------------------
@@ -131,73 +79,54 @@ const ChannelRow = memo(function ChannelRow({
 }: {
   channelId: string;
   selected: boolean;
-  /** Built-ins (#team) take no edit/delete menu. */
-  manageable: boolean;
+  /** Built-ins (#team) take no edit/delete menu. */ manageable: boolean;
   unread: number;
   onSelect: (id: string) => void;
   onRequestEdit: (id: string) => void;
   onRequestDelete: (id: string) => void;
 }): React.JSX.Element {
-  const styles = useStyles();
-  const nav = useNavTreeStyles();
   const [menuOpen, setMenuOpen] = useState(false);
   const handleClick = useCallback(() => onSelect(channelId), [onSelect, channelId]);
-  const handleMenuOpenChange = useCallback((_e: unknown, data: { open: boolean }) => setMenuOpen(data.open), []);
+  const handleMenuOpenChange = useCallback((open: boolean) => setMenuOpen(open), []);
   const handleEdit = useCallback(() => onRequestEdit(channelId), [onRequestEdit, channelId]);
   const handleDelete = useCallback(() => onRequestDelete(channelId), [onRequestDelete, channelId]);
   return (
-    <TreeItem
-      itemType="leaf"
-      value={`channel:${channelId}`}
-      className={mergeClasses(nav.navItem, selected && nav.navItemSelected)}
-      onClick={handleClick}
-    >
-      <TreeItemLayout
-        iconBefore={<NumberSymbol20Regular />}
-        aside={!selected && unread > 0 ? <CounterBadge count={unread} size="small" color="brand" /> : undefined}
-        {...(manageable
-          ? {
-              actions: {
-                // Fluent shows the actions slot on hover/focus; force it
-                // while the menu is open so it doesn't vanish under the
-                // popover (the Work sidebar's ProjectRow idiom).
-                visible: menuOpen || undefined,
-                children: (
-                  <span
-                    role="presentation"
-                    className={styles.rowActions}
-                    onClick={stopPropagation}
-                    onMouseDown={stopPropagation}
-                  >
-                    <Menu
-                      open={menuOpen}
-                      onOpenChange={handleMenuOpenChange}
-                      positioning={{ position: 'below', align: 'end' }}
-                    >
-                      <MenuTrigger disableButtonEnhancement>
-                        <IconButton aria-label={`#${channelId} actions`} icon={<MoreHorizontal20Regular />} size="sm" />
-                      </MenuTrigger>
-                      <MenuPopover>
-                        <MenuList>
-                          <MenuItem icon={<Edit20Regular />} onClick={handleEdit}>
-                            Edit…
-                          </MenuItem>
-                          <MenuDivider />
-                          <MenuItem icon={<Delete20Regular />} className={styles.dangerMenuItem} onClick={handleDelete}>
-                            Delete…
-                          </MenuItem>
-                        </MenuList>
-                      </MenuPopover>
-                    </Menu>
-                  </span>
-                ),
-              },
-            }
-          : {})}
-      >
-        <span className={unread > 0 ? styles.unreadLabel : undefined}>{channelId}</span>
-      </TreeItemLayout>
-    </TreeItem>
+    <SidebarRow>
+      <SidebarMenuButton type="button" isActive={selected} onClick={handleClick}>
+        <Hash />
+        <span className={cn('min-w-0 flex-1 truncate', unread > 0 && 'font-semibold')}>{channelId}</span>
+      </SidebarMenuButton>
+      {!selected && unread > 0 && <SidebarMenuBadge className="h-4 min-w-4 text-xs">{unread}</SidebarMenuBadge>}
+      {manageable && (
+        <SidebarRowActions open={menuOpen}>
+          <DropdownMenu open={menuOpen} onOpenChange={handleMenuOpenChange}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <DropdownMenuTrigger asChild>
+                  <SidebarMenuAction aria-label={`#${channelId} actions`}>
+                    <Ellipsis />
+                  </SidebarMenuAction>
+                </DropdownMenuTrigger>
+              </TooltipTrigger>
+              <TooltipContent side="top" sideOffset={6}>
+                Channel actions
+              </TooltipContent>
+            </Tooltip>
+            <DropdownMenuContent>
+              <DropdownMenuItem onClick={handleEdit}>
+                <Edit />
+                Edit…
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem className="text-destructive" onClick={handleDelete}>
+                <Trash2 />
+                Delete…
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </SidebarRowActions>
+      )}
+    </SidebarRow>
   );
 });
 
@@ -217,7 +146,6 @@ function NewChannelRow({
   onDone: () => void;
   onOpen: (channelId: string) => void;
 }): React.JSX.Element {
-  const styles = useStyles();
   const [name, setName] = useState('');
   const [error, setError] = useState<string | null>(null);
 
@@ -274,10 +202,10 @@ function NewChannelRow({
         : null;
 
   return (
-    <div className={styles.newChannelWrap}>
-      <div className={styles.newChannelRow}>
+    <div className="flex flex-col gap-0.5 pb-2">
+      <div className="flex items-center gap-2 px-2 pt-1 pl-5">
         <Input
-          className={styles.newChannelInput}
+          className="flex-1"
           value={name}
           placeholder="New channel…"
           autoFocus
@@ -285,17 +213,21 @@ function NewChannelRow({
           onChange={handleChange}
           onKeyDown={handleKeyDown}
         />
-        <IconButton
+
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
           aria-label={exists ? `Open #${slug}` : 'Create channel'}
-          size="sm"
-          icon={<Add20Regular />}
           onClick={create}
-        />
+        >
+          <Plus />
+        </Button>
       </div>
       {error ? (
-        <Caption1 className={styles.newChannelError}>{error}</Caption1>
+        <span className="px-5 text-xs text-destructive">{error}</span>
       ) : (
-        hint && <Caption1 className={styles.newChannelHint}>{hint}</Caption1>
+        hint && <span className="px-5 text-xs text-muted-foreground">{hint}</span>
       )}
     </div>
   );
@@ -310,7 +242,6 @@ function EditChannelDialog({
   channel: ResidentChannelDef | null;
   onClose: () => void;
 }): React.JSX.Element {
-  const styles = useStyles();
   const [description, setDescription] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -348,17 +279,20 @@ function EditChannelDialog({
   );
 
   return (
-    <AnimatedDialog open={channel !== null} onClose={onClose}>
+    <Dialog open={channel !== null} onOpenChange={(open) => !open && onClose()}>
       <DialogContent>
-        <DialogHeader>Edit #{channel?.id}</DialogHeader>
-        <DialogBody>
-          <div className={styles.dialogForm}>
+        <DialogHeader>
+          <DialogTitle>Edit #{channel?.id}</DialogTitle>
+        </DialogHeader>
+        <div className="min-h-0 overflow-y-auto">
+          <div className="flex flex-col gap-4">
             {error && (
-              <MessageBar intent="error">
-                <MessageBarBody>{error}</MessageBarBody>
-              </MessageBar>
+              <Alert variant="destructive">
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
             )}
-            <Field label="Description" hint="One line — what this channel is for. Shown in the channel header.">
+            <Field>
+              <FieldLabel>Description</FieldLabel>
               <Input
                 value={description}
                 placeholder="Deploys, incidents, and release chatter"
@@ -366,25 +300,25 @@ function EditChannelDialog({
                 onChange={handleChange}
                 onKeyDown={handleKeyDown}
               />
+              <FieldDescription>One line — what this channel is for. Shown in the channel header.</FieldDescription>
             </Field>
-            <div className={styles.dialogButtons}>
-              <Button variant="primary" onClick={save} isDisabled={saving}>
+            <div className="flex items-center gap-2">
+              <Button variant="default" onClick={save} disabled={saving}>
                 {saving ? 'Saving…' : 'Save'}
               </Button>
-              <Button variant="ghost" onClick={onClose} isDisabled={saving}>
+              <Button variant="ghost" onClick={onClose} disabled={saving}>
                 Cancel
               </Button>
             </div>
           </div>
-        </DialogBody>
+        </div>
       </DialogContent>
-    </AnimatedDialog>
+    </Dialog>
   );
 }
 
 /** The Channels nav section: header + "+", rows, inline create, dialogs. */
 export function ChannelsSection({ onNavigate }: { onNavigate?: () => void }): React.JSX.Element {
-  const nav = useNavTreeStyles();
   const storeData = useStore(persistedStoreApi.$atom);
   const view = useStore($residentsView);
   const unreadByChannel = useStore($residentUnreadByChannel);
@@ -454,29 +388,32 @@ export function ChannelsSection({ onNavigate }: { onNavigate?: () => void }): Re
         id="channels"
         label="Channels"
         collapsedBadge={unreadTotal}
-        actions={<IconButton aria-label="New channel" icon={<Add20Regular />} size="sm" onClick={startAdd} />}
+        actions={
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <SidebarGroupAction aria-label="New channel" onClick={startAdd}>
+                <Plus />
+              </SidebarGroupAction>
+            </TooltipTrigger>
+            <TooltipContent side="top" sideOffset={6}>
+              New channel
+            </TooltipContent>
+          </Tooltip>
+        }
       >
-        <Tree aria-label="Channels" className={nav.tree}>
+        <SidebarMenu aria-label="Channels">
           {/* The merged feed heads the things it merges (the Slack
-            pseudo-channel idiom) — also the only entry to agent↔agent
-            threads, via each message's conversation tag. */}
-          <TreeItem
-            itemType="leaf"
-            value="activity"
-            className={mergeClasses(nav.navItem, activityOpen && nav.navItemSelected)}
-            onClick={handleActivity}
-          >
-            <TreeItemLayout
-              iconBefore={<PeopleTeamRegular />}
-              aside={
-                !activityOpen && activityUnread > 0 ? (
-                  <CounterBadge count={activityUnread} size="small" color="brand" />
-                ) : undefined
-              }
-            >
-              Activity
-            </TreeItemLayout>
-          </TreeItem>
+                pseudo-channel idiom) — also the only entry to agent↔agent
+                threads, via each message's conversation tag. */}
+          <SidebarRow>
+            <SidebarMenuButton type="button" isActive={activityOpen} onClick={handleActivity}>
+              <UsersRound />
+              <span className="min-w-0 flex-1 truncate">Activity</span>
+            </SidebarMenuButton>
+            {!activityOpen && activityUnread > 0 && (
+              <SidebarMenuBadge className="h-4 min-w-4 text-xs">{activityUnread}</SidebarMenuBadge>
+            )}
+          </SidebarRow>
           {channelIds.map((channelId) => (
             <ChannelRow
               key={channelId}
@@ -489,18 +426,26 @@ export function ChannelsSection({ onNavigate }: { onNavigate?: () => void }): Re
               onRequestDelete={handleRequestDelete}
             />
           ))}
-        </Tree>
+        </SidebarMenu>
         {adding && <NewChannelRow existingIds={channelIds} onDone={stopAdd} onOpen={handleSelect} />}
       </NavSection>
-      <ConfirmDialog
-        open={pendingDelete !== null}
-        onClose={closeDelete}
-        onConfirm={confirmDelete}
-        title={`Delete #${pendingDelete ?? ''}?`}
-        description="The channel and its message history are removed. This action cannot be undone."
-        confirmLabel="Delete"
-        destructive
-      />
+      <AlertDialog open={pendingDelete !== null} onOpenChange={(open) => !open && closeDelete()}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{`Delete #${pendingDelete ?? ''}?`}</AlertDialogTitle>
+            <AlertDialogDescription>
+              The channel and its message history are removed. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={confirmDelete}>
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       <EditChannelDialog channel={editing} onClose={closeEdit} />
     </>
   );
@@ -529,25 +474,22 @@ const DmNavRow = memo(function DmNavRow({
   unread: number;
   onSelect: (id: string) => void;
 }): React.JSX.Element {
-  const styles = useStyles();
-  const nav = useNavTreeStyles();
   const handleClick = useCallback(() => onSelect(channelId), [onSelect, channelId]);
   return (
-    <TreeItem
-      itemType="leaf"
-      value={channelId}
-      className={mergeClasses(nav.navItem, selected && nav.navItemSelected)}
-      onClick={handleClick}
-    >
-      <TreeItemLayout
-        iconBefore={
-          <AgentAvatar name={avatar.name} colorId={avatar.colorId} size={20} {...(presence ? { presence } : {})} />
-        }
-        aside={!selected && unread > 0 ? <CounterBadge count={unread} size="small" color="brand" /> : undefined}
-      >
-        <span className={unread > 0 ? styles.unreadLabel : undefined}>{title}</span>
-      </TreeItemLayout>
-    </TreeItem>
+    <SidebarRow>
+      <SidebarMenuButton type="button" isActive={selected} onClick={handleClick}>
+        <span className="shrink-0">
+          <AgentAvatar name={avatar.name} colorId={avatar.colorId} size={20} />
+        </span>
+        <span className={cn('min-w-0 flex-1 truncate', unread > 0 && 'font-semibold')}>{title}</span>
+      </SidebarMenuButton>
+      {(!selected && unread > 0) || presence ? (
+        <SidebarMenuBadge className="gap-1 px-0">
+          {presence ? <AgentPresenceBadge presence={presence} /> : null}
+          {!selected && unread > 0 ? <span aria-label={`${unread} unread`}>{unread}</span> : null}
+        </SidebarMenuBadge>
+      ) : null}
+    </SidebarRow>
   );
 });
 
@@ -559,7 +501,6 @@ const DmNavRow = memo(function DmNavRow({
  * agent's Conversations tab.
  */
 export function DmsSection({ onNavigate }: { onNavigate?: () => void }): React.JSX.Element | null {
-  const nav = useNavTreeStyles();
   const storeData = useStore(persistedStoreApi.$atom);
   const statuses = useStore($residentStatus);
   const view = useStore($residentsView);
@@ -606,7 +547,7 @@ export function DmsSection({ onNavigate }: { onNavigate?: () => void }): React.J
 
   return (
     <NavSection id="dms" label="Direct messages" collapsedBadge={unreadTotal}>
-      <Tree aria-label="Direct messages" className={nav.tree}>
+      <SidebarMenu aria-label="Direct messages">
         {rows.map((channelId) => {
           const peerId = dmParticipants(channelId)?.find((p) => p !== USER_PARTICIPANT);
           const peer = peerId ? roster.find((a) => a.id === peerId) : undefined;
@@ -625,7 +566,7 @@ export function DmsSection({ onNavigate }: { onNavigate?: () => void }): React.J
             />
           );
         })}
-      </Tree>
+      </SidebarMenu>
     </NavSection>
   );
 }

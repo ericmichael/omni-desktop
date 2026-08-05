@@ -1,5 +1,18 @@
 import React, { useCallback, useEffect, useState } from 'react';
 
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/renderer/ds/ui/alert-dialog';
+import { Button } from '@/renderer/ds/ui/button';
+import { Card } from '@/renderer/ds/ui/card';
+
 // Server payload from omni-code's ``workers.list`` / ``ui.workers.update``.
 // Matches ``worker_state_dict`` in ``tools/worker_tools.py``.
 export type WorkerSummary = {
@@ -62,9 +75,9 @@ function dotClass(worker: WorkerSummary): string {
     return 'bg-primary animate-pulse';
   }
   if (worker.status === 'completed') {
-    return 'bg-successGreen';
+    return 'bg-success';
   }
-  return 'bg-errorRed';
+  return 'bg-destructive';
 }
 
 type RowProps = {
@@ -84,36 +97,40 @@ function WorkerRow({ worker, nowMs, isKilling, onKill, onDismiss }: RowProps) {
         className={['inline-block w-1.5 h-1.5 rounded-full flex-shrink-0', dotClass(worker)].join(' ')}
         aria-hidden
       />
-      <span className="text-textSubtle font-mono">{worker.worker_id}</span>
+      <span className="text-muted-foreground font-mono">{worker.worker_id}</span>
       <span
-        className={['min-w-0 truncate', worker.status === 'running' ? 'text-textPrimary' : 'text-textSubtle'].join(' ')}
+        className={['min-w-0 truncate', worker.status === 'running' ? 'text-foreground' : 'text-muted-foreground'].join(
+          ' '
+        )}
         title={worker.task}
       >
         {shortTask(worker.task)}
       </span>
-      <span className="ml-auto text-textSubtle whitespace-nowrap">{tail}</span>
+      <span className="ml-auto text-muted-foreground whitespace-nowrap">{tail}</span>
       {onKill && worker.status === 'running' ? (
-        <button
-          type="button"
+        <Button
+          variant="ghost"
+          size="icon-xs"
           disabled={isKilling}
           onClick={onKill.bind(null, worker.worker_id)}
-          className="text-textSubtle hover:text-errorRed transition-colors px-1.5 py-0.5 rounded hover:bg-bgCardAlt disabled:opacity-50 disabled:cursor-not-allowed"
+          className="text-muted-foreground hover:text-destructive"
           title={`Stop worker ${worker.worker_id}`}
           aria-label={`Stop worker ${worker.worker_id}`}
         >
           {isKilling ? '…' : '✕'}
-        </button>
+        </Button>
       ) : null}
       {onDismiss && worker.status !== 'running' ? (
-        <button
-          type="button"
+        <Button
+          variant="ghost"
+          size="xs"
           onClick={onDismiss.bind(null, worker.worker_id)}
-          className="text-textSubtle hover:text-textPrimary transition-colors px-1.5 py-0.5 rounded hover:bg-bgCardAlt"
+          className="text-muted-foreground"
           title={`Dismiss worker ${worker.worker_id}`}
           aria-label={`Dismiss worker ${worker.worker_id}`}
         >
           dismiss
-        </button>
+        </Button>
       ) : null}
     </li>
   );
@@ -126,7 +143,6 @@ type Props = {
 };
 
 // Docked workers panel. Mirrors BashJobs structurally so the two stack
-// as a single visual unit. Renders nothing when there are no workers.
 export function WorkersPanel({ workers, onKill, onDismiss }: Props) {
   const [, setNowTick] = useState(0);
   const anyRunning = workers.some((w) => w.status === 'running');
@@ -139,39 +155,35 @@ export function WorkersPanel({ workers, onKill, onDismiss }: Props) {
   }, [anyRunning]);
 
   const [killing, setKilling] = useState<Set<string>>(new Set());
+  const [pendingKillWorkerId, setPendingKillWorkerId] = useState<string | null>(null);
   const [killError, setKillError] = useState<string | null>(null);
 
-  const handleKill = useCallback(
-    async (worker_id: string) => {
-      if (!onKill) {
-        return;
+  const confirmKill = useCallback(async () => {
+    const worker_id = pendingKillWorkerId;
+    if (!worker_id || !onKill) {
+      return;
+    }
+    setKillError(null);
+    setKilling((prev) => {
+      const next = new Set(prev);
+      next.add(worker_id);
+      return next;
+    });
+    try {
+      const res = await onKill(worker_id);
+      if (!res.ok) {
+        setKillError(`Failed to stop ${worker_id}: ${res.error ?? 'unknown error'}`);
       }
-      if (!window.confirm(`Stop worker ${worker_id}?`)) {
-        return;
-      }
-      setKillError(null);
+    } catch (e) {
+      setKillError(`Failed to stop ${worker_id}: ${(e as Error).message ?? String(e)}`);
+    } finally {
       setKilling((prev) => {
         const next = new Set(prev);
-        next.add(worker_id);
+        next.delete(worker_id);
         return next;
       });
-      try {
-        const res = await onKill(worker_id);
-        if (!res.ok) {
-          setKillError(`Failed to stop ${worker_id}: ${res.error ?? 'unknown error'}`);
-        }
-      } catch (e) {
-        setKillError(`Failed to stop ${worker_id}: ${(e as Error).message ?? String(e)}`);
-      } finally {
-        setKilling((prev) => {
-          const next = new Set(prev);
-          next.delete(worker_id);
-          return next;
-        });
-      }
-    },
-    [onKill]
-  );
+    }
+  }, [onKill, pendingKillWorkerId]);
 
   if (!workers || workers.length === 0) {
     return null;
@@ -189,27 +201,27 @@ export function WorkersPanel({ workers, onKill, onDismiss }: Props) {
 
   return (
     <div className="px-3 pt-2">
-      <div className="rounded-md border border-bgCardAlt bg-bgCardAlt/60 p-2.5">
-        <div className="flex items-center gap-2 text-xs text-textSubtle">
-          <span className="font-medium text-textPrimary">Workers</span>
+      <Card className="gap-0 rounded-md border-accent bg-accent/60 p-2.5 shadow-none">
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <span className="font-medium text-foreground">Workers</span>
           <span aria-hidden>·</span>
           <span>
-            <span className="text-brand">{running.length}</span> running
+            <span className="text-primary">{running.length}</span> running
           </span>
           <span aria-hidden>·</span>
           <span>
-            <span className="text-successGreen">{succeeded}</span> done
+            <span className="text-success">{succeeded}</span> done
           </span>
           {failed > 0 ? (
             <>
               <span aria-hidden>·</span>
               <span>
-                <span className="text-errorRed">{failed}</span> failed
+                <span className="text-destructive">{failed}</span> failed
               </span>
             </>
           ) : null}
         </div>
-        {killError ? <div className="mt-1 text-[11px] text-errorRed">{killError}</div> : null}
+        {killError ? <div className="mt-1 text-xs text-destructive">{killError}</div> : null}
         <ul className="mt-1.5 space-y-1">
           {visible.map((w) => (
             <WorkerRow
@@ -217,13 +229,29 @@ export function WorkersPanel({ workers, onKill, onDismiss }: Props) {
               worker={w}
               nowMs={nowMs}
               isKilling={killing.has(w.worker_id)}
-              onKill={onKill ? handleKill : undefined}
+              onKill={onKill ? setPendingKillWorkerId : undefined}
               onDismiss={onDismiss}
             />
           ))}
         </ul>
-        {overflow > 0 ? <div className="mt-1 text-[11px] text-textSubtle">… +{overflow} more</div> : null}
-      </div>
+        {overflow > 0 ? <div className="mt-1 text-xs text-muted-foreground">… +{overflow} more</div> : null}
+      </Card>
+      <AlertDialog open={pendingKillWorkerId !== null} onOpenChange={(open) => !open && setPendingKillWorkerId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Stop worker?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Stop worker {pendingKillWorkerId}? Any in-progress work from this worker will stop.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={() => void confirmKill()}>
+              Stop worker
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

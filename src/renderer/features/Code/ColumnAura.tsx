@@ -16,7 +16,8 @@
  * on every activity tick. Render inside a positioned, rounded container —
  * the bloom rides `borderRadius: inherit`.
  */
-import { makeStyles, mergeClasses } from '@fluentui/react-components';
+import './CodeVisualEffects.css';
+
 import { useStore } from '@nanostores/react';
 
 import { $columnActivity } from '@/renderer/services/column-activity';
@@ -29,48 +30,7 @@ import { VoiceGlow } from './VoiceGlow';
 /** Pre-chat sandbox lifecycle states that should read as "powering on". */
 const BOOT_PHASES: ReadonlySet<AutoLaunchPhase> = new Set(['checking', 'installing', 'configChecking', 'starting']);
 
-const useStyles = makeStyles({
-  base: {
-    position: 'absolute',
-    top: 0,
-    right: 0,
-    bottom: 0,
-    left: 0,
-    borderRadius: 'inherit',
-    pointerEvents: 'none',
-    zIndex: 5,
-  },
-  working: {
-    boxShadow: 'inset 0 0 16px 2px color-mix(in srgb, #5ac8fa 28%, transparent)',
-    animationName: {
-      '0%': { opacity: 0.45 },
-      '50%': { opacity: 1 },
-      '100%': { opacity: 0.45 },
-    },
-    animationDuration: '3s',
-    animationTimingFunction: 'ease-in-out',
-    animationIterationCount: 'infinite',
-    '@media (prefers-reduced-motion: reduce)': { animationName: 'none', opacity: 0.7 },
-  },
-  attention: {
-    boxShadow: 'inset 0 0 16px 2px color-mix(in srgb, #ffd60a 32%, transparent)',
-  },
-  booting: {
-    boxShadow: 'inset 0 0 14px 2px color-mix(in srgb, #5ac8fa 16%, transparent)',
-    animationName: {
-      '0%': { opacity: 0.3 },
-      '50%': { opacity: 0.8 },
-      '100%': { opacity: 0.3 },
-    },
-    animationDuration: '4.5s',
-    animationTimingFunction: 'ease-in-out',
-    animationIterationCount: 'infinite',
-    '@media (prefers-reduced-motion: reduce)': { animationName: 'none', opacity: 0.5 },
-  },
-});
-
 export function ColumnAura({ tabId }: { tabId: string }) {
-  const styles = useStyles();
   const recordingScope = useStore($recordingScope);
   const activity = useStore($columnActivity, { keys: [tabId] })[tabId];
   const bootPhase = useStore($codeTabPhases, { keys: [tabId] })[tabId];
@@ -79,13 +39,13 @@ export function ColumnAura({ tabId }: { tabId: string }) {
     return <VoiceGlow />;
   }
   if (activity?.pendingApproval) {
-    return <div className={mergeClasses(styles.base, styles.attention)} aria-hidden="true" />;
+    return <div className="omni-column-aura omni-column-aura-attention" aria-hidden="true" />;
   }
   if (activity?.thinking) {
-    return <div className={mergeClasses(styles.base, styles.working)} aria-hidden="true" />;
+    return <div className="omni-column-aura omni-column-aura-working" aria-hidden="true" />;
   }
   if (bootPhase && BOOT_PHASES.has(bootPhase)) {
-    return <div className={mergeClasses(styles.base, styles.booting)} aria-hidden="true" />;
+    return <div className="omni-column-aura omni-column-aura-booting" aria-hidden="true" />;
   }
   return null;
 }

@@ -25,10 +25,10 @@ export type PipelineLookup = (projectId: ProjectId) => Pipeline | null | undefin
 
 /**
  * Why this ticket needs the human right now, or null if it doesn't.
- * Resolved and shipped (done-column) tickets never need attention.
+ * Archived and Done-category tickets never need attention.
  */
 export function needsAttention(ticket: Ticket, pipeline: Pipeline | null | undefined): AttentionReason | null {
-  if (ticket.resolution || ticket.archivedAt) {
+  if (ticket.archivedAt) {
     return null;
   }
   const category = categoryOf(pipeline, ticket.columnId);
@@ -60,11 +60,11 @@ const PRIORITY_ORDER: Record<string, number> = { critical: 0, high: 1, medium: 2
 
 /**
  * Group tickets for an attention-first list: Needs you → Doing → To do →
- * Done. Archived tickets are excluded. Resolved tickets count as done even
- * if their column isn't (resolution is the stronger signal).
+ * Done. Archived tickets are excluded. Pipeline category is the only status
+ * source; runtime phase is an attention overlay, not task completion.
  *
  * Sorting: needs-you and doing by recency (active agents first in doing);
- * todo by priority then age; done by resolution recency.
+ * todo by priority then age; done by completion recency.
  */
 export function groupTasks(tickets: Ticket[], pipelineFor: PipelineLookup): GroupedTasks {
   const needsYou: GroupedTasks['needsYou'] = [];
@@ -80,10 +80,6 @@ export function groupTasks(tickets: Ticket[], pipelineFor: PipelineLookup): Grou
     const reason = needsAttention(ticket, pipeline);
     if (reason) {
       needsYou.push({ ticket, reason });
-      continue;
-    }
-    if (ticket.resolution) {
-      done.push(ticket);
       continue;
     }
     const category: ColumnCategory = categoryOf(pipeline, ticket.columnId);
@@ -113,7 +109,7 @@ export function groupTasks(tickets: Ticket[], pipelineFor: PipelineLookup): Grou
     }
     return a.createdAt - b.createdAt;
   });
-  done.sort((a, b) => (b.resolvedAt ?? b.updatedAt) - (a.resolvedAt ?? a.updatedAt));
+  done.sort((a, b) => (b.completedAt ?? b.updatedAt) - (a.completedAt ?? a.updatedAt));
 
   return { needsYou, doing, todo, done };
 }

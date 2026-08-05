@@ -377,8 +377,8 @@ export type StoreData = {
   previewFeatures: boolean;
   /** System notifications when a backgrounded agent finishes or needs approval. */
   notifyOnAgentAttention: boolean;
-  /** "Text size" in percent (90 | 100 | 110 | 125) — scales the Fluent type
-   *  ramp and the root font-size (rem surfaces). */
+  /** "Text size" in percent (90 | 100 | 110 | 125), applied as the CSS root
+   *  font-size percentage. */
   textScale: number;
   /** Local voice (Option A): use on-device Parakeet STT + Pocket TTS instead of a hosted voice model. */
   localVoiceEnabled: boolean;
@@ -456,23 +456,13 @@ export type StoreData = {
   schemaVersion: number;
   codeTabs: CodeTab[];
   /**
-   * Closed chat conversations (projectless session columns), newest-first.
-   * Each entry is fully resumable: ``sessionId`` deterministically keys the
-   * scratch workspace directory and the agent-server conversation.
-   * Capped by the pruning helper.
+   * Indexed agent conversations, newest-first. Project identity is retained
+   * so the sidebar can group sessions beneath their project. Archived entries
+   * remain fully restorable and the index is capped by the pruning helper.
    */
   chatConversations: ChatConversation[];
   activeCodeTabId: CodeTabId | null;
   codeLayoutMode: CodeLayoutMode;
-  /** Optional background image (data URL) rendered behind the Code Deck. */
-  codeDeckBackground: string | null;
-  /**
-   * Wallpaper-derived glass tone. Sampled from `codeDeckBackground` luminance
-   * on upload — drives whether glass surfaces use a dark scrim with light
-   * text (`'dark'`) or a light scrim with dark text (`'light'`). Independent
-   * of the active theme so glass material stays readable on any wallpaper.
-   */
-  glassTone: 'dark' | 'light';
   activeTicketId: TicketId | null;
 
   // Enterprise platform (optional — when set, enables enterprise mode)
@@ -1074,6 +1064,13 @@ export const schema: Schema<StoreData> = {
         routineSchedule: { type: 'string' },
         workspaceDir: { type: 'string' },
         profileName: { type: 'string' },
+        sidecarOpen: { type: 'boolean' },
+        sidecarAppIds: { type: 'array', items: { type: 'string' } },
+        activeSidecarAppId: { type: 'string' },
+        spacesWidth: { type: 'number' },
+        spacesExpanded: { type: 'boolean' },
+        spacesSidecarWidth: { type: 'number' },
+        spacesSidecarExpanded: { type: 'boolean' },
         createdAt: { type: 'number' },
         activatedAt: { type: 'number' },
       },
@@ -1090,6 +1087,10 @@ export const schema: Schema<StoreData> = {
         title: { type: 'string' },
         lastActiveAt: { type: 'number' },
         profileName: { type: 'string' },
+        projectId: { type: 'string' },
+        ticketId: { type: 'string' },
+        ticketTitle: { type: 'string' },
+        archivedAt: { type: 'number' },
       },
       required: ['sessionId', 'title', 'lastActiveAt'],
     },
@@ -1107,10 +1108,6 @@ export const schema: Schema<StoreData> = {
     // default; the v27 migration stamps 'focus' explicitly for installs
     // without deck columns (and fresh stores hit that path on first boot).
     default: 'tile',
-  },
-  codeDeckBackground: {
-    type: ['string', 'null'],
-    default: null,
   },
   activeTicketId: {
     type: ['string', 'null'],
@@ -1250,7 +1247,7 @@ export const schema: Schema<StoreData> = {
         updatedAt: { type: 'number' },
         phaseChangedAt: { type: 'number' },
         columnChangedAt: { type: 'number' },
-        resolvedAt: { type: 'number' },
+        completedAt: { type: 'number' },
         archivedAt: { type: 'number' },
         cleanupPending: { type: 'boolean' },
         // Per-source map keyed by ProjectSource.id (last sync-to-host timestamps).
@@ -1354,7 +1351,6 @@ export const schema: Schema<StoreData> = {
       required: ['url', 'number', 'state', 'createdAt', 'lastSeenAt'],
     },
   },
-  glassTone: { type: 'string', default: 'dark' },
   modelsConfig: {
     type: 'object',
     default: { version: 3, default: null, voice_default: null, providers: {} },
@@ -1748,6 +1744,20 @@ export type CodeTab = {
   workspaceDir?: string;
   /** When set, this tab renders as a global app column (webview) instead of an agent session. */
   customAppId?: string;
+  /** Whether this session's right sidecar is visible. Open tabs remain mounted while hidden. */
+  sidecarOpen?: boolean;
+  /** Column-scoped apps currently open as tabs in this session's right sidecar. */
+  sidecarAppIds?: string[];
+  /** Selected app in the right sidecar. Must also be present in `sidecarAppIds`. */
+  activeSidecarAppId?: string;
+  /** User-selected width for this column in Spaces. */
+  spacesWidth?: number;
+  /** Whether this column uses the expanded Spaces width preset. */
+  spacesExpanded?: boolean;
+  /** User-selected width for this session's sidecar column in Spaces. */
+  spacesSidecarWidth?: number;
+  /** Whether this session's sidecar uses the expanded Spaces width preset. */
+  spacesSidecarExpanded?: boolean;
   /**
    * Sticky profile binding for this tab. Snapshotted from the resolution chain
    * (per-project ``sandboxProfile`` → user default) when the tab is created,
@@ -1776,15 +1786,22 @@ export type CodeTab = {
 export const isChatColumn = (tab: Pick<CodeTab, 'projectId' | 'routineId' | 'customAppId'>): boolean =>
   !tab.projectId && !tab.routineId && !tab.customAppId;
 
-/** A closed chat conversation, resumable from the Focus sidebar's Recent list. */
+/** An indexed agent conversation, resumable from the sidebar. */
 export type ChatConversation = {
   /** Scratch-directory key and agent-server conversation id. */
   sessionId: string;
-  /** First user message (truncated) — display label in Recent. */
+  /** First user message (truncated) — display label in the sidebar. */
   title: string;
   lastActiveAt: number;
   /** Sticky profile of the column that owned it, for faithful resume. */
   profileName?: string;
+  /** Project grouping retained independently of an active column. */
+  projectId?: ProjectId;
+  /** Ticket context retained when the session originated from a ticket. */
+  ticketId?: TicketId;
+  ticketTitle?: string;
+  /** Hidden from normal history until restored. */
+  archivedAt?: number;
 };
 
 // #endregion
@@ -1813,7 +1830,6 @@ export type ColumnId = string;
 // --- Enums ---
 
 export type TicketPriority = 'low' | 'medium' | 'high' | 'critical';
-export type TicketResolution = 'completed' | 'wont_do' | 'duplicate' | 'cancelled';
 export type MilestoneStatus = 'active' | 'completed' | 'archived';
 
 /** Re-export TicketPhase so renderer can import from shared/types. */
@@ -1829,9 +1845,9 @@ export type TokenUsage = {
 // --- Pipeline & columns ---
 
 /**
- * Human-facing status category (Jira-style). The column graph stays the
- * agent's custom state machine; the category is the universal state global
- * views group by. Valid pipelines read `todo* doing* done` in column order.
+ * Human-facing workflow status. The column graph stays the agent's custom
+ * state machine; the category is the universal state global views group by.
+ * Valid pipelines read `todo* doing* done` in column order.
  */
 export type ColumnCategory = 'todo' | 'doing' | 'done';
 
@@ -2233,14 +2249,12 @@ export type Ticket = {
   phaseChangedAt?: number;
   /** Stamped whenever `columnId` changes. Drives aging-in-column risk. */
   columnChangedAt?: number;
-  /** Stamped when `resolution` first becomes defined. Drives shipped-today/week. */
-  resolvedAt?: number;
+  /** Stamped when the task enters a Done-category column; cleared when reopened. */
+  completedAt?: number;
   /** Task ID for the supervisor's sandbox. */
   supervisorTaskId?: TaskId;
   /** Accumulated token usage across all supervisor runs. */
   tokenUsage?: TokenUsage;
-  /** Resolution reason when ticket is closed. Undefined means open. */
-  resolution?: TicketResolution;
   /** Timestamp when the ticket was archived from active views. */
   archivedAt?: number;
   /** Agent/human comments — serves as persistent memory across runs. */
@@ -2470,7 +2484,7 @@ type VoiceIpcEvents = Namespaced<
 export type AgentProcessStopOptions = {
   /**
    * Skip persisting the workspace snapshot during serve's SIGTERM teardown.
-   * Set by terminal closes ("Close session" on a non-chat code column) where
+   * Set when a non-chat code column is removed and its terminal exits, where
    * the caller deletes the snapshot tar right after the stop — persisting it
    * (fingerprint pass + full workspace tar export) would be wasted work.
    * Best-effort: an older omni-code without the ``sandbox.discard_snapshot``
@@ -3075,7 +3089,7 @@ export type MarketplaceConnector = {
   id: string;
   label: string;
   description: string;
-  /** Fluent icon name resolved via AppIcon's ICON_MAP; optional. */
+  /** Lucide icon name resolved via AppIcon's ICON_MAP; optional. */
   icon?: string;
   server: McpServerEntry;
 };
@@ -3191,7 +3205,6 @@ type ProjectIpcEvents = Namespaced<
     'check-git-repo': (workspaceDir: string) => GitRepoInfo;
     'add-ticket': (ticket: Omit<Ticket, 'id' | 'createdAt' | 'updatedAt' | 'columnId'>) => Ticket;
     'update-ticket': (id: TicketId, patch: Partial<Omit<Ticket, 'id' | 'projectId' | 'createdAt'>>) => void;
-    'remove-ticket': (id: TicketId) => void;
     'get-tickets': (projectId: ProjectId) => Ticket[];
     'get-ticket-workspace': (ticketId: TicketId) => string;
     'get-tasks': () => Task[];
@@ -3214,7 +3227,6 @@ type ProjectIpcEvents = Namespaced<
     'stop-supervisor': (ticketId: TicketId) => void;
     'send-supervisor-message': (ticketId: TicketId, message: string) => void;
     'reset-supervisor-session': (ticketId: TicketId) => void;
-    'resolve-ticket': (ticketId: TicketId, resolution: TicketResolution) => void;
     /** Assign (string principal id) or unassign (null) a ticket. Team ownership is unaffected; any member may call. */
     'assign-ticket': (ticketId: TicketId, assignee: string | null) => void;
     /**
@@ -3505,18 +3517,8 @@ type PageIpcEvents = Namespaced<
      * instance). Returns null if the page isn't a notebook.
      */
     'get-notebook-paths': (pageId: PageId) => { filePath: string; projectDir: string } | null;
-    /**
-     * Ensure the marimo glass CSS file exists for this notebook's project and
-     * migrate the notebook's `marimo.App()` to reference it. Idempotent —
-     * called by the renderer immediately before opening a notebook.
-     */
-    'prepare-notebook': (pageId: PageId, glassEnabled: boolean) => void;
-    /**
-     * Rewrite the marimo glass CSS file content for a project. Called when
-     * the launcher's glass mode toggles. Caller reloads the marimo webview
-     * afterwards to pick up the new CSS.
-     */
-    'set-notebook-glass': (projectDir: string, enabled: boolean) => void;
+    /** Prepare the notebook's marimo configuration before launch. */
+    'prepare-notebook': (pageId: PageId) => void;
   }
 >;
 

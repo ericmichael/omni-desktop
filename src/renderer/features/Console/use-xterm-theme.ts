@@ -8,7 +8,7 @@ const getCssVar = (name: string): string => {
 export const useXTermTheme = (): ITheme => {
   return useMemo((): ITheme => {
     return {
-      background: 'rgba(0, 0, 0, 0)',
+      background: 'transparent',
       foreground: getCssVar('--xterm-fg'),
       black: getCssVar('--xterm-black'),
       brightBlack: getCssVar('--xterm-bright-black'),

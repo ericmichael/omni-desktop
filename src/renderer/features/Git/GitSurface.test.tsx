@@ -43,34 +43,12 @@ vi.mock('@/renderer/omniagents-ui/rpc/git', async (importOriginal) => {
   return { ...original, GitClient: vi.fn(() => mocks.git) };
 });
 
-vi.mock('@fluentui/react-components', () => ({
-  makeStyles: () => () => new Proxy({}, { get: (_target, key) => String(key) }),
-  mergeClasses: (...classes: Array<string | false | undefined>) => classes.filter(Boolean).join(' '),
-  tokens: new Proxy({}, { get: (_target, key) => String(key) }),
-}));
-
-vi.mock('@fluentui/react-icons', async () => {
-  const { createElement } = await import('react');
-  return { Warning20Regular: () => createElement('span', { 'aria-hidden': true }) };
-});
-
 vi.mock('@/renderer/ds', async () => {
   const { createElement } = await import('react');
   return {
-    Button: ({ children, isDisabled, ...props }: any) =>
-      createElement('button', { ...props, disabled: isDisabled }, children),
+    Button: ({ children, ...props }: any) => createElement('button', props, children),
     Select: ({ children, ...props }: any) => createElement('select', props, children),
     Spinner: () => createElement('span', { 'aria-hidden': true }, 'loading'),
-    ConfirmDialog: ({ open, title, description, confirmLabel, onConfirm, onClose }: any) =>
-      open
-        ? createElement(
-            'div',
-            { role: 'dialog', 'aria-label': title },
-            createElement('p', null, description),
-            createElement('button', { onClick: onClose }, 'Cancel'),
-            createElement('button', { onClick: onConfirm }, confirmLabel)
-          )
-        : null,
   };
 });
 
@@ -158,7 +136,7 @@ async function settle() {
 }
 
 function button(label: string): HTMLButtonElement {
-  const result = [...container.querySelectorAll('button')].find(
+  const result = [...document.querySelectorAll('button')].find(
     (candidate) => candidate.getAttribute('aria-label') === label || candidate.textContent === label
   );
   if (!result) {
@@ -291,7 +269,7 @@ describe('GitSurface', () => {
     await act(async () => button('Discard file').click());
     await settle();
     expect(mocks.git.confirmDiscard).not.toHaveBeenCalled();
-    expect(container.querySelector('[role="dialog"]')?.textContent).toContain('dirty paths: src/index.ts');
+    expect(document.querySelector('[role="alertdialog"]')?.textContent).toContain('dirty paths: src/index.ts');
 
     await act(async () => button('Discard changes').click());
     await settle();
@@ -329,14 +307,16 @@ describe('GitSurface', () => {
 
     mocks.connected = false;
     act(() =>
-      root.render(<GitSurface environmentId="environment-1" isGlass sessionId="session-1" workspaceRoot="/workspace" />)
+      root.render(
+        <GitSurface active={false} environmentId="environment-1" sessionId="session-1" workspaceRoot="/workspace" />
+      )
     );
     expect(container.textContent).toContain('The selected repository is preserved');
     expect(container.querySelector<HTMLSelectElement>('select[aria-label="Repository"]')?.value).toBe('apps/api');
 
     mocks.connected = true;
     act(() =>
-      root.render(<GitSurface environmentId="environment-1" sessionId="session-1" workspaceRoot="/workspace" />)
+      root.render(<GitSurface active environmentId="environment-1" sessionId="session-1" workspaceRoot="/workspace" />)
     );
     await settle();
     expect(container.querySelector<HTMLSelectElement>('select[aria-label="Repository"]')?.value).toBe('apps/api');
@@ -421,7 +401,7 @@ describe('GitSurface', () => {
 
     act(() => button('Apply to local folder').click());
     expect(mocks.invoke).not.toHaveBeenCalled();
-    expect(container.querySelector('[role="dialog"]')?.textContent).toContain('/home/user/work');
+    expect(document.querySelector('[role="alertdialog"]')?.textContent).toContain('/home/user/work');
 
     await act(async () => button('Apply changes').click());
     await settle();

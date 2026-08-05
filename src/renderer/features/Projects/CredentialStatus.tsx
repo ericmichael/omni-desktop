@@ -4,33 +4,12 @@
  * for a private-looking host (with an inline "Add token"), or an SSH URL that
  * the runtime silently downgrades to unauthenticated HTTPS. Self-contained.
  */
-import { makeStyles, tokens } from '@fluentui/react-components';
-import { CheckmarkCircle16Regular, LockClosed16Regular, Warning16Regular } from '@fluentui/react-icons';
+import { CircleCheck, Lock, TriangleAlert } from 'lucide-react';
 import { memo, useCallback } from 'react';
 
+import { Button } from '@/renderer/ds/ui/button';
 import { gitHostFromUrl, isSshRemote, resolveCredentialForUrl } from '@/shared/git-credentials';
 import type { GitCredential } from '@/shared/types';
-
-const useStyles = makeStyles({
-  credRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalXS,
-    fontSize: tokens.fontSizeBase200,
-  },
-  credOk: { color: tokens.colorPaletteGreenForeground1 },
-  credMissing: { color: tokens.colorNeutralForeground2 },
-  credWarn: { color: tokens.colorPaletteYellowForeground2 },
-  credLink: {
-    fontSize: tokens.fontSizeBase200,
-    color: tokens.colorBrandForeground1,
-    cursor: 'pointer',
-    backgroundColor: 'transparent',
-    border: 'none',
-    padding: 0,
-    fontWeight: tokens.fontWeightMedium,
-  },
-});
 
 type CredentialStatusProps = {
   repoUrl: string;
@@ -39,7 +18,6 @@ type CredentialStatusProps = {
 };
 
 export const CredentialStatus = memo(({ repoUrl, credentials, onAddToken }: CredentialStatusProps) => {
-  const styles = useStyles();
   const url = repoUrl.trim();
   const host = gitHostFromUrl(url);
   const handleAddToken = useCallback(() => {
@@ -52,8 +30,8 @@ export const CredentialStatus = memo(({ repoUrl, credentials, onAddToken }: Cred
   }
   if (isSshRemote(url)) {
     return (
-      <span className={`${styles.credRow} ${styles.credWarn}`}>
-        <Warning16Regular />
+      <span className={`${'flex items-center gap-1 text-xs'} ${'text-warning'}`}>
+        <TriangleAlert />
         SSH URLs aren&apos;t authenticated — paste the HTTPS URL to use a stored token.
       </span>
     );
@@ -64,19 +42,19 @@ export const CredentialStatus = memo(({ repoUrl, credentials, onAddToken }: Cred
   const match = resolveCredentialForUrl(credentials, url);
   if (match) {
     return (
-      <span className={`${styles.credRow} ${styles.credOk}`}>
-        <CheckmarkCircle16Regular />
+      <span className={`${'flex items-center gap-1 text-xs'} ${'text-success'}`}>
+        <CircleCheck />
         Authenticates with the {host} token.
       </span>
     );
   }
   return (
-    <span className={`${styles.credRow} ${styles.credMissing}`}>
-      <LockClosed16Regular />
+    <span className={`${'flex items-center gap-1 text-xs'} ${'text-muted-foreground'}`}>
+      <Lock />
       No credential for {host}.
-      <button type="button" className={styles.credLink} onClick={handleAddToken}>
+      <Button type="button" variant="link" size="xs" className="h-auto p-0" onClick={handleAddToken}>
         Add token
-      </button>
+      </Button>
     </span>
   );
 });

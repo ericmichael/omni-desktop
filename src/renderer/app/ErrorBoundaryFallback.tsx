@@ -2,7 +2,7 @@ import { memo } from 'react';
 import type { FallbackProps } from 'react-error-boundary';
 import { AssertionError } from 'tsafe';
 
-import { Button, Heading } from '@/renderer/ds';
+import { Button } from '@/renderer/ds/ui/button';
 
 const getMessage = (error: unknown) => {
   let errorMessage = '';
@@ -18,12 +18,12 @@ export const ErrorBoundaryFallback = memo(({ error, resetErrorBoundary }: Fallba
   const stack = error instanceof Error ? error.stack : undefined;
   return (
     <div className="flex flex-col w-full h-full items-center justify-center gap-4">
-      <Heading>An error occurred.</Heading>
-      <Heading size="sm" className="text-fg-error">
+      <h2 className="font-display text-lg font-semibold tracking-tight">An error occurred.</h2>
+      <h2 className="font-display text-base font-semibold tracking-tight text-destructive">
         Error: {getMessage(error)}
-      </Heading>
+      </h2>
       {stack && (
-        <pre className="text-xs text-fg-subtle max-w-2xl max-h-48 overflow-auto whitespace-pre-wrap break-all px-4">
+        <pre className="max-h-48 max-w-2xl overflow-auto whitespace-pre-wrap break-all px-4 text-xs text-muted-foreground">
           {stack}
         </pre>
       )}

@@ -1,7 +1,7 @@
 import type { Milestone, Ticket } from '@/shared/types';
 
 /**
- * Pure aggregator for the dashboard "Shipped" section. Buckets resolved
+ * Pure aggregator for the dashboard "Shipped" section. Buckets completed
  * tickets and completed milestones into "today" and "this week" windows,
  * using local-time boundaries supplied by the caller.
  *
@@ -48,10 +48,7 @@ export function computeShippedDigest(input: ShippedInput): ShippedDigest {
   };
 
   for (const ticket of tickets) {
-    if (ticket.resolution === undefined) {
-      continue;
-    }
-    const at = ticket.resolvedAt;
+    const at = ticket.completedAt;
     if (at === undefined) {
       continue;
     }

@@ -255,3 +255,53 @@ describe('v15 pipeline column categories', () => {
     ).toThrow(/CHECK constraint/);
   });
 });
+
+describe('v19 unified ticket status', () => {
+  const getDb = useMigrationFixture(19, (db) => {
+    db.prepare("INSERT INTO projects (id, label, slug) VALUES ('proj_1', 'P', 'p')").run();
+    db.prepare(
+      "INSERT INTO pipeline_columns (id, project_id, label, sort_order, category) VALUES ('todo', 'proj_1', 'To do', 0, 'todo')"
+    ).run();
+    db.prepare(
+      "INSERT INTO pipeline_columns (id, project_id, label, sort_order, category) VALUES ('doing', 'proj_1', 'Doing', 1, 'doing')"
+    ).run();
+    db.prepare(
+      "INSERT INTO pipeline_columns (id, project_id, label, sort_order, category) VALUES ('done', 'proj_1', 'Done', 2, 'done')"
+    ).run();
+
+    const insert = db.prepare(
+      `INSERT INTO tickets
+       (id, project_id, column_id, title, description, priority, blocked_by, resolution, resolved_at, created_at, updated_at)
+       VALUES (?, 'proj_1', ?, ?, '', 'medium', '[]', ?, ?, '2026-01-01T00:00:00.000Z', '2026-01-02T00:00:00.000Z')`
+    );
+    insert.run('completed', 'doing', 'Completed', 'completed', '2026-01-03T00:00:00.000Z');
+    insert.run('cancelled', 'doing', 'Cancelled', 'cancelled', '2026-01-04T00:00:00.000Z');
+    insert.run('already_done', 'done', 'Already done', null, null);
+  });
+
+  it('uses the Done column as the sole completion state', () => {
+    const rows = getDb()
+      .prepare('SELECT id, column_id, completed_at, archived_at FROM tickets ORDER BY id')
+      .all() as Array<{ id: string; column_id: string; completed_at: string | null; archived_at: string | null }>;
+
+    expect(rows.find((row) => row.id === 'completed')).toMatchObject({
+      column_id: 'done',
+      completed_at: '2026-01-03T00:00:00.000Z',
+      archived_at: null,
+    });
+    expect(rows.find((row) => row.id === 'already_done')?.completed_at).toBe('2026-01-02T00:00:00.000Z');
+  });
+
+  it('converts retired close outcomes to archive and drops legacy columns', () => {
+    const cancelled = getDb().prepare("SELECT completed_at, archived_at FROM tickets WHERE id = 'cancelled'").get() as {
+      completed_at: string | null;
+      archived_at: string | null;
+    };
+    expect(cancelled).toEqual({ completed_at: null, archived_at: '2026-01-04T00:00:00.000Z' });
+
+    const columns = getDb().prepare('PRAGMA table_info(tickets)').all() as Array<{ name: string }>;
+    expect(columns.map((column) => column.name)).toContain('completed_at');
+    expect(columns.map((column) => column.name)).not.toContain('resolution');
+    expect(columns.map((column) => column.name)).not.toContain('resolved_at');
+  });
+});

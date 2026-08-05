@@ -8,60 +8,29 @@ import {
   useSensor,
   useSensors,
 } from '@dnd-kit/core';
-import { makeStyles, tokens } from '@fluentui/react-components';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useMemo, useState } from 'react';
 
 import { $currentPrincipal } from '@/renderer/features/Teams/state';
 import type { Column, ColumnId, ProjectId, Ticket, TicketId } from '@/shared/types';
 
-import { AssigneeFilter } from './AssigneeFilter';
 import { KanbanCard } from './KanbanCard';
 import { KanbanColumn } from './KanbanColumn';
+import { ProjectTaskComposer } from './ProjectTaskComposer';
 import { $activeMilestoneId, $assigneeFilter, $pipeline, $tickets, ticketApi } from './state';
 
-type VisibilityFilter = 'active' | 'archived' | 'all';
-
-const useStyles = makeStyles({
-  loading: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    height: '160px',
-  },
-  loadingText: {
-    fontSize: tokens.fontSizeBase300,
-    color: tokens.colorNeutralForeground2,
-  },
-  toolbar: {
-    display: 'flex',
-    justifyContent: 'flex-end',
-    paddingLeft: tokens.spacingHorizontalL,
-    paddingRight: tokens.spacingHorizontalL,
-    paddingTop: tokens.spacingVerticalS,
-  },
-  board: {
-    display: 'flex',
-    gap: tokens.spacingHorizontalS,
-    height: '100%',
-    overflowX: 'auto',
-    paddingLeft: tokens.spacingHorizontalS,
-    paddingRight: tokens.spacingHorizontalS,
-    paddingTop: tokens.spacingVerticalS,
-    paddingBottom: tokens.spacingVerticalS,
-    '@media (min-width: 640px)': {
-      gap: tokens.spacingHorizontalM,
-      paddingLeft: tokens.spacingHorizontalL,
-      paddingRight: tokens.spacingHorizontalL,
-      paddingTop: tokens.spacingVerticalM,
-      paddingBottom: tokens.spacingVerticalM,
-    },
-  },
-});
+type VisibilityFilter = 'current' | 'archived' | 'all';
 
 export const KanbanBoard = memo(
-  ({ projectId, visibilityFilter = 'active' }: { projectId: ProjectId; visibilityFilter?: VisibilityFilter }) => {
-    const styles = useStyles();
+  ({
+    projectId,
+    visibilityFilter = 'current',
+    query = '',
+  }: {
+    projectId: ProjectId;
+    visibilityFilter?: VisibilityFilter;
+    query?: string;
+  }) => {
     const pipeline = useStore($pipeline);
     const tickets = useStore($tickets);
     const activeMilestoneId = useStore($activeMilestoneId);
@@ -69,6 +38,7 @@ export const KanbanBoard = memo(
     const currentPrincipal = useStore($currentPrincipal);
 
     const [activeTicket, setActiveTicket] = useState<{ ticket: Ticket; column: Column } | null>(null);
+    const [newTaskColumnId, setNewTaskColumnId] = useState<ColumnId | null>(null);
 
     // Mouse drags on small movement; touch drags on long-press so a swipe on a
     // card still scrolls the board instead of picking the card up.
@@ -77,40 +47,47 @@ export const KanbanBoard = memo(
       useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 8 } })
     );
 
-    const projectTickets = useMemo(
-      () =>
-        Object.values(tickets).filter((t) => {
-          if (t.projectId !== projectId) {
+    const projectTickets = useMemo(() => {
+      const normalizedQuery = query.trim().toLowerCase();
+      return Object.values(tickets).filter((t) => {
+        if (t.projectId !== projectId) {
+          return false;
+        }
+        if (activeMilestoneId !== 'all' && t.milestoneId !== activeMilestoneId) {
+          return false;
+        }
+        // Assignee filter (teams): 'all' = everyone, 'me' = current principal,
+        // 'unassigned' = no assignee, else a specific member's principal id.
+        if (assigneeFilter === 'me') {
+          if (t.assignee !== currentPrincipal) {
             return false;
           }
-          if (activeMilestoneId !== 'all' && t.milestoneId !== activeMilestoneId) {
+        } else if (assigneeFilter === 'unassigned') {
+          if (t.assignee) {
             return false;
           }
-          // Assignee filter (teams): 'all' = everyone, 'me' = current principal,
-          // 'unassigned' = no assignee, else a specific member's principal id.
-          if (assigneeFilter === 'me') {
-            if (t.assignee !== currentPrincipal) {
-              return false;
-            }
-          } else if (assigneeFilter === 'unassigned') {
-            if (t.assignee) {
-              return false;
-            }
-          } else if (assigneeFilter !== 'all') {
-            if (t.assignee !== assigneeFilter) {
-              return false;
-            }
+        } else if (assigneeFilter !== 'all') {
+          if (t.assignee !== assigneeFilter) {
+            return false;
           }
-          if (visibilityFilter === 'active') {
-            return !t.archivedAt;
+        }
+        if (visibilityFilter === 'current') {
+          if (t.archivedAt) {
+            return false;
           }
-          if (visibilityFilter === 'archived') {
-            return !!t.archivedAt;
+        }
+        if (visibilityFilter === 'archived') {
+          if (!t.archivedAt) {
+            return false;
           }
-          return true;
-        }),
-      [tickets, projectId, activeMilestoneId, assigneeFilter, currentPrincipal, visibilityFilter]
-    );
+        }
+        return (
+          !normalizedQuery ||
+          t.title.toLowerCase().includes(normalizedQuery) ||
+          t.description.toLowerCase().includes(normalizedQuery)
+        );
+      });
+    }, [tickets, projectId, activeMilestoneId, assigneeFilter, currentPrincipal, visibilityFilter, query]);
 
     const ticketsByColumn = useMemo(() => {
       const map: Record<string, Ticket[]> = {};
@@ -175,58 +152,52 @@ export const KanbanBoard = memo(
       setActiveTicket(null);
     }, []);
 
-    const handleNewTicket = useCallback(
-      async (columnId: ColumnId) => {
-        const ticket = await ticketApi.addTicket({
-          projectId,
-          milestoneId: activeMilestoneId !== 'all' ? activeMilestoneId : undefined,
-          title: 'Untitled',
-          description: '',
-          priority: 'medium',
-          blockedBy: [],
-        });
-        // Place in the target column
-        if (columnId !== pipeline?.columns[0]?.id) {
-          void ticketApi.moveTicketToColumn(ticket.id, columnId);
-        }
-        // Navigate to the ticket detail so user can fill in details
-        ticketApi.goToTicket(ticket.id);
-      },
-      [projectId, activeMilestoneId, pipeline]
-    );
+    const handleNewTicket = useCallback((columnId: ColumnId) => setNewTaskColumnId(columnId), []);
 
     if (!pipeline) {
       return (
-        <div className={styles.loading}>
-          <p className={styles.loadingText}>Loading pipeline...</p>
+        <div className="flex items-center justify-center h-40">
+          <p className="text-sm text-muted-foreground">Loading pipeline...</p>
         </div>
       );
     }
 
     return (
-      <DndContext
-        sensors={sensors}
-        onDragStart={handleDragStart}
-        onDragEnd={handleDragEnd}
-        onDragCancel={handleDragCancel}
-      >
-        <div className={styles.toolbar}>
-          <AssigneeFilter />
-        </div>
-        <div className={styles.board}>
-          {pipeline.columns.map((column) => (
-            <KanbanColumn
-              key={column.id}
-              column={column}
-              tickets={ticketsByColumn[column.id] ?? []}
-              onNewTicket={handleNewTicket}
-            />
-          ))}
-        </div>
-        <DragOverlay dropAnimation={null}>
-          {activeTicket && <KanbanCard ticket={activeTicket.ticket} isOverlay />}
-        </DragOverlay>
-      </DndContext>
+      <>
+        <DndContext
+          sensors={sensors}
+          onDragStart={handleDragStart}
+          onDragEnd={handleDragEnd}
+          onDragCancel={handleDragCancel}
+        >
+          <div className="flex flex-col h-full min-h-0 min-w-0">
+            <div className="flex gap-2 flex-1 min-h-0 min-w-0 overflow-x-auto overflow-y-hidden overscroll-contain pl-2 pr-2 pt-2 pb-2 sm:gap-4 sm:pl-5 sm:pr-5 sm:pt-4 sm:pb-4">
+              {pipeline.columns.map((column) => (
+                <KanbanColumn
+                  key={column.id}
+                  column={column}
+                  tickets={ticketsByColumn[column.id] ?? []}
+                  onNewTicket={handleNewTicket}
+                />
+              ))}
+            </div>
+          </div>
+          <DragOverlay dropAnimation={null}>
+            {activeTicket && <KanbanCard ticket={activeTicket.ticket} isOverlay />}
+          </DragOverlay>
+        </DndContext>
+        <ProjectTaskComposer
+          projectId={projectId}
+          milestoneId={activeMilestoneId !== 'all' ? activeMilestoneId : undefined}
+          columnId={newTaskColumnId ?? undefined}
+          open={newTaskColumnId !== null}
+          onOpenChange={(open) => {
+            if (!open) {
+              setNewTaskColumnId(null);
+            }
+          }}
+        />
+      </>
     );
   }
 );

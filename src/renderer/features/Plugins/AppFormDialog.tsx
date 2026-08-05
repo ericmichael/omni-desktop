@@ -1,80 +1,28 @@
-import { makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
-import {
-  Globe20Regular,
-  MusicNote220Regular,
-  News20Regular,
-  People20Regular,
-  PersonBoard20Regular,
-  SlideLayout20Regular,
-  Star20Regular,
-  Video20Regular,
-} from '@fluentui/react-icons';
+import { Globe, Music2, Newspaper, PanelsTopLeft, Presentation, Star, Users, Video } from 'lucide-react';
 import { memo, useEffect, useState } from 'react';
 
 import { uuidv4 } from '@/lib/uuid';
-import {
-  AnimatedDialog,
-  Button,
-  DialogBody,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  FormField,
-  Input,
-  Switch,
-} from '@/renderer/ds';
+import { cn } from '@/renderer/ds/cn';
+import { Button } from '@/renderer/ds/ui/button';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/renderer/ds/ui/dialog';
+import { Field, FieldLabel } from '@/renderer/ds/ui/field';
+import { Input } from '@/renderer/ds/ui/input';
+import { Switch } from '@/renderer/ds/ui/switch';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { CustomAppEntry } from '@/shared/app-registry';
 
-type FluentIcon = typeof Globe20Regular;
+type LucideIcon = typeof Globe;
 
-const ICON_OPTIONS: { name: string; Icon: FluentIcon }[] = [
-  { name: 'Globe20Regular', Icon: Globe20Regular },
-  { name: 'People20Regular', Icon: People20Regular },
-  { name: 'Video20Regular', Icon: Video20Regular },
-  { name: 'MusicNote220Regular', Icon: MusicNote220Regular },
-  { name: 'News20Regular', Icon: News20Regular },
-  { name: 'Star20Regular', Icon: Star20Regular },
-  { name: 'SlideLayout20Regular', Icon: SlideLayout20Regular },
-  { name: 'PersonBoard20Regular', Icon: PersonBoard20Regular },
+const ICON_OPTIONS: { name: string; Icon: LucideIcon }[] = [
+  { name: 'Globe', Icon: Globe },
+  { name: 'Users', Icon: Users },
+  { name: 'Video', Icon: Video },
+  { name: 'Music2', Icon: Music2 },
+  { name: 'Newspaper', Icon: Newspaper },
+  { name: 'Star', Icon: Star },
+  { name: 'PanelsTopLeft', Icon: PanelsTopLeft },
+  { name: 'Presentation', Icon: Presentation },
 ];
-
-const useStyles = makeStyles({
-  form: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalM },
-  iconGrid: { display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '4px' },
-  iconBtn: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    width: '36px',
-    height: '36px',
-    borderRadius: tokens.borderRadiusMedium,
-    border: `1px solid ${tokens.colorNeutralStroke2}`,
-    backgroundColor: 'transparent',
-    cursor: 'pointer',
-    color: tokens.colorNeutralForeground3,
-    transitionProperty: 'border-color, color, background-color',
-    transitionDuration: '120ms',
-    ':hover': {
-      border: `1px solid ${tokens.colorNeutralStroke1}`,
-      color: tokens.colorNeutralForeground1,
-    },
-  },
-  iconBtnSelected: {
-    border: `1px solid ${tokens.colorBrandStroke1}`,
-    backgroundColor: tokens.colorBrandBackground2,
-    color: tokens.colorBrandForeground1,
-  },
-  dockToggleLabel: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalXS,
-    fontSize: tokens.fontSizeBase200,
-    color: tokens.colorNeutralForeground3,
-    cursor: 'pointer',
-    userSelect: 'none',
-  },
-});
 
 function isValidUrl(str: string): boolean {
   const trimmed = str.trim();
@@ -100,17 +48,16 @@ type AppFormDialogProps = {
  * `customApps`, which the rest of the page observes reactively.
  */
 export const AppFormDialog = memo(({ open, onClose }: AppFormDialogProps) => {
-  const styles = useStyles();
   const [label, setLabel] = useState('');
   const [url, setUrl] = useState('');
-  const [icon, setIcon] = useState('Globe20Regular');
+  const [icon, setIcon] = useState('Globe');
   const [columnScoped, setColumnScoped] = useState(false);
 
   useEffect(() => {
     if (open) {
       setLabel('');
       setUrl('');
-      setIcon('Globe20Regular');
+      setIcon('Globe');
       setColumnScoped(false);
     }
   }, [open]);
@@ -136,35 +83,54 @@ export const AppFormDialog = memo(({ open, onClose }: AppFormDialogProps) => {
   };
 
   return (
-    <AnimatedDialog open={open} onClose={onClose}>
+    <Dialog open={open} onOpenChange={(nextOpen) => !nextOpen && onClose()}>
       <DialogContent>
-        <DialogHeader>Add custom app</DialogHeader>
-        <DialogBody>
-          <div className={styles.form}>
-            <FormField label="Label">
+        <DialogHeader>
+          <DialogTitle>Add custom app</DialogTitle>
+        </DialogHeader>
+        <div className="min-h-0 overflow-y-auto">
+          <div className="flex flex-col gap-4">
+            <Field orientation="horizontal" className="justify-between gap-4">
+              <div className="min-w-0">
+                <FieldLabel>Label</FieldLabel>
+              </div>
               <Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="e.g. Teams" autoFocus />
-            </FormField>
-            <FormField label="URL">
+            </Field>
+            <Field orientation="horizontal" className="justify-between gap-4">
+              <div className="min-w-0">
+                <FieldLabel>URL</FieldLabel>
+              </div>
               <Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://..." type="url" />
-            </FormField>
-            <FormField label="Icon">
-              <div className={styles.iconGrid}>
+            </Field>
+            <Field orientation="horizontal" className="justify-between gap-4">
+              <div className="min-w-0">
+                <FieldLabel>Icon</FieldLabel>
+              </div>
+              <div className="flex flex-wrap gap-1 mt-1">
                 {ICON_OPTIONS.map(({ name, Icon: Ic }) => (
-                  <button
+                  <Button
                     key={name}
                     type="button"
-                    className={mergeClasses(styles.iconBtn, icon === name && styles.iconBtnSelected)}
+                    variant="ghost"
+                    size="icon"
+                    className={cn(
+                      'flex items-center justify-center w-9 h-9 rounded-lg border border-border bg-transparent cursor-pointer text-muted-foreground transition-colors duration-150 hover:border border-border hover:text-foreground',
+                      icon === name && 'border border-primary bg-primary/10 text-primary'
+                    )}
                     onClick={() => setIcon(name)}
                     aria-label={name}
                     title={name}
                   >
-                    <Ic style={{ width: 20, height: 20 }} />
-                  </button>
+                    <Ic className="size-5" />
+                  </Button>
                 ))}
               </div>
-            </FormField>
-            <FormField label="Show in session dock">
-              <label className={styles.dockToggleLabel}>
+            </Field>
+            <Field orientation="horizontal" className="justify-between gap-4">
+              <div className="min-w-0">
+                <FieldLabel>Show in session dock</FieldLabel>
+              </div>
+              <label className="flex items-center gap-1 text-xs text-muted-foreground cursor-pointer select-none">
                 <Switch checked={columnScoped} onCheckedChange={setColumnScoped} />
                 <span>
                   {columnScoped
@@ -172,19 +138,19 @@ export const AppFormDialog = memo(({ open, onClose }: AppFormDialogProps) => {
                     : 'Global only — opens as its own deck column via the app launcher.'}
                 </span>
               </label>
-            </FormField>
+            </Field>
           </div>
-        </DialogBody>
+        </div>
         <DialogFooter>
           <Button variant="ghost" onClick={onClose}>
             Cancel
           </Button>
-          <Button onClick={handleAdd} isDisabled={!isValid}>
+          <Button onClick={handleAdd} disabled={!isValid}>
             Add
           </Button>
         </DialogFooter>
       </DialogContent>
-    </AnimatedDialog>
+    </Dialog>
   );
 });
 AppFormDialog.displayName = 'AppFormDialog';

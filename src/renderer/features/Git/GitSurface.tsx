@@ -1,11 +1,25 @@
-import { makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
-import { Warning20Regular } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
+import { TriangleAlert } from 'lucide-react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { profileRunsOnHost } from '@/lib/artifacts';
-import { Button, ConfirmDialog, Select, Spinner } from '@/renderer/ds';
+import { Alert, AlertDescription, AlertTitle } from '@/renderer/ds/ui/alert';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/renderer/ds/ui/alert-dialog';
+import { Button } from '@/renderer/ds/ui/button';
+import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/renderer/ds/ui/empty';
+import { NativeSelect as Select } from '@/renderer/ds/ui/native-select';
+import { Spinner } from '@/renderer/ds/ui/spinner';
+import { ToggleGroup, ToggleGroupItem } from '@/renderer/ds/ui/toggle-group';
 import {
   GitClient,
   type GitConfirmation,
@@ -29,7 +43,6 @@ export type GitSurfaceProps = {
   environmentId: string;
   sessionId?: string;
   workspaceRoot?: string;
-  isGlass?: boolean;
   /** Whether this persistent surface is currently visible in the dock. */
   active?: boolean;
   onOpenFile?: (path: string, line?: number) => void;
@@ -51,71 +64,6 @@ type ApplyTarget = { source: Extract<ProjectSource, { kind: 'local' }>; localPat
 
 const GIT_READ_OPERATIONS = ['git_list_repositories', 'git_status', 'git_diff'] as const;
 const SESSION_BASE_REF = 'refs/tags/omni/seed';
-
-const useStyles = makeStyles({
-  root: {
-    display: 'flex',
-    flexDirection: 'column',
-    width: '100%',
-    height: '100%',
-    minWidth: 0,
-    minHeight: 0,
-    color: tokens.colorNeutralForeground1,
-    backgroundColor: tokens.colorNeutralBackground1,
-  },
-  rootGlass: { backgroundColor: 'transparent' },
-  toolbar: {
-    display: 'flex',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: tokens.spacingHorizontalS,
-    minHeight: '44px',
-    padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalM}`,
-    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
-  },
-  repositoryLabel: {
-    display: 'flex',
-    alignItems: 'center',
-    minWidth: 0,
-    gap: tokens.spacingHorizontalXS,
-    fontSize: tokens.fontSizeBase200,
-    color: tokens.colorNeutralForeground2,
-  },
-  repositorySelect: { minWidth: '12rem', maxWidth: '24rem' },
-  viewControls: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalXXS },
-  toolbarSpacer: { flex: '1 1 auto' },
-  banner: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
-    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
-    color: tokens.colorNeutralForeground2,
-    backgroundColor: tokens.colorNeutralBackground2,
-    fontSize: tokens.fontSizeBase200,
-  },
-  warning: {
-    color: tokens.colorPaletteDarkOrangeForeground1,
-    backgroundColor: tokens.colorPaletteDarkOrangeBackground1,
-  },
-  error: {
-    color: tokens.colorPaletteRedForeground1,
-    backgroundColor: tokens.colorPaletteRedBackground1,
-  },
-  centered: {
-    display: 'flex',
-    flex: '1 1 auto',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: tokens.spacingVerticalM,
-    minHeight: 0,
-    padding: tokens.spacingVerticalXXL,
-    textAlign: 'center',
-    color: tokens.colorNeutralForeground3,
-  },
-  content: { flex: '1 1 auto', minWidth: 0, minHeight: 0, overflow: 'hidden' },
-});
 
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback;
@@ -167,8 +115,7 @@ export function sourceForRepository(sources: ProjectSource[], repository: GitRep
 }
 
 export const GitSurface = memo((props: GitSurfaceProps) => {
-  const { tabId, environmentId, sessionId, workspaceRoot, isGlass, active = true, onOpenFile } = props;
-  const styles = useStyles();
+  const { tabId, environmentId, sessionId, workspaceRoot, active = true, onOpenFile } = props;
   const store = useStore(persistedStoreApi.$atom);
   const rpc = useRPCClient();
   const connected = useRPCConnected();
@@ -473,42 +420,73 @@ export const GitSurface = memo((props: GitSurfaceProps) => {
 
   let body;
   if (!identityKey) {
-    body = <div className={styles.centered}>Open an agent workspace to use source control.</div>;
+    body = (
+      <Empty className="h-full rounded-none border-0">
+        <EmptyHeader>
+          <EmptyTitle>Open an agent workspace</EmptyTitle>
+          <EmptyDescription>Source control is available after a workspace is connected.</EmptyDescription>
+        </EmptyHeader>
+      </Empty>
+    );
   } else if (!connected && !currentData) {
     body = (
-      <div className={styles.centered} role="status">
-        <Spinner size="md" />
-        Connecting to source control…
-      </div>
+      <Empty className="h-full rounded-none border-0" role="status">
+        <EmptyHeader>
+          <EmptyMedia>
+            <Spinner />
+          </EmptyMedia>
+          <EmptyTitle>Connecting to source control…</EmptyTitle>
+        </EmptyHeader>
+      </Empty>
     );
   } else if (loadError && !currentData) {
     body = (
-      <div className={styles.centered} role="alert">
-        <span>{loadError}</span>
-        {connected && <Button onClick={preparedKey === identityKey ? refresh : retryDiscovery}>Retry</Button>}
-      </div>
+      <Empty className="h-full rounded-none border-0" role="alert">
+        <EmptyHeader>
+          <EmptyTitle>Source control unavailable</EmptyTitle>
+          <EmptyDescription>{loadError}</EmptyDescription>
+        </EmptyHeader>
+        {connected && (
+          <EmptyContent>
+            <Button onClick={preparedKey === identityKey ? refresh : retryDiscovery}>Retry</Button>
+          </EmptyContent>
+        )}
+      </Empty>
     );
   } else if (preparedKey !== identityKey || !currentRepositories) {
     body = (
-      <div className={styles.centered} role="status">
-        <Spinner size="md" />
-        Discovering repositories…
-      </div>
+      <Empty className="h-full rounded-none border-0" role="status">
+        <EmptyHeader>
+          <EmptyMedia>
+            <Spinner />
+          </EmptyMedia>
+          <EmptyTitle>Discovering repositories…</EmptyTitle>
+        </EmptyHeader>
+      </Empty>
     );
   } else if (currentRepositories.repositories.length === 0) {
     body = (
-      <div className={styles.centered} role="status">
-        {currentRepositories.unreachable_sources.length > 0
-          ? 'Configured Git sources were not materialized in this environment. Check the selected workspace and profile.'
-          : 'No Git repositories were found in this workspace.'}
-      </div>
+      <Empty className="h-full rounded-none border-0" role="status">
+        <EmptyHeader>
+          <EmptyTitle>No repositories found</EmptyTitle>
+          <EmptyDescription>
+            {currentRepositories.unreachable_sources.length > 0
+              ? 'Configured Git sources were not materialized in this environment. Check the selected workspace and profile.'
+              : 'No Git repositories were found in this workspace.'}
+          </EmptyDescription>
+        </EmptyHeader>
+      </Empty>
     );
   } else if (!currentData) {
     body = (
-      <div className={styles.centered} role="status">
-        <Spinner size="md" />
-        Loading source control…
-      </div>
+      <Empty className="h-full rounded-none border-0" role="status">
+        <EmptyHeader>
+          <EmptyMedia>
+            <Spinner />
+          </EmptyMedia>
+          <EmptyTitle>Loading source control…</EmptyTitle>
+        </EmptyHeader>
+      </Empty>
     );
   } else {
     body = (
@@ -516,7 +494,6 @@ export const GitSurface = memo((props: GitSurfaceProps) => {
         actionsDisabled={mutationPending || !connected}
         diff={currentData.diff}
         diffHeading={currentMode === 'session' ? 'Session changes' : undefined}
-        isGlass={isGlass}
         onDiscard={discardSupported ? requestDiscard : undefined}
         onOpenFile={onOpenFile ? openRepositoryFile : undefined}
         onSelectFile={choosePath}
@@ -530,16 +507,18 @@ export const GitSurface = memo((props: GitSurfaceProps) => {
 
   const conflictStatus = currentData?.status;
   return (
-    <section className={mergeClasses(styles.root, isGlass && styles.rootGlass)} aria-label="Source control">
-      <div className={styles.toolbar}>
-        <label className={styles.repositoryLabel}>
+    <section
+      className="flex flex-col w-full h-full min-w-0 min-h-0 text-foreground bg-card"
+      aria-label="Source control"
+    >
+      <div className="flex items-center flex-wrap gap-2 min-h-11 px-4 py-1 border-b border-border">
+        <label className="flex items-center min-w-0 gap-1 text-xs text-muted-foreground">
           Repository
           <Select
             aria-label="Repository"
-            className={styles.repositorySelect}
+            className="min-w-48 max-w-96"
             disabled={!connected || !currentRepositories?.repositories.length}
             onChange={(event) => chooseRepository(event.target.value as WorkspaceRepo)}
-            size="sm"
             value={currentRepo ?? ''}
           >
             {!currentRepo && <option value="">No repository</option>}
@@ -550,131 +529,139 @@ export const GitSurface = memo((props: GitSurfaceProps) => {
             ))}
           </Select>
         </label>
-        <div className={styles.viewControls} aria-label="Diff view">
-          {currentApplyTarget && (
-            <Button
-              aria-pressed={currentMode === 'session'}
-              onClick={() => chooseMode('session')}
-              size="sm"
-              variant={currentMode === 'session' ? 'primary' : 'ghost'}
-            >
-              Session changes
-            </Button>
-          )}
-          <Button
-            aria-pressed={currentMode === 'worktree'}
-            onClick={() => chooseMode('worktree')}
-            size="sm"
-            variant={currentMode === 'worktree' ? 'primary' : 'ghost'}
-          >
-            Working tree
+        <ToggleGroup
+          type="single"
+          variant="outline"
+          spacing={0}
+          value={currentMode}
+          onValueChange={(value) => value && chooseMode(value as GitViewMode)}
+          className="flex items-center gap-0.5"
+          aria-label="Diff view"
+        >
+          {currentApplyTarget && <ToggleGroupItem value="session">Session changes</ToggleGroupItem>}
+          <ToggleGroupItem value="worktree">Working tree</ToggleGroupItem>
+          <ToggleGroupItem value="staged">Staged</ToggleGroupItem>
+        </ToggleGroup>
+        {currentPath && (
+          <Button size="sm" variant="ghost" onClick={() => setSelectedPath(null)}>
+            All changes
           </Button>
-          <Button
-            aria-pressed={currentMode === 'staged'}
-            onClick={() => chooseMode('staged')}
-            size="sm"
-            variant={currentMode === 'staged' ? 'primary' : 'ghost'}
-          >
-            Staged
-          </Button>
-          {currentPath && (
-            <Button size="sm" variant="ghost" onClick={() => setSelectedPath(null)}>
-              All changes
-            </Button>
-          )}
-        </div>
-        <span className={styles.toolbarSpacer} />
+        )}
+        <span className="flex-auto" />
         {currentApplyTarget && (
           <Button
-            isDisabled={!connected || applyPending}
+            disabled={!connected || applyPending}
             onClick={() => setPendingApply(currentApplyTarget)}
             size="sm"
-            variant="primary"
+            variant="default"
           >
             {applyPending ? 'Applying…' : 'Apply to local folder'}
           </Button>
         )}
-        <Button aria-label="Refresh source control" isDisabled={!connected || loading} onClick={refresh} size="sm">
+        <Button aria-label="Refresh source control" disabled={!connected || loading} onClick={refresh} size="sm">
           Refresh
         </Button>
       </div>
       {!connected && (
-        <div className={styles.banner} role="status">
-          Reconnecting to source control… The selected repository is preserved.
-        </div>
+        <Alert className="rounded-none border-x-0 border-t-0" role="status">
+          <AlertDescription>Reconnecting to source control… The selected repository is preserved.</AlertDescription>
+        </Alert>
       )}
       {connected && discovering && currentRepositories && (
-        <div className={styles.banner} role="status">
-          Refreshing repositories…
-        </div>
+        <Alert className="rounded-none border-x-0 border-t-0" role="status">
+          <AlertDescription>Refreshing repositories…</AlertDescription>
+        </Alert>
       )}
       {connected && loading && currentData && (
-        <div className={styles.banner} role="status">
-          Refreshing source control…
-        </div>
+        <Alert className="rounded-none border-x-0 border-t-0" role="status">
+          <AlertDescription>Refreshing source control…</AlertDescription>
+        </Alert>
       )}
       {currentRepositories && currentRepositories.unreachable_sources.length > 0 && (
-        <div className={mergeClasses(styles.banner, styles.warning)} role="note">
-          <Warning20Regular />
-          Git source{currentRepositories.unreachable_sources.length === 1 ? '' : 's'}{' '}
-          {currentRepositories.unreachable_sources
-            .map((source) => source.mount_name ?? source.repo_url ?? source.path ?? 'unnamed')
-            .join(', ')}{' '}
-          {currentRepositories.unreachable_sources.length === 1 ? 'was' : 'were'} not materialized in this environment
-          and cannot be opened.
-        </div>
+        <Alert
+          className="rounded-none border-x-0 border-t-0 border-warning bg-warning text-warning-foreground"
+          role="note"
+        >
+          <TriangleAlert />
+          <AlertTitle>Git sources unavailable</AlertTitle>
+          <AlertDescription className="text-warning-foreground">
+            Git source{currentRepositories.unreachable_sources.length === 1 ? '' : 's'}{' '}
+            {currentRepositories.unreachable_sources
+              .map((source) => source.mount_name ?? source.repo_url ?? source.path ?? 'unnamed')
+              .join(', ')}{' '}
+            {currentRepositories.unreachable_sources.length === 1 ? 'was' : 'were'} not materialized in this environment
+            and cannot be opened.
+          </AlertDescription>
+        </Alert>
       )}
       {currentRepositories?.truncated && (
-        <div className={styles.banner} role="note">
-          Repository discovery reached its limit. Some nested repositories may not be shown.
-        </div>
+        <Alert className="rounded-none border-x-0 border-t-0" role="note">
+          <AlertDescription>
+            Repository discovery reached its limit. Some nested repositories may not be shown.
+          </AlertDescription>
+        </Alert>
       )}
       {conflictStatus && (conflictStatus.state !== 'clean' || conflictStatus.conflicted.length > 0) && (
-        <div className={mergeClasses(styles.banner, styles.warning)} role="alert">
-          <Warning20Regular />
-          {conflictStatus.state === 'clean'
-            ? 'Repository has unresolved conflicts'
-            : `Repository is ${conflictStatus.state.replaceAll('_', ' ')}`}
-          {conflictStatus.conflicted.length > 0 ? ` with conflicts in ${conflictStatus.conflicted.join(', ')}` : ''}.
-        </div>
+        <Alert className="rounded-none border-x-0 border-t-0 border-warning bg-warning text-warning-foreground">
+          <TriangleAlert />
+          <AlertTitle>Repository needs attention</AlertTitle>
+          <AlertDescription className="text-warning-foreground">
+            {conflictStatus.state === 'clean'
+              ? 'Repository has unresolved conflicts'
+              : `Repository is ${conflictStatus.state.replaceAll('_', ' ')}`}
+            {conflictStatus.conflicted.length > 0 ? ` with conflicts in ${conflictStatus.conflicted.join(', ')}` : ''}.
+          </AlertDescription>
+        </Alert>
       )}
       {(operationError || (loadError && currentData)) && (
-        <div className={mergeClasses(styles.banner, styles.error)} role="alert">
-          {operationError ?? loadError}
-        </div>
+        <Alert className="rounded-none border-x-0 border-t-0" variant="destructive">
+          <AlertDescription>{operationError ?? loadError}</AlertDescription>
+        </Alert>
       )}
       {applyError && (
-        <div className={mergeClasses(styles.banner, styles.error)} role="alert">
-          {applyError}
-        </div>
+        <Alert className="rounded-none border-x-0 border-t-0" variant="destructive">
+          <AlertDescription>{applyError}</AlertDescription>
+        </Alert>
       )}
       {applyStatus && (
-        <div className={styles.banner} role="status">
-          {applyStatus}
-        </div>
+        <Alert className="rounded-none border-x-0 border-t-0" role="status">
+          <AlertDescription>{applyStatus}</AlertDescription>
+        </Alert>
       )}
-      <div className={styles.content}>{body}</div>
-      <ConfirmDialog
-        confirmLabel="Discard changes"
-        description={pendingDiscard ? impactDescription(pendingDiscard.confirmation) : undefined}
-        destructive
-        onClose={() => setPendingDiscard(null)}
-        onConfirm={() => void confirmDiscard()}
-        open={pendingDiscard !== null}
-        title="Discard selected changes?"
-      />
-      <ConfirmDialog
-        confirmLabel="Apply changes"
-        description={
-          pendingApply
-            ? `Copy every changed and untracked file from the sandbox source “${pendingApply.source.mountName}” to ${pendingApply.localPath}. Local files deleted in the sandbox will be removed; unrelated local files are left untouched.`
-            : undefined
-        }
-        onClose={() => setPendingApply(null)}
-        onConfirm={() => void confirmApply()}
-        open={pendingApply !== null}
-        title="Apply sandbox changes to the local folder?"
-      />
+      <div className="flex-auto min-w-0 min-h-0 overflow-hidden">{body}</div>
+      <AlertDialog open={pendingDiscard !== null} onOpenChange={(open) => !open && setPendingDiscard(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Discard selected changes?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingDiscard ? impactDescription(pendingDiscard.confirmation) : ''}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={() => void confirmDiscard()}>
+              Discard changes
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={pendingApply !== null} onOpenChange={(open) => !open && setPendingApply(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Apply sandbox changes to the local folder?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingApply
+                ? `Copy every changed and untracked file from the sandbox source “${pendingApply.source.mountName}” to ${pendingApply.localPath}. Local files deleted in the sandbox will be removed; unrelated local files are left untouched.`
+                : ''}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void confirmApply()}>Apply changes</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </section>
   );
 });
@@ -688,7 +675,6 @@ export function WorkspaceGitPortal({
   environmentId,
   sessionId,
   workspaceRoot,
-  isGlass,
   onOpenFile,
 }: GitSurfaceProps & { host: HTMLDivElement }) {
   return createPortal(
@@ -698,9 +684,9 @@ export function WorkspaceGitPortal({
       environmentId={environmentId}
       sessionId={sessionId}
       workspaceRoot={workspaceRoot}
-      isGlass={isGlass}
       onOpenFile={onOpenFile}
     />,
+
     host
   );
 }

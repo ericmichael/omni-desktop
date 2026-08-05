@@ -1,9 +1,10 @@
-import { makeStyles, tokens } from '@fluentui/react-components';
-import { CheckmarkCircle20Filled } from '@fluentui/react-icons';
+import { CircleCheck } from 'lucide-react';
 import type { ChangeEvent, KeyboardEvent } from 'react';
 import { memo, useCallback, useState } from 'react';
 
-import { Body1Strong, Button, Caption1, Input, Spinner } from '@/renderer/ds';
+import { Button } from '@/renderer/ds/ui/button';
+import { Input } from '@/renderer/ds/ui/input';
+import { Spinner } from '@/renderer/ds/ui/spinner';
 import { probeFailureCopy } from '@/renderer/features/Onboarding/probe-copy';
 import { emitter } from '@/renderer/services/ipc';
 
@@ -27,20 +28,7 @@ const PROVIDER_COPY: Record<Props['kind'], { label: string; keyHint: string; key
   },
 };
 
-const useStyles = makeStyles({
-  root: { display: 'flex', flexDirection: 'column', gap: '20px' },
-  header: { display: 'flex', flexDirection: 'column', gap: '4px' },
-  field: { display: 'flex', flexDirection: 'column', gap: '6px' },
-  inputRow: { display: 'flex', alignItems: 'center', gap: '8px' },
-  inputWrap: { flex: '1 1 auto', minWidth: 0 },
-  statusIcon: { color: tokens.colorPaletteGreenForeground1, flexShrink: 0 },
-  error: { color: tokens.colorPaletteRedForeground1, fontSize: tokens.fontSizeBase200 },
-  escape: { marginTop: '4px' },
-  actions: { display: 'flex', justifyContent: 'space-between' },
-});
-
 export const OnboardingKeyEntryStep = memo(({ kind, onValidated, onBack, onAdvanced }: Props) => {
-  const styles = useStyles();
   const copy = PROVIDER_COPY[kind];
   const [apiKey, setApiKey] = useState('');
   const [busy, setBusy] = useState(false);
@@ -88,24 +76,23 @@ export const OnboardingKeyEntryStep = memo(({ kind, onValidated, onBack, onAdvan
   );
 
   return (
-    <div className={styles.root}>
-      <div className={styles.header}>
-        <Body1Strong>Connect your {copy.label} account</Body1Strong>
-        <Caption1>
+    <div className="flex flex-col gap-5">
+      <div className="flex flex-col gap-1">
+        <span className="text-sm font-semibold">Connect your {copy.label} account</span>
+        <span className="text-xs text-muted-foreground">
           Paste your API key — we check it instantly, and it never leaves this machine.{' '}
           <a href={copy.keyUrl} target="_blank" rel="noopener noreferrer">
             {copy.keyHint}
           </a>
-        </Caption1>
+        </span>
       </div>
 
-      <div className={styles.field}>
-        <Caption1>API key</Caption1>
-        <div className={styles.inputRow}>
-          <div className={styles.inputWrap}>
+      <div className="flex flex-col gap-1.5">
+        <span className="text-xs text-muted-foreground">API key</span>
+        <div className="flex items-center gap-2">
+          <div className="flex-auto min-w-0">
             <Input
               type="password"
-              size="sm"
               value={apiKey}
               onChange={handleKeyChange}
               onKeyDown={handleInputKeyDown}
@@ -114,12 +101,12 @@ export const OnboardingKeyEntryStep = memo(({ kind, onValidated, onBack, onAdvan
               disabled={busy}
             />
           </div>
-          {busy && <Spinner size="sm" />}
-          {validated && <CheckmarkCircle20Filled className={styles.statusIcon} />}
+          {busy && <Spinner />}
+          {validated && <CircleCheck className="shrink-0 text-success" />}
         </div>
-        {error && <span className={styles.error}>{error}</span>}
+        {error && <span className="text-destructive text-xs">{error}</span>}
         {failCount >= 2 && (
-          <div className={styles.escape}>
+          <div className="mt-1">
             <Button variant="ghost" size="sm" onClick={onAdvanced}>
               Set up manually instead
             </Button>
@@ -127,11 +114,11 @@ export const OnboardingKeyEntryStep = memo(({ kind, onValidated, onBack, onAdvan
         )}
       </div>
 
-      <div className={styles.actions}>
-        <Button variant="ghost" size="sm" onClick={onBack} isDisabled={busy}>
+      <div className="flex justify-between">
+        <Button variant="ghost" size="sm" onClick={onBack} disabled={busy}>
           Back
         </Button>
-        <Button variant="primary" size="sm" onClick={handleContinue} isDisabled={!apiKey.trim() || busy}>
+        <Button variant="default" size="sm" onClick={handleContinue} disabled={!apiKey.trim() || busy}>
           {busy ? 'Checking…' : 'Continue'}
         </Button>
       </div>

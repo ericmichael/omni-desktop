@@ -94,6 +94,20 @@ describe('syncColumnsForProject', () => {
     expect(review.gate).toBe(0);
   });
 
+  it('keeps completion timestamps aligned with column categories', () => {
+    const id = seedTicket('completed');
+
+    repo.syncColumnsForProject(PROJECT_ID, initialDefaults);
+    expect(repo.getTicket(id)?.completed_at).not.toBeNull();
+
+    repo.syncColumnsForProject(PROJECT_ID, [
+      { logicalId: 'backlog', label: 'Backlog', category: 'todo' },
+      { logicalId: 'completed', label: 'Formerly done', category: 'doing' },
+      { logicalId: 'done', label: 'Done', category: 'done' },
+    ]);
+    expect(repo.getTicket(id)?.completed_at).toBeNull();
+  });
+
   it('persists workflow metadata and max concurrency on synced columns', () => {
     repo.syncColumnsForProject(PROJECT_ID, [
       { logicalId: 'backlog', label: 'Backlog' },
