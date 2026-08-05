@@ -101,3 +101,5 @@ xattr -d 'com.apple.quarantine' /Applications/Omni\ Code.app
 ## License
 
 Apache-2.0
+
+<!-- Dummy PR marker for UI PR detection testing. -->
