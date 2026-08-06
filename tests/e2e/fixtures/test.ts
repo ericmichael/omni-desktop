@@ -1,3 +1,5 @@
+import path from 'node:path';
+
 import {
   _electron as electron,
   type Browser,
@@ -9,14 +11,17 @@ import {
   type TestInfo,
 } from '@playwright/test';
 import electronExecutablePath from 'electron';
-import path from 'node:path';
-import type { ManagedProcess } from 'tests/e2e/support/process';
 import { startDeterministicModelServer } from 'tests/e2e/support/model-server';
+import type { ManagedProcess } from 'tests/e2e/support/process';
 import { killTcpPort, startProcess, waitForHttpOk } from 'tests/e2e/support/process';
 import { attachProofVideo, visualProofEnabled } from 'tests/e2e/support/proof';
 import {
   createE2eState,
+  type E2eCodexCredentialState,
+  type E2eMcpConfigState,
   type E2eState,
+  inspectElectronCodexCredential,
+  inspectElectronMcpConfig,
   seedElectronState,
   seedServerState,
   type SeedState,
@@ -37,12 +42,16 @@ type E2eFixtures = E2eOptions & {
 
 type LaunchedApp = {
   page: Page;
+  captureScreenshot: () => Promise<Buffer>;
   close: () => Promise<void>;
 };
 
 type E2eApp = {
   readonly page: Page;
   readonly workspaceDir: string;
+  captureScreenshot: () => Promise<Buffer>;
+  inspectCodexCredential: () => E2eCodexCredentialState;
+  inspectMcpConfig: () => E2eMcpConfigState;
   restart: () => Promise<Page>;
 };
 
@@ -111,6 +120,7 @@ async function launchServerLocal(
 
   return {
     page,
+    captureScreenshot: () => page.screenshot({ animations: 'disabled' }),
     close: async () => {
       await context?.close().catch(() => undefined);
       await attachPageVideo(page, testInfo, `server-local video ${launchIndex}`);
@@ -173,8 +183,8 @@ async function launchElectronLocal(
   // a BrowserWindow handle; otherwise the navigation can destroy its JS
   // execution context while proof-mode sizing is in flight.
   await page.getByText('New chat', { exact: true }).first().waitFor({ state: 'visible', timeout: 120_000 });
+  const browserWindow = await electronApp.browserWindow(page);
   if (visualProofEnabled) {
-    const browserWindow = await electronApp.browserWindow(page);
     await browserWindow.evaluate((window, size) => window.setSize(size.width, size.height), proofViewport);
     await page.setViewportSize(proofViewport);
   }
@@ -182,6 +192,13 @@ async function launchElectronLocal(
 
   return {
     page,
+    captureScreenshot: async () => {
+      const base64 = await browserWindow.evaluate(async (window) => {
+        const image = await window.capturePage();
+        return image.toPNG().toString('base64');
+      });
+      return Buffer.from(base64, 'base64');
+    },
     close: async () => {
       await electronApp.close().catch(() => undefined);
       await attachPageVideo(page, testInfo, `electron-local video ${launchIndex}`);
@@ -222,6 +239,9 @@ export const test = base.extend<E2eFixtures>({
       get workspaceDir() {
         return state.workspaceDir;
       },
+      captureScreenshot: () => launched.captureScreenshot(),
+      inspectCodexCredential: () => inspectElectronCodexCredential(state),
+      inspectMcpConfig: () => inspectElectronMcpConfig(state),
       restart: async () => {
         await launched.close();
         launched = await launch();

@@ -67,11 +67,20 @@ describe('workspaceRepo', () => {
 describe('GitClient read boundaries', () => {
   it('always sends the explicit environment and repository, and omits unset options', async () => {
     const rpc = transport(status());
-    const client = new GitClient(rpc, environment);
+    const client = new GitClient(rpc, {
+      workspaceId: 'workspace-1',
+      environmentId: environment,
+      environmentGeneration: 3,
+    });
 
     await client.status(repo);
 
-    expect(rpc.request).toHaveBeenCalledWith('git_status', { environment_id: environment, repo });
+    expect(rpc.request).toHaveBeenCalledWith('git_status', {
+      workspace_id: 'workspace-1',
+      environment_id: environment,
+      environment_generation: 3,
+      repo,
+    });
   });
 
   it('validates status echoes and nested fields instead of casting open records', async () => {

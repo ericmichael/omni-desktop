@@ -37,15 +37,36 @@ const localPath = (snapshotDir: string, snapshotRef: string): string => join(sna
 
 export interface SnapshotStore {
   pull(snapshotRef: string, snapshotDir: string): Promise<boolean>;
-  push(snapshotRef: string, snapshotDir: string): Promise<void>;
+  /** True only when a non-empty local snapshot is safe to persist. */
+  verify(snapshotRef: string, snapshotDir: string): Promise<boolean>;
+  /** True when the verified snapshot is durable in this store. */
+  push(snapshotRef: string, snapshotDir: string): Promise<boolean>;
   remove(snapshotRef: string): Promise<void>;
 }
+
+const verifyLocalSnapshot = (snapshotRef: string, snapshotDir: string): boolean => {
+  if (!snapshotRef) {
+    return false;
+  }
+  try {
+    const stat = statSync(localPath(snapshotDir, snapshotRef));
+    return stat.isFile() && stat.size > 0;
+  } catch {
+    return false;
+  }
+};
 
 class NullSnapshotStore implements SnapshotStore {
   async pull(): Promise<boolean> {
     return false;
   }
-  async push(): Promise<void> {}
+  async verify(snapshotRef: string, snapshotDir: string): Promise<boolean> {
+    return verifyLocalSnapshot(snapshotRef, snapshotDir);
+  }
+  async push(snapshotRef: string, snapshotDir: string): Promise<boolean> {
+    // On desktop/self-hosted, the verified local tar is the durable copy.
+    return verifyLocalSnapshot(snapshotRef, snapshotDir);
+  }
   async remove(): Promise<void> {}
 }
 
@@ -123,30 +144,23 @@ export class AzureBlobSnapshotStore implements SnapshotStore {
     }
   }
 
-  async push(snapshotRef: string, snapshotDir: string): Promise<void> {
-    if (!snapshotRef) {
-      return;
+  async verify(snapshotRef: string, snapshotDir: string): Promise<boolean> {
+    return verifyLocalSnapshot(snapshotRef, snapshotDir);
+  }
+
+  async push(snapshotRef: string, snapshotDir: string): Promise<boolean> {
+    if (!(await this.verify(snapshotRef, snapshotDir))) {
+      return false;
     }
     const src = localPath(snapshotDir, snapshotRef);
-    if (!existsSync(src)) {
-      return;
-    }
-    // Guard against zero-byte tars (omni serve crashed mid-write); a zero
-    // byte upload would clobber a usable prior copy.
-    try {
-      const stat = statSync(src);
-      if (stat.size === 0) {
-        return;
-      }
-    } catch {
-      return;
-    }
     try {
       const buf = await readFile(src);
       const client = (await this.container()).getBlockBlobClient(blobName(snapshotRef));
       await client.uploadData(buf);
+      return true;
     } catch (err) {
       console.error(`[snapshot-blob] push failed for ${snapshotRef}:`, err);
+      return false;
     }
   }
 

@@ -9,6 +9,9 @@ export type SessionItem = {
   created_at: string;
   archived: boolean;
   message_count: number;
+  title?: string;
+  pinned?: boolean;
+  searchPreview?: string;
   first_message?: any;
   last_message?: any;
 };

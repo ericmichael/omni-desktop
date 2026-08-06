@@ -78,6 +78,38 @@ describe('buildInstalledPlugins', () => {
     );
   });
 
+  it('surfaces runtime-only managed servers with read-only metadata', () => {
+    const items = buildInstalledPlugins({
+      mcpConfig: null,
+      skills: [],
+      updates: {},
+      customApps: [],
+      extensions: [],
+      runtimeMcpServers: [
+        {
+          server_name: 'omni-projects',
+          source: 'host_managed',
+          transport: 'stdio',
+          params: { command: 'omni-projects', args: [] },
+          server_options: {},
+          enabled: true,
+          read_only: true,
+          read_only_reason: 'host_managed',
+          status: { state: 'ready' },
+          auth: { kind: 'none', state: 'not_required' },
+        },
+      ],
+    });
+    expect(items).toMatchObject([
+      {
+        kind: 'connector',
+        id: 'omni-projects',
+        runtime: { read_only: true, source: 'host_managed' },
+        server: { command: 'omni-projects' },
+      },
+    ]);
+  });
+
   it('attaches update-available reports to marketplace skills by bundle key', () => {
     const items = buildInstalledPlugins({
       mcpConfig: null,

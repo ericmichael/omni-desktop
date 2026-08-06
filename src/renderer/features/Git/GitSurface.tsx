@@ -34,13 +34,14 @@ import {
 import { useRPCClient, useRPCConnected } from '@/renderer/omniagents-ui/rpc-context';
 import { emitter } from '@/renderer/services/ipc';
 import { persistedStoreApi } from '@/renderer/services/store';
-import type { CodeTabId, ProjectSource } from '@/shared/types';
+import type { CodeTabId, ExecutionTarget, ProjectSource } from '@/shared/types';
 
+import { GitRepositoryActions, type GitRepositoryCapabilities } from './GitRepositoryActions';
 import { GitStatusDiffView } from './GitStatusDiffView';
 
 export type GitSurfaceProps = {
   tabId?: CodeTabId;
-  environmentId: string;
+  executionTarget: ExecutionTarget;
   sessionId?: string;
   workspaceRoot?: string;
   /** Whether this persistent surface is currently visible in the dock. */
@@ -115,12 +116,12 @@ export function sourceForRepository(sources: ProjectSource[], repository: GitRep
 }
 
 export const GitSurface = memo((props: GitSurfaceProps) => {
-  const { tabId, environmentId, sessionId, workspaceRoot, active = true, onOpenFile } = props;
+  const { tabId, executionTarget, sessionId, workspaceRoot, active = true, onOpenFile } = props;
   const store = useStore(persistedStoreApi.$atom);
   const rpc = useRPCClient();
   const connected = useRPCConnected();
-  const identityKey = sessionId && workspaceRoot ? JSON.stringify([sessionId, environmentId, workspaceRoot]) : null;
-  const gitClient = useMemo(() => new GitClient(rpc, environmentId), [environmentId, rpc]);
+  const identityKey = sessionId && workspaceRoot ? JSON.stringify([sessionId, executionTarget, workspaceRoot]) : null;
+  const gitClient = useMemo(() => new GitClient(rpc, executionTarget), [executionTarget, rpc]);
   const [preparedKey, setPreparedKey] = useState<string | null>(null);
   const [repositories, setRepositories] = useState<IdentitySelection<GitListRepositoriesResult> | null>(null);
   const [selectedRepository, setSelectedRepository] = useState<IdentitySelection<WorkspaceRepo> | null>(null);
@@ -144,6 +145,20 @@ export const GitSurface = memo((props: GitSurfaceProps) => {
   const stageSupported = rpc.supportsExperimentalOperation('git_stage');
   const unstageSupported = rpc.supportsExperimentalOperation('git_unstage');
   const discardSupported = rpc.supportsExperimentalOperation('git_discard');
+  const repositoryCapabilities: GitRepositoryCapabilities = {
+    commit: rpc.supportsExperimentalOperation('git_commit'),
+    log: rpc.supportsExperimentalOperation('git_log'),
+    branches: rpc.supportsExperimentalOperation('git_list_branches'),
+    worktrees: rpc.supportsExperimentalOperation('git_list_worktrees'),
+    conflicts: rpc.supportsExperimentalOperation('git_conflicts'),
+    stage: stageSupported,
+    checkout: rpc.supportsExperimentalOperation('git_checkout'),
+    reset: rpc.supportsExperimentalOperation('git_reset'),
+    fetch: rpc.supportsExperimentalOperation('git_fetch'),
+    pull: rpc.supportsExperimentalOperation('git_pull'),
+    push: rpc.supportsExperimentalOperation('git_push'),
+    progress: rpc.supportsExperimentalOperation('git_operation_progress'),
+  };
   const currentRepositories = repositories?.identityKey === identityKey ? repositories.value : null;
   const currentRepo = selectedRepository?.identityKey === identityKey ? selectedRepository.value : null;
   const currentMode = diffMode?.identityKey === identityKey ? diffMode.value : 'worktree';
@@ -562,6 +577,19 @@ export const GitSurface = memo((props: GitSurfaceProps) => {
           Refresh
         </Button>
       </div>
+      {currentRepo && currentData ? (
+        <GitRepositoryActions
+          key={`${identityKey}:${currentRepo}`}
+          client={gitClient}
+          repo={currentRepo}
+          status={currentData.status}
+          capabilities={repositoryCapabilities}
+          disabled={mutationPending || !connected}
+          onChanged={refresh}
+          onMutationPendingChange={setMutationPending}
+          onOpenFile={onOpenFile ? openRepositoryFile : undefined}
+        />
+      ) : null}
       {!connected && (
         <Alert className="rounded-none border-x-0 border-t-0" role="status">
           <AlertDescription>Reconnecting to source control… The selected repository is preserved.</AlertDescription>
@@ -672,7 +700,7 @@ export function WorkspaceGitPortal({
   host,
   active,
   tabId,
-  environmentId,
+  executionTarget,
   sessionId,
   workspaceRoot,
   onOpenFile,
@@ -681,7 +709,7 @@ export function WorkspaceGitPortal({
     <GitSurface
       active={active}
       tabId={tabId}
-      environmentId={environmentId}
+      executionTarget={executionTarget}
       sessionId={sessionId}
       workspaceRoot={workspaceRoot}
       onOpenFile={onOpenFile}

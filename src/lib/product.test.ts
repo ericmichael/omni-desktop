@@ -26,7 +26,7 @@ const OMNI_CODE_DESCRIBE = {
   prog: 'omni',
   label: 'Omni Code',
   slug: 'omni_code',
-  version: '0.6.20',
+  version: '0.6.21',
   config_dir: '/home/user/.config/omni_code',
   env_prefix: 'OMNI_CODE',
   update: {
@@ -46,7 +46,7 @@ describe('bundled ProductDefinition (omni-code parity)', () => {
       packageName: 'omni-code',
       extraIndexUrl: 'https://pypi.fury.io/ericmichael/',
       prog: 'omni',
-      pinnedVersion: '0.6.20',
+      pinnedVersion: '0.6.21',
     });
     expect(getActiveProduct()).toBe(BUNDLED_PRODUCT);
   });
@@ -69,7 +69,7 @@ describe('describe --json payload parsing', () => {
       prog: 'omni',
       label: 'Omni Code',
       slug: 'omni_code',
-      version: '0.6.20',
+      version: '0.6.21',
       configDir: '/home/user/.config/omni_code',
       envPrefix: 'OMNI_CODE',
       update: {
@@ -104,6 +104,12 @@ describe('describe --json payload parsing', () => {
     expect(() => parseProductDescribePayload(null)).toThrow(/did not return an object/);
     expect(() => parseProductDescribePayload({ ...OMNI_CODE_DESCRIBE, slug: undefined })).toThrow(/missing "slug"/);
     expect(() => parseProductDescribePayload({ ...OMNI_CODE_DESCRIBE, serve_protocol: undefined })).toThrow(
+      /missing "serve_protocol"/
+    );
+    expect(() => parseProductDescribePayload({ ...OMNI_CODE_DESCRIBE, serve_protocol: Number.NaN })).toThrow(
+      /missing "serve_protocol"/
+    );
+    expect(() => parseProductDescribePayload({ ...OMNI_CODE_DESCRIBE, serve_protocol: 2.5 })).toThrow(
       /missing "serve_protocol"/
     );
   });

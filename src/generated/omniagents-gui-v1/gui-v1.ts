@@ -414,6 +414,7 @@ export interface GitDiffParams {
   context_lines?: number;
   from_rev?: string;
   to_rev?: string;
+  include_untracked?: boolean;
   workspace_id?: string;
   environment_generation?: number;
 }
@@ -569,7 +570,7 @@ export interface SearchThreadsParams {
 }
 export interface UpdateThreadParams {
   thread_id: string;
-  title?: string;
+  title?: string | null;
   pinned?: boolean;
   status?: string;
   metadata?: Record<string, unknown>;
@@ -745,7 +746,7 @@ export interface ElicitationRequestedParams {
   elicitation_id: string;
   kind: string;
   message: string;
-  title?: string;
+  title?: string | null;
   input_schema?: Record<string, unknown>;
   options?: unknown[];
   url?: string;

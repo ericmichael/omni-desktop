@@ -21,6 +21,12 @@ import {
   SettingsSection,
 } from '@/renderer/features/SettingsModal/SettingsLayout';
 import { SettingsModalConnectionCards } from '@/renderer/features/SettingsModal/SettingsModalConnectionCards';
+import {
+  runtimeModelListFromManagement,
+  useProductManagement,
+  useProductManagementRefresh,
+  useProductManagementSnapshot,
+} from '@/renderer/omniagents-ui/product-management-context';
 import { agentConfigApi } from '@/renderer/services/config';
 import { emitter, ipc } from '@/renderer/services/ipc';
 import { persistedStoreApi } from '@/renderer/services/store';
@@ -81,6 +87,9 @@ function collectRealtimeModelKeys(config: ModelsConfig): string[] {
 }
 
 export const SettingsModalAiTab = memo(() => {
+  const management = useProductManagement();
+  const refreshManagement = useProductManagementRefresh();
+  const managementSnapshot = useProductManagementSnapshot();
   const [config, setConfig] = useState<ModelsConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [dirty, setDirty] = useState(false);
@@ -94,7 +103,12 @@ export const SettingsModalAiTab = memo(() => {
   // includes models not in the store — notably OAuth-discovered Codex models.
   // Entries, not names — the `realtime` flag decides what the voice model
   // dropdown may offer, and dropping it here would strand voice on text models.
-  const [runtimeModels, setRuntimeModels] = useState<RuntimeModelEntry[]>([]);
+  const [legacyRuntimeModels, setLegacyRuntimeModels] = useState<RuntimeModelEntry[]>([]);
+  const canonicalRuntimeModels = useMemo(
+    () => runtimeModelListFromManagement(managementSnapshot)?.models ?? null,
+    [managementSnapshot]
+  );
+  const runtimeModels = canonicalRuntimeModels ?? legacyRuntimeModels;
   const runtimeModelNames = useMemo(() => runtimeModels.map((m) => m.name), [runtimeModels]);
 
   const load = useCallback(async () => {
@@ -115,22 +129,45 @@ export const SettingsModalAiTab = memo(() => {
   }, [load]);
 
   useEffect(() => {
+    if (canonicalRuntimeModels || (management.status !== 'error' && managementSnapshot.models.status !== 'error')) {
+      return;
+    }
     emitter
       .invoke('util:list-models')
-      .then((res) => setRuntimeModels(res.models))
-      .catch(() => setRuntimeModels([]));
-  }, []);
+      .then((res) => setLegacyRuntimeModels(res.models))
+      .catch(() => setLegacyRuntimeModels([]));
+  }, [canonicalRuntimeModels, management.status, managementSnapshot.models.status]);
 
   // Dead ChatGPT sessions must not render a plausible "discovered" model
   // list — while broken, discovery is failing and the runtime list is just
   // local seeds wearing a live costume.
-  const [codexBroken, setCodexBroken] = useState(false);
+  const canonicalCodexStatus = useMemo(() => {
+    if (managementSnapshot.accounts.status !== 'ready' || !managementSnapshot.accounts.data) {
+      return null;
+    }
+    const account = managementSnapshot.accounts.data.providers.find(
+      (candidate) => candidate.kind === 'oauth' && /codex|chatgpt|openai/i.test(`${candidate.id} ${candidate.label}`)
+    );
+    return {
+      signedIn: account?.state === 'signed_in',
+      broken: account?.state === 'error',
+      accountId:
+        account?.identity && typeof account.identity['account_id'] === 'string'
+          ? account.identity['account_id']
+          : undefined,
+    };
+  }, [managementSnapshot.accounts]);
+  const [legacyCodexBroken, setLegacyCodexBroken] = useState(false);
   useEffect(() => {
+    if (canonicalCodexStatus || (management.status !== 'error' && managementSnapshot.accounts.status !== 'error')) {
+      return;
+    }
     emitter
       .invoke('codex:status')
-      .then((s) => setCodexBroken(Boolean(s.broken)))
-      .catch(() => setCodexBroken(false));
-  }, []);
+      .then((s) => setLegacyCodexBroken(Boolean(s.broken)))
+      .catch(() => setLegacyCodexBroken(false));
+  }, [canonicalCodexStatus, management.status, managementSnapshot.accounts.status]);
+  const codexBroken = canonicalCodexStatus?.broken ?? legacyCodexBroken;
 
   // Union of store-configured keys and the live runtime list, so discovered
   // models (e.g. Codex) are selectable as the default model. Realtime models
@@ -162,15 +199,17 @@ export const SettingsModalAiTab = memo(() => {
    */
   const applyCodexSignIn = useCallback(async (): Promise<string | undefined> => {
     const current = await agentConfigApi.getModels();
-    const runtime = await emitter.invoke('util:list-models').catch(() => null);
+    const refreshed = await refreshManagement().catch(() => null);
+    const canonical = refreshed ? runtimeModelListFromManagement(refreshed) : null;
+    const runtime = canonical ?? (await emitter.invoke('util:list-models').catch(() => null));
     // Push the fresh discovery into state so the default picker and the
     // Codex provider row both reflect sign-in immediately (no modal reopen).
-    setRuntimeModels(runtime?.models ?? []);
+    setLegacyRuntimeModels(runtime?.models ?? []);
     const { config: next, madeDefault } = buildCodexConfig(current, runtime);
     await agentConfigApi.setModels(next);
     await load();
     return madeDefault;
-  }, [load]);
+  }, [load, refreshManagement]);
 
   /**
    * Connection-card fix path: validate the replacement key first, persist it
@@ -416,8 +455,17 @@ export const SettingsModalAiTab = memo(() => {
   return (
     <SettingsPane>
       <SettingsSection title="Connections">
-        <CodexSignInCard onSignedIn={applyCodexSignIn} />
-        <SettingsModalConnectionCards config={config} onFixKey={applyKeyFix} />
+        <CodexSignInCard
+          onSignedIn={applyCodexSignIn}
+          canonicalStatus={canonicalCodexStatus}
+          allowLegacyStatus={management.status === 'error' || managementSnapshot.accounts.status === 'error'}
+        />
+        <SettingsModalConnectionCards
+          config={config}
+          onFixKey={applyKeyFix}
+          runtimeProviders={managementSnapshot.providers.data?.providers}
+          allowLegacyProbe={management.status === 'error' || managementSnapshot.providers.status === 'error'}
+        />
       </SettingsSection>
 
       <SettingsSection title="Defaults">
@@ -590,110 +638,129 @@ SettingsModalAiTab.displayName = 'SettingsModalAiTab';
  * store so it's visible), so the agent uses ChatGPT immediately — no manual
  * provider setup. `onSignedIn` does that and returns the chosen model ref.
  */
-const CodexSignInCard = memo(({ onSignedIn }: { onSignedIn: () => Promise<string | undefined> }) => {
-  const [status, setStatus] = useState<{ signedIn: boolean; accountId?: string; broken?: boolean } | null>(null);
-  const [activeModel, setActiveModel] = useState<string | undefined>(undefined);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  // Set while the device-flow user_code is live and the user is authorizing.
-  const [deviceCode, setDeviceCode] = useState<CodexDeviceCode | null>(null);
+const CodexSignInCard = memo(
+  ({
+    onSignedIn,
+    canonicalStatus,
+    allowLegacyStatus,
+  }: {
+    onSignedIn: () => Promise<string | undefined>;
+    canonicalStatus: { signedIn: boolean; accountId?: string; broken?: boolean } | null;
+    allowLegacyStatus: boolean;
+  }) => {
+    const [status, setStatus] = useState<{ signedIn: boolean; accountId?: string; broken?: boolean } | null>(
+      canonicalStatus
+    );
+    const [activeModel, setActiveModel] = useState<string | undefined>(undefined);
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    // Set while the device-flow user_code is live and the user is authorizing.
+    const [deviceCode, setDeviceCode] = useState<CodexDeviceCode | null>(null);
 
-  useEffect(() => {
-    emitter
-      .invoke('codex:status')
-      .then(setStatus)
-      .catch(() => setStatus({ signedIn: false }));
-  }, []);
-
-  // Main pushes the user code mid-flow; show it while we poll.
-  useEffect(() => ipc.on('codex:device-code', setDeviceCode), []);
-
-  const onSignIn = useCallback(async () => {
-    setBusy(true);
-    setError(null);
-    setDeviceCode(null);
-    try {
-      // Device flow works in Electron and server/browser mode alike. PKCE
-      // (codex:login) is still available in Electron for a one-click UX but
-      // the device flow's universality wins for a single code path here.
-      const next = await emitter.invoke('codex:link');
-      setStatus(next);
-      if (next.signedIn) {
-        setActiveModel(await onSignedIn());
+    useEffect(() => {
+      if (canonicalStatus) {
+        setStatus(canonicalStatus);
+        return;
       }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Sign-in failed');
-    } finally {
-      setBusy(false);
+      if (!allowLegacyStatus) {
+        return;
+      }
+      emitter
+        .invoke('codex:status')
+        .then(setStatus)
+        .catch(() => setStatus({ signedIn: false }));
+    }, [allowLegacyStatus, canonicalStatus]);
+
+    // Main pushes the user code mid-flow; show it while we poll.
+    useEffect(() => ipc.on('codex:device-code', setDeviceCode), []);
+
+    const onSignIn = useCallback(async () => {
+      setBusy(true);
+      setError(null);
       setDeviceCode(null);
-    }
-  }, [onSignedIn]);
+      try {
+        // Device flow works in Electron and server/browser mode alike. PKCE
+        // (codex:login) is still available in Electron for a one-click UX but
+        // the device flow's universality wins for a single code path here.
+        const next = await emitter.invoke('codex:link');
+        setStatus(next);
+        if (next.signedIn) {
+          setActiveModel(await onSignedIn());
+        }
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Sign-in failed');
+      } finally {
+        setBusy(false);
+        setDeviceCode(null);
+      }
+    }, [onSignedIn]);
 
-  const onSignOut = useCallback(async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      await emitter.invoke('codex:logout');
-      setStatus({ signedIn: false });
-      setActiveModel(undefined);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Sign-out failed');
-    } finally {
-      setBusy(false);
-    }
-  }, []);
+    const onSignOut = useCallback(async () => {
+      setBusy(true);
+      setError(null);
+      try {
+        await emitter.invoke('codex:logout');
+        setStatus({ signedIn: false });
+        setActiveModel(undefined);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Sign-out failed');
+      } finally {
+        setBusy(false);
+      }
+    }, []);
 
-  return (
-    <Card>
-      <CardContent className="flex flex-col gap-2">
-        <div className="flex items-center gap-2">
-          <div className="flex-1 min-w-0">
-            <div className="text-sm font-medium text-foreground">
-              {status?.broken
-                ? 'ChatGPT session expired'
-                : status?.signedIn
-                  ? 'Signed in to ChatGPT'
-                  : 'Use your ChatGPT subscription'}
+    return (
+      <Card>
+        <CardContent className="flex flex-col gap-2">
+          <div className="flex items-center gap-2">
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-medium text-foreground">
+                {status?.broken
+                  ? 'ChatGPT session expired'
+                  : status?.signedIn
+                    ? 'Signed in to ChatGPT'
+                    : 'Use your ChatGPT subscription'}
+              </div>
+              <div className="text-sm text-muted-foreground sm:text-xs">
+                {status?.broken
+                  ? 'Sign in again to reconnect.'
+                  : status?.signedIn
+                    ? (activeModel ?? '')
+                    : (error ?? 'Works with Plus, Pro, and Team plans.')}
+              </div>
             </div>
-            <div className="text-sm text-muted-foreground sm:text-xs">
-              {status?.broken
-                ? 'Sign in again to reconnect.'
-                : status?.signedIn
-                  ? (activeModel ?? '')
-                  : (error ?? 'Works with Plus, Pro, and Team plans.')}
-            </div>
+            {status?.signedIn && !status.broken ? (
+              <Button size="sm" variant="ghost" onClick={onSignOut} disabled={busy}>
+                Sign out
+              </Button>
+            ) : (
+              <Button size="sm" onClick={onSignIn} disabled={busy}>
+                {busy ? 'Waiting for authorization…' : status?.broken ? 'Sign in again' : 'Sign in with ChatGPT'}
+              </Button>
+            )}
           </div>
-          {status?.signedIn && !status.broken ? (
-            <Button size="sm" variant="ghost" onClick={onSignOut} disabled={busy}>
-              Sign out
-            </Button>
-          ) : (
-            <Button size="sm" onClick={onSignIn} disabled={busy}>
-              {busy ? 'Waiting for authorization…' : status?.broken ? 'Sign in again' : 'Sign in with ChatGPT'}
-            </Button>
+
+          {busy && deviceCode && (
+            <div className="flex flex-col gap-0.5 p-2 rounded-lg bg-background border border-border">
+              <span className="text-xs text-muted-foreground">
+                Open{' '}
+                <a href={deviceCode.verificationUri} target="_blank" rel="noopener noreferrer">
+                  {deviceCode.verificationUri}
+                </a>{' '}
+                and enter this code:
+              </span>
+              <span className="font-mono text-xl font-semibold tracking-widest">{deviceCode.userCode}</span>
+              <div className="flex items-center gap-2">
+                <Spinner />
+                <span className="text-xs text-muted-foreground">Waiting for authorization…</span>
+              </div>
+            </div>
           )}
-        </div>
-
-        {busy && deviceCode && (
-          <div className="flex flex-col gap-0.5 p-2 rounded-lg bg-background border border-border">
-            <span className="text-xs text-muted-foreground">
-              Open{' '}
-              <a href={deviceCode.verificationUri} target="_blank" rel="noopener noreferrer">
-                {deviceCode.verificationUri}
-              </a>{' '}
-              and enter this code:
-            </span>
-            <span className="font-mono text-xl font-semibold tracking-widest">{deviceCode.userCode}</span>
-            <div className="flex items-center gap-2">
-              <Spinner />
-              <span className="text-xs text-muted-foreground">Waiting for authorization…</span>
-            </div>
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  );
-});
+        </CardContent>
+      </Card>
+    );
+  }
+);
 CodexSignInCard.displayName = 'CodexSignInCard';
 
 const ProviderRow = memo(

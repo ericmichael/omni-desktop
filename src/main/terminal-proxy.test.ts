@@ -85,7 +85,12 @@ const makeProxy = () => {
   const processManager = {
     getStatus: () => ({
       type: 'running',
-      data: { wsUrl: 'ws://127.0.0.1:9000/ws?token=abc', environmentId: 'environment-1' },
+      data: {
+        wsUrl: 'ws://127.0.0.1:9000/ws?token=abc',
+        workspaceId: 'workspace-1',
+        environmentId: 'environment-1',
+        environmentGeneration: 3,
+      },
     }),
   } as unknown as ProcessManager;
   return { proxy: new TerminalProxy({ processManager, sendToWindow }), sendToWindow };
@@ -195,7 +200,9 @@ describe('TerminalProxy lifecycle', () => {
     expect(createFrame.params).toMatchObject({
       function: 'terminal.create',
       session_id: 'sess-1',
+      workspace_id: 'workspace-1',
       environment_id: 'environment-1',
+      environment_generation: 3,
     });
   });
 

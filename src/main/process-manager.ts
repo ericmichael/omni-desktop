@@ -16,16 +16,25 @@ import {
   type AgentProcessStartArg,
   type FetchFn,
 } from '@/main/agent-process';
+import { hasDurableHostCodexMutation, isDurableCodexAccountRequest } from '@/main/local-codex-account-owner';
+import {
+  hasDurableHostMcpMutation,
+  isMcpManagementMethod,
+  isProtectedManagedMcpRequest,
+} from '@/main/local-mcp-config-owner';
 import type { IComputeClient } from '@/main/platform-client';
 import { getDefaultWorkspaceDir } from '@/main/util';
 import { gitTokenEnvName, resolveCredentialForUrl } from '@/shared/git-credentials';
 import type { IIpcListener } from '@/shared/ipc-listener';
+import { assertManagementAdminRequest, type ManagementAdminResult } from '@/shared/management-admin';
 import type {
   AgentProcessStartOptions,
   AgentProcessStatus,
   AgentProcessStopOptions,
+  AgentProcessStopResult,
   GitCredential,
   IpcRendererEvents,
+  ManagementRuntimeConnection,
   Project,
   SandboxPauseResult,
   SandboxSwitchResult,
@@ -120,7 +129,10 @@ export class ProcessManager {
   private consumerWorkspaceIds = new Map<string, string>();
   private consumerWorkspaceIdentities = new Map<string, string>();
   private pendingStarts = new Map<string, { identity: string; promise: Promise<void> }>();
-  private pendingStops = new Map<string, Promise<void>>();
+  private pendingStops = new Map<string, Promise<AgentProcessStopResult>>();
+  private pendingManagementConnection: Promise<ManagementRuntimeConnection> | null = null;
+  /** Monotonic consumer intent; async results may publish only if their epoch still wins. */
+  private consumerEpochs = new Map<string, number>();
   private sendToWindow: <T extends keyof IpcRendererEvents>(channel: T, ...args: IpcRendererEvents[T]) => void;
   private fetchFn: FetchFn;
   private getStoreData: () => ProcessManagerStoreData;
@@ -159,6 +171,20 @@ export class ProcessManager {
    * `src/server/host-bridge-preparer.ts`.
    */
   private hostBridge?: IHostBridgePreparer;
+  /** Blocks local AgentHost operations while the runtime venv is being
+   * installed or repaired. In particular, the omni-code console script may
+   * exist before the development omniagents overlay is fully installed. */
+  private waitForRuntimeInstall?: () => Promise<void>;
+  /** Trusted topology assertion. True only for the single-user local Electron
+   * manager; server managers must remain false even if child env is spoofed. */
+  private durableLocalCodexAccountMutations: boolean;
+  /** Independent trusted topology gate for canonical host MCP stores. */
+  private durableLocalMcpMutations: boolean;
+  /** One-time parity/ownership transfer, injected only by Electron main. */
+  private prepareLocalMcpOwnership?: (status: Record<string, unknown>) => void | Promise<void>;
+  /** Readiness hook for local ownership transfer; runs after the control
+   * channel is usable and never gates the legacy settings read. */
+  private onManagementReady?: (proc: AgentProcess) => void | Promise<void>;
 
   /** processId → machineId for live `local:<machineId>` sessions, so stop()
    *  can tell the laptop to tear down its `omni sandbox-host`. */
@@ -186,6 +212,16 @@ export class ProcessManager {
     allowedProfileNames?: string[];
     /** Computer-as-sandbox preparer (cloud-only). */
     hostBridge?: IHostBridgePreparer;
+    /** Wait for any in-flight local runtime install/repair to settle. */
+    waitForRuntimeInstall?: () => Promise<void>;
+    /** Permit canonical Codex mutations only in local single-user Electron. */
+    durableLocalCodexAccountMutations?: boolean;
+    /** Permit canonical MCP CRUD/auth only in local single-user Electron. */
+    durableLocalMcpMutations?: boolean;
+    /** Verify legacy/canonical parity before the first canonical mutation. */
+    prepareLocalMcpOwnership?: (status: Record<string, unknown>) => void | Promise<void>;
+    /** Run local ownership transfer after the management host is ready. */
+    onManagementReady?: (proc: AgentProcess) => void | Promise<void>;
   }) {
     this.sendToWindow = arg.sendToWindow;
     this.fetchFn = arg.fetchFn ?? globalThis.fetch;
@@ -199,6 +235,11 @@ export class ProcessManager {
     this.resolveGitToken = arg.resolveGitToken;
     this.allowedProfileNames = arg.allowedProfileNames;
     this.hostBridge = arg.hostBridge;
+    this.waitForRuntimeInstall = arg.waitForRuntimeInstall;
+    this.durableLocalCodexAccountMutations = arg.durableLocalCodexAccountMutations === true;
+    this.durableLocalMcpMutations = arg.durableLocalMcpMutations === true;
+    this.prepareLocalMcpOwnership = arg.prepareLocalMcpOwnership;
+    this.onManagementReady = arg.onManagementReady;
   }
 
   private resolveProfileName(projectId: string | undefined, override: string | undefined): string {
@@ -376,7 +417,20 @@ export class ProcessManager {
     }
     const runtime = this.consumerRuntimes.get(consumerId);
     if (!runtime) {
-      return null;
+      // Platform compute already returns one fully materialized, consumer-
+      // scoped AgentHost environment. It does not pass through the local
+      // configureConsumer control plane, so its validated status data is the
+      // authoritative runtime rather than a shared-host readiness leak.
+      const data = status.data;
+      return data.agentHostId &&
+        data.workspaceId &&
+        data.environmentId &&
+        Number.isSafeInteger(data.environmentGeneration) &&
+        data.workspaceRoot &&
+        data.defaultCwd &&
+        data.services
+        ? status
+        : null;
     }
     return {
       ...status,
@@ -384,6 +438,7 @@ export class ProcessManager {
         ...status.data,
         workspaceId: runtime.workspaceId,
         environmentId: runtime.environmentId,
+        environmentGeneration: runtime.environmentGeneration,
         workspaceRoot: runtime.workspaceRoot,
         ...(runtime.defaultCwd ? { defaultCwd: runtime.defaultCwd } : {}),
         services: runtime.services,
@@ -781,6 +836,16 @@ export class ProcessManager {
     });
   }
 
+  private advanceConsumerEpoch(processId: string): number {
+    const epoch = (this.consumerEpochs.get(processId) ?? 0) + 1;
+    this.consumerEpochs.set(processId, epoch);
+    return epoch;
+  }
+
+  private isCurrentConsumerEpoch(processId: string, epoch: number): boolean {
+    return this.consumerEpochs.get(processId) === epoch;
+  }
+
   start = (processId: string, opts: AgentProcessStartOptions): Promise<void> => {
     const identity = ProcessManager.launchIdentity(opts);
     const pending = this.pendingStarts.get(processId);
@@ -792,10 +857,24 @@ export class ProcessManager {
       // provisioning (picker changes, HMR, renderer reconnection). Preserve a
       // single mutator for that consumer and apply the newer intent only after
       // the current transaction settles.
-      return pending.promise.catch(() => undefined).then(() => this.start(processId, opts));
+      const epoch = this.advanceConsumerEpoch(processId);
+      const operation = pending.promise
+        .catch(() => undefined)
+        .then(() =>
+          this.isCurrentConsumerEpoch(processId, epoch) ? this.startConsumer(processId, opts, epoch) : undefined
+        );
+      this.pendingStarts.set(processId, { identity, promise: operation });
+      const clear = (): void => {
+        if (this.pendingStarts.get(processId)?.promise === operation) {
+          this.pendingStarts.delete(processId);
+        }
+      };
+      void operation.then(clear, clear);
+      return operation;
     }
 
-    const operation = this.startConsumer(processId, opts);
+    const epoch = this.advanceConsumerEpoch(processId);
+    const operation = this.startConsumer(processId, opts, epoch);
     this.pendingStarts.set(processId, { identity, promise: operation });
     const clear = (): void => {
       if (this.pendingStarts.get(processId)?.promise === operation) {
@@ -806,7 +885,177 @@ export class ProcessManager {
     return operation;
   };
 
-  private startConsumer = async (processId: string, opts: AgentProcessStartOptions): Promise<void> => {
+  /**
+   * Ensure a targetless, product-scoped management attachment exists.
+   *
+   * No Workspace/Profile/Environment is materialized for this synthetic
+   * consumer. It shares a compatible interactive AgentHost when one exists,
+   * otherwise it starts the host early so Settings and onboarding can read
+   * management state without opening a code column. Only the ordinary
+   * renderer credential is returned; the AgentHost control token remains
+   * encapsulated by AgentProcess and its main-process control client.
+   */
+  ensureManagementConnection = (): Promise<ManagementRuntimeConnection> => {
+    if (this.pendingManagementConnection) {
+      return this.pendingManagementConnection;
+    }
+    const operation = this.ensureManagementConnectionImpl();
+    this.pendingManagementConnection = operation;
+    const clear = (): void => {
+      if (this.pendingManagementConnection === operation) {
+        this.pendingManagementConnection = null;
+      }
+    };
+    void operation.then(clear, clear);
+    return operation;
+  };
+
+  private ensureManagementConnectionImpl = async (): Promise<ManagementRuntimeConnection> => {
+    const processId = '__product_management__';
+    // Profile definitions are consumer-environment concerns. Force the local
+    // targetless host path here even when the user's default is delegated
+    // platform compute or a laptop host_bridge; no sandbox is being created.
+    const startArg = await this.buildStartArg({ workspaceDir: '', profileNameOverride: 'host' });
+    const mode = this.resolveMode(startArg.profileName);
+    if (mode !== 'serve') {
+      throw new Error('Product management requires a targetless AgentHost');
+    }
+    await this.waitForRuntimeInstall?.();
+    const compatibilityKey = this.agentHostCompatibilityKey(processId, mode, startArg);
+    const { proc, created } = this.getOrCreate(processId, compatibilityKey, mode, null);
+    try {
+      const statusType = proc.getStatus().type;
+      if (created || !['starting', 'connecting', 'running'].includes(statusType)) {
+        await proc.start(startArg);
+      }
+      const [connection, mutationCapabilities] = await Promise.all([
+        proc.getRuntimeConnection(),
+        proc.getManagementMutationCapabilities(),
+      ]);
+      // Host MCP ownership transfer is a readiness side effect. It must not
+      // make the legacy settings read wait for a cold runtime to boot.
+      await this.onManagementReady?.(proc);
+      return { ...connection, mutationCapabilities };
+    } catch (error) {
+      this.processes.delete(processId);
+      const detached = this.agentHosts.detach(processId);
+      if (detached?.lastConsumer) {
+        await proc.stop().catch(() => {});
+      }
+      throw error;
+    }
+  };
+
+  mutateManagement = async (input: unknown): Promise<ManagementAdminResult> => {
+    const request = assertManagementAdminRequest(input);
+    await this.ensureManagementConnection();
+    const proc = this.processes.get('__product_management__');
+    if (!proc) {
+      throw new Error('Product management AgentHost is unavailable');
+    }
+    if (request.method.startsWith('account_')) {
+      if (!isDurableCodexAccountRequest(request)) {
+        throw new Error('Only durable ChatGPT OAuth account mutations are available through this broker');
+      }
+      if (!this.durableLocalCodexAccountMutations) {
+        throw new Error('Account mutations are unavailable outside local single-user Electron');
+      }
+      const status = await proc.getManagementAccountStatus();
+      if (!hasDurableHostCodexMutation(status)) {
+        throw new Error('AgentHost did not attest durable host-scoped Codex account mutations');
+      }
+    }
+    if (isMcpManagementMethod(request.method)) {
+      if (!this.durableLocalMcpMutations) {
+        throw new Error('MCP mutations are unavailable outside local single-user Electron');
+      }
+      if (isProtectedManagedMcpRequest(request as { method: string; params: Record<string, unknown> })) {
+        throw new Error('The omni-projects MCP server is managed by Omni Desktop and cannot be changed');
+      }
+      const status = await proc.getManagementMcpStatus();
+      if (!hasDurableHostMcpMutation(status)) {
+        throw new Error('AgentHost did not attest durable host-scoped MCP configuration and OAuth stores');
+      }
+      await this.prepareLocalMcpOwnership?.(status);
+
+      const result = await proc.callManagementAdmin(request.method, request.params as never);
+      // mcp_auth_cancel only discards process-local pending state. Every other
+      // allowed MCP mutation can change config, credentials, or live instances.
+      if (request.method !== 'mcp_auth_cancel') {
+        await this.invalidateLocalMcpAgentHosts(request.method === 'mcp_reload_server' ? proc : undefined);
+      }
+      return result;
+    }
+    return proc.callManagementAdmin(request.method, request.params as never);
+  };
+
+  private evictStaleMcpHost = async (proc: AgentProcess): Promise<string[]> => {
+    const consumers = this.agentHosts.consumersForHost(proc);
+    for (const processId of consumers) {
+      this.advanceConsumerEpoch(processId);
+      this.processes.delete(processId);
+      this.consumerRuntimes.delete(processId);
+      this.consumerWorkspaceIds.delete(processId);
+      this.consumerWorkspaceIdentities.delete(processId);
+      this.lastStartArgs.delete(processId);
+      this.mirrorSources.delete(processId);
+      this.agentHosts.detach(processId);
+      if (processId === '__product_management__') {
+        this.pendingManagementConnection = null;
+      }
+    }
+    await proc.stop().catch(() => undefined);
+    return consumers;
+  };
+
+  /** Reload every distinct live local AgentHost after the shared file/token
+   * store changes. A peer that cannot reload is evicted before returning an
+   * actionable partial-invalidation error, so it can never serve stale MCP. */
+  private invalidateLocalMcpAgentHosts = async (alreadyReloaded?: AgentProcess): Promise<void> => {
+    const hosts = this.agentHosts
+      .hosts()
+      .filter(
+        (host) => host !== alreadyReloaded && host.usesLocalAgentHostConfig() && host.getStatus().type === 'running'
+      );
+    const failures: string[] = [];
+    await Promise.all(
+      hosts.map(async (host) => {
+        try {
+          await host.callManagementAdmin('mcp_reload_server', {});
+        } catch (error) {
+          const consumers = await this.evictStaleMcpHost(host);
+          failures.push(`${consumers.join(', ') || 'unattached host'}: ${(error as Error).message}`);
+        }
+      })
+    );
+    if (failures.length > 0) {
+      throw new Error(
+        `MCP mutation committed, but stale AgentHost invalidation failed; affected hosts were stopped: ${failures.join('; ')}`
+      );
+    }
+  };
+
+  /** Main-only account migration read. No IPC handler exposes this method. */
+  getManagementAccountStatus = async (): Promise<Record<string, unknown>> => {
+    await this.ensureManagementConnection();
+    const proc = this.processes.get('__product_management__');
+    if (!proc) {
+      throw new Error('Product management AgentHost is unavailable');
+    }
+    return proc.getManagementAccountStatus();
+  };
+
+  /** Main-only MCP ownership migration read. No generic control RPC is exposed. */
+  getManagementMcpStatus = async (): Promise<Record<string, unknown>> => {
+    await this.ensureManagementConnection();
+    const proc = this.processes.get('__product_management__');
+    if (!proc) {
+      throw new Error('Product management AgentHost is unavailable');
+    }
+    return proc.getManagementMcpStatus();
+  };
+
+  private startConsumer = async (processId: string, opts: AgentProcessStartOptions, epoch: number): Promise<void> => {
     // Adopt an already-live process rather than restarting it. A renderer that
     // just (re)connected has an empty status map — its auto-launch guard reads
     // that map *before* `watchProcessStatus` seeds it — so a browser reload or
@@ -823,7 +1072,9 @@ export class ProcessManager {
       if (sameLaunch && (type === 'starting' || type === 'connecting' || type === 'running')) {
         // Re-broadcast so the reconnected renderer, which cleared its local
         // status before calling start, leaves `starting` on its own.
-        this.sendToWindow('agent-process:status', processId, this.getStatus(processId));
+        if (this.isCurrentConsumerEpoch(processId, epoch)) {
+          this.sendToWindow('agent-process:status', processId, this.getStatus(processId));
+        }
         return;
       }
     }
@@ -835,8 +1086,17 @@ export class ProcessManager {
     if (profilePath) {
       startArg.explicitProfilePath = profilePath;
     }
+    if (!this.isCurrentConsumerEpoch(processId, epoch)) {
+      return;
+    }
     const mode = this.resolveMode(startArg.profileName);
     const client = this.resolveComputeClient(startArg.profileName);
+    if (mode === 'serve') {
+      await this.waitForRuntimeInstall?.();
+    }
+    if (!this.isCurrentConsumerEpoch(processId, epoch)) {
+      return;
+    }
     const compatibilityKey = this.agentHostCompatibilityKey(processId, mode, startArg);
     const { proc, created } = this.getOrCreate(processId, compatibilityKey, mode, client);
     const preservedAttachment = live === proc;
@@ -845,6 +1105,10 @@ export class ProcessManager {
       if (created || !['starting', 'connecting', 'running'].includes(statusType)) {
         await proc.start(startArg);
       }
+      if (!this.isCurrentConsumerEpoch(processId, epoch)) {
+        await this.retireStaleStart(processId, proc, previousRuntime);
+        return;
+      }
       if (mode === 'serve') {
         const workspaceIdentity = ProcessManager.workspaceIdentity(startArg);
         const workspaceId =
@@ -852,11 +1116,23 @@ export class ProcessManager {
             ? previousWorkspaceId
             : `workspace_${randomUUID().replaceAll('-', '')}`;
         const runtime = await proc.configureConsumer(processId, workspaceId, startArg);
+        if (!this.isCurrentConsumerEpoch(processId, epoch)) {
+          const isPriorRuntime =
+            previousRuntime?.environmentId === runtime.environmentId &&
+            previousRuntime.environmentGeneration === runtime.environmentGeneration;
+          if (!isPriorRuntime) {
+            await proc.stopConsumerEnvironment(runtime).catch((error) => {
+              console.warn(`[process-manager] stale environment cleanup failed: ${(error as Error).message}`);
+            });
+          }
+          await this.retireStaleStart(processId, proc, previousRuntime);
+          return;
+        }
         this.consumerWorkspaceIds.set(processId, workspaceId);
         this.consumerWorkspaceIdentities.set(processId, workspaceIdentity);
         this.consumerRuntimes.set(processId, runtime);
         if (previousRuntime && previousRuntime.environmentId !== runtime.environmentId) {
-          await proc.stopConsumerEnvironment(previousRuntime.environmentId).catch((error) => {
+          await proc.stopConsumerEnvironment(previousRuntime).catch((error) => {
             console.warn(`[process-manager] old environment cleanup failed: ${(error as Error).message}`);
           });
         }
@@ -892,35 +1168,68 @@ export class ProcessManager {
     this.sendToWindow('agent-process:status', processId, this.getStatus(processId));
   };
 
-  stop = async (processId: string, opts?: AgentProcessStopOptions): Promise<void> => {
+  private retireStaleStart = async (
+    processId: string,
+    proc: AgentProcess,
+    previousRuntime: AgentHostConsumerRuntime | undefined
+  ): Promise<void> => {
+    // A rebind keeps the previous runtime/attachment authoritative until the
+    // newer intent takes over. A cancelled first start owns no useful state.
+    if (previousRuntime || this.processes.get(processId) !== proc) {
+      return;
+    }
+    this.processes.delete(processId);
+    const detached = this.agentHosts.detach(processId);
+    if (detached?.lastConsumer) {
+      await proc.stop().catch(() => {});
+    }
+  };
+
+  stop = async (processId: string, opts?: AgentProcessStopOptions): Promise<AgentProcessStopResult> => {
     const pending = this.pendingStops.get(processId);
     if (pending) {
       return pending;
     }
-    const operation = this.stopConsumer(processId, opts).finally(() => {
+    const epoch = this.advanceConsumerEpoch(processId);
+    const pendingStart = this.pendingStarts.get(processId)?.promise;
+    const operation = (async () => {
+      await pendingStart?.catch(() => undefined);
+      if (this.isCurrentConsumerEpoch(processId, epoch)) {
+        return this.stopConsumer(processId, opts);
+      }
+      return this.emptyStopResult();
+    })().finally(() => {
       this.pendingStops.delete(processId);
     });
     this.pendingStops.set(processId, operation);
     return operation;
   };
 
-  private stopConsumer = async (processId: string, opts?: AgentProcessStopOptions): Promise<void> => {
+  private emptyStopResult = (): AgentProcessStopResult => ({
+    scope: 'none',
+    shutdown: 'not-applicable',
+    snapshotPersistence: 'complete',
+    pendingSnapshotRefs: [],
+  });
+
+  private stopConsumer = async (processId: string, opts?: AgentProcessStopOptions): Promise<AgentProcessStopResult> => {
     const proc = this.processes.get(processId);
     if (!proc) {
-      return;
+      return this.emptyStopResult();
     }
     this.mirrorSources.delete(processId);
     const runtime = this.consumerRuntimes.get(processId);
     const detached = this.agentHosts.detach(processId);
     try {
       if (opts?.discardSnapshot && runtime) {
-        await proc.discardConsumerSnapshot(runtime.environmentId).catch(() => {});
+        await proc.discardConsumerSnapshot(runtime).catch(() => {});
       }
       if (detached?.lastConsumer) {
-        await proc.stop();
+        return await proc.stop();
       } else if (detached && runtime) {
-        await proc.stopConsumerEnvironment(runtime.environmentId);
+        return await proc.stopConsumerEnvironment(runtime);
       }
+      return this.emptyStopResult();
     } finally {
       this.consumerRuntimes.delete(processId);
       this.consumerWorkspaceIds.delete(processId);
@@ -962,6 +1271,9 @@ export class ProcessManager {
     }
     const mode = this.resolveMode(startArg.profileName);
     const client = this.resolveComputeClient(startArg.profileName);
+    if (mode === 'serve') {
+      await this.waitForRuntimeInstall?.();
+    }
     const previous = this.processes.get(processId);
     const compatibilityKey = this.agentHostCompatibilityKey(processId, mode, startArg);
     if (previous && mode === 'serve' && lastOpts) {
@@ -984,7 +1296,7 @@ export class ProcessManager {
         this.consumerRuntimes.delete(processId);
         this.sendToWindow('agent-process:status', processId, this.getStatus(processId));
         if (currentRuntime) {
-          await previous.stopConsumerEnvironment(currentRuntime.environmentId);
+          await previous.stopConsumerEnvironment(currentRuntime);
         }
         const runtime = await previous.configureConsumer(processId, workspaceId, startArg);
         this.consumerRuntimes.set(processId, runtime);
@@ -1118,7 +1430,7 @@ export class ProcessManager {
       return { ok: false, supported: false, reason: 'process not found' };
     }
     const runtime = this.consumerRuntimes.get(processId);
-    const result = await proc.pause(runtime?.environmentId);
+    const result = await proc.pause(runtime);
     if (runtime && result.ok && result.supported) {
       this.consumerRuntimes.set(processId, { ...runtime, paused: result.paused ?? true });
       this.sendToWindow('agent-process:status', processId, this.getStatus(processId));
@@ -1132,7 +1444,7 @@ export class ProcessManager {
       return { ok: false, supported: false, reason: 'process not found' };
     }
     const runtime = this.consumerRuntimes.get(processId);
-    const result = await proc.unpause(runtime?.environmentId);
+    const result = await proc.unpause(runtime);
     if (runtime && result.ok && result.supported) {
       this.consumerRuntimes.set(processId, { ...runtime, paused: result.paused ?? false });
       this.sendToWindow('agent-process:status', processId, this.getStatus(processId));
@@ -1172,7 +1484,7 @@ export class ProcessManager {
       const runtime = await proc.configureConsumer(processId, workspaceId, nextArg);
       this.consumerRuntimes.set(processId, runtime);
       if (currentRuntime && currentRuntime.environmentId !== runtime.environmentId) {
-        await proc.stopConsumerEnvironment(currentRuntime.environmentId).catch((error) => {
+        await proc.stopConsumerEnvironment(currentRuntime).catch((error) => {
           console.warn(`[process-manager] old environment cleanup failed: ${(error as Error).message}`);
         });
       }
@@ -1190,7 +1502,7 @@ export class ProcessManager {
   };
 
   notifyActivity = (processId: string): void => {
-    this.processes.get(processId)?.notifyActivity(this.consumerRuntimes.get(processId)?.environmentId);
+    this.processes.get(processId)?.notifyActivity(this.consumerRuntimes.get(processId));
   };
 
   /**
@@ -1348,6 +1660,12 @@ export class ProcessManager {
       this.mirrorTimer = null;
     }
     this.mirrorSources.clear();
+    // Invalidate every materialization before awaiting it. Late results see a
+    // stale epoch, retire their environment, and cannot repopulate the maps.
+    for (const processId of this.pendingStarts.keys()) {
+      this.advanceConsumerEpoch(processId);
+    }
+    await Promise.allSettled([...this.pendingStarts.values()].map((entry) => entry.promise));
     await Promise.allSettled([...this.pendingStops.values()]);
     const exits = this.agentHosts.clear().map((p) => p.exit());
     await Promise.allSettled(exits);
@@ -1358,6 +1676,8 @@ export class ProcessManager {
     this.consumerWorkspaceIdentities.clear();
     this.pendingStarts.clear();
     this.pendingStops.clear();
+    this.pendingManagementConnection = null;
+    this.consumerEpochs.clear();
   };
 }
 
@@ -1380,6 +1700,8 @@ export function registerProcessHandlers(ipc: IIpcListener, resolve: (event: unkn
   h('agent-process:rebuild', (pm, processId, rebuildArg) => pm.rebuild(processId, rebuildArg));
   h('agent-process:resize', (pm, processId, cols, rows) => pm.resizePty(processId, cols, rows));
   h('agent-process:get-status', (pm, processId) => pm.getStatus(processId));
+  h('management-runtime:ensure', (pm) => pm.ensureManagementConnection());
+  h('management-runtime:mutate', (pm, request) => pm.mutateManagement(request));
   h('agent-process:pause', (pm, processId) => pm.pause(processId));
   h('agent-process:unpause', (pm, processId) => pm.unpause(processId));
   h('agent-process:notify-activity', (pm, processId) => pm.notifyActivity(processId));
@@ -1396,10 +1718,38 @@ export const createProcessManager = (arg: {
   getStoreData?: () => ProcessManagerStoreData;
   resolveGitToken?: (credentialId: string) => Promise<string | undefined>;
   getExtraEnv?: (processId?: string) => Record<string, string> | Promise<Record<string, string>>;
+  waitForRuntimeInstall?: () => Promise<void>;
+  durableLocalCodexAccountMutations?: boolean;
+  durableLocalMcpMutations?: boolean;
+  prepareLocalMcpOwnership?: (status: Record<string, unknown>) => void | Promise<void>;
+  onManagementReady?: (proc: AgentProcess) => void | Promise<void>;
 }) => {
-  const { ipc, sendToWindow, fetchFn, getStoreData, resolveGitToken, getExtraEnv } = arg;
+  const {
+    ipc,
+    sendToWindow,
+    fetchFn,
+    getStoreData,
+    resolveGitToken,
+    getExtraEnv,
+    waitForRuntimeInstall,
+    durableLocalCodexAccountMutations,
+    durableLocalMcpMutations,
+    prepareLocalMcpOwnership,
+    onManagementReady,
+  } = arg;
 
-  const processManager = new ProcessManager({ sendToWindow, fetchFn, getStoreData, resolveGitToken, getExtraEnv });
+  const processManager = new ProcessManager({
+    sendToWindow,
+    fetchFn,
+    getStoreData,
+    resolveGitToken,
+    getExtraEnv,
+    waitForRuntimeInstall,
+    durableLocalCodexAccountMutations,
+    durableLocalMcpMutations,
+    prepareLocalMcpOwnership,
+    onManagementReady,
+  });
   const channels = registerProcessHandlers(ipc, () => processManager);
 
   const cleanup = async () => {

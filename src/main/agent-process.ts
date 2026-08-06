@@ -2,12 +2,14 @@ import type { ChildProcess } from 'node:child_process';
 import { spawn } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import path from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 
 import c from 'ansi-colors';
 import { shellEnvSync } from 'shell-env';
 import { assert } from 'tsafe';
 import { WebSocket as WsWebSocket } from 'ws';
 
+import type { RpcMethodMap } from '@/generated/omniagents-gui-v1/gui-v1';
 import { getProductSlug } from '@/lib/product';
 import { DEFAULT_ENV } from '@/lib/pty-utils';
 import { SimpleLogger } from '@/lib/simple-logger';
@@ -18,9 +20,21 @@ import type { IComputeClient } from '@/main/platform-client';
 import { assertServeProtocolSupported } from '@/main/product-runtime';
 import { resolveProfile } from '@/main/profile-resolver';
 import { getSnapshotStore } from '@/main/snapshot-blob-store';
+import { completePendingSnapshotUpload, recordPendingSnapshotUpload } from '@/main/snapshot-upload-ledger';
 import { getOmniCliPath, getOmniConfigDir, isDirectory, pathExists } from '@/main/util';
 import { downloadWorkspace } from '@/main/workspace-sync';
-import type { AgentProcessData, AgentProcessStatus, LogEntry, SandboxPauseResult, WithTimestamp } from '@/shared/types';
+import type { ManagementAdminMethod } from '@/shared/management-admin';
+import type {
+  AgentProcessData,
+  AgentProcessStatus,
+  AgentProcessStopResult,
+  AgentRuntimeConnection,
+  ExecutionTarget,
+  LogEntry,
+  ManagementMutationCapabilities,
+  SandboxPauseResult,
+  WithTimestamp,
+} from '@/shared/types';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -33,12 +47,10 @@ import type { AgentProcessData, AgentProcessStatus, LogEntry, SandboxPauseResult
  *                   Workspaces and profiles materialize independent execution
  *                   environments through its control plane.
  *   - ``compute`` — delegate the sandbox lifecycle to an {@link IComputeClient}
- *                   instead of spawning ``omni serve`` here. Two impls exist:
- *                   ``PlatformClient`` (omni-platform delegation) and
- *                   ``RemoteElectronComputeClient`` (computer-as-sandbox: the
- *                   sandbox runs on a laptop the user owns, driven over the
- *                   cloud↔laptop reverse-RPC WS). Both connect to a remote
- *                   AgentHost rather than a local child process.
+ *                   instead of spawning ``omni serve`` here. Platform mode
+ *                   connects to a remote AgentHost. Computer-as-sandbox uses
+ *                   the separate local ``host_bridge`` serve path so it keeps
+ *                   the locally validated readiness contract.
  */
 export type AgentProcessMode = 'serve' | 'compute';
 
@@ -166,9 +178,7 @@ export type AgentProcessStartArg = {
   explicitProfilePath?: string;
 };
 
-export type AgentHostConsumerRuntime = {
-  workspaceId: string;
-  environmentId: string;
+export type AgentHostConsumerRuntime = ExecutionTarget & {
   workspaceRoot: string;
   defaultCwd?: string;
   services: Record<string, string>;
@@ -177,6 +187,38 @@ export type AgentHostConsumerRuntime = {
 };
 
 export type FetchFn = typeof globalThis.fetch;
+
+type AgentHostEnvironmentResource = {
+  environmentId: string;
+  workspaceId: string;
+  state: 'provisioning' | 'ready' | 'replacing' | 'stopping' | 'stopped' | 'failed';
+  generation: number;
+};
+
+type AgentHostResourceSnapshot = {
+  agentHostId: string;
+  workspaces: Array<{
+    workspaceId: string;
+    ownerUserId?: string;
+    snapshotRef?: string;
+    sources: unknown[];
+  }>;
+  profiles: Record<string, Record<string, unknown>>;
+  environments: AgentHostEnvironmentResource[];
+};
+
+type ConsumerRegistration = {
+  consumerId: string;
+  threadId: string;
+  workspaceId: string;
+  snapshotRef: string;
+  sources: Record<string, unknown>[];
+  profileId: string;
+  profileDefinition: Record<string, unknown>;
+  runtime: AgentHostConsumerRuntime;
+};
+
+type HostTermination = 'graceful' | 'forced' | 'not-applicable';
 
 // ---------------------------------------------------------------------------
 // Internal helpers
@@ -304,6 +346,66 @@ const serveWorkspaceDirectory = (workspaceId: string, arg: AgentProcessStartArg)
   return path.join(getOmniConfigDir(), 'workspaces', workspaceId);
 };
 
+const resourceRecord = (value: unknown, label: string): Record<string, unknown> => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`AgentHost ${label} must be an object`);
+  }
+  return value as Record<string, unknown>;
+};
+
+const resourceString = (value: Record<string, unknown>, field: string, label: string): string => {
+  const result = value[field];
+  if (typeof result !== 'string' || !result.trim()) {
+    throw new Error(`AgentHost ${label}.${field} must be a non-empty string`);
+  }
+  return result;
+};
+
+const decodeAgentHostResources = (value: unknown): AgentHostResourceSnapshot => {
+  const root = resourceRecord(value, 'resource listing');
+  if (!Array.isArray(root.workspaces) || !Array.isArray(root.environments)) {
+    throw new Error('AgentHost resource listing must contain workspace and environment arrays');
+  }
+  const profiles = resourceRecord(root.profiles, 'resource listing.profiles');
+  const decodedProfiles: Record<string, Record<string, unknown>> = {};
+  for (const [profileId, definition] of Object.entries(profiles)) {
+    decodedProfiles[profileId] = resourceRecord(definition, `profile ${profileId}`);
+  }
+  return {
+    agentHostId: resourceString(root, 'agent_host_id', 'resource listing'),
+    workspaces: root.workspaces.map((item, index) => {
+      const workspace = resourceRecord(item, `workspaces[${index}]`);
+      if (!Array.isArray(workspace.sources)) {
+        throw new Error(`AgentHost workspaces[${index}].sources must be an array`);
+      }
+      return {
+        workspaceId: resourceString(workspace, 'workspace_id', `workspaces[${index}]`),
+        ...(typeof workspace.owner_user_id === 'string' ? { ownerUserId: workspace.owner_user_id } : {}),
+        ...(typeof workspace.snapshot_ref === 'string' ? { snapshotRef: workspace.snapshot_ref } : {}),
+        sources: workspace.sources,
+      };
+    }),
+    profiles: decodedProfiles,
+    environments: root.environments.map((item, index) => {
+      const environment = resourceRecord(item, `environments[${index}]`);
+      const state = resourceString(environment, 'state', `environments[${index}]`);
+      if (!['provisioning', 'ready', 'replacing', 'stopping', 'stopped', 'failed'].includes(state)) {
+        throw new Error(`AgentHost environments[${index}].state is unknown`);
+      }
+      const generation = environment.generation;
+      if (!Number.isSafeInteger(generation) || (generation as number) < 0) {
+        throw new Error(`AgentHost environments[${index}].generation must be a non-negative integer`);
+      }
+      return {
+        environmentId: resourceString(environment, 'environment_id', `environments[${index}]`),
+        workspaceId: resourceString(environment, 'workspace_id', `environments[${index}]`),
+        state: state as AgentHostEnvironmentResource['state'],
+        generation: generation as number,
+      };
+    }),
+  };
+};
+
 const SERVER_CALL_TIMEOUT_MS = 8_000;
 
 /**
@@ -315,7 +417,7 @@ const SERVER_CALL_TIMEOUT_MS = 8_000;
  */
 async function oneShotServerCall(
   wsUrl: string,
-  environmentId: string,
+  target: ExecutionTarget,
   fn: string,
   args: Record<string, unknown> = {},
   timeoutMs: number = SERVER_CALL_TIMEOUT_MS,
@@ -376,7 +478,13 @@ async function oneShotServerCall(
               });
             }),
         });
-        const result = await request('server_call', { function: fn, args, environment_id: environmentId });
+        const result = await request('server_call', {
+          function: fn,
+          args,
+          workspace_id: target.workspaceId,
+          environment_id: target.environmentId,
+          environment_generation: target.environmentGeneration,
+        });
         if (typeof result !== 'object' || result === null) {
           finish({ ok: false, supported: false, reason: `${fn} returned no result` });
           return;
@@ -462,10 +570,18 @@ export class AgentProcess {
   private computeClient: IComputeClient | null = null;
   private computeSessionId: string | null = null;
   private getExtraEnv?: () => Record<string, string> | Promise<Record<string, string>>;
+  private readonly processStopTimeoutMs: number;
+  private readonly snapshotRetryDelayMs: number;
+  private readonly stopReconcilePollMs: number;
+  private readonly stopReconcileTimeoutMs: number;
+  private snapshotRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private snapshotRetryAttempts = new Map<string, number>();
   private agentHostControlToken: string | null = null;
   private agentHostControlClient: AgentHostControlClient | null = null;
   /** Environment id -> durable Workspace snapshot reference. */
   private consumerSnapshotRefs = new Map<string, string>();
+  /** Desired consumer bindings retained across renderer/control reconnects. */
+  private consumerRegistrations = new Map<string, ConsumerRegistration>();
   /**
    * Children we deliberately killed via {@link killProcess} (SIGTERM → SIGKILL).
    * Their late `close` events should NOT flip status to `error("signal SIGKILL")`
@@ -491,6 +607,13 @@ export class AgentProcess {
      * codex.json to the spawn's config dir before omni-serve starts).
      */
     getExtraEnv?: () => Record<string, string> | Promise<Record<string, string>>;
+    /** Test/embedding override for the SIGTERM grace period. */
+    processStopTimeoutMs?: number;
+    /** Test/embedding override for snapshot persistence retry backoff. */
+    snapshotRetryDelayMs?: number;
+    /** Test/embedding overrides for observing an already-committed stop. */
+    stopReconcilePollMs?: number;
+    stopReconcileTimeoutMs?: number;
   }) {
     this.mode = opts.mode;
     this.ipcRawOutput = opts.ipcRawOutput;
@@ -498,6 +621,10 @@ export class AgentProcess {
     this.fetchFn = opts.fetchFn ?? globalThis.fetch;
     this.computeClient = opts.computeClient ?? null;
     this.getExtraEnv = opts.getExtraEnv;
+    this.processStopTimeoutMs = opts.processStopTimeoutMs ?? 30_000;
+    this.snapshotRetryDelayMs = opts.snapshotRetryDelayMs ?? 5_000;
+    this.stopReconcilePollMs = opts.stopReconcilePollMs ?? 250;
+    this.stopReconcileTimeoutMs = opts.stopReconcileTimeoutMs ?? 2 * 60_000;
     this.status = { type: 'uninitialized', timestamp: Date.now() };
     this.log = new SimpleLogger((entry) => {
       this.ipcRawOutput(entry.message);
@@ -508,6 +635,83 @@ export class AgentProcess {
   // --- Public API ---
 
   getStatus = (): WithTimestamp<AgentProcessStatus> => this.status;
+
+  /** Whether this AgentProcess owns an in-process AgentHost reading the
+   * launcher's host mcp.json. Delegated compute has a different config store. */
+  usesLocalAgentHostConfig = (): boolean => this.mode === 'serve';
+
+  /**
+   * Wait for the targetless AgentHost and return only its ordinary consumer
+   * connection. The privileged control credential deliberately has no path
+   * through this API; renderer management reads use the same scoped bearer
+   * credential as an embedded conversation client.
+   */
+  getRuntimeConnection = async (): Promise<AgentRuntimeConnection> => {
+    const data = await this.waitForRunningData();
+    return {
+      baseUrl: data.uiUrl,
+      ...(data.authToken ? { authToken: data.authToken } : {}),
+    };
+  };
+
+  /** Report only the operations negotiated by main's privileged control
+   * client. No control credential or generic RPC surface leaves this class. */
+  getManagementMutationCapabilities = async (): Promise<ManagementMutationCapabilities> => {
+    const data = await this.waitForRunningData();
+    if (!data.wsUrl || !this.agentHostControlToken) {
+      return { validateConfig: false, writeConfig: false };
+    }
+    const control =
+      this.agentHostControlClient ??
+      (this.agentHostControlClient = new AgentHostControlClient(data.wsUrl, this.agentHostControlToken));
+    const operations = new Set(await control.getExperimentalOperations());
+    return {
+      validateConfig: operations.has('validate_config'),
+      writeConfig: operations.has('write_config'),
+    };
+  };
+
+  /** Privileged process-wide management mutation. Only ProcessManager's
+   * closed broker calls this method; neither the token nor this client crosses
+   * into renderer code. */
+  callManagementAdmin = async <Method extends ManagementAdminMethod>(
+    method: Method,
+    params: RpcMethodMap[Method]['params']
+  ): Promise<RpcMethodMap[Method]['result']> => {
+    const data = await this.waitForRunningData();
+    if (!data.wsUrl || !this.agentHostControlToken) {
+      throw new Error('AgentHost admin channel is unavailable');
+    }
+    const control =
+      this.agentHostControlClient ??
+      (this.agentHostControlClient = new AgentHostControlClient(data.wsUrl, this.agentHostControlToken));
+    return control.call(method, params);
+  };
+
+  /** Narrow main-process read used to verify durable local account ownership.
+   * It is deliberately not exposed through IPC as a generic control call. */
+  getManagementAccountStatus = async (): Promise<RpcMethodMap['account_status']['result']> => {
+    const data = await this.waitForRunningData();
+    if (!data.wsUrl || !this.agentHostControlToken) {
+      throw new Error('AgentHost admin channel is unavailable');
+    }
+    const control =
+      this.agentHostControlClient ??
+      (this.agentHostControlClient = new AgentHostControlClient(data.wsUrl, this.agentHostControlToken));
+    return control.call('account_status', {});
+  };
+
+  /** Narrow main-process read used by the local MCP ownership/durability gate. */
+  getManagementMcpStatus = async (): Promise<RpcMethodMap['mcp_list_servers']['result']> => {
+    const data = await this.waitForRunningData();
+    if (!data.wsUrl || !this.agentHostControlToken) {
+      throw new Error('AgentHost admin channel is unavailable');
+    }
+    const control =
+      this.agentHostControlClient ??
+      (this.agentHostControlClient = new AgentHostControlClient(data.wsUrl, this.agentHostControlToken));
+    return control.call('mcp_list_servers', {});
+  };
 
   /** Register and bind one launcher consumer inside this long-lived AgentHost. */
   configureConsumer = async (
@@ -528,19 +732,6 @@ export class AgentProcess {
       (this.agentHostControlClient = new AgentHostControlClient(data.wsUrl, this.agentHostControlToken));
     const snapshotRef = arg.snapshotRef ?? workspaceId;
     const snapshotDir = path.join(getOmniConfigDir(), 'snapshots');
-
-    // Blob durability follows the Workspace being materialized, not whichever
-    // consumer happened to start this shared AgentHost process first.
-    try {
-      const pulled = await getSnapshotStore().pull(snapshotRef, snapshotDir);
-      if (pulled) {
-        this.log.info(c.cyan(`Restored snapshot from blob for workspace ${snapshotRef}\r\n`));
-      }
-    } catch (error) {
-      // Best-effort: the provisioner can still materialize a fresh workspace.
-      console.error(`[snapshot-blob] pull failed for ${snapshotRef}:`, error);
-    }
-
     let materializedEnvironmentId: string | undefined;
     const resolved = arg.explicitProfilePath
       ? ({ kind: 'file', path: arg.explicitProfilePath } as const)
@@ -561,26 +752,89 @@ export class AgentProcess {
     // conversations, so it must never become the RPC resource identifier.
     const threadId = arg.sessionId ?? consumerId;
     const controlContext = { consumerId, profileName: arg.profileName };
-    await control.call(
-      'agent_host_register_workspace',
-      {
-        workspace_id: workspaceId,
-        materialization_path: serveWorkspaceDirectory(workspaceId, arg),
-        snapshot_ref: snapshotRef,
-        sources: arg.sources.map(sourceDescriptor),
-        owner_user_id: 'token_user',
-      },
-      controlContext
-    );
-    await control.call(
-      'agent_host_register_profile',
-      {
-        profile_id: profileId,
-        definition,
-        owner_user_id: 'token_user',
-      },
-      controlContext
-    );
+    const sources = arg.sources.map(sourceDescriptor);
+
+    // Every provisioning transaction begins with an authoritative inventory.
+    // Besides making renderer reload adoption cheap, this resolves ambiguous
+    // control-socket losses without blindly repeating materialization.
+    const resources = decodeAgentHostResources(await control.call('agent_host_list_resources', {}, controlContext));
+    if (data.agentHostId && resources.agentHostId !== data.agentHostId) {
+      throw new Error(
+        `AgentHost identity changed from ${data.agentHostId} to ${resources.agentHostId}; host restart required`
+      );
+    }
+    const registeredWorkspace = resources.workspaces.find((item) => item.workspaceId === workspaceId);
+    if (
+      registeredWorkspace &&
+      (registeredWorkspace.ownerUserId !== 'token_user' ||
+        registeredWorkspace.snapshotRef !== snapshotRef ||
+        !isDeepStrictEqual(registeredWorkspace.sources, sources))
+    ) {
+      throw new Error(`AgentHost workspace ${workspaceId} is registered with a different definition`);
+    }
+    const registeredProfile = resources.profiles[profileId];
+    if (registeredProfile && !isDeepStrictEqual(registeredProfile, definition)) {
+      throw new Error(`AgentHost profile ${profileId} is registered with a different definition`);
+    }
+
+    const previous = this.consumerRegistrations.get(consumerId);
+    const sameDesiredBinding =
+      previous?.workspaceId === workspaceId &&
+      previous.threadId === threadId &&
+      previous.snapshotRef === snapshotRef &&
+      previous.profileId === profileId &&
+      isDeepStrictEqual(previous.sources, sources) &&
+      isDeepStrictEqual(previous.profileDefinition, definition);
+    if (sameDesiredBinding && previous) {
+      const authoritative = resources.environments.find(
+        (item) => item.environmentId === previous.runtime.environmentId
+      );
+      if (authoritative && authoritative.workspaceId !== workspaceId) {
+        throw new Error(`AgentHost environment ${authoritative.environmentId} moved to a different workspace`);
+      }
+      if (authoritative?.state === 'ready' && authoritative.generation === previous.runtime.environmentGeneration) {
+        await this.bindConsumer(control, threadId, previous.runtime, controlContext);
+        this.consumerSnapshotRefs.set(previous.runtime.environmentId, snapshotRef);
+        return previous.runtime;
+      }
+    }
+
+    // Blob durability follows the Workspace being materialized, not whichever
+    // consumer happened to start this shared AgentHost process first.
+    try {
+      const pulled = await getSnapshotStore().pull(snapshotRef, snapshotDir);
+      if (pulled) {
+        this.log.info(c.cyan(`Restored snapshot from blob for workspace ${snapshotRef}\r\n`));
+      }
+    } catch (error) {
+      // Best-effort: the provisioner can still materialize a fresh workspace.
+      console.error(`[snapshot-blob] pull failed for ${snapshotRef}:`, error);
+    }
+
+    if (!registeredWorkspace) {
+      await control.call(
+        'agent_host_register_workspace',
+        {
+          workspace_id: workspaceId,
+          materialization_path: serveWorkspaceDirectory(workspaceId, arg),
+          snapshot_ref: snapshotRef,
+          sources,
+          owner_user_id: 'token_user',
+        },
+        controlContext
+      );
+    }
+    if (!registeredProfile) {
+      await control.call(
+        'agent_host_register_profile',
+        {
+          profile_id: profileId,
+          definition,
+          owner_user_id: 'token_user',
+        },
+        controlContext
+      );
+    }
     const materialized = (await control.call(
       'agent_host_materialize_environment',
       {
@@ -594,6 +848,10 @@ export class AgentProcess {
       throw new Error('AgentHost materialization returned no environment_id');
     }
     materializedEnvironmentId = environmentId;
+    const environmentGeneration = materialized['generation'];
+    if (!Number.isSafeInteger(environmentGeneration) || (environmentGeneration as number) < 0) {
+      throw new Error('AgentHost materialization returned no valid generation');
+    }
     const workspaceRoot = String(materialized['workspace_root'] ?? '').trim();
     if (!workspaceRoot) {
       throw new Error('AgentHost materialization returned no workspace_root');
@@ -601,6 +859,7 @@ export class AgentProcess {
     const runtime: AgentHostConsumerRuntime = {
       workspaceId,
       environmentId,
+      environmentGeneration: environmentGeneration as number,
       workspaceRoot,
       ...(typeof materialized['default_cwd'] === 'string' && materialized['default_cwd'].trim()
         ? { defaultCwd: materialized['default_cwd'].trim() }
@@ -615,20 +874,7 @@ export class AgentProcess {
     };
 
     try {
-      await control.call(
-        'agent_host_bind_thread',
-        {
-          thread_id: threadId,
-          binding: {
-            workspace_id: runtime.workspaceId,
-            environment_selection: {
-              mode: 'existing',
-              environment_id: runtime.environmentId,
-            },
-          },
-        },
-        controlContext
-      );
+      await this.bindConsumer(control, threadId, runtime, controlContext);
     } catch (error) {
       if (materializedEnvironmentId) {
         try {
@@ -642,32 +888,149 @@ export class AgentProcess {
       throw error;
     }
     this.consumerSnapshotRefs.set(runtime.environmentId, snapshotRef);
+    this.consumerRegistrations.set(consumerId, {
+      consumerId,
+      threadId,
+      workspaceId,
+      snapshotRef,
+      sources,
+      profileId,
+      profileDefinition: definition,
+      runtime,
+    });
     return runtime;
   };
 
-  stopConsumerEnvironment = async (environmentId: string): Promise<void> => {
-    if (!this.agentHostControlClient) {
-      return;
-    }
-    await this.agentHostControlClient.call('agent_host_stop_environment', {
-      environment_id: environmentId,
-    });
-    await this.pushConsumerSnapshot(environmentId);
+  private bindConsumer = async (
+    control: AgentHostControlClient,
+    threadId: string,
+    runtime: AgentHostConsumerRuntime,
+    context: { consumerId: string; profileName: string }
+  ): Promise<void> => {
+    await control.call(
+      'agent_host_bind_thread',
+      {
+        thread_id: threadId,
+        binding: {
+          workspace_id: runtime.workspaceId,
+          environment_selection: {
+            mode: 'existing',
+            environment_id: runtime.environmentId,
+            // Pins the binding to this materialization: the runtime fails
+            // closed at bind and on inherit-mode runs if the environment
+            // was rebuilt since. Older runtimes ignore the extra key.
+            environment_generation: runtime.environmentGeneration,
+          },
+        },
+      },
+      context
+    );
   };
 
-  discardConsumerSnapshot = async (environmentId: string): Promise<void> => {
+  stopConsumerEnvironment = async (target: ExecutionTarget | string): Promise<AgentProcessStopResult> => {
+    if (!this.agentHostControlClient) {
+      return this.stopResult('environment', 'not-applicable');
+    }
+    const environmentId = typeof target === 'string' ? target : target.environmentId;
+    const statusData =
+      this.status.type === 'running' || this.status.type === 'connecting' ? this.status.data : undefined;
+    const list = async (): Promise<AgentHostResourceSnapshot> => {
+      const resources = decodeAgentHostResources(
+        await this.agentHostControlClient!.call('agent_host_list_resources', {})
+      );
+      if (statusData?.agentHostId && resources.agentHostId !== statusData.agentHostId) {
+        throw new Error(
+          `AgentHost identity changed from ${statusData.agentHostId} to ${resources.agentHostId}; host restart required`
+        );
+      }
+      return resources;
+    };
+    const assertExpected = (environment: AgentHostEnvironmentResource | undefined): void => {
+      if (!environment || typeof target === 'string') {
+        return;
+      }
+      if (environment.workspaceId !== target.workspaceId || environment.generation !== target.environmentGeneration) {
+        throw new Error(
+          `Refusing to stop stale environment target ${environmentId}@${target.environmentGeneration}; ` +
+            `AgentHost reports ${environment.workspaceId}/${environment.generation}`
+        );
+      }
+    };
+    const reconcileCommittedStop = async (
+      initial: AgentHostEnvironmentResource | undefined
+    ): Promise<AgentHostEnvironmentResource | undefined> => {
+      let current = initial;
+      const deadline = Date.now() + this.stopReconcileTimeoutMs;
+      while (current?.state === 'stopping' && Date.now() < deadline) {
+        await new Promise<void>((resolve) => {
+          setTimeout(resolve, this.stopReconcilePollMs);
+        });
+        current = (await list()).environments.find((item) => item.environmentId === environmentId);
+        assertExpected(current);
+      }
+      return current;
+    };
+    const before = (await list()).environments.find((item) => item.environmentId === environmentId);
+    assertExpected(before);
+    if (!before || before.state === 'stopped' || before.state === 'failed') {
+      return this.finalizeStoppedConsumer(environmentId);
+    }
+    if (before.state === 'stopping') {
+      const settled = await reconcileCommittedStop(before);
+      if (!settled || settled.state === 'stopped' || settled.state === 'failed') {
+        return this.finalizeStoppedConsumer(environmentId);
+      }
+      throw new Error(`AgentHost environment ${environmentId} stop did not reach a terminal state`);
+    }
+    try {
+      await this.agentHostControlClient.call('agent_host_stop_environment', {
+        environment_id: environmentId,
+      });
+    } catch (error) {
+      // The response may have been lost after the stop committed. Reconnect
+      // and inspect before deciding whether retrying is safe.
+      const listed = (await list()).environments.find((item) => item.environmentId === environmentId);
+      const after = listed?.state === 'stopping' ? await reconcileCommittedStop(listed) : listed;
+      assertExpected(after);
+      if (!after || after.state === 'stopped' || after.state === 'failed') {
+        return this.finalizeStoppedConsumer(environmentId);
+      }
+      throw error;
+    }
+    return this.finalizeStoppedConsumer(environmentId);
+  };
+
+  private finalizeStoppedConsumer = async (environmentId: string): Promise<AgentProcessStopResult> => {
+    await this.pushConsumerSnapshot(environmentId);
+    for (const [consumerId, registration] of this.consumerRegistrations) {
+      if (registration.runtime.environmentId === environmentId) {
+        this.consumerRegistrations.delete(consumerId);
+      }
+    }
+    return this.stopResult('environment', 'not-applicable');
+  };
+
+  discardConsumerSnapshot = async (target: ExecutionTarget): Promise<void> => {
     const data = await this.waitForRunningData();
     if (!data.wsUrl) {
       return;
     }
-    await oneShotServerCall(
+    const snapshotRef = this.consumerSnapshotRefs.get(target.environmentId);
+    const result = await oneShotServerCall(
       data.wsUrl,
-      environmentId,
+      target,
       'sandbox.discard_snapshot',
       {},
       SERVER_CALL_TIMEOUT_MS,
       data.authToken
     );
+    if (result.ok) {
+      this.clearSnapshotRetry(target.environmentId);
+      this.consumerSnapshotRefs.delete(target.environmentId);
+      if (snapshotRef) {
+        completePendingSnapshotUpload(snapshotRef, path.join(getOmniConfigDir(), 'snapshots'));
+      }
+    }
   };
 
   start = async (arg: AgentProcessStartArg): Promise<void> => {
@@ -686,7 +1049,7 @@ export class AgentProcess {
     await this.startServeSession(arg);
   };
 
-  stop = async (): Promise<void> => {
+  stop = async (): Promise<AgentProcessStopResult> => {
     if (this.mode === 'compute') {
       this.updateStatus({ type: 'stopping' });
       if (this.computeSessionId && this.computeClient) {
@@ -721,7 +1084,7 @@ export class AgentProcess {
         this.computeSessionId = null;
       }
       this.updateStatus({ type: 'exited' });
-      return;
+      return this.stopResult('compute', 'graceful');
     }
 
     // Serve mode — omni serve handles its own teardown on SIGTERM, so we
@@ -729,14 +1092,34 @@ export class AgentProcess {
     // service cleanup in its own finally block.
     if (!this.childProcess) {
       this.closeAgentHostControl();
-      return;
+      await this.pushAllConsumerSnapshots();
+      this.consumerRegistrations.clear();
+      return this.stopResult('host', 'not-applicable');
     }
     // Capture the WS URL + auth before flipping status — `stopping` carries no data.
     this.updateStatus({ type: 'stopping' });
     this.closeAgentHostControl();
-    await this.killProcess();
-    await this.pushAllConsumerSnapshots();
+    const shutdown = await this.killProcess(this.processStopTimeoutMs);
+    if (shutdown === 'graceful') {
+      // omni serve has completed its snapshot writers. Verify every expected
+      // tar before asking the durability backend to accept it.
+      await this.pushAllConsumerSnapshots();
+    } else {
+      const snapshotDir = path.join(getOmniConfigDir(), 'snapshots');
+      for (const snapshotRef of this.pendingSnapshotRefs()) {
+        if (!recordPendingSnapshotUpload(snapshotRef, snapshotDir, 'forced-uncertain')) {
+          console.error(`[snapshot-blob] could not durably record forced uncertainty for ${snapshotRef}`);
+        }
+      }
+      console.error(
+        `[agent-process] AgentHost required SIGKILL; snapshot persistence is uncertain for: ${
+          this.pendingSnapshotRefs().join(', ') || '(no registered snapshots)'
+        }`
+      );
+    }
+    this.consumerRegistrations.clear();
     this.updateStatus({ type: 'exited' });
+    return this.stopResult('host', shutdown);
   };
 
   rebuild = async (fallbackArg: AgentProcessStartArg): Promise<void> => {
@@ -745,9 +1128,9 @@ export class AgentProcess {
     await this.start(arg);
   };
 
-  exit = async (): Promise<void> => {
+  exit = async (): Promise<AgentProcessStopResult> => {
     this.updateStatus({ type: 'exiting' });
-    await this.stop();
+    return this.stop();
   };
 
   /**
@@ -758,8 +1141,8 @@ export class AgentProcess {
    * stop/shutdown if you want to free resources." The ProcessManager records
    * the returned paused state on the selected consumer runtime.
    */
-  pause = async (environmentId?: string): Promise<SandboxPauseResult> => {
-    return this.callSandboxLifecycle(environmentId, 'sandbox.pause');
+  pause = async (target?: ExecutionTarget): Promise<SandboxPauseResult> => {
+    return this.callSandboxLifecycle(target, 'sandbox.pause');
   };
 
   /**
@@ -767,8 +1150,8 @@ export class AgentProcess {
    * already-running container is a no-op as far as the user is concerned
    * (the server function returns supported=true, paused=false).
    */
-  unpause = async (environmentId?: string): Promise<SandboxPauseResult> => {
-    return this.callSandboxLifecycle(environmentId, 'sandbox.unpause');
+  unpause = async (target?: ExecutionTarget): Promise<SandboxPauseResult> => {
+    return this.callSandboxLifecycle(target, 'sandbox.unpause');
   };
 
   /**
@@ -776,17 +1159,17 @@ export class AgentProcess {
    * doesn't pause while the user is actively interacting with a client
    * surface. Throttling is the renderer's responsibility — we just relay.
    */
-  notifyActivity = (environmentId?: string): void => {
+  notifyActivity = (target?: ExecutionTarget): void => {
     if (this.status.type !== 'running' && this.status.type !== 'connecting') {
       return;
     }
     const data = (this.status as Extract<AgentProcessStatus, { type: 'running' | 'connecting' }>).data;
-    if (!data.wsUrl || !environmentId) {
+    if (!data.wsUrl || !target) {
       return;
     }
     void oneShotServerCall(
       data.wsUrl,
-      environmentId,
+      target,
       'sandbox.notify_activity',
       {},
       SERVER_CALL_TIMEOUT_MS,
@@ -798,7 +1181,7 @@ export class AgentProcess {
   };
 
   private callSandboxLifecycle = async (
-    environmentId: string | undefined,
+    target: ExecutionTarget | undefined,
     fn: 'sandbox.pause' | 'sandbox.unpause'
   ): Promise<SandboxPauseResult> => {
     if (this.mode === 'compute') {
@@ -812,11 +1195,11 @@ export class AgentProcess {
     if (!wsUrl) {
       return { ok: false, supported: false, reason: 'no ws_url available' };
     }
-    if (!environmentId) {
+    if (!target) {
       return { ok: false, supported: false, reason: 'no execution environment is available' };
     }
     try {
-      return await oneShotServerCall(wsUrl, environmentId, fn, {}, SERVER_CALL_TIMEOUT_MS, data.authToken);
+      return await oneShotServerCall(wsUrl, target, fn, {}, SERVER_CALL_TIMEOUT_MS, data.authToken);
     } catch (err) {
       const message = (err as Error).message ?? String(err);
       return { ok: false, supported: true, reason: message };
@@ -968,7 +1351,23 @@ export class AgentProcess {
         this.childProcess = null;
         // An unexpected host exit shuts down every environment. Persist all
         // Workspace snapshots; there is no distinguished "startup session".
-        void this.pushAllConsumerSnapshots();
+        const forcedShutdown = signal === 'SIGKILL';
+        if (forcedShutdown) {
+          const snapshotDir = path.join(getOmniConfigDir(), 'snapshots');
+          for (const snapshotRef of this.pendingSnapshotRefs()) {
+            if (!recordPendingSnapshotUpload(snapshotRef, snapshotDir, 'forced-uncertain')) {
+              console.error(`[snapshot-blob] could not durably record forced uncertainty for ${snapshotRef}`);
+            }
+          }
+          console.error(
+            `[agent-process] AgentHost exited via SIGKILL; snapshot persistence is uncertain for: ${
+              this.pendingSnapshotRefs().join(', ') || '(no registered snapshots)'
+            }`
+          );
+        } else {
+          void this.pushAllConsumerSnapshots();
+        }
+        this.consumerRegistrations.clear();
         if (this.status.type === 'exiting' || this.status.type === 'stopping') {
           this.updateStatus({ type: 'exited' });
           return;
@@ -988,7 +1387,21 @@ export class AgentProcess {
           : tail
             ? `omni serve exited (${reason})\n\n${tail}`
             : `omni serve exited (${reason})`;
-        this.updateStatus({ type: 'error', error: { message } });
+        this.updateStatus({
+          type: 'error',
+          error: {
+            message,
+            ...(forcedShutdown
+              ? {
+                  context: {
+                    shutdown: 'forced',
+                    snapshotPersistence: 'uncertain',
+                    pendingSnapshotRefs: this.pendingSnapshotRefs(),
+                  },
+                }
+              : {}),
+          },
+        });
       });
     } catch (error) {
       this.childProcess = null;
@@ -996,8 +1409,7 @@ export class AgentProcess {
     }
   };
 
-  // --- Compute mode (IComputeClient-backed: PlatformClient or
-  //     RemoteElectronComputeClient; see AgentProcessMode docs) ---
+  // --- Compute mode (IComputeClient-backed PlatformClient) ---
 
   private startComputeSession = async (arg: AgentProcessStartArg): Promise<void> => {
     if (!this.computeClient) {
@@ -1033,37 +1445,32 @@ export class AgentProcess {
         return;
       }
 
-      const wsUrl = ready.websocketUrl!;
-      // Derive the UI/HTTP origin from the WS URL by mapping the scheme, NOT by
-      // force-rewriting to ``https:``. ``PlatformClient`` returns a TLS gateway
-      // (``wss://`` → ``https://``); ``RemoteElectronComputeClient`` returns the
-      // laptop's plain-HTTP loopback (``ws://`` → ``http://``). Forcing https on
-      // the latter made the readiness HTTP probe fail forever (TLS handshake
-      // against a plain-HTTP server).
-      let uiUrl = wsUrl.replace(/^wss:/i, 'https:').replace(/^ws:/i, 'http:').replace(/\/ws$/, '');
-      if (ready.authToken) {
-        // Webview handoff only: the bundled web UI reads `?token=` off its own
-        // location and exchanges it for a one-time /auth/ws-ticket ticket —
-        // the token itself never rides a WS dial URL.
-        const sep = uiUrl.includes('?') ? '&' : '?';
-        uiUrl = `${uiUrl}${sep}token=${encodeURIComponent(ready.authToken)}`;
+      const wsUrl = ready.websocketUrl;
+      if (!wsUrl) {
+        throw new Error('Platform compute session became active without websocketUrl');
       }
+      // The consumer credential stays in structured process data and is sent
+      // through Authorization headers / one-time ticket exchange. It is never
+      // embedded in either renderer-facing URL.
+      const uiUrl = wsUrl.replace(/^wss:/i, 'https:').replace(/^ws:/i, 'http:').replace(/\/ws$/, '');
       const data: AgentProcessData = {
         uiUrl,
         wsUrl,
-        ...(ready.authToken ? { authToken: ready.authToken } : {}),
-        containerId: ready.containerId,
+        agentHostId: ready.agentHostId,
+        workspaceId: ready.workspaceId,
+        environmentId: ready.environmentId,
+        environmentGeneration: ready.environmentGeneration,
+        workspaceRoot: ready.workspaceRoot,
+        defaultCwd: ready.defaultCwd,
+        services: ready.services,
+        authToken: ready.consumerCredential.token,
+        ...(ready.containerId ? { containerId: ready.containerId } : {}),
       };
 
       // When the compute backend's ``waitForSession`` already guarantees the
       // sandbox is serving, skip our own HTTP/WS readiness probe.
-      // ``RemoteElectronComputeClient`` only reports ``active`` once the
-      // laptop's OWN ``AgentProcess`` reached ``running`` (its local readiness
-      // probe passed), and the loopback ``wsUrl`` it returns isn't reachable
-      // from the cloud anyway — re-probing it here is both redundant and wrong
-      // (it's what hung the session at "connecting"). The proxy-rewriter
-      // relabels these URLs to ``/proxy/local/<machineId>/<sessionId>/...`` for
-      // the renderer downstream.
+      // Alternate trusted adapters may confirm readiness themselves; ordinary
+      // platform sessions retain the independent HTTP/WS probe below.
       if (this.computeClient.confirmsReadiness) {
         this.updateStatus({ type: 'running', data });
         this.log.info(c.green.bold('Compute sandbox started\r\n'));
@@ -1147,23 +1554,88 @@ export class AgentProcess {
     this.agentHostControlToken = null;
   };
 
-  private pushConsumerSnapshot = async (environmentId: string): Promise<void> => {
-    const snapshotRef = this.consumerSnapshotRefs.get(environmentId);
-    if (!snapshotRef) {
+  private pendingSnapshotRefs = (): string[] => [...new Set(this.consumerSnapshotRefs.values())].sort();
+
+  private stopResult = (
+    scope: AgentProcessStopResult['scope'],
+    shutdown: AgentProcessStopResult['shutdown']
+  ): AgentProcessStopResult => ({
+    scope,
+    shutdown,
+    snapshotPersistence: this.consumerSnapshotRefs.size === 0 ? 'complete' : 'uncertain',
+    pendingSnapshotRefs: this.pendingSnapshotRefs(),
+  });
+
+  private scheduleSnapshotRetry = (environmentId: string): void => {
+    if (!this.consumerSnapshotRefs.has(environmentId) || this.snapshotRetryTimers.has(environmentId)) {
       return;
     }
-    this.consumerSnapshotRefs.delete(environmentId);
+    const attempt = Math.min((this.snapshotRetryAttempts.get(environmentId) ?? 0) + 1, 32);
+    this.snapshotRetryAttempts.set(environmentId, attempt);
+    const delay = Math.min(this.snapshotRetryDelayMs * 2 ** Math.min(attempt - 1, 4), 60_000);
+    const timer = setTimeout(() => {
+      this.snapshotRetryTimers.delete(environmentId);
+      void this.pushConsumerSnapshot(environmentId);
+    }, delay);
+    timer.unref?.();
+    this.snapshotRetryTimers.set(environmentId, timer);
+  };
+
+  private clearSnapshotRetry = (environmentId: string): void => {
+    const timer = this.snapshotRetryTimers.get(environmentId);
+    if (timer) {
+      clearTimeout(timer);
+      this.snapshotRetryTimers.delete(environmentId);
+    }
+    this.snapshotRetryAttempts.delete(environmentId);
+  };
+
+  private pushConsumerSnapshot = async (environmentId: string): Promise<boolean> => {
+    const snapshotRef = this.consumerSnapshotRefs.get(environmentId);
+    if (!snapshotRef) {
+      return true;
+    }
     const snapshotDir = path.join(getOmniConfigDir(), 'snapshots');
     try {
-      await getSnapshotStore().push(snapshotRef, snapshotDir);
+      const store = getSnapshotStore();
+      if (!(await store.verify(snapshotRef, snapshotDir))) {
+        console.error(`[snapshot-blob] snapshot file is missing or invalid for ${snapshotRef}; retaining retry state`);
+        if (!recordPendingSnapshotUpload(snapshotRef, snapshotDir, 'retryable')) {
+          console.error(`[snapshot-blob] could not durably record retry state for ${snapshotRef}`);
+        }
+        this.scheduleSnapshotRetry(environmentId);
+        return false;
+      }
+      if (!(await store.push(snapshotRef, snapshotDir))) {
+        console.error(`[snapshot-blob] push did not persist ${snapshotRef}; retaining retry state`);
+        if (!recordPendingSnapshotUpload(snapshotRef, snapshotDir, 'retryable')) {
+          console.error(`[snapshot-blob] could not durably record retry state for ${snapshotRef}`);
+        }
+        this.scheduleSnapshotRetry(environmentId);
+        return false;
+      }
+      this.clearSnapshotRetry(environmentId);
+      this.consumerSnapshotRefs.delete(environmentId);
+      if (!completePendingSnapshotUpload(snapshotRef, snapshotDir)) {
+        console.error(`[snapshot-blob] persisted ${snapshotRef}, but could not clear its durable retry record`);
+      }
+      return true;
     } catch (error) {
       console.error(`[snapshot-blob] push failed for ${snapshotRef}:`, error);
+      if (!recordPendingSnapshotUpload(snapshotRef, snapshotDir, 'retryable')) {
+        console.error(`[snapshot-blob] could not durably record retry state for ${snapshotRef}`);
+      }
+      this.scheduleSnapshotRetry(environmentId);
+      return false;
     }
   };
 
-  private pushAllConsumerSnapshots = async (): Promise<void> => {
+  private pushAllConsumerSnapshots = async (): Promise<boolean> => {
     const environmentIds = [...this.consumerSnapshotRefs.keys()];
-    await Promise.all(environmentIds.map((environmentId) => this.pushConsumerSnapshot(environmentId)));
+    const persisted = await Promise.all(
+      environmentIds.map((environmentId) => this.pushConsumerSnapshot(environmentId))
+    );
+    return persisted.every(Boolean);
   };
 
   /** Patch fields on the embedded ``AgentProcessData`` without changing the
@@ -1319,30 +1791,31 @@ export class AgentProcess {
    * `exited` from stop()/exit(), or `starting` from a back-to-back
    * rebuild's start()).
    */
-  private killProcess = (timeout = 30_000): Promise<void> => {
+  private killProcess = (timeout = 30_000): Promise<HostTermination> => {
     const child = this.childProcess;
     if (!child || child.exitCode !== null) {
       this.childProcess = null;
-      return Promise.resolve();
+      return Promise.resolve('not-applicable');
     }
     this.intentionallyKilled.add(child);
-    return new Promise<void>((resolve) => {
+    return new Promise<HostTermination>((resolve) => {
+      let timer: ReturnType<typeof setTimeout>;
       const onExit = (): void => {
         clearTimeout(timer);
         if (this.childProcess === child) {
           this.childProcess = null;
         }
-        resolve();
+        resolve('graceful');
       };
       child.once('close', onExit);
       child.kill('SIGTERM');
-      const timer = setTimeout(() => {
+      timer = setTimeout(() => {
         child.removeListener('close', onExit);
         child.kill('SIGKILL');
         if (this.childProcess === child) {
           this.childProcess = null;
         }
-        resolve();
+        resolve('forced');
       }, timeout);
     });
   };

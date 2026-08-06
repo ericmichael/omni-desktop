@@ -117,6 +117,16 @@ describe('chatBootMachine', () => {
   // -------------------------------------------------------------------------
 
   describe('error branches', () => {
+    it('surfaces a permanent connection failure and retries from the connection boundary', () => {
+      let snap = next(initialSnap(), { type: 'RPC_FAILED', error: 'credentials rejected' });
+      expect(phase(snap)).toBe('connectionError');
+      expect(ctx(snap).error).toBe('credentials rejected');
+
+      snap = next(snap, { type: 'RETRY' });
+      expect(phase(snap)).toBe('awaitingConnection');
+      expect(ctx(snap).error).toBeNull();
+    });
+
     it('bootstrapping → bootstrapError on BOOTSTRAP_FAILED', () => {
       let snap = next(initialSnap(), { type: 'RPC_CONNECTED' });
       snap = next(snap, { type: 'BOOTSTRAP_FAILED', error: 'boom' });

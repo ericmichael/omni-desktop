@@ -1,5 +1,6 @@
 import type { GitOperationProgressParams, RpcMethodMap } from '@/generated/omniagents-gui-v1/gui-v1';
 import { OmniagentsRpcError } from '@/shared/omniagents-rpc';
+import type { ExecutionTarget } from '@/shared/types';
 
 import type { RPCClient } from './client';
 
@@ -626,13 +627,29 @@ function validateGitPath(path: string): void {
 export class GitClient {
   readonly #rpc: GitTransport;
   readonly #environment: string;
+  readonly #target: ExecutionTarget | null;
 
-  constructor(rpc: GitTransport, environmentId: string) {
+  constructor(rpc: GitTransport, target: ExecutionTarget | string) {
+    const environmentId = typeof target === 'string' ? target : target.environmentId;
     if (!environmentId) {
       throw new TypeError('Git client requires an environment id');
     }
     this.#rpc = rpc;
     this.#environment = environmentId;
+    this.#target = typeof target === 'string' ? null : target;
+  }
+
+  #request<M extends GitMethod>(method: M, params: GitParams<M>): Promise<RpcMethodMap[M]['result']> {
+    return this.#rpc.request(method, {
+      ...params,
+      ...(this.#target
+        ? {
+            workspace_id: this.#target.workspaceId,
+            environment_id: this.#target.environmentId,
+            environment_generation: this.#target.environmentGeneration,
+          }
+        : {}),
+    } as GitParams<M>);
   }
 
   onOperationProgress(handler: (progress: GitOperationProgress) => void): () => void {
@@ -640,6 +657,14 @@ export class GitClient {
       const item = record(payload, 'git operation progress');
       const eventEnvironment = string(item.environment_id, 'progress.environment_id');
       if (eventEnvironment !== this.#environment) {
+        return;
+      }
+      if (
+        this.#target &&
+        ((item.workspace_id !== undefined && item.workspace_id !== this.#target.workspaceId) ||
+          (item.environment_generation !== undefined &&
+            item.environment_generation !== this.#target.environmentGeneration))
+      ) {
         return;
       }
       const operation = string(item.operation, 'progress.operation') as GitOperationProgress['operation'];
@@ -667,7 +692,7 @@ export class GitClient {
     if (opts.maxDepth !== undefined && (!Number.isSafeInteger(opts.maxDepth) || opts.maxDepth < 0)) {
       throw new TypeError('Repository discovery maxDepth must be a non-negative safe integer');
     }
-    const raw = await this.#rpc.request('git_list_repositories', {
+    const raw = await this.#request('git_list_repositories', {
       environment_id: this.#environment,
       ...(opts.path === undefined ? {} : { path: requestedPath }),
       ...(opts.maxDepth === undefined ? {} : { max_depth: opts.maxDepth }),
@@ -733,7 +758,7 @@ export class GitClient {
     workspaceRepo(repo);
     opts.paths?.forEach(validateGitPath);
     return parseStatus(
-      await this.#rpc.request('git_status', {
+      await this.#request('git_status', {
         environment_id: this.#environment,
         repo,
         ...(opts.includeUntracked === undefined ? {} : { include_untracked: opts.includeUntracked }),
@@ -752,7 +777,7 @@ export class GitClient {
     workspaceRepo(repo);
     opts.paths?.forEach(validateGitPath);
     return parseDiff(
-      await this.#rpc.request('git_diff', {
+      await this.#request('git_diff', {
         environment_id: this.#environment,
         repo,
         ...(opts.mode === undefined ? {} : { mode: opts.mode }),
@@ -772,7 +797,7 @@ export class GitClient {
   ): Promise<GitLogResult> {
     workspaceRepo(repo);
     opts.paths?.forEach(validateGitPath);
-    const raw = await this.#rpc.request('git_log', {
+    const raw = await this.#request('git_log', {
       environment_id: this.#environment,
       repo,
       ...(opts.rev === undefined ? {} : { rev: opts.rev }),
@@ -813,7 +838,7 @@ export class GitClient {
   async branches(repo: WorkspaceRepo, includeRemote?: boolean): Promise<GitListBranchesResult> {
     workspaceRepo(repo);
     const item = resultBase(
-      await this.#rpc.request('git_list_branches', {
+      await this.#request('git_list_branches', {
         environment_id: this.#environment,
         repo,
         ...(includeRemote === undefined ? {} : { include_remote: includeRemote }),
@@ -853,7 +878,7 @@ export class GitClient {
   async worktrees(repo: WorkspaceRepo): Promise<GitListWorktreesResult> {
     workspaceRepo(repo);
     const item = resultBase(
-      await this.#rpc.request('git_list_worktrees', { environment_id: this.#environment, repo }),
+      await this.#request('git_list_worktrees', { environment_id: this.#environment, repo }),
       this.#environment,
       repo,
       'git_list_worktrees result'
@@ -897,7 +922,7 @@ export class GitClient {
     workspaceRepo(repo);
     paths?.forEach(validateGitPath);
     const item = resultBase(
-      await this.#rpc.request('git_conflicts', {
+      await this.#request('git_conflicts', {
         environment_id: this.#environment,
         repo,
         ...(paths === undefined ? {} : { paths }),
@@ -962,7 +987,7 @@ export class GitClient {
   }
 
   async stage(repo: WorkspaceRepo, selection: GitSelection): Promise<GitStageResult> {
-    const raw = await this.#rpc.request(
+    const raw = await this.#request(
       'git_stage',
       selectionParams(this.#environment, workspaceRepo(repo), selection) as unknown as GitParams<'git_stage'>
     );
@@ -971,7 +996,7 @@ export class GitClient {
 
   async unstage(repo: WorkspaceRepo, selection: GitFileSelection): Promise<GitUnstageResult> {
     const params = selectionParams(this.#environment, workspaceRepo(repo), selection);
-    const raw = await this.#rpc.request('git_unstage', params as unknown as GitParams<'git_unstage'>);
+    const raw = await this.#request('git_unstage', params as unknown as GitParams<'git_unstage'>);
     return this.#selectionResult(raw, repo, 'unstaged') as GitUnstageResult;
   }
 
@@ -1092,7 +1117,7 @@ export class GitClient {
     repo: WorkspaceRepo,
     opts: { remote?: string; refspec?: string; prune?: boolean } = {}
   ): Promise<GitFetchResult> {
-    const raw = await this.#rpc.request('git_fetch', {
+    const raw = await this.#request('git_fetch', {
       environment_id: this.#environment,
       repo: workspaceRepo(repo),
       ...(opts.remote === undefined ? {} : { remote: opts.remote }),
@@ -1129,7 +1154,7 @@ export class GitClient {
     opts: { remote?: string; refspec?: string; rebase?: boolean } = {}
   ): Promise<GitPullResult> {
     const item = resultBase(
-      await this.#rpc.request('git_pull', {
+      await this.#request('git_pull', {
         environment_id: this.#environment,
         repo: workspaceRepo(repo),
         ...(opts.remote === undefined ? {} : { remote: opts.remote }),
@@ -1292,7 +1317,7 @@ export class GitClient {
   ): Promise<GitMutationOutcome<T>> {
     const binding = { method, repo, paramsKey: stableKey(params) };
     try {
-      return { kind: 'completed', result: parse(await this.#rpc.request(method, params as unknown as GitParams<M>)) };
+      return { kind: 'completed', result: parse(await this.#request(method, params as unknown as GitParams<M>)) };
     } catch (error) {
       const confirmation = GitConfirmation.fromError(error, binding);
       if (!confirmation) {
@@ -1314,9 +1339,7 @@ export class GitClient {
     try {
       return {
         kind: 'completed',
-        result: parse(
-          await this.#rpc.request(method, { ...params, confirmation_token: token } as unknown as GitParams<M>)
-        ),
+        result: parse(await this.#request(method, { ...params, confirmation_token: token } as unknown as GitParams<M>)),
       };
     } catch (error) {
       // A stale/expired token carries a fresh impact and token. Return that

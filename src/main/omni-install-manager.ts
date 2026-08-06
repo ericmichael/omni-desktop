@@ -871,6 +871,27 @@ export class OmniInstallManager {
     }
   };
 
+  /**
+   * Wait until an active runtime install (including the development editable
+   * omniagents overlay) has completely settled before a caller uses the CLI.
+   *
+   * The omni-code install step creates ``bin/omni`` before the subsequent
+   * editable omniagents install replaces the released dependency. Checking
+   * only for the executable can therefore observe a briefly incomplete
+   * environment while uv is between uninstall and install. ProcessManager
+   * uses this barrier before starting or reconfiguring a local AgentHost.
+   */
+  waitForInstallCompletion = async (): Promise<void> => {
+    await this.installInProgress;
+
+    if (this.status.type === 'error') {
+      throw new Error(`Omni runtime installation failed: ${this.status.error.message}`);
+    }
+    if (this.status.type === 'canceled' || this.status.type === 'canceling') {
+      throw new Error('Omni runtime installation was canceled');
+    }
+  };
+
   cancelInstall = async (): Promise<void> => {
     const installInProgress = this.status.type === 'installing' || this.status.type === 'starting';
 

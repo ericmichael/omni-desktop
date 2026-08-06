@@ -6,7 +6,10 @@ import {
   CheckCircleIcon,
   ChevronDownIcon,
   ChevronUpIcon,
+  CircleAlertIcon,
+  CircleIcon,
   CopyIcon,
+  LoaderCircleIcon,
   Maximize2Icon,
   Minimize2Icon,
   PaperclipIcon,
@@ -37,10 +40,12 @@ import {
 import { CodeBlock } from './ai/code-block';
 import { MessageResponse } from './ai/message';
 import { Plan, PlanContent, PlanDescription, PlanFooter, PlanHeader, PlanTitle } from './ai/plan';
+import { Reasoning, ReasoningContent, ReasoningTrigger } from './ai/reasoning';
 import { Shimmer } from './ai/shimmer';
 import { Tool, ToolContent, ToolHeader, ToolInput, ToolOutput } from './ai/tool';
 import { ChatContainerContent, ChatContainerRoot, ChatContainerScrollAnchor } from './ChatContainer';
 import { Markdown } from './promptkit/markdown';
+import { RunDiffCard } from './RunDiffCard';
 
 export type {
   ApprovalItem,
@@ -50,6 +55,9 @@ export type {
   ChatMessage,
   MessageItem,
   PlanItem,
+  ReasoningItem,
+  RunDiffItem,
+  StructuredItem,
   ToolItem,
 } from '@/shared/chat-types';
 import type {
@@ -60,6 +68,9 @@ import type {
   ChatMessage,
   MessageItem,
   PlanItem,
+  ReasoningItem,
+  RunDiffItem,
+  StructuredItem,
   ToolItem,
 } from '@/shared/chat-types';
 
@@ -276,6 +287,26 @@ export function MessageList({
                   queuePosition={queuePosition}
                   queueTotal={queueTotal}
                 />
+              );
+            }
+            if (m.type === 'reasoning') {
+              const reasoning = m as ReasoningItem;
+              return (
+                <Reasoning key={reasoning.canonical.item_id} defaultOpen={false}>
+                  <ReasoningTrigger />
+                  <ReasoningContent>{reasoning.summary}</ReasoningContent>
+                </Reasoning>
+              );
+            }
+            if (m.type === 'plan') {
+              return <PlanCard key={(m as PlanItem).id} item={m as PlanItem} />;
+            }
+            if (m.type === 'run_diff') {
+              return <RunDiffCard key={(m as RunDiffItem).canonical.item_id} item={m as RunDiffItem} />;
+            }
+            if (m.type === 'structured') {
+              return (
+                <StructuredConversationCard key={(m as StructuredItem).canonical.item_id} item={m as StructuredItem} />
               );
             }
             return null;
@@ -713,6 +744,28 @@ function StatusRow({ text, spinner, italic }: { text?: string; spinner?: boolean
     <div className="text-xs text-muted-foreground">
       <span className={italic ? 'italic' : ''}>{text}</span>
     </div>
+  );
+}
+
+function StructuredConversationCard({ item }: { item: StructuredItem }) {
+  const detail = JSON.stringify(item.canonical.content, null, 2);
+  return (
+    <Artifact data-conversation-kind={item.kind}>
+      <ArtifactHeader>
+        <ArtifactTitle>{item.title}</ArtifactTitle>
+      </ArtifactHeader>
+      <ArtifactContent className="space-y-3">
+        {item.summary ? <pre className="whitespace-pre-wrap break-words text-sm">{item.summary}</pre> : null}
+        <Collapsible>
+          <CollapsibleTrigger className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
+            Structured details <ChevronDownIcon className="size-3" />
+          </CollapsibleTrigger>
+          <CollapsibleContent className="mt-2">
+            <CodeBlock code={detail} language="json" />
+          </CollapsibleContent>
+        </Collapsible>
+      </ArtifactContent>
+    </Artifact>
   );
 }
 
@@ -1309,31 +1362,49 @@ function PlanCard({ item, onDecision }: { item: PlanItem; onDecision?: (approved
       <PlanContent>
         <ol className="space-y-2 list-none">
           {item.steps.map((step, i) => (
-            <li key={i} className="flex items-start gap-2">
-              <CheckCircleIcon className="size-4 shrink-0 mt-0.5 text-muted-foreground" />
+            <li key={step.id ?? i} className="flex items-start gap-2">
+              <PlanStepStatusIcon status={step.status} />
               <div className="min-w-0 max-w-full overflow-hidden">
                 <div className="text-sm font-medium">{step.title}</div>
                 {step.description ? <div className="text-xs text-muted-foreground">{step.description}</div> : null}
+                {step.status ? (
+                  <div className="text-xs text-muted-foreground">{step.status.replace('_', ' ')}</div>
+                ) : null}
               </div>
             </li>
           ))}
         </ol>
       </PlanContent>
-      <PlanFooter className="justify-end gap-2">
-        <Button
-          variant="outline"
-          size="sm"
-          className="border-destructive text-destructive hover:bg-destructive/10 hover:text-destructive"
-          onClick={() => onDecision?.(false)}
-        >
-          Reject
-        </Button>
-        <Button size="sm" onClick={() => onDecision?.(true)}>
-          Approve Plan
-        </Button>
-      </PlanFooter>
+      {onDecision ? (
+        <PlanFooter className="justify-end gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            className="border-destructive text-destructive hover:bg-destructive/10 hover:text-destructive"
+            onClick={() => onDecision(false)}
+          >
+            Reject
+          </Button>
+          <Button size="sm" onClick={() => onDecision(true)}>
+            Approve Plan
+          </Button>
+        </PlanFooter>
+      ) : null}
     </Plan>
   );
+}
+
+function PlanStepStatusIcon({ status }: { status?: PlanItem['steps'][number]['status'] }) {
+  if (status === 'completed') {
+    return <CheckCircleIcon className="mt-0.5 size-4 shrink-0 text-success" aria-label="Completed" />;
+  }
+  if (status === 'in_progress') {
+    return <LoaderCircleIcon className="mt-0.5 size-4 shrink-0 animate-spin text-primary" aria-label="In progress" />;
+  }
+  if (status === 'blocked') {
+    return <CircleAlertIcon className="mt-0.5 size-4 shrink-0 text-warning" aria-label="Blocked" />;
+  }
+  return <CircleIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-label="Pending" />;
 }
 
 function renderMetadata(meta: any, fallbackText: string): React.ReactNode | null {

@@ -7,7 +7,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { PlatformClient, type PlatformConfig } from '@/main/platform-client';
+import { PlatformClient, type PlatformConfig, PlatformSessionContractError } from '@/main/platform-client';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -19,6 +19,22 @@ const makeConfig = (overrides: Partial<PlatformConfig> = {}): PlatformConfig => 
   url: BASE_URL,
   accessToken: 'access-token-1',
   refreshToken: 'refresh-token-1',
+  ...overrides,
+});
+
+const platformSession = (overrides: Record<string, unknown> = {}) => ({
+  session_id: 's1',
+  status: 'active',
+  agent_host_id: 'agent-host-1',
+  workspace_id: 'workspace-1',
+  environment_id: 'environment-1',
+  environment_generation: 3,
+  workspace_root: '/workspace/project',
+  default_cwd: '/workspace/project',
+  services: { code_server: 'https://code.example.test' },
+  consumer_credential: { token: 'consumer-token-1', scope: 'consumer', kind: 'ordinary' },
+  websocket_url: 'wss://runtime.example.test/ws',
+  container_id: 'c1',
   ...overrides,
 });
 
@@ -134,9 +150,19 @@ describe('PlatformClient instance', () => {
   // --- startSession ---
 
   it('startSession sends POST with agent and optional git repo', async () => {
-    fetchFn.mockResolvedValueOnce(jsonResponse({ session_id: 's1', runtime_token: 'rt1', status: 'pending' }));
+    fetchFn.mockResolvedValueOnce(jsonResponse(platformSession({ status: 'pending', websocket_url: undefined })));
     const result = await client.startSession('omni-code', 'acme', { url: 'https://github.com/repo', branch: 'main' });
     expect(result.sessionId).toBe('s1');
+    expect(result).toMatchObject({
+      agentHostId: 'agent-host-1',
+      workspaceId: 'workspace-1',
+      environmentId: 'environment-1',
+      environmentGeneration: 3,
+      workspaceRoot: '/workspace/project',
+      defaultCwd: '/workspace/project',
+      services: { code_server: 'https://code.example.test' },
+      consumerCredential: { token: 'consumer-token-1', scope: 'consumer', kind: 'ordinary' },
+    });
     const body = JSON.parse(fetchFn.mock.calls[0]![1]!.body as string);
     expect(body.agent).toBe('omni-code');
     expect(body.domain).toBe('acme');
@@ -147,20 +173,67 @@ describe('PlatformClient instance', () => {
   // --- pollSessionStatus ---
 
   it('pollSessionStatus maps response fields', async () => {
-    fetchFn.mockResolvedValueOnce(
-      jsonResponse({
-        session_id: 's1',
-        status: 'active',
-        websocket_url: 'ws://host',
-        container_id: 'c1',
-        auth_token: 'at',
-      })
-    );
+    fetchFn.mockResolvedValueOnce(jsonResponse(platformSession({ websocket_url: 'wss://host.example.test/ws' })));
     const result = await client.pollSessionStatus('s1');
     expect(result.status).toBe('active');
-    expect(result.websocketUrl).toBe('ws://host');
+    expect(result.websocketUrl).toBe('wss://host.example.test/ws');
     expect(result.containerId).toBe('c1');
-    expect(result.authToken).toBe('at');
+    expect(result.consumerCredential.token).toBe('consumer-token-1');
+  });
+
+  it.each([
+    'agent_host_id',
+    'workspace_id',
+    'environment_id',
+    'environment_generation',
+    'workspace_root',
+    'default_cwd',
+    'services',
+    'consumer_credential',
+  ])('fails closed when a remote session omits %s', async (field) => {
+    const response = platformSession();
+    delete response[field as keyof typeof response];
+    fetchFn.mockResolvedValueOnce(jsonResponse(response));
+    await expect(client.pollSessionStatus('s1')).rejects.toBeInstanceOf(PlatformSessionContractError);
+  });
+
+  it('rejects legacy, privileged, mismatched, or URL-embedded credentials', async () => {
+    fetchFn.mockResolvedValueOnce(jsonResponse(platformSession({ auth_token: 'legacy-admin-like-token' })));
+    await expect(client.pollSessionStatus('s1')).rejects.toThrow(/forbidden privileged or legacy credential/);
+
+    fetchFn.mockResolvedValueOnce(
+      jsonResponse(platformSession({ admin_credential: { token: 'must-never-cross-the-boundary' } }))
+    );
+    await expect(client.pollSessionStatus('s1')).rejects.toThrow(/forbidden privileged or legacy credential/);
+
+    fetchFn.mockResolvedValueOnce(
+      jsonResponse(
+        platformSession({
+          consumer_credential: { token: 'admin', scope: 'admin', kind: 'ordinary' },
+        })
+      )
+    );
+    await expect(client.pollSessionStatus('s1')).rejects.toThrow(/consumer scope and ordinary kind/);
+
+    fetchFn.mockResolvedValueOnce(jsonResponse(platformSession({ session_id: 'another-session' })));
+    await expect(client.pollSessionStatus('s1')).rejects.toThrow(/does not match/);
+
+    fetchFn.mockResolvedValueOnce(
+      jsonResponse(platformSession({ websocket_url: 'wss://runtime.example.test/ws?token=leak' }))
+    );
+    await expect(client.pollSessionStatus('s1')).rejects.toThrow(/must not contain credentials in its query/);
+  });
+
+  it.each([
+    [{ environment_generation: 0 }, /positive safe integer/],
+    [{ workspace_root: 'relative/workspace' }, /absolute normalized path/],
+    [{ default_cwd: '/another/root' }, /inside workspace_root/],
+    [{ services: { vnc: 'ftp://services.example.test' } }, /unsupported protocol/],
+    [{ consumer_credential: { token: '', scope: 'consumer', kind: 'ordinary' } }, /must be a non-empty string/],
+    [{ status: 'mystery' }, /unsupported value/],
+  ])('rejects malformed routing metadata %#', async (overrides, error) => {
+    fetchFn.mockResolvedValueOnce(jsonResponse(platformSession(overrides)));
+    await expect(client.pollSessionStatus('s1')).rejects.toThrow(error as RegExp);
   });
 
   // --- waitForSession ---
@@ -168,8 +241,8 @@ describe('PlatformClient instance', () => {
   it('waitForSession resolves when session becomes active with websocketUrl', async () => {
     vi.useFakeTimers();
     fetchFn
-      .mockResolvedValueOnce(jsonResponse({ session_id: 's1', status: 'pending' }))
-      .mockResolvedValueOnce(jsonResponse({ session_id: 's1', status: 'active', websocket_url: 'ws://host' }));
+      .mockResolvedValueOnce(jsonResponse(platformSession({ status: 'pending', websocket_url: undefined })))
+      .mockResolvedValueOnce(jsonResponse(platformSession()));
 
     const promise = client.waitForSession('s1', 5);
     // Advance through setTimeout(2000) calls
@@ -181,7 +254,9 @@ describe('PlatformClient instance', () => {
   });
 
   it('waitForSession throws when session fails', async () => {
-    fetchFn.mockResolvedValue(jsonResponse({ session_id: 's1', status: 'failed', error: 'OOM' }));
+    fetchFn.mockResolvedValue(
+      jsonResponse(platformSession({ status: 'failed', websocket_url: undefined, error: 'OOM' }))
+    );
     // No fake timers needed — the first poll immediately hits 'failed' and throws
     await expect(client.waitForSession('s1', 5)).rejects.toThrow('OOM');
   });

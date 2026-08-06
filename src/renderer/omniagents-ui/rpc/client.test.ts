@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { OmniagentsRpcError } from './client';
-import { RPCClient, WORKSPACE_EXPERIMENTAL_OPERATIONS } from './client';
+import { EXPERIMENTAL_FEATURE_MANIFESTS, RPCClient, WORKSPACE_EXPERIMENTAL_OPERATIONS } from './client';
 
 type InitializeRequest = {
   id: number;
@@ -32,7 +32,7 @@ class MockWebSocket {
 
   readyState = MockWebSocket.CONNECTING;
   onmessage: ((event: { data: string }) => void) | null = null;
-  onclose: (() => void) | null = null;
+  onclose: ((event?: { code?: number; reason?: string }) => void) | null = null;
   onerror: (() => void) | null = null;
   sent: string[] = [];
   private listeners = new Map<string, Set<() => void>>();
@@ -148,6 +148,19 @@ describe('RPCClient GUI protocol handshake', () => {
     ]);
     expect(client.isConnected).toBe(true);
     expect(client.initializeResult).toEqual(initializeResult(initialize));
+    expect(initialize.params.capabilities.experimental_operations).toContain('get_config');
+    expect(initialize.params.capabilities.experimental_operations).not.toContain('validate_config');
+    expect(initialize.params.capabilities.experimental_operations).not.toContain('write_config');
+    expect(EXPERIMENTAL_FEATURE_MANIFESTS.conversationOrganization).toEqual([
+      'list_threads',
+      'search_threads',
+      'update_thread',
+      'thread_updated',
+    ]);
+    expect(EXPERIMENTAL_FEATURE_MANIFESTS.plansAndDiffs).toEqual(['get_plan', 'get_run_diff', 'item_updated']);
+    expect(initialize.params.capabilities.experimental_operations).not.toContain('fork_session');
+    expect(initialize.params.capabilities.experimental_operations).not.toContain('export_thread');
+    expect(initialize.params.capabilities.experimental_operations).not.toContain('purge_threads');
     client.dispose();
   });
 
@@ -273,6 +286,39 @@ describe('RPCClient GUI protocol handshake', () => {
     client.dispose();
   });
 
+  it('gates experimental features atomically when a required notification is unsupported', async () => {
+    MockWebSocket.autoInitialize = false;
+    const client = new RPCClient('ws://example.test/ws');
+    const connection = client.connect();
+    const socket = MockWebSocket.instances[0]!;
+    socket.open();
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(1));
+
+    const first = JSON.parse(socket.sent[0]!) as InitializeRequest;
+    socket.receive({
+      jsonrpc: '2.0',
+      id: first.id,
+      error: {
+        code: -32013,
+        message: 'Unsupported experimental capabilities',
+        data: { kind: 'capability_not_negotiated', unsupported_capabilities: ['item_updated'] },
+      },
+    });
+
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(2));
+    const second = JSON.parse(socket.sent[1]!) as InitializeRequest;
+    expect(second.params.capabilities.experimental_operations).toContain('get_plan');
+    expect(second.params.capabilities.experimental_operations).toContain('get_run_diff');
+    expect(second.params.capabilities.experimental_operations).not.toContain('item_updated');
+    socket.receive({ jsonrpc: '2.0', id: second.id, result: initializeResult(second) });
+    await connection;
+
+    expect(client.supportsExperimentalFeature('plansAndDiffs')).toBe(false);
+    expect(client.supportsExperimentalFeature('conversationOrganization')).toBe(true);
+    expect(client.degradedExperimentalOperations).toEqual(['item_updated']);
+    client.dispose();
+  });
+
   it('does not degrade an unrelated capability mismatch', async () => {
     MockWebSocket.autoInitialize = false;
     const client = new RPCClient('ws://example.test/ws');
@@ -301,6 +347,28 @@ describe('RPCClient GUI protocol handshake', () => {
     expect(client.initializeResult).toBeNull();
     client.dispose();
   });
+
+  it('bounds the whole socket plus initialize attempt and closes the timed-out transport', async () => {
+    vi.useFakeTimers();
+    const client = new RPCClient('ws://example.test/ws');
+    try {
+      const connection = client.connect();
+      const socket = MockWebSocket.instances[0]!;
+      const rejection = expect(connection).rejects.toMatchObject({
+        name: 'RpcTimeoutError',
+        method: 'initialize',
+        timeoutMs: 10_000,
+      });
+
+      await vi.advanceTimersByTimeAsync(10_001);
+
+      await rejection;
+      expect(socket.readyState).toBe(3);
+    } finally {
+      client.dispose();
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe('RPCClient generated protocol integration', () => {
@@ -316,7 +384,11 @@ describe('RPCClient generated protocol integration', () => {
 
   it('keeps conversation and execution identities separate in server_call', async () => {
     const { client, socket } = await connectedClient();
-    const response = client.serverCall('bash_jobs.list', {}, 'session-1', 'environment-1');
+    const response = client.serverCall('bash_jobs.list', {}, 'session-1', {
+      workspaceId: 'workspace-1',
+      environmentId: 'environment-1',
+      environmentGeneration: 3,
+    });
     const request = JSON.parse(socket.sent[0]!) as Record<string, unknown>;
 
     expect(request).toEqual({
@@ -327,7 +399,9 @@ describe('RPCClient generated protocol integration', () => {
         function: 'bash_jobs.list',
         args: {},
         session_id: 'session-1',
+        workspace_id: 'workspace-1',
         environment_id: 'environment-1',
+        environment_generation: 3,
       },
     });
 
@@ -344,6 +418,112 @@ describe('RPCClient generated protocol integration', () => {
     expect(request).not.toHaveProperty('params');
     socket.receive({ jsonrpc: '2.0', id: request.id, result: [] });
     await expect(response).resolves.toEqual([]);
+    client.dispose();
+  });
+
+  it('uses typed MCP resource and tool operations with their exact generated params', async () => {
+    const { client, socket } = await connectedClient();
+
+    const resource = client.mcpReadResource('github', 'file:///readme', 'session-1');
+    const resourceFrame = JSON.parse(socket.sent.at(-1)!) as Record<string, unknown>;
+    expect(resourceFrame).toEqual({
+      jsonrpc: '2.0',
+      id: 2,
+      method: 'mcp_read_resource',
+      params: { server_name: 'github', uri: 'file:///readme', session_id: 'session-1' },
+    });
+    socket.receive({
+      jsonrpc: '2.0',
+      id: resourceFrame.id,
+      result: { server_name: 'github', uri: 'file:///readme', contents: [{ text: 'hello' }] },
+    });
+    await expect(resource).resolves.toEqual({
+      server_name: 'github',
+      uri: 'file:///readme',
+      contents: [{ text: 'hello' }],
+    });
+
+    const tool = client.mcpCallTool('github', 'open_issue', { title: 'Bug' }, 'session-1');
+    const toolFrame = JSON.parse(socket.sent.at(-1)!) as Record<string, unknown>;
+    expect(toolFrame).toEqual({
+      jsonrpc: '2.0',
+      id: 3,
+      method: 'mcp_call_tool',
+      params: {
+        server_name: 'github',
+        tool_name: 'open_issue',
+        session_id: 'session-1',
+        args: { title: 'Bug' },
+      },
+    });
+    socket.receive({
+      jsonrpc: '2.0',
+      id: toolFrame.id,
+      result: { server_name: 'github', tool_name: 'open_issue', result: { content: [] } },
+    });
+    await expect(tool).resolves.toEqual({
+      server_name: 'github',
+      tool_name: 'open_issue',
+      result: { content: [] },
+    });
+    client.dispose();
+  });
+
+  it('rejects malformed typed MCP results and a missing call-tool session locally', async () => {
+    const { client, socket } = await connectedClient();
+
+    const missingSession = client.mcpCallTool('github', 'open_issue', {});
+    await expect(missingSession).rejects.toThrow('sessionId must be a non-empty string');
+    expect(socket.sent).toHaveLength(0);
+
+    const resource = client.mcpReadResource('github', 'file:///readme', 'session-1');
+    const resourceFrame = JSON.parse(socket.sent.at(-1)!) as Record<string, unknown>;
+    socket.receive({
+      jsonrpc: '2.0',
+      id: resourceFrame.id,
+      result: { server_name: 'github', uri: 'file:///readme', contents: 'not-an-array' },
+    });
+    await expect(resource).rejects.toThrow('mcp_read_resource.contents must be an array');
+
+    const tool = client.mcpCallTool('github', 'open_issue', {}, 'session-1');
+    const toolFrame = JSON.parse(socket.sent.at(-1)!) as Record<string, unknown>;
+    socket.receive({
+      jsonrpc: '2.0',
+      id: toolFrame.id,
+      result: { server_name: 'github', tool_name: 'open_issue', result: [] },
+    });
+    await expect(tool).rejects.toThrow('mcp_call_tool.result must be an object');
+    client.dispose();
+  });
+
+  it('rejects an unnegotiated typed MCP operation without sending a request', async () => {
+    MockWebSocket.autoInitialize = false;
+    const client = new RPCClient('ws://example.test/ws');
+    const connection = client.connect();
+    const socket = MockWebSocket.instances[0]!;
+    socket.open();
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(1));
+
+    const first = JSON.parse(socket.sent[0]!) as InitializeRequest;
+    socket.receive({
+      jsonrpc: '2.0',
+      id: first.id,
+      error: {
+        code: -32013,
+        message: 'Unsupported experimental capabilities',
+        data: { kind: 'capability_not_negotiated', unsupported_capabilities: ['mcp_call_tool'] },
+      },
+    });
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(2));
+    const second = JSON.parse(socket.sent[1]!) as InitializeRequest;
+    socket.receive({ jsonrpc: '2.0', id: second.id, result: initializeResult(second) });
+    await connection;
+    socket.sent.length = 0;
+
+    await expect(client.mcpCallTool('github', 'open_issue', {}, 'session-1')).rejects.toThrow(
+      'mcp_call_tool was not negotiated for this connection'
+    );
+    expect(socket.sent).toHaveLength(0);
     client.dispose();
   });
 
@@ -368,6 +548,47 @@ describe('RPCClient generated protocol integration', () => {
       message: 'Invalid params',
       data: { method: 'get_session_history' },
     } satisfies Partial<OmniagentsRpcError>);
+    client.dispose();
+  });
+
+  it('supports per-call deadlines and AbortSignal cleanup without retrying', async () => {
+    const { client, socket } = await connectedClient();
+
+    const timedOut = client.request('fs_stat', { environment_id: 'environment', path: 'slow' }, { timeoutMs: 5 });
+    await expect(timedOut).rejects.toMatchObject({ name: 'RpcTimeoutError', method: 'fs_stat', timeoutMs: 5 });
+    expect(client.actor.getSnapshot().context.pendingCount).toBe(0);
+
+    const controller = new AbortController();
+    const aborted = client.request(
+      'fs_stat',
+      { environment_id: 'environment', path: 'cancelled' },
+      { timeoutMs: null, signal: controller.signal }
+    );
+    controller.abort();
+    await expect(aborted).rejects.toMatchObject({ name: 'RpcAbortError', method: 'fs_stat' });
+    expect(client.actor.getSnapshot().context.pendingCount).toBe(0);
+    expect(socket.sent.filter((frame) => JSON.parse(frame).method === 'fs_stat')).toHaveLength(2);
+    client.dispose();
+  });
+
+  it('classifies permanent close metadata and rejects pending calls structurally', async () => {
+    const { client, socket } = await connectedClient();
+    const pending = client.getSessionHistory('session-1');
+
+    socket.onclose?.({ code: 4401, reason: 'credentials rejected' });
+
+    await expect(pending).rejects.toMatchObject({
+      name: 'ConnectionClosedError',
+      permanent: true,
+      closeCode: 4401,
+      reason: 'credentials rejected',
+    });
+    expect(client.actor.getSnapshot().context).toMatchObject({
+      permanent: true,
+      closeCode: 4401,
+      error: 'credentials rejected',
+    });
+    expect(client.connectionState).toBe('disconnected');
     client.dispose();
   });
 
@@ -462,6 +683,46 @@ describe('RPCClient durable event replay', () => {
     client.dispose();
   });
 
+  it('routes sequenced elicitation notifications through the shared interaction queue', async () => {
+    const { client, socket } = await connectedClient();
+    const changes: string[] = [];
+    client.elicitations.onChange((event) => changes.push(event.type));
+
+    notify(
+      socket,
+      'elicitation_requested',
+      envelope(1, {
+        elicitation_id: 'elicit-1',
+        kind: 'question',
+        message: 'Which environment?',
+      })
+    );
+
+    expect(client.elicitations.get('elicit-1')).toMatchObject({
+      kind: 'question',
+      sessionId: 's',
+      message: 'Which environment?',
+    });
+    expect(changes).toEqual(['requested']);
+
+    const response = client.elicitations.respond('elicit-1', {
+      action: 'accept',
+      value: { text: 'staging' },
+    });
+    const frame = sentRequests(socket, 'elicitation_response')[0]!;
+    expect(frame.params).toEqual({
+      elicitation_id: 'elicit-1',
+      action: 'accept',
+      value: { text: 'staging' },
+    });
+    socket.receive({ jsonrpc: '2.0', id: frame.id, result: { status: 'accepted' } });
+
+    await expect(response).resolves.toMatchObject({ status: 'accepted', won: true });
+    expect(client.elicitations.get('elicit-1')).toBeUndefined();
+    expect(changes).toEqual(['requested', 'removed']);
+    client.dispose();
+  });
+
   it('passes transient events (no seq) through untouched', async () => {
     const { client, socket } = await connectedClient();
     const seen: unknown[] = [];
@@ -538,9 +799,10 @@ describe('RPCClient durable event replay', () => {
     });
 
     await vi.waitFor(() => expect(resyncs).toEqual(['s']));
-    // The held live event is delivered anyway (loop-safe degradation) while
-    // the host performs its full get_session_history refetch.
-    await vi.waitFor(() => expect(seen).toEqual([1, 5]));
+    // The held live event remains quarantined. Delivering it before the host
+    // completes its authoritative reload could apply an event from a new
+    // stream epoch onto stale state.
+    expect(seen).toEqual([1]);
     client.dispose();
   });
 
@@ -570,6 +832,45 @@ describe('RPCClient durable event replay', () => {
     client.dispose();
   });
 
+  it('registers a selected cursorless session immediately from sequence zero', async () => {
+    const { client, socket } = await connectedClient();
+
+    const registration = client.registerSession('selected-session');
+    await vi.waitFor(() => expect(sentRequests(socket, 'resume_session')).toHaveLength(1));
+    const resume = sentRequests(socket, 'resume_session')[0]!;
+    expect(resume.params).toEqual({ session_id: 'selected-session', after_seq: 0 });
+    socket.receive({
+      jsonrpc: '2.0',
+      id: resume.id,
+      result: { session_id: 'selected-session', stream_id: 'stream-selected', last_seq: 0, events: [] },
+    });
+
+    await registration;
+    client.dispose();
+  });
+
+  it('routes ack_events -32030 through the same authoritative resync quarantine', async () => {
+    const { client, socket } = await connectedClient();
+    const resyncs: string[] = [];
+    const seen: number[] = [];
+    client.onResyncRequired((sessionId) => resyncs.push(sessionId));
+    client.on('message_output', (params: any) => seen.push(params.seq));
+
+    notify(socket, 'message_output', envelope(1, { content: 'a' }));
+    await vi.waitFor(() => expect(sentRequests(socket, 'ack_events')).toHaveLength(1), { timeout: 2000 });
+    const ack = sentRequests(socket, 'ack_events')[0]!;
+    socket.receive({
+      jsonrpc: '2.0',
+      id: ack.id,
+      error: { code: -32030, message: 'cursor compacted', data: { kind: 'resync_required' } },
+    });
+
+    await vi.waitFor(() => expect(resyncs).toEqual(['s']));
+    notify(socket, 'message_output', envelope(2, { content: 'quarantined' }));
+    expect(seen).toEqual([1]);
+    client.dispose();
+  });
+
   it('resumes tracked sessions from the stored cursor after a reconnect', async () => {
     const { client, socket } = await connectedClient();
     const seen: unknown[] = [];
@@ -585,7 +886,7 @@ describe('RPCClient durable event replay', () => {
     const socket2 = MockWebSocket.instances.at(-1)!;
     socket2.open();
 
-    await vi.waitFor(() => expect(socket2.sent).toHaveLength(3), { timeout: 3000 });
+    await vi.waitFor(() => expect(sentRequests(socket2, 'resume_session')).toHaveLength(1), { timeout: 3000 });
     expect(socket2.sent.slice(0, 2).map((frame) => (JSON.parse(frame) as { method: string }).method)).toEqual([
       'initialize',
       'initialized',
@@ -593,9 +894,9 @@ describe('RPCClient durable event replay', () => {
 
     // The fresh connection must resume from the stored cursor before any
     // live event arrives, recovering exactly the missed events.
-    await vi.waitFor(() => expect(sentRequests(socket2, 'resume_session')).toHaveLength(1), { timeout: 3000 });
     const resume = sentRequests(socket2, 'resume_session')[0]!;
     expect(resume.params).toEqual({ session_id: 's', stream_id: 'stream-1', after_seq: 2 });
+    expect(client.connectionState).toBe('connecting');
 
     socket2.receive({
       jsonrpc: '2.0',
@@ -612,6 +913,7 @@ describe('RPCClient durable event replay', () => {
     });
 
     await vi.waitFor(() => expect(seen).toEqual([1, 2, 3, 4]));
+    expect(client.connectionState).toBe('connected');
     // A duplicate of a replayed event (legacy pending-event replay) is dropped.
     notify(socket2, 'message_output', envelope(3, { content: 'c' }));
     expect(seen).toEqual([1, 2, 3, 4]);

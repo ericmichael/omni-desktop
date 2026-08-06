@@ -138,7 +138,11 @@ describe('FilesSurface', () => {
     await act(async () => {
       root.render(
         <StrictMode>
-          <FilesSurface environmentId="environment-1" sessionId="session-1" workspaceRoot="/workspace" />
+          <FilesSurface
+            executionTarget={{ workspaceId: 'workspace-1', environmentId: 'environment-1', environmentGeneration: 3 }}
+            sessionId="session-1"
+            workspaceRoot="/workspace"
+          />
         </StrictMode>
       );
     });

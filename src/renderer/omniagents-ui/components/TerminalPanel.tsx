@@ -17,6 +17,7 @@ import {
   type TerminalTabActor,
   terminalTabMachine,
 } from '@/shared/machines/terminal-tab.machine';
+import type { ExecutionTarget } from '@/shared/types';
 
 function base64Encode(bytes: Uint8Array): string {
   let binary = '';
@@ -66,14 +67,14 @@ function makeTabId(): string {
 export function TerminalPanel({
   open,
   sessionId,
-  environmentId,
+  executionTarget,
   onSessionId,
   onClose,
   confined,
 }: {
   open: boolean;
   sessionId?: string;
-  environmentId?: string;
+  executionTarget?: ExecutionTarget;
   onSessionId?: (sid: string) => void;
   onClose?: () => void;
   confined?: boolean;
@@ -268,7 +269,7 @@ export function TerminalPanel({
       // Tell machine we're starting
       rt.actor.send({ type: 'CONNECT' });
 
-      if (!environmentId) {
+      if (!executionTarget) {
         rt.actor.send({ type: 'SESSION_ERROR', error: 'Execution environment unavailable' });
         return;
       }
@@ -285,7 +286,7 @@ export function TerminalPanel({
           'terminal.create',
           { cols: rt.terminal.cols, rows: rt.terminal.rows },
           sid,
-          environmentId
+          executionTarget
         );
 
         const terminalId = String(created?.terminal_id || '').trim();
@@ -401,7 +402,17 @@ export function TerminalPanel({
         }
       }
     },
-    [authToken, client, ensureRuntime, ensureSession, environmentId, openInContainer, resolvePath, sendFrame, wsOrigin]
+    [
+      authToken,
+      client,
+      ensureRuntime,
+      ensureSession,
+      executionTarget,
+      openInContainer,
+      resolvePath,
+      sendFrame,
+      wsOrigin,
+    ]
   );
 
   // Use refs for unstable callbacks to prevent the main effect from re-firing
@@ -450,7 +461,7 @@ export function TerminalPanel({
         const ctx = snap.context;
         if (ctx.terminalId && ctx.sessionId) {
           try {
-            await client.serverCall('terminal.close', { terminal_id: ctx.terminalId }, ctx.sessionId, environmentId);
+            await client.serverCall('terminal.close', { terminal_id: ctx.terminalId }, ctx.sessionId, executionTarget);
           } catch {}
         }
 
@@ -482,7 +493,7 @@ export function TerminalPanel({
         return nextTabs;
       });
     },
-    [client, environmentId, sendFrame]
+    [client, executionTarget, sendFrame]
   );
 
   // Auto-create first tab

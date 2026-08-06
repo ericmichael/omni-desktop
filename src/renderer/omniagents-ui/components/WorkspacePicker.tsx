@@ -16,6 +16,7 @@ import { Item, ItemContent, ItemGroup, ItemMedia, ItemTitle } from '@/renderer/d
 import { ScrollArea } from '@/renderer/ds/ui/scroll-area';
 import { Spinner } from '@/renderer/ds/ui/spinner';
 import { useRPCClient } from '@/renderer/omniagents-ui/rpc-context';
+import type { ExecutionTarget } from '@/shared/types';
 
 type DirEntry = {
   name: string;
@@ -25,13 +26,13 @@ type DirEntry = {
 
 export function WorkspacePicker({
   sessionId,
-  environmentId,
+  executionTarget,
   initialPath,
   onSelect,
   onClose,
 }: {
   sessionId?: string;
-  environmentId?: string;
+  executionTarget?: ExecutionTarget;
   initialPath?: string;
   onSelect: (path: string) => void;
   onClose: () => void;
@@ -49,7 +50,7 @@ export function WorkspacePicker({
     async (path?: string | null) => {
       setLoading(true);
       setError(null);
-      if (!environmentId) {
+      if (!executionTarget) {
         setError('Execution environment unavailable');
         setLoading(false);
         return;
@@ -63,7 +64,7 @@ export function WorkspacePicker({
             ignore_hidden: true,
           },
           sessionId,
-          environmentId
+          executionTarget
         )) as any;
         setCurrentPath(res.path || null);
         setParentPath(res.parent || null);
@@ -83,7 +84,7 @@ export function WorkspacePicker({
         setLoading(false);
       }
     },
-    [client, environmentId, sessionId]
+    [client, executionTarget, sessionId]
   );
 
   useEffect(() => {
@@ -95,7 +96,7 @@ export function WorkspacePicker({
       // container and would make the (sandbox-aware) lister fail.
       let start: string | undefined;
       try {
-        const res = (await client.serverCall('fs_get_workspace_root', {}, sessionId, environmentId)) as any;
+        const res = (await client.serverCall('fs_get_workspace_root', {}, sessionId, executionTarget)) as any;
         start = res?.path;
       } catch {}
       if (!start) {
@@ -103,7 +104,7 @@ export function WorkspacePicker({
       }
       if (!start) {
         try {
-          const res = (await client.serverCall('fs_get_home', {}, sessionId, environmentId)) as any;
+          const res = (await client.serverCall('fs_get_home', {}, sessionId, executionTarget)) as any;
           start = res?.path;
         } catch {}
       }
@@ -153,7 +154,7 @@ export function WorkspacePicker({
                 size="icon-xs"
                 onClick={async () => {
                   try {
-                    const res = (await client.serverCall('fs_get_home', {}, sessionId, environmentId)) as any;
+                    const res = (await client.serverCall('fs_get_home', {}, sessionId, executionTarget)) as any;
                     if (res?.path) {
                       load(res.path);
                     }

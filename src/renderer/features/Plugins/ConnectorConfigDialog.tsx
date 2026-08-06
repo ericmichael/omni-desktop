@@ -18,12 +18,14 @@ export function emptyServer(): McpServerEntry {
 type KeyValueEditorProps = {
   label: string;
   entries: Record<string, string>;
+  storedKeys?: string[];
   onChange: (next: Record<string, string>) => void;
 };
 
 /** Ordered key/value editor over a Record — index-based so keys can be typed freely. */
-const KeyValueEditor = memo(({ label, entries, onChange }: KeyValueEditorProps) => {
+const KeyValueEditor = memo(({ label, entries, storedKeys = [], onChange }: KeyValueEditorProps) => {
   const entryList = Object.entries(entries);
+  const stored = new Set(storedKeys);
 
   const setAt = (index: number, key: string, value: string) => {
     const next = entryList.slice();
@@ -45,10 +47,11 @@ const KeyValueEditor = memo(({ label, entries, onChange }: KeyValueEditorProps) 
           />
 
           <Input
-            type="text"
+            type="password"
             value={value}
             onChange={(e) => setAt(i, key, e.target.value)}
-            placeholder="value"
+            placeholder={stored.has(key) && value.length === 0 ? 'Stored value — leave blank to keep' : 'value'}
+            aria-label={`${label} ${key || 'value'}`}
             className="grow-2 basis-0"
           />
 
@@ -79,6 +82,8 @@ type ConnectorConfigDialogProps = {
   initial: McpServerEntry | null;
   /** Ids already present in McpConfig — validates a new server's name. */
   existingIds: string[];
+  /** Secret key names returned by the runtime as write-only presence markers. */
+  storedSecrets?: { env: string[]; headers: string[] };
   onSave: (id: string, entry: McpServerEntry) => Promise<void>;
   onClose: () => void;
 };
@@ -89,7 +94,7 @@ type ConnectorConfigDialogProps = {
  * the one entry in McpConfig via the caller.
  */
 export const ConnectorConfigDialog = memo(
-  ({ open, serverId, initial, existingIds, onSave, onClose }: ConnectorConfigDialogProps) => {
+  ({ open, serverId, initial, existingIds, storedSecrets, onSave, onClose }: ConnectorConfigDialogProps) => {
     const creating = serverId === null;
     const [id, setId] = useState('');
     const [draft, setDraft] = useState<McpServerEntry>(emptyServer);
@@ -231,15 +236,19 @@ export const ConnectorConfigDialog = memo(
                 <KeyValueEditor
                   label="Headers"
                   entries={draft.headers ?? {}}
+                  storedKeys={storedSecrets?.headers}
                   onChange={(headers) => setDraft({ ...draft, headers })}
                 />
               )}
 
-              <KeyValueEditor
-                label="Environment variables"
-                entries={draft.env ?? {}}
-                onChange={(env) => setDraft({ ...draft, env })}
-              />
+              {isStdio && (
+                <KeyValueEditor
+                  label="Environment variables"
+                  entries={draft.env ?? {}}
+                  storedKeys={storedSecrets?.env}
+                  onChange={(env) => setDraft({ ...draft, env })}
+                />
+              )}
             </div>
           </div>
           <DialogFooter>

@@ -93,7 +93,9 @@ const runningStatus = (wsUrl: string, authToken?: string): WithTimestamp<AgentPr
   data: {
     uiUrl: wsUrl.replace(/^ws:/, 'http:').replace(/\/ws$/, ''),
     wsUrl,
+    workspaceId: 'workspace-1',
     environmentId: 'environment-1',
+    environmentGeneration: 3,
     ...(authToken ? { authToken } : {}),
   },
 });

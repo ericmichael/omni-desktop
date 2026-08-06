@@ -4,7 +4,7 @@ import { useMemo } from 'react';
 import { serverOrigin } from '@/renderer/services/ipc';
 import type { SessionController } from '@/renderer/services/session-control';
 import type { PlanItem } from '@/shared/chat-types';
-import type { AgentRuntimeConnection, TicketId } from '@/shared/types';
+import type { AgentRuntimeConnection, ExecutionTarget, TicketId } from '@/shared/types';
 
 import type { ClientToolCallHandler } from './App';
 import { App as OmniAgentsCore } from './App';
@@ -17,7 +17,7 @@ type OmniAgentsAppProps = {
   connection: AgentRuntimeConnection;
   sessionId?: string;
   /** Execution environment used by workspace, process, and terminal RPCs. */
-  environmentId?: string;
+  executionTarget?: ExecutionTarget;
   onSessionChange?: (sessionId: string | undefined) => void;
   variables?: Record<string, unknown>;
   voiceVariables?: Record<string, unknown>;
@@ -60,7 +60,7 @@ type OmniAgentsAppProps = {
 export const OmniAgentsApp = ({
   connection,
   sessionId,
-  environmentId,
+  executionTarget,
   onSessionChange,
   variables,
   voiceVariables,
@@ -99,7 +99,7 @@ export const OmniAgentsApp = ({
       <RPCClientProvider>
         <OmniAgentsCore
           sessionId={sessionId}
-          environmentId={environmentId}
+          executionTarget={executionTarget}
           onSessionChange={onSessionChange}
           variables={variables}
           voiceVariables={voiceVariables}

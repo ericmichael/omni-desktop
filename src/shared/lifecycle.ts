@@ -161,6 +161,30 @@ export class ConnectionClosedError extends Error {
   }
 }
 
+/** A JSON-RPC call did not complete within its deadline. */
+export class RpcTimeoutError extends Error {
+  readonly method: string;
+  readonly timeoutMs: number;
+
+  constructor(method: string, timeoutMs: number) {
+    super(`RPC call '${method}' timed out after ${timeoutMs}ms`);
+    this.name = 'RpcTimeoutError';
+    this.method = method;
+    this.timeoutMs = timeoutMs;
+  }
+}
+
+/** A JSON-RPC call was aborted by its AbortSignal before completing. */
+export class RpcAbortError extends Error {
+  readonly method: string;
+
+  constructor(method: string) {
+    super(`RPC call '${method}' was aborted`);
+    this.name = 'RpcAbortError';
+    this.method = method;
+  }
+}
+
 /** Connection state reported to UIs so they can distinguish retryable from terminal failures. */
 export type ConnectionState =
   | { state: 'connecting' }

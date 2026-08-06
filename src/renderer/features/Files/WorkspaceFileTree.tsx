@@ -8,6 +8,7 @@ import { Button } from '@/renderer/ds/ui/button';
 import { Spinner } from '@/renderer/ds/ui/spinner';
 import type { FsClient, FsEntry, FsListResult, WatchCallbacks } from '@/renderer/omniagents-ui/rpc/fs';
 import { WatchRegistry } from '@/renderer/omniagents-ui/rpc/fs';
+import type { ExecutionTarget } from '@/shared/types';
 
 export interface WorkspaceTreeWatchRegistry {
   subscribe(path: string, callbacks: WatchCallbacks): Promise<() => Promise<void>>;
@@ -16,7 +17,7 @@ export interface WorkspaceTreeWatchRegistry {
 
 export type WorkspaceFileTreeProps = {
   fsClient: FsClient;
-  environmentId: string;
+  executionTarget: ExecutionTarget;
   selectedPath?: string | null;
   onOpenFile: (path: string) => void;
   /** Test/embedding seam. When omitted, the tree owns a WatchRegistry. */
@@ -143,7 +144,14 @@ const WorkspaceTreeNode = memo(
 WorkspaceTreeNode.displayName = 'WorkspaceTreeNode';
 
 export const WorkspaceFileTree = memo(
-  ({ fsClient, environmentId, selectedPath = null, onOpenFile, watchRegistry, className }: WorkspaceFileTreeProps) => {
+  ({
+    fsClient,
+    executionTarget,
+    selectedPath = null,
+    onOpenFile,
+    watchRegistry,
+    className,
+  }: WorkspaceFileTreeProps) => {
     const [directoryStates, setDirectoryStates] = useState<Map<string, DirectoryState>>(new Map());
     const [openItems, setOpenItems] = useState<Set<string>>(new Set());
     const registryRef = useRef<WorkspaceTreeWatchRegistry | null>(null);
@@ -186,7 +194,7 @@ export const WorkspaceFileTree = memo(
           setLoading(path);
         }
         try {
-          const listing = await fsClient.list(environmentId, path, false);
+          const listing = await fsClient.list(executionTarget, path, false);
           if (generation === generationRef.current) {
             applyListing(path, listing);
           }
@@ -196,7 +204,7 @@ export const WorkspaceFileTree = memo(
           }
         }
       },
-      [applyError, applyListing, environmentId, fsClient, setLoading]
+      [applyError, applyListing, executionTarget, fsClient, setLoading]
     );
 
     const scheduleRefresh = useCallback(
@@ -279,7 +287,7 @@ export const WorkspaceFileTree = memo(
       generationRef.current += 1;
       setDirectoryStates(new Map());
       setOpenItems(new Set());
-      const registry = watchRegistry ?? new WatchRegistry(fsClient, environmentId);
+      const registry = watchRegistry ?? new WatchRegistry(fsClient, executionTarget);
       registryRef.current = registry;
       ownedRegistryRef.current = watchRegistry ? null : (registry as WatchRegistry);
       subscribeDirectory('.');
@@ -305,7 +313,7 @@ export const WorkspaceFileTree = memo(
           void owned.dispose();
         }
       };
-    }, [environmentId, fsClient, subscribeDirectory, watchRegistry]);
+    }, [executionTarget, fsClient, subscribeDirectory, watchRegistry]);
 
     const closeBranch = useCallback(
       (path: string) => {

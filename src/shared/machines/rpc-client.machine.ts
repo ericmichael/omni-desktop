@@ -9,16 +9,18 @@
  */
 import { type ActorRefFrom, assign, setup } from 'xstate';
 
+import { classifyCloseCode, DEFAULT_LIFECYCLE_POLICY, reconnectDelayMs } from '@/shared/lifecycle';
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-export const RPC_CALL_TIMEOUT_MS = 30_000;
-export const WS_CONNECT_TIMEOUT_MS = 10_000;
+export const RPC_CALL_TIMEOUT_MS = DEFAULT_LIFECYCLE_POLICY.rpcTimeoutMs;
+export const WS_CONNECT_TIMEOUT_MS = DEFAULT_LIFECYCLE_POLICY.connectTimeoutMs;
 export const MAX_PENDING_CALLS = 100;
-export const INITIAL_RECONNECT_DELAY_MS = 500;
-export const MAX_RECONNECT_DELAY_MS = 10_000;
-export const MAX_RECONNECT_ATTEMPTS = 20;
+export const INITIAL_RECONNECT_DELAY_MS = DEFAULT_LIFECYCLE_POLICY.reconnectInitialDelayMs;
+export const MAX_RECONNECT_DELAY_MS = DEFAULT_LIFECYCLE_POLICY.reconnectMaxDelayMs;
+export const MAX_RECONNECT_ATTEMPTS = DEFAULT_LIFECYCLE_POLICY.reconnectMaxAttempts;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -60,6 +62,9 @@ export type RPCClientContext = {
   /** Pending RPC calls — managed externally via the class wrapper. */
   pendingCount: number;
   error: string | null;
+  /** Whether the last failure is terminal and requires explicit user action. */
+  permanent: boolean;
+  closeCode: number | undefined;
 };
 
 // ---------------------------------------------------------------------------
@@ -70,8 +75,8 @@ export type RPCClientEvent =
   | { type: 'CONNECT' }
   | { type: 'DISCONNECT' }
   | { type: 'WS_OPEN' }
-  | { type: 'WS_CLOSE'; reason?: string }
-  | { type: 'WS_ERROR'; error: string }
+  | { type: 'WS_CLOSE'; code?: number; reason?: string }
+  | { type: 'WS_ERROR'; error: string; permanent?: boolean }
   | { type: 'CALL_STARTED' }
   | { type: 'CALL_SETTLED' }
   | { type: 'RETRY' };
@@ -90,13 +95,16 @@ export const rpcClientMachine = setup({
     reconnectDelay: ({ context }: { context: RPCClientContext }) => context.reconnectDelay,
   },
   guards: {
-    canReconnect: ({ context }) => context.reconnectAttempt < MAX_RECONNECT_ATTEMPTS,
     hasReachedMaxAttempts: ({ context }) => context.reconnectAttempt >= MAX_RECONNECT_ATTEMPTS,
+    isPermanentFailure: ({ event }) =>
+      (event.type === 'WS_CLOSE' && classifyCloseCode(event.code) === 'permanent') ||
+      (event.type === 'WS_ERROR' && event.permanent === true),
   },
   actions: {
     incrementReconnect: assign({
       reconnectAttempt: ({ context }) => context.reconnectAttempt + 1,
-      reconnectDelay: ({ context }) => Math.min(MAX_RECONNECT_DELAY_MS, Math.round(context.reconnectDelay * 1.5)),
+      reconnectDelay: ({ context }) =>
+        Math.round(reconnectDelayMs(DEFAULT_LIFECYCLE_POLICY, context.reconnectAttempt + 1)),
     }),
     resetReconnect: assign({
       reconnectAttempt: 0,
@@ -105,7 +113,20 @@ export const rpcClientMachine = setup({
     setError: assign({
       error: (_, params: { error: string }) => params.error,
     }),
-    clearError: assign({ error: null }),
+    clearError: assign({ error: null, permanent: false, closeCode: undefined }),
+    setPermanentFailure: assign({
+      error: ({ event }) => {
+        if (event.type === 'WS_CLOSE') {
+          return event.reason || 'Connection closed permanently';
+        }
+        if (event.type === 'WS_ERROR') {
+          return event.error;
+        }
+        return 'Connection closed permanently';
+      },
+      permanent: true,
+      closeCode: ({ event }) => (event.type === 'WS_CLOSE' ? event.code : undefined),
+    }),
     incrementPending: assign({
       pendingCount: ({ context }) => context.pendingCount + 1,
     }),
@@ -126,6 +147,8 @@ export const rpcClientMachine = setup({
     nextCallId: 0,
     pendingCount: 0,
     error: null,
+    permanent: false,
+    closeCode: undefined,
   }),
   states: {
     disconnected: {
@@ -137,8 +160,14 @@ export const rpcClientMachine = setup({
     connecting: {
       on: {
         WS_OPEN: { target: 'connected', actions: 'resetReconnect' },
-        WS_ERROR: { target: 'reconnecting' },
-        WS_CLOSE: { target: 'reconnecting' },
+        WS_ERROR: [
+          { guard: 'isPermanentFailure', target: 'disconnected', actions: 'setPermanentFailure' },
+          { target: 'reconnecting' },
+        ],
+        WS_CLOSE: [
+          { guard: 'isPermanentFailure', target: 'disconnected', actions: 'setPermanentFailure' },
+          { target: 'reconnecting' },
+        ],
         // initialize is a regular correlated JSON-RPC call, made while the
         // transport is open but before application readiness.
         CALL_STARTED: { actions: 'incrementPending' },
@@ -151,8 +180,14 @@ export const rpcClientMachine = setup({
 
     connected: {
       on: {
-        WS_CLOSE: 'reconnecting',
-        WS_ERROR: 'reconnecting',
+        WS_CLOSE: [
+          { guard: 'isPermanentFailure', target: 'disconnected', actions: 'setPermanentFailure' },
+          { target: 'reconnecting' },
+        ],
+        WS_ERROR: [
+          { guard: 'isPermanentFailure', target: 'disconnected', actions: 'setPermanentFailure' },
+          { target: 'reconnecting' },
+        ],
         CALL_STARTED: { actions: 'incrementPending' },
         CALL_SETTLED: { actions: 'decrementPending' },
       },
@@ -163,7 +198,7 @@ export const rpcClientMachine = setup({
         {
           guard: 'hasReachedMaxAttempts',
           target: 'disconnected',
-          actions: assign({ error: 'Max reconnect attempts reached' }),
+          actions: assign({ error: 'Max reconnect attempts reached', permanent: true }),
         },
       ],
       entry: 'incrementReconnect',
@@ -190,6 +225,7 @@ export const rpcClientMachine = setup({
     // show up as dropped events or mis-transition the machine.
     WS_OPEN: { actions: 'noop' },
     WS_CLOSE: { actions: 'noop' },
+    WS_ERROR: { actions: 'noop' },
   },
 });
 

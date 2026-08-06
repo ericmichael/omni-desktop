@@ -5,12 +5,18 @@
  * selectors + action methods for the component layer.
  */
 import { useActorRef, useSelector } from '@xstate/react';
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 
-import { rehydrateHistory } from '@/lib/rehydrate-history';
 import { uuidv4 } from '@/lib/uuid';
+import {
+  adaptCanonicalConversationItem,
+  loadSessionTranscript,
+} from '@/renderer/omniagents-ui/rpc/canonical-chat-history';
 import type { RPCClient } from '@/renderer/omniagents-ui/rpc/client';
-import type { Attachment, MessageItem } from '@/shared/chat-types';
+import { ConversationClient } from '@/renderer/omniagents-ui/rpc/conversation';
+import { PlanDiffRecovery } from '@/renderer/omniagents-ui/rpc/plan-diff-recovery';
+import { PlansAndDiffsClient } from '@/renderer/omniagents-ui/rpc/plans-and-diffs';
+import type { Attachment } from '@/shared/chat-types';
 import { chatSessionMachine, type ChatSessionPhase, isThinking } from '@/shared/machines/chat-session.machine';
 import { createMachineLogger } from '@/shared/machines/machine-logger';
 
@@ -48,6 +54,86 @@ export function useChatSession(client: RPCClient) {
   const actor = useActorRef(chatSessionMachine, {
     inspect: createMachineLogger('chatSession'),
   });
+  const registeredSessionRef = useRef<string | null>(null);
+  const loadRequestRef = useRef(0);
+  const conversations = useMemo(() => new ConversationClient(client), [client]);
+  const plansAndDiffs = useMemo(() => new PlansAndDiffsClient(client), [client]);
+  const planDiffRecovery = useMemo(
+    () => new PlanDiffRecovery(plansAndDiffs, conversations, () => client.supportsExperimentalFeature('plansAndDiffs')),
+    [client, conversations, plansAndDiffs]
+  );
+
+  useEffect(() => () => plansAndDiffs.dispose(), [plansAndDiffs]);
+
+  const adoptRecoveredItems = useCallback(
+    (threadId: string, recovered: Awaited<ReturnType<PlanDiffRecovery['recoverPlans']>>) => {
+      if (actor.getSnapshot().context.sessionId !== threadId) {
+        return;
+      }
+      for (const item of recovered) {
+        actor.send({ type: 'CANONICAL_ITEM_UPDATED', item, session_id: threadId });
+      }
+    },
+    [actor]
+  );
+
+  const recoverDurableThreadState = useCallback(
+    async (threadId: string) => {
+      if (!client.supportsExperimentalFeature('plansAndDiffs')) {
+        return;
+      }
+      const results = await Promise.allSettled([
+        planDiffRecovery.recoverPlans(threadId),
+        planDiffRecovery.recoverLatestRunDiff(threadId),
+      ]);
+      for (const result of results) {
+        if (result.status === 'fulfilled') {
+          adoptRecoveredItems(threadId, result.value);
+        }
+      }
+    },
+    [adoptRecoveredItems, client, planDiffRecovery]
+  );
+
+  // Replay repairs event gaps, but the authoritative reads also protect
+  // against a server that compacted older item updates before reconnect. Run
+  // them after every real reconnect (the initial connection is covered by
+  // loadSession below).
+  useEffect(() => {
+    let hasConnected = client.isConnected;
+    let disconnectedAfterConnect = false;
+    const subscription = client.actor.subscribe((snapshot) => {
+      if (snapshot.value !== 'connected') {
+        if (hasConnected) {
+          disconnectedAfterConnect = true;
+        }
+        return;
+      }
+      if (!hasConnected) {
+        hasConnected = true;
+        return;
+      }
+      if (!disconnectedAfterConnect) {
+        return;
+      }
+      disconnectedAfterConnect = false;
+      const threadId = actor.getSnapshot().context.sessionId;
+      if (threadId) {
+        void recoverDurableThreadState(threadId);
+      }
+    });
+    return () => subscription.unsubscribe();
+  }, [actor, client, recoverDurableThreadState]);
+
+  useEffect(
+    () => () => {
+      if (registeredSessionRef.current) {
+        client.unregisterSession(registeredSessionRef.current);
+        registeredSessionRef.current = null;
+      }
+    },
+    [client]
+  );
 
   // --- Wire RPC events → machine events (thin adapter, no logic) ---
   useEffect(() => {
@@ -85,10 +171,23 @@ export function useChatSession(client: RPCClient) {
       }),
 
       client.on('run_end', (p: any) => {
+        const threadId = typeof p?.session_id === 'string' ? p.session_id : '';
         actor.send({
           type: 'RUN_END',
-          session_id: typeof p?.session_id === 'string' ? p.session_id : undefined,
+          session_id: threadId || undefined,
         });
+        if (threadId && client.supportsExperimentalFeature('plansAndDiffs')) {
+          void planDiffRecovery
+            // run_end exposes a run_id, not the canonical conversation
+            // turn_id accepted by get_run_diff. Ask for the authoritative
+            // latest completed turn instead of assuming those identities match.
+            .recoverLatestRunDiff(threadId)
+            .then((recovered) => adoptRecoveredItems(threadId, recovered))
+            .catch(() => {
+              // The canonical transcript and reconnect recovery remain the
+              // durable fallback for a transient post-run read failure.
+            });
+        }
       }),
 
       client.on('run_status', (p: any) => {
@@ -263,10 +362,41 @@ export function useChatSession(client: RPCClient) {
           actor.send({ type: 'APPROVAL_RESOLVED', request_id });
         }
       }),
+
+      // Plan and run-diff updates are canonical item revisions, not legacy
+      // transcript deltas. Fetch the complete authoritative item before
+      // projecting it so additive fields are preserved and replay/live paths
+      // converge through the same revision-aware machine action.
+      client.on('item_updated', (p: any) => {
+        if (!client.supportsExperimentalFeature('plansAndDiffs') || (p?.kind !== 'plan' && p?.kind !== 'run_diff')) {
+          return;
+        }
+        const threadId = typeof p?.thread_id === 'string' ? p.thread_id : '';
+        const itemId = typeof p?.item_id === 'string' ? p.item_id : '';
+        if (!threadId || !itemId || actor.getSnapshot().context.sessionId !== threadId) {
+          return;
+        }
+        void conversations
+          .getItem(threadId, itemId)
+          .then((item) => {
+            if (actor.getSnapshot().context.sessionId !== threadId) {
+              return;
+            }
+            actor.send({
+              type: 'CANONICAL_ITEM_UPDATED',
+              item: adaptCanonicalConversationItem(item),
+              session_id: threadId,
+            });
+          })
+          .catch(() => {
+            // Durable replay or the next authoritative transcript load repairs
+            // a transient read failure. Never retry this read as a mutation.
+          });
+      }),
     ];
 
     return () => offs.forEach((off) => off());
-  }, [client, actor]);
+  }, [client, actor, conversations, planDiffRecovery, adoptRecoveredItems]);
 
   // --- Fine-grained selectors ---
   const sessionId = useSelector(actor, (s) => s.context.sessionId);
@@ -406,52 +536,77 @@ export function useChatSession(client: RPCClient) {
    * mount-rehydration bug; this API makes that mistake impossible.
    */
   const loadSession = useCallback(
-    async (id: string | undefined): Promise<string> => {
+    async (id: string | undefined, options: { authoritativeResync?: boolean } = {}): Promise<string> => {
+      const request = ++loadRequestRef.current;
+      const isCurrent = (sessionId: string) =>
+        loadRequestRef.current === request && actor.getSnapshot().context.sessionId === sessionId;
+      const register = async (sessionId: string, restoreNow = true) => {
+        if (registeredSessionRef.current && registeredSessionRef.current !== sessionId) {
+          client.unregisterSession(registeredSessionRef.current);
+        }
+        registeredSessionRef.current = sessionId;
+        await client.registerSession(sessionId, restoreNow);
+      };
       if (!id) {
         // Fresh session — mint the UUID exactly once, here. This is the
         // ONLY place in the client that generates a session id; every
         // other caller (mount effect, "new chat" button, etc.) flows
         // through loadSession so we can't drift.
         const newId = uuidv4();
+        await register(newId, false);
+        if (loadRequestRef.current !== request) {
+          return newId;
+        }
         actor.send({ type: 'NEW_SESSION', sessionId: newId });
         return newId;
       }
       actor.send({ type: 'SELECT_SESSION', id });
+      await register(id);
+      if (!isCurrent(id)) {
+        return id;
+      }
       const profile = typeof localStorage !== 'undefined' && localStorage.getItem('debug:profile') === '1';
       try {
         const t0 = profile ? performance.now() : 0;
-        const raw = await client.getSessionHistory(id);
+        const loaded = await loadSessionTranscript(client, id);
         const tFetched = profile ? performance.now() : 0;
-        const msgs = rehydrateHistory(raw as Record<string, unknown>[]) as MessageItem[];
+        const msgs = loaded.items;
         if (profile) {
           const tEnd = performance.now();
-          const rawLen = Array.isArray(raw) ? raw.length : 0;
-
           console.log(
             `[profile] loadSession session=${id} fetch_ms=${(tFetched - t0).toFixed(1)} ` +
               `rehydrate_ms=${(tEnd - tFetched).toFixed(1)} total_ms=${(tEnd - t0).toFixed(1)} ` +
-              `raw_items=${rawLen} rehydrated_items=${msgs.length}`
+              `source=${loaded.source} raw_items=${loaded.rawItemCount} rehydrated_items=${msgs.length}`
           );
         }
+        if (!isCurrent(id)) {
+          return id;
+        }
         actor.send({ type: 'HISTORY_LOADED', items: msgs });
+        await recoverDurableThreadState(id);
+        if (options.authoritativeResync && isCurrent(id)) {
+          await client.completeSessionResync(id);
+        }
       } catch (err) {
-        actor.send({ type: 'HISTORY_ERROR', error: String((err as Error)?.message || err) });
+        if (isCurrent(id)) {
+          actor.send({ type: 'HISTORY_ERROR', error: String((err as Error)?.message || err) });
+        }
       }
       return id;
     },
-    [actor, client]
+    [actor, client, recoverDurableThreadState]
   );
 
   // Resync fallback (durable event replay, error -32030 / stream epoch
   // change): when the client cannot recover the sequenced stream by
   // cursor-based replay, refetch authoritative state for the affected
   // session through the existing loadSession path (SELECT_SESSION →
-  // get_session_history → HISTORY_LOADED). Sessions other than the bound
+  // canonical list_items pagination → HISTORY_LOADED). Sessions other than the bound
   // one need nothing — their history is refetched on selection anyway.
   useEffect(() => {
     return client.onResyncRequired((resyncSessionId) => {
       if (resyncSessionId && resyncSessionId === actor.getSnapshot().context.sessionId) {
-        void loadSession(resyncSessionId);
+        void loadSession(resyncSessionId, { authoritativeResync: true });
       }
     });
   }, [client, actor, loadSession]);

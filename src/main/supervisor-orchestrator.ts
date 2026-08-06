@@ -1177,7 +1177,7 @@ export class SupervisorOrchestrator {
       const codeTabs = this.deps.store.getCodeTabs() as Array<{ id: string; ticketId?: string }>;
       const tickets = this.deps.host.getTicketsByProject(projectId);
       const ticketIds = new Set(tickets.map((t) => t.id));
-      const stops: Promise<void>[] = [];
+      const stops: Promise<unknown>[] = [];
       for (const tab of codeTabs) {
         if (tab.ticketId && ticketIds.has(tab.ticketId as TicketId)) {
           stops.push(pm.stop(tab.id).catch(() => {}));

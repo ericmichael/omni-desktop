@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createActor, getNextSnapshot } from 'xstate';
 
 import {
@@ -44,6 +44,15 @@ function connectedSnapshot() {
 }
 
 describe('rpcClientMachine', () => {
+  beforeEach(() => {
+    // Midpoint RNG removes symmetric jitter while preserving production math.
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   // -----------------------------------------------------------------------
   // Initial state
   // -----------------------------------------------------------------------
@@ -63,6 +72,8 @@ describe('rpcClientMachine', () => {
     expect(ctx.reconnectDelay).toBe(INITIAL_RECONNECT_DELAY_MS);
     expect(ctx.pendingCount).toBe(0);
     expect(ctx.error).toBeNull();
+    expect(ctx.permanent).toBe(false);
+    expect(ctx.closeCode).toBeUndefined();
     actor.stop();
   });
 
@@ -118,7 +129,7 @@ describe('rpcClientMachine', () => {
     const snap = next(connectingSnapshot(), { type: 'WS_ERROR', error: 'fail' });
     expect(snap.value).toBe('reconnecting');
     expect(snap.context.reconnectAttempt).toBe(1);
-    expect(snap.context.reconnectDelay).toBe(Math.round(INITIAL_RECONNECT_DELAY_MS * 1.5));
+    expect(snap.context.reconnectDelay).toBe(INITIAL_RECONNECT_DELAY_MS);
   });
 
   it('WS_CLOSE from connecting → reconnecting', () => {
@@ -137,6 +148,22 @@ describe('rpcClientMachine', () => {
     const snap = next(connectedSnapshot(), { type: 'WS_ERROR', error: 'unexpected' });
     expect(snap.value).toBe('reconnecting');
     expect(snap.context.reconnectAttempt).toBe(1);
+  });
+
+  it('stops reconnecting on a permanent WebSocket close', () => {
+    const snap = next(connectedSnapshot(), { type: 'WS_CLOSE', code: 4401, reason: 'token rejected' });
+    expect(snap.value).toBe('disconnected');
+    expect(snap.context.reconnectAttempt).toBe(0);
+    expect(snap.context.permanent).toBe(true);
+    expect(snap.context.closeCode).toBe(4401);
+    expect(snap.context.error).toBe('token rejected');
+  });
+
+  it('stops reconnecting on an explicitly permanent transport error', () => {
+    const snap = next(connectingSnapshot(), { type: 'WS_ERROR', error: 'handshake rejected', permanent: true });
+    expect(snap.value).toBe('disconnected');
+    expect(snap.context.permanent).toBe(true);
+    expect(snap.context.error).toBe('handshake rejected');
   });
 
   // -----------------------------------------------------------------------
@@ -167,19 +194,18 @@ describe('rpcClientMachine', () => {
   it('applies exponential backoff across multiple failures', () => {
     let snap = connectingSnapshot();
 
-    // Failure 1: delay 500 → 750, attempt 0 → 1
+    // Failure 1: 500ms, attempt 0 → 1
     snap = next(snap, { type: 'WS_ERROR', error: 'fail' });
     expect(snap.value).toBe('reconnecting');
     expect(snap.context.reconnectAttempt).toBe(1);
-    expect(snap.context.reconnectDelay).toBe(Math.round(INITIAL_RECONNECT_DELAY_MS * 1.5));
+    expect(snap.context.reconnectDelay).toBe(INITIAL_RECONNECT_DELAY_MS);
 
     // Simulate delay firing → back to connecting
     // Then failure 2 from connecting
     const connecting2 = { ...snap, value: 'connecting' as const } as any;
     snap = next(connecting2, { type: 'WS_ERROR', error: 'fail' });
     expect(snap.context.reconnectAttempt).toBe(2);
-    const expected = Math.round(Math.round(INITIAL_RECONNECT_DELAY_MS * 1.5) * 1.5);
-    expect(snap.context.reconnectDelay).toBe(expected);
+    expect(snap.context.reconnectDelay).toBe(INITIAL_RECONNECT_DELAY_MS * 2);
   });
 
   it('caps reconnect delay at MAX_RECONNECT_DELAY_MS', () => {

@@ -141,6 +141,7 @@ export type ChatSessionEvent =
   // History loading
   | { type: 'HISTORY_LOADED'; items: MessageItem[] }
   | { type: 'HISTORY_ERROR'; error: string }
+  | { type: 'CANONICAL_ITEM_UPDATED'; item: MessageItem; session_id?: string }
   // Errors
   | { type: 'SUBMIT_ERROR'; error: string }
   // Artifacts
@@ -468,6 +469,44 @@ export const chatSessionMachine = setup({
       },
     }),
 
+    upsertCanonicalItem: assign({
+      items: ({ context, event }) => {
+        const e = event as Extract<ChatSessionEvent, { type: 'CANONICAL_ITEM_UPDATED' }>;
+        const incoming = e.item.canonical;
+        if (!incoming) {
+          return context.items;
+        }
+        const next = context.items.slice();
+        const index = next.findIndex((item) => item.canonical?.item_id === incoming.item_id);
+        if (index >= 0) {
+          const current = next[index]!.canonical!;
+          if (
+            incoming.revision < current.revision ||
+            (incoming.revision === current.revision && incoming.updated_at <= current.updated_at)
+          ) {
+            return context.items;
+          }
+          next[index] = e.item;
+        } else {
+          const insertionIndex = next.findIndex(
+            (item) => item.canonical !== undefined && item.canonical.seq > incoming.seq
+          );
+          if (insertionIndex < 0) {
+            next.push(e.item);
+          } else {
+            next.splice(insertionIndex, 0, e.item);
+          }
+        }
+        // HISTORY_LOADED already supplies canonical items in sequence order.
+        // Live messages/tools do not yet carry canonical envelopes, so sorting
+        // the mixed list would partition all live items ahead of history on
+        // every plan/diff update. Preserve the existing transcript order;
+        // replacements stay in place; a new canonical item is inserted before
+        // the next canonical sequence without moving any existing live item.
+        return next;
+      },
+    }),
+
     setSubmitError: assign(({ context, event }) => {
       const e = event as Extract<ChatSessionEvent, { type: 'SUBMIT_ERROR' }>;
       return {
@@ -558,6 +597,7 @@ export const chatSessionMachine = setup({
   on: {
     SET_SESSION_ID: { actions: 'setSessionIdOnly' },
     HISTORY_LOADED: { actions: 'setHistoryItems' },
+    CANONICAL_ITEM_UPDATED: { guard: 'acceptLoose', actions: 'upsertCanonicalItem' },
     APPEND_RESPONSE: { actions: 'appendResponse' },
     ADD_ARTIFACT: { guard: 'acceptLoose', actions: 'addArtifact' },
     STAGE_CONTEXT: { actions: 'stageContext' },

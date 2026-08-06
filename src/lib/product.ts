@@ -40,7 +40,7 @@ export const BUNDLED_PRODUCT: ProductDefinition = {
   packageName: 'omni-code',
   extraIndexUrl: 'https://pypi.fury.io/ericmichael/',
   prog: 'omni',
-  pinnedVersion: '0.6.20',
+  pinnedVersion: '0.6.21',
 };
 
 /** The product this launcher instance hosts. */
@@ -91,7 +91,7 @@ export const parseProductDescribePayload = (raw: unknown): ProductRuntimeInfo =>
     return v;
   };
   const serveProtocol = obj['serve_protocol'];
-  if (typeof serveProtocol !== 'number') {
+  if (typeof serveProtocol !== 'number' || !Number.isInteger(serveProtocol) || serveProtocol < 1) {
     throw new Error('describe --json payload is missing "serve_protocol"');
   }
   let update: ProductRuntimeInfo['update'] = null;

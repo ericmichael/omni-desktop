@@ -20,6 +20,12 @@ const hoisted = vi.hoisted(() => ({
     exit: ReturnType<typeof vi.fn>;
     rebuild: ReturnType<typeof vi.fn>;
     getStatus: ReturnType<typeof vi.fn>;
+    getRuntimeConnection: ReturnType<typeof vi.fn>;
+    getManagementMutationCapabilities: ReturnType<typeof vi.fn>;
+    getManagementAccountStatus: ReturnType<typeof vi.fn>;
+    getManagementMcpStatus: ReturnType<typeof vi.fn>;
+    usesLocalAgentHostConfig: ReturnType<typeof vi.fn>;
+    callManagementAdmin: ReturnType<typeof vi.fn>;
     resizePty: ReturnType<typeof vi.fn>;
     configureConsumer: ReturnType<typeof vi.fn>;
     stopConsumerEnvironment: ReturnType<typeof vi.fn>;
@@ -35,10 +41,37 @@ vi.mock('@/main/agent-process', () => ({
   AgentProcess: class MockAgentProcess {
     mode: string;
     start = vi.fn();
-    stop = vi.fn(async () => {});
+    stop = vi.fn(async () => ({
+      scope: 'host',
+      shutdown: 'graceful',
+      snapshotPersistence: 'complete',
+      pendingSnapshotRefs: [],
+    }));
     exit = vi.fn(async () => {});
     rebuild = vi.fn(async () => {});
     getStatus = vi.fn(() => ({ type: 'uninitialized', timestamp: Date.now() }));
+    getRuntimeConnection = vi.fn(async () => ({
+      baseUrl: 'http://127.0.0.1:9000',
+      authToken: 'ordinary-consumer-token',
+    }));
+    getManagementMutationCapabilities = vi.fn(async () => ({ validateConfig: true, writeConfig: true }));
+    getManagementAccountStatus = vi.fn(async () => ({
+      providers: [{ id: 'openai-chatgpt', state: 'signed_out', identity: null }],
+      mutation_persistence: { codex_oauth: { durable: true, scope: 'host' } },
+    }));
+    getManagementMcpStatus = vi.fn(async () => ({
+      servers: [],
+      user_mcp_allowed: true,
+      write_target: '/config/mcp.json',
+      mutation_persistence: {
+        user_config: { durable: true, scope: 'host' },
+        oauth_tokens: { durable: true, scope: 'host' },
+        pending_auth: { durable: false, scope: 'process' },
+        managed_servers: ['omni-projects'],
+      },
+    }));
+    usesLocalAgentHostConfig = vi.fn(() => this.mode === 'serve');
+    callManagementAdmin = vi.fn(async (method: string) => ({ ok: true, method }));
     resizePty = vi.fn();
     configureConsumer = vi.fn(async (_threadId: string, workspaceId: string, _arg: unknown) => {
       await hoisted.configureConsumerGate;
@@ -48,12 +81,18 @@ vi.mock('@/main/agent-process', () => ({
       return {
         workspaceId,
         environmentId: `environment-${workspaceId}`,
+        environmentGeneration: 3,
         workspaceRoot: `/runtime/${workspaceId}`,
         services: {},
         containerId: `container-${workspaceId}`,
       };
     });
-    stopConsumerEnvironment = vi.fn(async () => {});
+    stopConsumerEnvironment = vi.fn(async () => ({
+      scope: 'environment',
+      shutdown: 'not-applicable',
+      snapshotPersistence: 'complete',
+      pendingSnapshotRefs: [],
+    }));
     discardConsumerSnapshot = vi.fn(async () => {});
     pause = vi.fn(async () => ({ ok: true, supported: true, paused: true }));
     unpause = vi.fn(async () => ({ ok: true, supported: true, paused: false }));
@@ -93,7 +132,12 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-import { isLauncherOwnedDir, ProcessManager, type ProcessManagerStoreData } from '@/main/process-manager';
+import {
+  type IHostBridgePreparer,
+  isLauncherOwnedDir,
+  ProcessManager,
+  type ProcessManagerStoreData,
+} from '@/main/process-manager';
 import { getDefaultWorkspaceDir } from '@/main/util';
 import { gitTokenEnvName } from '@/shared/git-credentials';
 import type { AgentProcessStatus, GitCredential, Project, WithTimestamp } from '@/shared/types';
@@ -105,6 +149,11 @@ import type { AgentProcessStatus, GitCredential, Project, WithTimestamp } from '
 function makePm(opts?: {
   storeData?: Partial<ProcessManagerStoreData>;
   resolveGitToken?: (credentialId: string) => Promise<string | undefined>;
+  hostBridge?: IHostBridgePreparer;
+  waitForRuntimeInstall?: () => Promise<void>;
+  durableLocalCodexAccountMutations?: boolean;
+  durableLocalMcpMutations?: boolean;
+  prepareLocalMcpOwnership?: (status: Record<string, unknown>) => void | Promise<void>;
 }) {
   hoisted.agentProcessInstances = [];
   const sendCalls: Array<{ channel: string; args: unknown[] }> = [];
@@ -119,6 +168,11 @@ function makePm(opts?: {
     }) as never,
     getStoreData: () => storeData,
     resolveGitToken: opts?.resolveGitToken,
+    hostBridge: opts?.hostBridge,
+    waitForRuntimeInstall: opts?.waitForRuntimeInstall,
+    durableLocalCodexAccountMutations: opts?.durableLocalCodexAccountMutations,
+    durableLocalMcpMutations: opts?.durableLocalMcpMutations,
+    prepareLocalMcpOwnership: opts?.prepareLocalMcpOwnership,
   });
   return { pm, sendCalls };
 }
@@ -195,6 +249,285 @@ describe('ProcessManager', () => {
           projectId: 'proj_x',
         })
       );
+    });
+
+    it('keeps local-machine compute on the explicitly safe host_bridge serve path', async () => {
+      const hostBridge: IHostBridgePreparer = {
+        prepare: vi.fn(async () => ({ profilePath: '/tmp/host-bridge-machine-1.yml' })),
+        release: vi.fn(async () => {}),
+        machineState: vi.fn(() => ({ online: true, label: 'Laptop' })),
+      };
+      const { pm } = makePm({ storeData: { defaultProfileName: 'local:machine-1' }, hostBridge });
+      await pm.start('tab-local', { workspaceDir: '/tmp/local-workspace' });
+
+      expect(hoisted.agentProcessInstances[0]!.mode).toBe('serve');
+      expect(hoisted.agentProcessInstances[0]!.start).toHaveBeenCalledWith(
+        expect.objectContaining({
+          profileName: 'local:machine-1',
+          explicitProfilePath: '/tmp/host-bridge-machine-1.yml',
+        })
+      );
+    });
+
+    it('forwards complete platform execution routing and consumer credentials to the renderer', async () => {
+      const { pm, sendCalls } = makePm({ storeData: { defaultProfileName: 'platform' } });
+      await pm.start('tab-platform', { workspaceDir: '/tmp/platform-workspace', sessionId: 'conversation-1' });
+      const process = hoisted.agentProcessInstances[0]!;
+      const status: WithTimestamp<AgentProcessStatus> = {
+        type: 'running',
+        timestamp: 10,
+        data: {
+          uiUrl: 'https://runtime.example.test',
+          wsUrl: 'wss://runtime.example.test/ws',
+          agentHostId: 'remote-agent-host-1',
+          workspaceId: 'remote-workspace-1',
+          environmentId: 'remote-environment-1',
+          environmentGeneration: 7,
+          workspaceRoot: '/workspace/project',
+          defaultCwd: '/workspace/project',
+          services: { code_server: 'https://code.example.test' },
+          authToken: 'ordinary-consumer-token',
+        },
+      };
+      process.getStatus.mockReturnValue(status);
+      process.emitStatus(status);
+
+      expect(pm.getStatus('tab-platform')).toEqual(status);
+      expect(sendCalls.at(-1)).toEqual({
+        channel: 'agent-process:status',
+        args: ['tab-platform', status],
+      });
+    });
+  });
+
+  describe('product management connection', () => {
+    it('does not create or start an AgentHost until the runtime install overlay finishes', async () => {
+      let finishInstall!: () => void;
+      const install = new Promise<void>((resolve) => {
+        finishInstall = resolve;
+      });
+      const waitForRuntimeInstall = vi.fn(() => install);
+      const { pm } = makePm({ waitForRuntimeInstall });
+
+      const management = pm.ensureManagementConnection();
+      await vi.waitFor(() => expect(waitForRuntimeInstall).toHaveBeenCalledOnce());
+      expect(hoisted.agentProcessInstances).toHaveLength(0);
+
+      finishInstall();
+      await management;
+      expect(hoisted.agentProcessInstances).toHaveLength(1);
+      expect(hoisted.agentProcessInstances[0]!.start).toHaveBeenCalledOnce();
+    });
+
+    it('starts a targetless serve host without materializing an environment', async () => {
+      const { pm } = makePm({ storeData: { defaultProfileName: 'platform' } });
+
+      await expect(pm.ensureManagementConnection()).resolves.toEqual({
+        baseUrl: 'http://127.0.0.1:9000',
+        authToken: 'ordinary-consumer-token',
+        mutationCapabilities: { validateConfig: true, writeConfig: true },
+      });
+
+      const host = hoisted.agentProcessInstances[0]!;
+      expect(host.mode).toBe('serve');
+      expect(host.start).toHaveBeenCalledWith(
+        expect.objectContaining({ profileName: 'host', workspaceDir: '', sources: [] })
+      );
+      expect(host.configureConsumer).not.toHaveBeenCalled();
+      expect(host.getRuntimeConnection).toHaveBeenCalledOnce();
+      expect(host.getManagementMutationCapabilities).toHaveBeenCalledOnce();
+    });
+
+    it('deduplicates concurrent management connection requests', async () => {
+      const { pm } = makePm();
+
+      const [first, second] = await Promise.all([pm.ensureManagementConnection(), pm.ensureManagementConnection()]);
+
+      expect(first).toEqual(second);
+      expect(hoisted.agentProcessInstances).toHaveLength(1);
+      expect(hoisted.agentProcessInstances[0]!.getRuntimeConnection).toHaveBeenCalledOnce();
+    });
+
+    it('routes only allowlisted mutations through the host admin client', async () => {
+      const { pm } = makePm();
+
+      await expect(
+        pm.mutateManagement({ method: 'validate_config', params: { updates: { temperature: 0.2 } } })
+      ).resolves.toEqual({ ok: true, method: 'validate_config' });
+
+      const host = hoisted.agentProcessInstances[0]!;
+      expect(host.callManagementAdmin).toHaveBeenCalledWith('validate_config', {
+        updates: { temperature: 0.2 },
+      });
+      await expect(pm.mutateManagement({ method: 'agent_host_list_resources', params: {} })).rejects.toThrow(
+        'not allowed'
+      );
+      expect(host.callManagementAdmin).toHaveBeenCalledOnce();
+    });
+
+    it('denies account mutations by default for server and other non-Electron managers', async () => {
+      const { pm } = makePm();
+
+      await expect(
+        pm.mutateManagement({
+          method: 'account_logout',
+          params: { provider: 'openai-chatgpt' },
+        })
+      ).rejects.toThrow('outside local single-user Electron');
+
+      const host = hoisted.agentProcessInstances[0]!;
+      expect(host.getManagementAccountStatus).not.toHaveBeenCalled();
+      expect(host.callManagementAdmin).not.toHaveBeenCalled();
+    });
+
+    it('requires runtime durable-host attestation as well as the Electron topology flag', async () => {
+      const { pm } = makePm({ durableLocalCodexAccountMutations: true });
+      await pm.ensureManagementConnection();
+      const host = hoisted.agentProcessInstances[0]!;
+      host.getManagementAccountStatus.mockResolvedValue({
+        providers: [{ id: 'openai-chatgpt', state: 'signed_out', identity: null }],
+        mutation_persistence: { codex_oauth: { durable: false, scope: null } },
+      });
+
+      await expect(
+        pm.mutateManagement({
+          method: 'account_logout',
+          params: { provider: 'openai-chatgpt' },
+        })
+      ).rejects.toThrow('did not attest durable host-scoped');
+      expect(host.callManagementAdmin).not.toHaveBeenCalled();
+    });
+
+    it('permits only the durable Codex OAuth subset after both gates pass', async () => {
+      const { pm } = makePm({ durableLocalCodexAccountMutations: true });
+
+      await expect(
+        pm.mutateManagement({
+          method: 'account_login_start',
+          params: { provider: 'openai-chatgpt', mode: 'device_code' },
+        })
+      ).resolves.toEqual({ ok: true, method: 'account_login_start' });
+
+      const host = hoisted.agentProcessInstances[0]!;
+      expect(host.getManagementAccountStatus).toHaveBeenCalledOnce();
+      expect(host.callManagementAdmin).toHaveBeenCalledWith('account_login_start', {
+        provider: 'openai-chatgpt',
+        mode: 'device_code',
+      });
+    });
+
+    it.each([
+      { method: 'account_login_start', params: { provider: 'openai', mode: 'api_key', api_key: 'secret' } },
+      { method: 'account_logout', params: { provider: 'openai' } },
+      { method: 'account_refresh', params: { provider: 'anthropic' } },
+      { method: 'account_select', params: { provider: 'openai-chatgpt' } },
+    ])('denies non-Codex or non-durable account mutation $method', async (request) => {
+      const { pm } = makePm({ durableLocalCodexAccountMutations: true });
+
+      await expect(pm.mutateManagement(request)).rejects.toThrow('Only durable ChatGPT OAuth');
+      const host = hoisted.agentProcessInstances[0]!;
+      expect(host.getManagementAccountStatus).not.toHaveBeenCalled();
+      expect(host.callManagementAdmin).not.toHaveBeenCalled();
+    });
+
+    it('gates MCP mutations on Electron topology, runtime durability, and ownership preparation', async () => {
+      const prepare = vi.fn();
+      const { pm } = makePm({ durableLocalMcpMutations: true, prepareLocalMcpOwnership: prepare });
+      await pm.ensureManagementConnection();
+      const host = hoisted.agentProcessInstances[0]!;
+      host.getStatus.mockReturnValue({ type: 'running', timestamp: Date.now() });
+
+      await expect(
+        pm.mutateManagement({
+          method: 'mcp_create_server',
+          params: { server_name: 'github', type: 'http', params: { url: 'https://mcp.test' } },
+        })
+      ).resolves.toEqual({ ok: true, method: 'mcp_create_server' });
+
+      expect(host.getManagementMcpStatus).toHaveBeenCalledOnce();
+      expect(prepare).toHaveBeenCalledOnce();
+      expect(host.callManagementAdmin).toHaveBeenNthCalledWith(1, 'mcp_create_server', {
+        server_name: 'github',
+        type: 'http',
+        params: { url: 'https://mcp.test' },
+      });
+      expect(host.callManagementAdmin).toHaveBeenNthCalledWith(2, 'mcp_reload_server', {});
+    });
+
+    it('does not let MCP or global methods borrow one another topology gates', async () => {
+      const noMcp = makePm({ durableLocalCodexAccountMutations: true }).pm;
+      await expect(
+        noMcp.mutateManagement({ method: 'mcp_delete_server', params: { server_name: 'github' } })
+      ).rejects.toThrow('outside local single-user Electron');
+
+      const noAccount = makePm({ durableLocalMcpMutations: true }).pm;
+      await expect(
+        noAccount.mutateManagement({ method: 'account_logout', params: { provider: 'openai-chatgpt' } })
+      ).rejects.toThrow('outside local single-user Electron');
+
+      await expect(
+        noAccount.mutateManagement({ method: 'write_config', params: { updates: { enabled: true } } })
+      ).resolves.toEqual({ ok: true, method: 'write_config' });
+    });
+
+    it('rejects managed omni-projects mutations before invoking the runtime', async () => {
+      const { pm } = makePm({ durableLocalMcpMutations: true });
+      await expect(
+        pm.mutateManagement({ method: 'mcp_delete_server', params: { server_name: 'omni-projects' } })
+      ).rejects.toThrow('managed by Omni Desktop');
+      const host = hoisted.agentProcessInstances[0]!;
+      expect(host.getManagementMcpStatus).not.toHaveBeenCalled();
+      expect(host.callManagementAdmin).not.toHaveBeenCalled();
+    });
+
+    it('requires the complete runtime MCP durability attestation', async () => {
+      const { pm } = makePm({ durableLocalMcpMutations: true });
+      await pm.ensureManagementConnection();
+      const host = hoisted.agentProcessInstances[0]!;
+      host.getManagementMcpStatus.mockResolvedValue({
+        servers: [],
+        mutation_persistence: {
+          user_config: { durable: true, scope: 'host' },
+          oauth_tokens: { durable: false, scope: null },
+          managed_servers: ['omni-projects'],
+        },
+      });
+      await expect(
+        pm.mutateManagement({ method: 'mcp_delete_server', params: { server_name: 'github' } })
+      ).rejects.toThrow('did not attest durable host-scoped MCP');
+      expect(host.callManagementAdmin).not.toHaveBeenCalled();
+    });
+
+    it('stops and evicts a distinct live host when post-commit reload fails', async () => {
+      const { pm } = makePm({
+        storeData: { defaultProfileName: 'devbox', projects: [] },
+        durableLocalMcpMutations: true,
+        prepareLocalMcpOwnership: vi.fn(),
+      });
+      await pm.start('agent:mcp-peer', { workspaceDir: '/tmp/mcp-peer' });
+      await pm.ensureManagementConnection();
+      expect(hoisted.agentProcessInstances).toHaveLength(2);
+      const [peer, management] = hoisted.agentProcessInstances;
+      peer!.getStatus.mockReturnValue({ type: 'running', timestamp: Date.now() });
+      management!.getStatus.mockReturnValue({ type: 'running', timestamp: Date.now() });
+      peer!.callManagementAdmin.mockImplementation(async (method: string) => {
+        if (method === 'mcp_reload_server') {
+          throw new Error('peer control channel lost');
+        }
+        return { ok: true, method };
+      });
+
+      await expect(
+        pm.mutateManagement({
+          method: 'mcp_update_server',
+          params: { server_name: 'github', params: { url: 'https://new.test' } },
+        })
+      ).rejects.toThrow('mutation committed, but stale AgentHost invalidation failed');
+
+      expect(peer!.stop).toHaveBeenCalledOnce();
+      expect(management!.stop).not.toHaveBeenCalled();
+      expect(pm.getStatus('agent:mcp-peer').type).toBe('uninitialized');
+      expect(management!.callManagementAdmin).toHaveBeenCalledWith('mcp_reload_server', {});
     });
   });
 
@@ -419,6 +752,24 @@ describe('ProcessManager', () => {
   });
 
   describe('lifecycle', () => {
+    it('does not start a session AgentHost until the runtime install overlay finishes', async () => {
+      let finishInstall!: () => void;
+      const install = new Promise<void>((resolve) => {
+        finishInstall = resolve;
+      });
+      const waitForRuntimeInstall = vi.fn(() => install);
+      const { pm } = makePm({ waitForRuntimeInstall });
+
+      const starting = pm.start('proc-1', { workspaceDir: '/tmp' });
+      await vi.waitFor(() => expect(waitForRuntimeInstall).toHaveBeenCalledOnce());
+      expect(hoisted.agentProcessInstances).toHaveLength(0);
+
+      finishInstall();
+      await starting;
+      expect(hoisted.agentProcessInstances).toHaveLength(1);
+      expect(hoisted.agentProcessInstances[0]!.start).toHaveBeenCalledOnce();
+    });
+
     it('shares one in-flight start transaction for duplicate first intent', async () => {
       const { pm } = makePm({ storeData: { defaultProfileName: 'devbox' } });
       let release!: () => void;
@@ -444,6 +795,88 @@ describe('ProcessManager', () => {
       release();
       await Promise.all([first, duplicate]);
       expect(host.configureConsumer).toHaveBeenCalledTimes(1);
+    });
+
+    it('invalidates and retires a materialization when stop wins the race', async () => {
+      const { pm } = makePm();
+      let release!: () => void;
+      hoisted.configureConsumerGate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+
+      const starting = pm.start('proc-race', { workspaceDir: '/tmp/race' });
+      await vi.waitFor(() => expect(hoisted.agentProcessInstances[0]?.configureConsumer).toHaveBeenCalledTimes(1));
+      const host = hoisted.agentProcessInstances[0]!;
+      const stopping = pm.stop('proc-race');
+      expect(host.stopConsumerEnvironment).not.toHaveBeenCalled();
+
+      release();
+      await Promise.all([starting, stopping]);
+
+      expect(host.stopConsumerEnvironment).toHaveBeenCalledWith(expect.objectContaining({ environmentGeneration: 3 }));
+      expect(host.stop).toHaveBeenCalledTimes(1);
+      expect(pm.getStatus('proc-race').type).toBe('uninitialized');
+    });
+
+    it('cleanup invalidates and drains a pending materialization', async () => {
+      const { pm } = makePm();
+      let release!: () => void;
+      hoisted.configureConsumerGate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+
+      const starting = pm.start('proc-cleanup-race', { workspaceDir: '/tmp/race' });
+      await vi.waitFor(() => expect(hoisted.agentProcessInstances[0]?.configureConsumer).toHaveBeenCalledTimes(1));
+      const host = hoisted.agentProcessInstances[0]!;
+      const cleanup = pm.cleanup();
+      await Promise.resolve();
+      expect(host.stopConsumerEnvironment).not.toHaveBeenCalled();
+
+      release();
+      await Promise.all([starting, cleanup]);
+
+      expect(host.stopConsumerEnvironment).toHaveBeenCalledTimes(1);
+      expect(host.stop).toHaveBeenCalledTimes(1);
+      expect(pm.getStatus('proc-cleanup-race').type).toBe('uninitialized');
+    });
+
+    it('publishes only the newest intent when workspace changes during materialization', async () => {
+      const { pm, sendCalls } = makePm();
+      let release!: () => void;
+      hoisted.configureConsumerGate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+
+      const first = pm.start('proc-newer-intent', { workspaceDir: '/tmp/first' });
+      await vi.waitFor(() => expect(hoisted.agentProcessInstances[0]?.configureConsumer).toHaveBeenCalledTimes(1));
+      const staleHost = hoisted.agentProcessInstances[0]!;
+      const staleWorkspaceId = staleHost.configureConsumer.mock.calls[0]![1];
+      const second = pm.start('proc-newer-intent', { workspaceDir: '/tmp/second' });
+
+      release();
+      await Promise.all([first, second]);
+
+      expect(hoisted.agentProcessInstances).toHaveLength(2);
+      expect(staleHost.stopConsumerEnvironment).toHaveBeenCalledTimes(1);
+      expect(staleHost.stop).toHaveBeenCalledTimes(1);
+      const currentHost = hoisted.agentProcessInstances[1]!;
+      currentHost.getStatus.mockReturnValue({
+        type: 'running',
+        data: { wsUrl: 'ws://localhost/ws', uiUrl: 'http://localhost' },
+        timestamp: Date.now(),
+      } satisfies WithTimestamp<AgentProcessStatus>);
+      expect(pm.getProcessWorkspaceDir('proc-newer-intent')).toBe('/tmp/second');
+      expect(pm.getStatus('proc-newer-intent')).toMatchObject({
+        type: 'running',
+        data: { workspaceId: currentHost.configureConsumer.mock.calls[0]![1] },
+      });
+      expect(
+        sendCalls.some(
+          ({ channel, args }) =>
+            channel === 'agent-process:status' &&
+            (args[1] as { data?: { workspaceId?: string } })?.data?.workspaceId === staleWorkspaceId
+        )
+      ).toBe(false);
     });
 
     it('start creates an AgentProcess and calls start', async () => {
@@ -487,7 +920,13 @@ describe('ProcessManager', () => {
       expect(host.configureConsumer).toHaveBeenCalledTimes(2);
       const secondWorkspaceId = host.configureConsumer.mock.calls[1]![1] as string;
       expect(secondWorkspaceId).not.toBe(firstWorkspaceId);
-      expect(host.stopConsumerEnvironment).toHaveBeenCalledWith(`environment-${firstWorkspaceId}`);
+      expect(host.stopConsumerEnvironment).toHaveBeenCalledWith(
+        expect.objectContaining({
+          workspaceId: firstWorkspaceId,
+          environmentId: `environment-${firstWorkspaceId}`,
+          environmentGeneration: 3,
+        })
+      );
       expect(pm.getProcessWorkspaceDir('proc-1')).toBe('/tmp/ws2');
     });
 
@@ -602,7 +1041,13 @@ describe('ProcessManager', () => {
       const tabAWorkspaceId = host.configureConsumer.mock.calls[0]![1] as string;
       await pm.stop('tab-a');
       expect(host.stop).not.toHaveBeenCalled();
-      expect(host.stopConsumerEnvironment).toHaveBeenCalledWith(`environment-${tabAWorkspaceId}`);
+      expect(host.stopConsumerEnvironment).toHaveBeenCalledWith(
+        expect.objectContaining({
+          workspaceId: tabAWorkspaceId,
+          environmentId: `environment-${tabAWorkspaceId}`,
+          environmentGeneration: 3,
+        })
+      );
       expect(pm.getStatus('tab-a').type).toBe('uninitialized');
       expect(pm.getStatus('tab-b').type).toBe('running');
 
@@ -669,7 +1114,13 @@ describe('ProcessManager', () => {
       );
       const rebuilding = pm.rebuild('tab-a', { workspaceDir: '/tmp/a' });
       await vi.waitFor(() =>
-        expect(host.stopConsumerEnvironment).toHaveBeenCalledWith(`environment-${tabAWorkspaceId}`)
+        expect(host.stopConsumerEnvironment).toHaveBeenCalledWith(
+          expect.objectContaining({
+            workspaceId: tabAWorkspaceId,
+            environmentId: `environment-${tabAWorkspaceId}`,
+            environmentGeneration: 3,
+          })
+        )
       );
       expect(pm.getStatus('tab-a')).toMatchObject({ type: 'starting' });
       expect(pm.getStatus('tab-a')).not.toHaveProperty('data');
@@ -686,7 +1137,13 @@ describe('ProcessManager', () => {
       await rebuilding;
 
       expect(host.rebuild).not.toHaveBeenCalled();
-      expect(host.stopConsumerEnvironment).toHaveBeenCalledWith(`environment-${tabAWorkspaceId}`);
+      expect(host.stopConsumerEnvironment).toHaveBeenCalledWith(
+        expect.objectContaining({
+          workspaceId: tabAWorkspaceId,
+          environmentId: `environment-${tabAWorkspaceId}`,
+          environmentGeneration: 3,
+        })
+      );
       expect(host.configureConsumer).toHaveBeenLastCalledWith(
         'tab-a',
         expect.stringMatching(/^workspace_/),
@@ -720,7 +1177,13 @@ describe('ProcessManager', () => {
         expect.stringMatching(/^workspace_/),
         expect.objectContaining({ profileName: 'devbox' })
       );
-      expect(host.stopConsumerEnvironment).toHaveBeenCalledWith(`environment-${tabAWorkspaceId}`);
+      expect(host.stopConsumerEnvironment).toHaveBeenCalledWith(
+        expect.objectContaining({
+          workspaceId: tabAWorkspaceId,
+          environmentId: `environment-${tabAWorkspaceId}`,
+          environmentGeneration: 3,
+        })
+      );
     });
 
     it('routes lifecycle calls and snapshot discard to the selected consumer environment', async () => {
@@ -736,16 +1199,20 @@ describe('ProcessManager', () => {
       } satisfies WithTimestamp<AgentProcessStatus>);
 
       await expect(pm.pause('tab-a')).resolves.toMatchObject({ ok: true, paused: true });
-      expect(host.pause).toHaveBeenCalledWith(environmentId);
+      expect(host.pause).toHaveBeenCalledWith(expect.objectContaining({ environmentId, environmentGeneration: 3 }));
       expect(pm.getStatus('tab-a')).toMatchObject({ data: { paused: true } });
 
       await expect(pm.unpause('tab-a')).resolves.toMatchObject({ ok: true, paused: false });
-      expect(host.unpause).toHaveBeenCalledWith(environmentId);
+      expect(host.unpause).toHaveBeenCalledWith(expect.objectContaining({ environmentId, environmentGeneration: 3 }));
       pm.notifyActivity('tab-a');
-      expect(host.notifyActivity).toHaveBeenCalledWith(environmentId);
+      expect(host.notifyActivity).toHaveBeenCalledWith(
+        expect.objectContaining({ environmentId, environmentGeneration: 3 })
+      );
 
       await pm.stop('tab-a', { discardSnapshot: true });
-      expect(host.discardConsumerSnapshot).toHaveBeenCalledWith(environmentId);
+      expect(host.discardConsumerSnapshot).toHaveBeenCalledWith(
+        expect.objectContaining({ environmentId, environmentGeneration: 3 })
+      );
       expect(host.stop).toHaveBeenCalledTimes(1);
     });
 
@@ -839,7 +1306,12 @@ describe('ProcessManager', () => {
       const { pm } = makePm();
       await pm.start('proc-1', { workspaceDir: '/tmp' });
 
-      await pm.stop('proc-1');
+      await expect(pm.stop('proc-1')).resolves.toEqual({
+        scope: 'host',
+        shutdown: 'graceful',
+        snapshotPersistence: 'complete',
+        pendingSnapshotRefs: [],
+      });
 
       expect(hoisted.agentProcessInstances[0]!.stop).toHaveBeenCalled();
       expect(pm.getStatus('proc-1').type).toBe('uninitialized');

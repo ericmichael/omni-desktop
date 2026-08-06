@@ -85,6 +85,7 @@ type ServeConn = {
   methods: string[];
   calls: string[];
   environmentIds: unknown[];
+  routing: Array<Record<string, unknown>>;
 };
 
 const startFakeServe = async () => {
@@ -99,6 +100,7 @@ const startFakeServe = async () => {
       methods: [],
       calls: [],
       environmentIds: [],
+      routing: [],
     };
     connections.push(conn);
     socket.on('message', (raw) => {
@@ -119,6 +121,7 @@ const startFakeServe = async () => {
         conn.calls.push(msg.params.function);
       }
       conn.environmentIds.push(msg.params.environment_id);
+      conn.routing.push(msg.params as Record<string, unknown>);
       socket.send(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { ok: true, supported: true, paused: true } }));
     });
   });
@@ -204,13 +207,22 @@ describe('AgentProcess dial auth (serve mode)', () => {
     expect(serve.connections[0]!.query).toBe('');
 
     // One-shot server_call dials (pause) carry the same header.
-    const result = await proc.pause('environment-authenticated');
+    const result = await proc.pause({
+      workspaceId: 'workspace-authenticated',
+      environmentId: 'environment-authenticated',
+      environmentGeneration: 3,
+    });
     expect(result.ok).toBe(true);
     const callConn = serve.connections.find((c) => c.calls.includes('sandbox.pause'));
     expect(callConn?.authorization).toBe('Bearer serve-token-1');
     expect(callConn?.query).toBe('');
     expect(callConn?.methods.slice(0, 3)).toEqual(['initialize', 'initialized', 'server_call']);
     expect(callConn?.environmentIds).toEqual(['environment-authenticated']);
+    expect(callConn?.routing[0]).toMatchObject({
+      workspace_id: 'workspace-authenticated',
+      environment_id: 'environment-authenticated',
+      environment_generation: 3,
+    });
 
     // The echoed readiness line (renderer log viewer / stdout) never carries
     // the token — it is redacted at the echo chokepoint.

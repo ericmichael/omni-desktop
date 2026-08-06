@@ -3,6 +3,7 @@ import type { Schema } from 'electron-store';
 
 import type { CustomAppEntry } from '@/shared/app-registry';
 import type { ExtensionDescriptor, ExtensionEnsureResult, ExtensionInstanceState } from '@/shared/extensions';
+import type { ManagementAdminRequest, ManagementAdminResult } from '@/shared/management-admin';
 import type { VoicePersona } from '@/shared/voice-personas';
 
 // Normally we'd use SWR or some query library, but I had some issues with react render cycles and the easiest fix
@@ -543,6 +544,28 @@ export type StoreData = {
    * tenants start empty so a shared file never leaks across tenants).
    */
   agentConfigMigratedFromFiles?: boolean;
+
+  /**
+   * Set only after the local Electron AgentHost proves structural parity with
+   * Desktop's materialized mcp.json and attests durable host-scoped MCP config
+   * and OAuth stores. Once set, Desktop must never materialize mcp.json again;
+   * canonical Omniagents CRUD/auth RPCs are its sole writer.
+   *
+   * Server and multi-user deployments ignore this host-local marker.
+   */
+  mcpConfigOwnership?: 'omniagents';
+
+  /**
+   * Set only after the local Electron AgentHost proves that its canonical
+   * account RPCs persist Codex OAuth credentials durably in the product's host
+   * config directory. Before this marker, the legacy Desktop OAuth handlers
+   * remain available as a migration fallback. After it, account mutations fail
+   * closed instead of writing/removing `codex.json` behind Omniagents' back.
+   *
+   * Server and multi-user deployments never read or write this host-local
+   * marker; they retain their per-principal secret-store ownership.
+   */
+  codexAccountOwnership?: 'omniagents';
 
   /** Voice mode audio device + processing preferences. */
   audioSettings: AudioSettings;
@@ -1369,6 +1392,8 @@ export const schema: Schema<StoreData> = {
   },
   envVars: { type: 'string', default: '' },
   agentConfigMigratedFromFiles: { type: 'boolean', default: false },
+  mcpConfigOwnership: { type: 'string', enum: ['omniagents'] },
+  codexAccountOwnership: { type: 'string', enum: ['omniagents'] },
   audioSettings: {
     type: 'object',
     default: {
@@ -1555,17 +1580,49 @@ export type AgentRuntimeConnection = {
   authToken?: string;
 };
 
+/** Mutation availability reported by main's privileged management broker.
+ * This contains capability booleans only; the admin credential never crosses
+ * the IPC boundary. */
+export type ManagementMutationCapabilities = {
+  validateConfig: boolean;
+  writeConfig: boolean;
+};
+
+export type ManagementRuntimeConnection = AgentRuntimeConnection & {
+  mutationCapabilities: ManagementMutationCapabilities;
+};
+
+/**
+ * Complete address of a materialized AgentHost execution environment.
+ *
+ * The generation is part of the address: re-materializing an environment can
+ * reuse its id with a newer generation, and Omniagents rejects stale callers
+ * when this value is supplied. Workspace RPCs must carry all three fields.
+ */
+export type ExecutionTarget = {
+  workspaceId: string;
+  environmentId: string;
+  environmentGeneration: number;
+};
+
+/** Result of retiring one execution environment or its owning AgentHost. */
+export type AgentProcessStopResult = {
+  scope: 'environment' | 'host' | 'compute' | 'none';
+  /** Host-process termination mode. Environment-only stops do not terminate it. */
+  shutdown: 'graceful' | 'forced' | 'not-applicable';
+  /** `uncertain` means one or more durable snapshot uploads still need retrying. */
+  snapshotPersistence: 'complete' | 'uncertain';
+  /** Snapshot references retained in main-process retry bookkeeping. */
+  pendingSnapshotRefs: string[];
+};
+
 // Unified agent process data — emitted by `omni serve` and the platform path.
 export type AgentProcessData = {
   /** Base URL the renderer parses for WS + HTTP endpoints. */
   uiUrl: string;
   /** Direct WS URL for JSON-RPC; renderer derives from uiUrl if unset. */
   wsUrl?: string;
-  /**
-   * Agent-host identity emitted by local ``omni serve``. Optional on the
-   * unified process shape because delegated compute backends have not yet
-   * adopted the local readiness contract.
-   */
+  /** Agent-host identity. Required once either local or platform readiness completes. */
   agentHostId?: string;
   /** Workspace resource bound to ``environmentId`` by the agent host. */
   workspaceId?: string;
@@ -1575,6 +1632,8 @@ export type AgentProcessData = {
    * separate from the conversation ``sessionId`` by design.
    */
   environmentId?: string;
+  /** Generation paired with ``environmentId`` by AgentHost materialization. */
+  environmentGeneration?: number;
   /** Authoritative root returned by the materialized execution environment. */
   workspaceRoot?: string;
   /** Environment-selected initial cwd for terminals and agent commands. */
@@ -2501,7 +2560,7 @@ type AgentProcessIpcEvents = Namespaced<
   'agent-process',
   {
     start: (processId: string, arg: AgentProcessStartOptions) => void;
-    stop: (processId: string, opts?: AgentProcessStopOptions) => void;
+    stop: (processId: string, opts?: AgentProcessStopOptions) => AgentProcessStopResult;
     rebuild: (processId: string, arg: AgentProcessStartOptions) => void;
     resize: (processId: string, cols: number, rows: number) => void;
     'get-status': (processId: string) => WithTimestamp<AgentProcessStatus>;
@@ -2527,6 +2586,18 @@ type AgentProcessIpcEvents = Namespaced<
      * profile stays within the same security domain.
      */
     'switch-sandbox': (processId: string, profileName: string) => SandboxSwitchResult;
+  }
+>;
+
+/** Product-scoped read connection. Process-wide mutations stay on main's
+ * privileged AgentHost control/admin path and are intentionally absent. */
+type ManagementRuntimeIpcEvents = Namespaced<
+  'management-runtime',
+  {
+    ensure: () => ManagementRuntimeConnection;
+    /** Closed main-process broker. The control/admin credential never appears
+     * in this request or response and arbitrary RPC methods are rejected. */
+    mutate: (request: ManagementAdminRequest) => ManagementAdminResult;
   }
 >;
 
@@ -3938,6 +4009,7 @@ export type IpcEvents = MainProcessIpcEvents &
   OmniInstallProcessIpcEvents &
   VoiceIpcEvents &
   AgentProcessIpcEvents &
+  ManagementRuntimeIpcEvents &
   SnapshotIpcEvents &
   UtilIpcEvents &
   TerminalIpcEvents &

@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -59,6 +59,34 @@ describe('materializeAgentConfig — plaintext', () => {
     expect(read('models.json').providers.openai.api_key).toBe('sk-secret');
     expect(read('mcp.json').mcpServers[MCP_ENTRY_NAME]).toEqual(STDIO);
     expect(read('mcp.json').mcpServers.github.headers.Authorization).toBe('token ghp_xxx');
+    expect(read('network.json')).toEqual(NET);
+  });
+
+  it('can relinquish mcp.json while continuing to materialize the other configs', () => {
+    materializeAgentConfig({
+      configDir: dir,
+      models: models(),
+      mcp: mcp(),
+      network: NET,
+      mode: 'plaintext',
+      managedMcpEntry: STDIO,
+    });
+    const canonical = { mcpServers: { canonical: { type: 'stdio', command: 'owned' } } };
+    const mcpPath = join(dir, 'mcp.json');
+    writeFileSync(mcpPath, `${JSON.stringify(canonical)}\n`);
+
+    materializeAgentConfig({
+      configDir: dir,
+      models: models(),
+      mcp: mcp(),
+      network: NET,
+      mode: 'plaintext',
+      managedMcpEntry: STDIO,
+      writeMcp: false,
+    });
+
+    expect(read('mcp.json')).toEqual(canonical);
+    expect(read('models.json').providers.openai.api_key).toBe('sk-secret');
     expect(read('network.json')).toEqual(NET);
   });
 });

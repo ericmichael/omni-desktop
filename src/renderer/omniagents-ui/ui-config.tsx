@@ -4,7 +4,7 @@ import { createContext, useContext, useMemo } from 'react';
 import { serverOrigin } from '@/renderer/services/ipc';
 import type { AgentRuntimeConnection } from '@/shared/types';
 
-type UiConfig = {
+export type UiConfig = {
   runtimeBaseUrl: string;
   url: URL;
   searchParams: URLSearchParams;
@@ -50,6 +50,49 @@ const buildWsUrl = (url: URL, path: string): string => {
   return `${proto}//${url.host}${path}`;
 };
 
+export const resolveUiConfig = (connection: AgentRuntimeConnection): UiConfig => {
+  // Anchor against the launcher's actual origin — same-origin in browser
+  // server mode, cloud baseUrl in cloud-linked Electron. Downstream
+  // (wsBaseUrl, wsRealtimeUrl, httpBaseUrl, proxyPrefix) all derive from
+  // url.host, so fixing this seam cascades everywhere consumers like
+  // rpc/client.ts, rpc/realtime.ts, TerminalPanel get URLs from us.
+  const url = new URL(connection.baseUrl, serverOrigin());
+  const searchParams = url.searchParams;
+  // Launcher-owned runtimes pass credentials as typed process data. Keep
+  // query-token parsing only for standalone/browser entry points that still
+  // receive an authenticated UI handoff URL.
+  const token = connection.authToken ?? searchParams.get('token') ?? undefined;
+  const debug = /^(1|true|yes)$/i.test(String(searchParams.get('debug') || ''));
+  const minimal = searchParams.get('minimal') === 'true';
+  const session = searchParams.get('session') || undefined;
+  const proxyPrefix = getProxyPrefix(url.pathname);
+  const resolvePath = (path: string) => {
+    if (!proxyPrefix || path.startsWith('/proxy/')) {
+      return path;
+    }
+    return `${proxyPrefix}${path}`;
+  };
+  const httpBaseUrl = `${url.protocol}//${url.host}`;
+  const wsOrigin = buildWsUrl(url, '');
+  const wsBaseUrl = `${wsOrigin}${resolvePath('/ws')}`;
+  const wsRealtimeUrl = `${wsOrigin}${resolvePath('/ws/realtime')}`;
+  return {
+    runtimeBaseUrl: connection.baseUrl,
+    url,
+    searchParams,
+    token,
+    debug,
+    minimal,
+    session,
+    wsBaseUrl,
+    wsRealtimeUrl,
+    wsOrigin,
+    httpBaseUrl,
+    proxyPrefix,
+    resolvePath,
+  };
+};
+
 export const UiConfigProvider = ({
   connection,
   children,
@@ -57,48 +100,7 @@ export const UiConfigProvider = ({
   connection: AgentRuntimeConnection;
   children: ReactNode;
 }) => {
-  const value = useMemo<UiConfig>(() => {
-    // Anchor against the launcher's actual origin — same-origin in browser
-    // server mode, cloud baseUrl in cloud-linked Electron. Downstream
-    // (wsBaseUrl, wsRealtimeUrl, httpBaseUrl, proxyPrefix) all derive from
-    // url.host, so fixing this seam cascades everywhere consumers like
-    // rpc/client.ts, rpc/realtime.ts, TerminalPanel get URLs from us.
-    const url = new URL(connection.baseUrl, serverOrigin());
-    const searchParams = url.searchParams;
-    // Launcher-owned runtimes pass credentials as typed process data. Keep
-    // query-token parsing only for standalone/browser entry points that still
-    // receive an authenticated UI handoff URL.
-    const token = connection.authToken ?? searchParams.get('token') ?? undefined;
-    const debug = /^(1|true|yes)$/i.test(String(searchParams.get('debug') || ''));
-    const minimal = searchParams.get('minimal') === 'true';
-    const session = searchParams.get('session') || undefined;
-    const proxyPrefix = getProxyPrefix(url.pathname);
-    const resolvePath = (path: string) => {
-      if (!proxyPrefix || path.startsWith('/proxy/')) {
-        return path;
-      }
-      return `${proxyPrefix}${path}`;
-    };
-    const httpBaseUrl = `${url.protocol}//${url.host}`;
-    const wsOrigin = buildWsUrl(url, '');
-    const wsBaseUrl = `${wsOrigin}${resolvePath('/ws')}`;
-    const wsRealtimeUrl = `${wsOrigin}${resolvePath('/ws/realtime')}`;
-    return {
-      runtimeBaseUrl: connection.baseUrl,
-      url,
-      searchParams,
-      token,
-      debug,
-      minimal,
-      session,
-      wsBaseUrl,
-      wsRealtimeUrl,
-      wsOrigin,
-      httpBaseUrl,
-      proxyPrefix,
-      resolvePath,
-    };
-  }, [connection.authToken, connection.baseUrl]);
+  const value = useMemo<UiConfig>(() => resolveUiConfig(connection), [connection.authToken, connection.baseUrl]);
 
   return <UiConfigContext.Provider value={value}>{children}</UiConfigContext.Provider>;
 };

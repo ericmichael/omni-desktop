@@ -3,7 +3,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { GitDiffResult, GitRepository, GitStatusResult, WorkspaceRepo } from '@/renderer/omniagents-ui/rpc/git';
-import { workspaceRepo } from '@/renderer/omniagents-ui/rpc/git';
+import { GitClient, workspaceRepo } from '@/renderer/omniagents-ui/rpc/git';
 import type { ProjectSource } from '@/shared/types';
 
 import { GitSurface, sourceForRepository } from './GitSurface';
@@ -24,6 +24,7 @@ const mocks = vi.hoisted(() => ({
     unstage: vi.fn(),
     discard: vi.fn(),
     confirmDiscard: vi.fn(),
+    onOperationProgress: vi.fn(() => () => {}),
   },
 }));
 
@@ -203,12 +204,17 @@ afterEach(() => {
 });
 
 describe('GitSurface', () => {
+  const executionTarget = {
+    workspaceId: 'workspace-1',
+    environmentId: 'environment-1',
+    environmentGeneration: 3,
+  };
   it('discovers the session repository, filters a selected diff, and opens the first changed line', async () => {
     const onOpenFile = vi.fn();
     await act(async () =>
       root.render(
         <GitSurface
-          environmentId="environment-1"
+          executionTarget={executionTarget}
           sessionId="session-1"
           workspaceRoot="/workspace"
           onOpenFile={onOpenFile}
@@ -219,6 +225,7 @@ describe('GitSurface', () => {
     await settle();
 
     expect(mocks.rpc.serverCall).not.toHaveBeenCalledWith('session.ensure', expect.anything());
+    expect(vi.mocked(GitClient)).toHaveBeenCalledWith(mocks.rpc, executionTarget);
     expect(container.querySelector('section[aria-label="Source control"]')).not.toBeNull();
     expect(container.querySelector('select[aria-label="Repository"]')?.getAttribute('value')).toBeNull();
 
@@ -232,7 +239,7 @@ describe('GitSurface', () => {
 
   it('stages and unstages the exact file selection through explicit view buttons', async () => {
     await act(async () =>
-      root.render(<GitSurface environmentId="environment-1" sessionId="session-1" workspaceRoot="/workspace" />)
+      root.render(<GitSurface executionTarget={executionTarget} sessionId="session-1" workspaceRoot="/workspace" />)
     );
     await settle();
     await settle();
@@ -261,7 +268,7 @@ describe('GitSurface', () => {
       result: { environment_id: 'environment-1', repo, discarded_paths: ['src/index.ts'], discarded_hunks: [] },
     });
     await act(async () =>
-      root.render(<GitSurface environmentId="environment-1" sessionId="session-1" workspaceRoot="/workspace" />)
+      root.render(<GitSurface executionTarget={executionTarget} sessionId="session-1" workspaceRoot="/workspace" />)
     );
     await settle();
     await settle();
@@ -295,7 +302,7 @@ describe('GitSurface', () => {
       ],
     });
     await act(async () =>
-      root.render(<GitSurface environmentId="environment-1" sessionId="session-1" workspaceRoot="/workspace" />)
+      root.render(<GitSurface executionTarget={executionTarget} sessionId="session-1" workspaceRoot="/workspace" />)
     );
     await settle();
     await settle();
@@ -308,7 +315,7 @@ describe('GitSurface', () => {
     mocks.connected = false;
     act(() =>
       root.render(
-        <GitSurface active={false} environmentId="environment-1" sessionId="session-1" workspaceRoot="/workspace" />
+        <GitSurface active={false} executionTarget={executionTarget} sessionId="session-1" workspaceRoot="/workspace" />
       )
     );
     expect(container.textContent).toContain('The selected repository is preserved');
@@ -316,7 +323,9 @@ describe('GitSurface', () => {
 
     mocks.connected = true;
     act(() =>
-      root.render(<GitSurface active environmentId="environment-1" sessionId="session-1" workspaceRoot="/workspace" />)
+      root.render(
+        <GitSurface active executionTarget={executionTarget} sessionId="session-1" workspaceRoot="/workspace" />
+      )
     );
     await settle();
     expect(container.querySelector<HTMLSelectElement>('select[aria-label="Repository"]')?.value).toBe('apps/api');
@@ -324,7 +333,9 @@ describe('GitSurface', () => {
 
   it('refreshes repository status and diffs when the persistent Git surface becomes active again', async () => {
     await act(async () =>
-      root.render(<GitSurface active environmentId="environment-1" sessionId="session-1" workspaceRoot="/workspace" />)
+      root.render(
+        <GitSurface active executionTarget={executionTarget} sessionId="session-1" workspaceRoot="/workspace" />
+      )
     );
     await settle();
     await settle();
@@ -334,7 +345,7 @@ describe('GitSurface', () => {
 
     act(() =>
       root.render(
-        <GitSurface active={false} environmentId="environment-1" sessionId="session-1" workspaceRoot="/workspace" />
+        <GitSurface active={false} executionTarget={executionTarget} sessionId="session-1" workspaceRoot="/workspace" />
       )
     );
     await settle();
@@ -343,7 +354,9 @@ describe('GitSurface', () => {
     expect(mocks.git.diff.mock.calls.length).toBe(diffCalls);
 
     act(() =>
-      root.render(<GitSurface active environmentId="environment-1" sessionId="session-1" workspaceRoot="/workspace" />)
+      root.render(
+        <GitSurface active executionTarget={executionTarget} sessionId="session-1" workspaceRoot="/workspace" />
+      )
     );
     await settle();
     await settle();
@@ -363,7 +376,7 @@ describe('GitSurface', () => {
       ],
     });
     await act(async () =>
-      root.render(<GitSurface environmentId="environment-1" sessionId="session-1" workspaceRoot="/workspace" />)
+      root.render(<GitSurface executionTarget={executionTarget} sessionId="session-1" workspaceRoot="/workspace" />)
     );
     await settle();
 
@@ -385,7 +398,12 @@ describe('GitSurface', () => {
     };
     await act(async () =>
       root.render(
-        <GitSurface environmentId="environment-1" tabId="tab-1" sessionId="session-1" workspaceRoot="/workspace/work" />
+        <GitSurface
+          executionTarget={executionTarget}
+          tabId="tab-1"
+          sessionId="session-1"
+          workspaceRoot="/workspace/work"
+        />
       )
     );
     await settle();

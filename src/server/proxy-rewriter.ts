@@ -276,6 +276,16 @@ export const setupProxyRewriter = (
     return result;
   });
 
+  wsHandler.addResultWrapper('management-runtime:ensure', (result) => {
+    const connection = result as { baseUrl?: unknown } | undefined;
+    if (connection && typeof connection.baseUrl === 'string') {
+      const data: Record<string, string | undefined> = { uiUrl: connection.baseUrl };
+      rewriteStatusUrls(data, 'management');
+      connection.baseUrl = data.uiUrl;
+    }
+    return result;
+  });
+
   wsHandler.addResultWrapper('project:get-tasks', (result) => {
     const tasks = result as Array<{ id: string; status: Record<string, unknown> }> | undefined;
     if (Array.isArray(tasks)) {

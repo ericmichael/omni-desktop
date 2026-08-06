@@ -104,6 +104,26 @@ function downloadResponder(bytes: Uint8Array, sha256 = sha256Hello) {
 }
 
 describe('FsClient', () => {
+  it('sends the complete execution target on filesystem requests', async () => {
+    const rpc = new FakeRpc();
+    rpc.responder = () => ({ path: '.', writable: true, entries: [], truncated: false });
+    const client = new FsClient(rpc as FileSystemRpcTransport);
+
+    await client.list({ workspaceId: 'workspace-1', environmentId: environmentId, environmentGeneration: 3 }, '.');
+
+    expect(rpc.calls[0]).toEqual({
+      method: 'fs_list',
+      params: {
+        workspace_id: 'workspace-1',
+        environment_id: environmentId,
+        environment_generation: 3,
+        path: '.',
+        recursive: false,
+      },
+    });
+    client.dispose();
+  });
+
   it('accepts only canonical workspace-relative POSIX paths before sending requests', async () => {
     expect(validateFsPath('.')).toBe('.');
     expect(validateFsPath('.hidden/src.ts')).toBe('.hidden/src.ts');

@@ -97,6 +97,13 @@ export class ReplayTracker {
     }
   }
 
+  /** Replace the cursor after an authoritative full-state resync. */
+  reset(streamId: string | null = null, lastSeq = 0): void {
+    this.streamId = streamId;
+    this.lastSeq = Number.isInteger(lastSeq) && lastSeq >= 0 ? lastSeq : 0;
+    this.gapCount = 0;
+  }
+
   /**
    * Apply a `resume_session` result. Returns the events to deliver, in
    * order, with already-applied sequences skipped. Tolerates
@@ -139,7 +146,10 @@ export class ReplayTracker {
  */
 export class SessionReplayCoordinator {
   private trackers = new Map<string, ReplayTracker>();
+  private registered = new Set<string>();
   private resuming = new Set<string>();
+  private pendingRetry = new Set<string>();
+  private needsResync = new Set<string>();
   private buffered = new Map<string, ReplayedEvent[]>();
 
   constructor(
@@ -158,6 +168,55 @@ export class SessionReplayCoordinator {
   }
 
   /**
+   * Register a session selected by the UI even when it has not emitted a
+   * sequenced event yet. Reconnect recovery must attach these cursorless
+   * sessions with ``resume_session(after_seq=0)`` or externally-triggered
+   * activity can be missed indefinitely.
+   */
+  registerSession(sessionId: string): ReplayTracker {
+    this.registered.add(sessionId);
+    return this.tracker(sessionId);
+  }
+
+  /** Stop reconnect recovery for a session the UI no longer owns. */
+  unregisterSession(sessionId: string): void {
+    this.registered.delete(sessionId);
+    this.trackers.delete(sessionId);
+    this.pendingRetry.delete(sessionId);
+    this.needsResync.delete(sessionId);
+    this.buffered.delete(sessionId);
+  }
+
+  /**
+   * Seed a fresh cursor after the host has refetched authoritative state.
+   * Passing no epoch leaves the session cursorless; the next ``resumeAll``
+   * adopts the server's current stream from sequence zero.
+   */
+  completeResync(sessionId: string, streamId: string | null = null, lastSeq = 0): void {
+    const tracker = this.tracker(sessionId);
+    tracker.reset(streamId, lastSeq);
+    this.needsResync.delete(sessionId);
+    this.pendingRetry.delete(sessionId);
+    this.buffered.delete(sessionId);
+  }
+
+  /**
+   * Quarantine a session after an out-of-band replay failure (for example
+   * ``ack_events`` returning ``-32030``). No further sequenced events are
+   * delivered until the host reloads authoritative state and calls
+   * ``completeResync``.
+   */
+  requireResync(sessionId: string): void {
+    if (this.needsResync.has(sessionId)) {
+      return;
+    }
+    this.needsResync.add(sessionId);
+    this.pendingRetry.delete(sessionId);
+    this.buffered.delete(sessionId);
+    this.onResyncRequired(sessionId);
+  }
+
+  /**
    * Route one incoming notification. Returns true when the event was
    * handled here (dropped or deferred); false when the caller should
    * deliver it normally.
@@ -167,6 +226,9 @@ export class SessionReplayCoordinator {
     const seq = params?.seq;
     if (typeof sessionId !== 'string' || typeof seq !== 'number') {
       return false;
+    }
+    if (this.needsResync.has(sessionId)) {
+      return true;
     }
     const tracker = this.tracker(sessionId);
     if (this.resuming.has(sessionId)) {
@@ -183,8 +245,8 @@ export class SessionReplayCoordinator {
       return true;
     }
     if (observation === 'stream_changed') {
-      this.onResyncRequired(sessionId);
-      return false;
+      this.requireResync(sessionId);
+      return true;
     }
     // gap: buffer the triggering event and backfill.
     this.buffered.set(sessionId, [{ method, params: params! }]);
@@ -202,57 +264,60 @@ export class SessionReplayCoordinator {
    * finished during the outage). No-op on the first connect — no cursors
    * exist yet — and for sessions with a backfill already in flight.
    */
-  resumeAll(): void {
+  async resumeAll(): Promise<void> {
+    const resumes: Promise<void>[] = [];
     for (const [sessionId, tracker] of this.trackers) {
-      if (tracker.streamId === null || this.resuming.has(sessionId)) {
+      if (
+        this.resuming.has(sessionId) ||
+        this.needsResync.has(sessionId) ||
+        (tracker.streamId === null && !this.registered.has(sessionId))
+      ) {
         continue;
       }
-      this.buffered.set(sessionId, []);
+      if (!this.pendingRetry.has(sessionId)) {
+        this.buffered.set(sessionId, []);
+      }
       this.resuming.add(sessionId);
-      void this.runResume(sessionId, tracker);
+      resumes.push(this.runResume(sessionId, tracker));
     }
+    await Promise.all(resumes);
   }
 
   private async runResume(sessionId: string, tracker: ReplayTracker): Promise<void> {
-    let failed = false;
+    let outcome: 'success' | 'retry' | 'resync' = 'success';
     try {
       const result = await this.resume(sessionId, tracker.streamId, tracker.lastSeq);
       for (const event of tracker.applyResume(result)) {
         this.deliver(event.method, event.params);
       }
+      this.pendingRetry.delete(sessionId);
     } catch (err) {
-      // Resync required (or transport failure): surface to the host app,
-      // which refetches authoritative state.
-      failed = true;
       if ((err as { code?: unknown } | null)?.code === RESYNC_REQUIRED_CODE) {
-        // The server can never serve this cursor again (stream epoch
-        // changed, or the session was deleted — resume_session would only
-        // re-materialize it). Drop the tracker so later resumeAll passes
-        // skip the session; a future live event re-adopts its stream.
-        this.trackers.delete(sessionId);
+        outcome = 'resync';
+        this.requireResync(sessionId);
+      } else {
+        // A transport failure while resuming is not evidence that the durable
+        // cursor is invalid. Keep both the cursor and held live events for the
+        // next successful reconnect instead of force-advancing or asking the
+        // host to perform an unnecessary full-state rebuild.
+        outcome = 'retry';
+        this.pendingRetry.add(sessionId);
       }
-      this.onResyncRequired(sessionId);
-    } finally {
-      const held = this.buffered.get(sessionId) ?? [];
-      this.buffered.delete(sessionId);
-      this.resuming.delete(sessionId);
-      for (const event of held) {
-        if (failed) {
-          // Degrade to deliver-anyway: force the cursor past the held
-          // events so they cannot re-trigger a resume loop while the host
-          // performs its full resync.
-          const seq = event.params.seq;
-          if (typeof seq === 'number') {
-            tracker.forceAdvance(seq);
-          }
-          this.deliver(event.method, event.params);
-          continue;
-        }
-        if (this.handle(event.method, event.params)) {
-          continue;
-        }
-        this.deliver(event.method, event.params);
+    }
+    const held = this.buffered.get(sessionId) ?? [];
+    this.resuming.delete(sessionId);
+    if (outcome === 'retry') {
+      return;
+    }
+    this.buffered.delete(sessionId);
+    if (outcome === 'resync') {
+      return;
+    }
+    for (const event of held) {
+      if (this.handle(event.method, event.params)) {
+        continue;
       }
+      this.deliver(event.method, event.params);
     }
   }
 }

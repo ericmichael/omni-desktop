@@ -62,7 +62,7 @@ async function renderTree(): Promise<void> {
   await act(async () => {
     root.render(
       <WorkspaceFileTree
-        environmentId="environment-1"
+        executionTarget={{ workspaceId: 'workspace-1', environmentId: 'environment-1', environmentGeneration: 3 }}
         fsClient={{ list } as never}
         onOpenFile={onOpenFile}
         watchRegistry={registry}
@@ -98,7 +98,11 @@ describe('WorkspaceFileTree', () => {
 
     const retry = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Retry')!;
     await act(async () => retry.click());
-    expect(list).toHaveBeenCalledWith('environment-1', '.', false);
+    expect(list).toHaveBeenCalledWith(
+      expect.objectContaining({ environmentId: 'environment-1', environmentGeneration: 3 }),
+      '.',
+      false
+    );
     expect(container.querySelector('[role="status"]')?.textContent).toContain('This workspace is empty');
   });
 
@@ -145,11 +149,19 @@ describe('WorkspaceFileTree', () => {
       registry.callbacks.get('source')?.onEvents?.([{ type: 'created', path: 'source/new.ts', entryType: 'file' }]);
       await vi.advanceTimersByTimeAsync(50);
     });
-    expect(list).toHaveBeenCalledWith('environment-1', 'source', false);
+    expect(list).toHaveBeenCalledWith(
+      expect.objectContaining({ environmentId: 'environment-1', environmentGeneration: 3 }),
+      'source',
+      false
+    );
     expect(container.textContent).toContain('new.ts');
 
     const refresh = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Refresh')!;
     await act(async () => refresh.click());
-    expect(list).toHaveBeenCalledWith('environment-1', '.', false);
+    expect(list).toHaveBeenCalledWith(
+      expect.objectContaining({ environmentId: 'environment-1', environmentGeneration: 3 }),
+      '.',
+      false
+    );
   });
 });

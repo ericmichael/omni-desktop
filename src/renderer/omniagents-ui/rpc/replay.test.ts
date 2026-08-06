@@ -99,7 +99,7 @@ describe('SessionReplayCoordinator', () => {
     expect(coordinator.tracker('s').lastSeq).toBe(4);
   });
 
-  it('reports resync when the resume call fails', async () => {
+  it('does not report resync for a transient resume failure', async () => {
     const resyncs: string[] = [];
     const coordinator = new SessionReplayCoordinator(
       async () => {
@@ -111,7 +111,7 @@ describe('SessionReplayCoordinator', () => {
     coordinator.tracker('s').observe(payload(1));
     expect(coordinator.handle('message_output', payload(5))).toBe(true);
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(resyncs).toEqual(['s']);
+    expect(resyncs).toEqual([]);
   });
 
   it('drops duplicate deliveries so no duplicate UI items appear', () => {
@@ -123,7 +123,7 @@ describe('SessionReplayCoordinator', () => {
     expect(coordinator.handle('message_output', payload(1))).toBe(true);
   });
 
-  it('resumeAll backfills every tracked session and skips cursorless ones', async () => {
+  it('resumeAll backfills tracked cursors and registered cursorless sessions', async () => {
     const delivered: Array<[string, unknown]> = [];
     const resumed: Array<[string, string | null, number]> = [];
     const coordinator = new SessionReplayCoordinator(
@@ -141,22 +141,24 @@ describe('SessionReplayCoordinator', () => {
 
     coordinator.handle('run_started', { session_id: 'a', stream_id: 'stream-1', seq: 3 });
     coordinator.handle('run_started', { session_id: 'b', stream_id: 'stream-1', seq: 7 });
-    // Transient-only session: no cursor, must not be resumed.
-    coordinator.handle('token', { session_id: 'c' });
+    // A selected session with no sequenced event must still attach from zero.
+    coordinator.registerSession('c');
 
-    coordinator.resumeAll();
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await coordinator.resumeAll();
 
     expect(resumed).toEqual([
       ['a', 'stream-1', 3],
       ['b', 'stream-1', 7],
+      ['c', null, 0],
     ]);
     expect(delivered).toEqual([
       ['run_end', 4],
       ['run_end', 8],
+      ['run_end', 1],
     ]);
     expect(coordinator.tracker('a').lastSeq).toBe(4);
     expect(coordinator.tracker('b').lastSeq).toBe(8);
+    expect(coordinator.tracker('c').lastSeq).toBe(1);
   });
 
   it('resumeAll buffers live events arriving during the backfill', async () => {
@@ -192,7 +194,7 @@ describe('SessionReplayCoordinator', () => {
     expect(coordinator.tracker('s').lastSeq).toBe(3);
   });
 
-  it('prunes the cursor on a -32030 resume failure so resumeAll stops re-resuming the session', async () => {
+  it('pauses resume after -32030 until authoritative resync completes', async () => {
     const resumed: string[] = [];
     const resyncs: string[] = [];
     const coordinator = new SessionReplayCoordinator(
@@ -205,17 +207,20 @@ describe('SessionReplayCoordinator', () => {
     );
 
     coordinator.handle('run_started', payload(3));
-    coordinator.resumeAll();
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await coordinator.resumeAll();
     expect(resumed).toEqual(['s']);
     expect(resyncs).toEqual(['s']);
 
-    // The unservable cursor is gone: the next reconnect must not resume —
-    // and therefore not re-materialize — the session server-side.
-    coordinator.resumeAll();
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    // The unservable cursor is quarantined until the host completes its
+    // authoritative rebuild; reconnect must not hammer the same cursor.
+    await coordinator.resumeAll();
     expect(resumed).toEqual(['s']);
     expect(resyncs).toEqual(['s']);
+
+    coordinator.completeResync('s');
+    coordinator.registerSession('s');
+    await coordinator.resumeAll();
+    expect(resumed).toEqual(['s', 's']);
   });
 
   it('keeps the cursor on a transport resume failure and retries on the next reconnect', async () => {
@@ -230,12 +235,27 @@ describe('SessionReplayCoordinator', () => {
     );
 
     coordinator.handle('run_started', payload(3));
-    coordinator.resumeAll();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    coordinator.resumeAll();
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await coordinator.resumeAll();
+    await coordinator.resumeAll();
 
     expect(resumed).toEqual(['s', 's']);
     expect(coordinator.tracker('s').lastSeq).toBe(3);
+  });
+
+  it('unregisters cursorless sessions so reconnect does not recreate them', async () => {
+    const resumed: string[] = [];
+    const coordinator = new SessionReplayCoordinator(
+      async (sessionId) => {
+        resumed.push(sessionId);
+        return { session_id: sessionId, stream_id: 'stream', last_seq: 0 };
+      },
+      () => {}
+    );
+
+    coordinator.registerSession('selected');
+    coordinator.unregisterSession('selected');
+    await coordinator.resumeAll();
+
+    expect(resumed).toEqual([]);
   });
 });

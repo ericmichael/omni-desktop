@@ -137,6 +137,9 @@ export function createCursorAssigner(): { assign: (items: readonly MessageItem[]
   const byKey = new Map<string, Cursor>();
   const byObj = new WeakMap<object, Cursor>();
   const keyOf = (it: MessageItem): string | null => {
+    if ('canonical' in it && it.canonical) {
+      return `c:${it.canonical.item_id}`;
+    }
     if (it.type === 'tool' && it.call_id) {
       return `t:${it.call_id}`;
     }
@@ -219,6 +222,15 @@ const mapEntry = (it: MessageItem, cursor: Cursor, index: number): TranscriptEnt
       break;
     case 'artifact':
       return { cursor, index, kind: 'artifact', title: it.title, artifactId: it.artifact_id };
+    case 'reasoning':
+      entry = { cursor, index, kind: 'message', role: 'assistant', text: capField(it.summary, 'text', t) ?? '' };
+      break;
+    case 'plan':
+      return { cursor, index, kind: 'artifact', title: it.title, artifactId: it.id };
+    case 'run_diff':
+      return { cursor, index, kind: 'artifact', title: 'Run changes', artifactId: it.canonical.item_id };
+    case 'structured':
+      return { cursor, index, kind: 'artifact', title: it.title, artifactId: it.canonical.item_id };
   }
   return Object.keys(t).length > 0 ? { ...entry, truncated: t } : entry;
 };
@@ -292,6 +304,35 @@ export function fullEntry(items: readonly MessageItem[], cursors: readonly Curso
       };
     case 'artifact':
       return { cursor, index, total, kind: 'artifact', title: it.title, content: it.content };
+    case 'reasoning':
+      return { cursor, index, total, kind: 'message', role: 'assistant', text: it.summary };
+    case 'plan':
+      return {
+        cursor,
+        index,
+        total,
+        kind: 'artifact',
+        title: it.title,
+        content: JSON.stringify(it.canonical?.content ?? { steps: it.steps }, null, 2),
+      };
+    case 'run_diff':
+      return {
+        cursor,
+        index,
+        total,
+        kind: 'artifact',
+        title: 'Run changes',
+        content: it.diff || JSON.stringify(it.canonical.content, null, 2),
+      };
+    case 'structured':
+      return {
+        cursor,
+        index,
+        total,
+        kind: 'artifact',
+        title: it.title,
+        content: JSON.stringify(it.canonical.content, null, 2),
+      };
   }
 }
 
@@ -314,6 +355,12 @@ export function lastEntrySignal(
     case 'approval':
       return { cursor, kind: 'approval', tool: it.tool };
     case 'artifact':
+      return { cursor, kind: 'artifact' };
+    case 'reasoning':
+      return { cursor, kind: 'message', role: 'assistant' };
+    case 'plan':
+    case 'run_diff':
+    case 'structured':
       return { cursor, kind: 'artifact' };
   }
 }

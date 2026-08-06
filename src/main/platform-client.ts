@@ -22,13 +22,167 @@ export type PlatformConfig = {
 
 export type PlatformSession = {
   sessionId: string;
-  runtimeToken: string;
   status: 'pending' | 'active' | 'completed' | 'failed';
+  agentHostId: string;
+  workspaceId: string;
+  environmentId: string;
+  environmentGeneration: number;
+  workspaceRoot: string;
+  defaultCwd: string;
+  services: Record<string, string>;
+  /** Ordinary AgentHost credential scoped to this one consumer. Never admin. */
+  consumerCredential: {
+    token: string;
+    scope: 'consumer';
+    kind: 'ordinary';
+  };
   websocketUrl?: string;
   containerId?: string;
-  authToken?: string;
   error?: string;
 };
+
+export class PlatformSessionContractError extends Error {
+  constructor(message: string) {
+    super(`Invalid platform compute session: ${message}`);
+    this.name = 'PlatformSessionContractError';
+  }
+}
+
+const PLATFORM_SESSION_STATUSES = new Set<PlatformSession['status']>(['pending', 'active', 'completed', 'failed']);
+
+function record(value: unknown, label: string): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new PlatformSessionContractError(`${label} must be an object`);
+  }
+  return value as Record<string, unknown>;
+}
+
+function nonEmptyString(value: unknown, label: string): string {
+  if (typeof value !== 'string' || value.trim().length === 0 || value.includes('\0')) {
+    throw new PlatformSessionContractError(`${label} must be a non-empty string`);
+  }
+  return value.trim();
+}
+
+function optionalString(value: unknown, label: string): string | undefined {
+  return value === undefined || value === null ? undefined : nonEmptyString(value, label);
+}
+
+function remoteUrl(value: unknown, label: string, protocols: readonly string[]): string {
+  const raw = nonEmptyString(value, label);
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    throw new PlatformSessionContractError(`${label} must be an absolute URL`);
+  }
+  if (!protocols.includes(parsed.protocol)) {
+    throw new PlatformSessionContractError(`${label} uses an unsupported protocol`);
+  }
+  if (parsed.username || parsed.password) {
+    throw new PlatformSessionContractError(`${label} must not contain credentials`);
+  }
+  for (const key of parsed.searchParams.keys()) {
+    if (/token|credential|authorization|auth/i.test(key)) {
+      throw new PlatformSessionContractError(`${label} must not contain credentials in its query`);
+    }
+  }
+  return raw;
+}
+
+function absolutePosixPath(value: unknown, label: string): string {
+  const result = nonEmptyString(value, label);
+  if (!result.startsWith('/') || result.includes('/../') || result.endsWith('/..')) {
+    throw new PlatformSessionContractError(`${label} must be an absolute normalized path`);
+  }
+  return result;
+}
+
+function assertNoPrivilegedCredential(value: unknown, label = 'response'): void {
+  if (Array.isArray(value)) {
+    value.forEach((entry, index) => assertNoPrivilegedCredential(entry, `${label}[${index}]`));
+    return;
+  }
+  if (!value || typeof value !== 'object') {
+    return;
+  }
+  for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
+    const normalized = key.toLowerCase();
+    if (
+      normalized === 'auth_token' ||
+      normalized === 'admin_token' ||
+      normalized === 'control_token' ||
+      normalized === 'runtime_token' ||
+      normalized === 'access_token' ||
+      normalized === 'refresh_token' ||
+      normalized === 'client_secret' ||
+      ((normalized.includes('admin') || normalized.includes('control')) &&
+        (normalized.includes('token') || normalized.includes('credential') || normalized.includes('auth')))
+    ) {
+      throw new PlatformSessionContractError(
+        `${label} contains forbidden privileged or legacy credential field ${key}`
+      );
+    }
+    assertNoPrivilegedCredential(nested, `${label}.${key}`);
+  }
+}
+
+/** Decode the fail-closed v2 platform compute response contract. */
+export function parsePlatformSession(value: unknown, expectedSessionId?: string): PlatformSession {
+  assertNoPrivilegedCredential(value);
+  const item = record(value, 'response');
+  const sessionId = nonEmptyString(item.session_id, 'session_id');
+  if (expectedSessionId !== undefined && sessionId !== expectedSessionId) {
+    throw new PlatformSessionContractError('session_id does not match the requested session');
+  }
+  const status = nonEmptyString(item.status, 'status') as PlatformSession['status'];
+  if (!PLATFORM_SESSION_STATUSES.has(status)) {
+    throw new PlatformSessionContractError(`status has unsupported value ${JSON.stringify(status)}`);
+  }
+  const generation = item.environment_generation;
+  if (!Number.isSafeInteger(generation) || (generation as number) < 1) {
+    throw new PlatformSessionContractError('environment_generation must be a positive safe integer');
+  }
+  const workspaceRoot = absolutePosixPath(item.workspace_root, 'workspace_root');
+  const defaultCwd = absolutePosixPath(item.default_cwd, 'default_cwd');
+  if (defaultCwd !== workspaceRoot && !defaultCwd.startsWith(`${workspaceRoot.replace(/\/$/, '')}/`)) {
+    throw new PlatformSessionContractError('default_cwd must be inside workspace_root');
+  }
+  const rawServices = record(item.services, 'services');
+  const services = Object.fromEntries(
+    Object.entries(rawServices).map(([name, url]) => [
+      nonEmptyString(name, 'services key'),
+      remoteUrl(url, `services.${name}`, ['http:', 'https:']),
+    ])
+  );
+  const credential = record(item.consumer_credential, 'consumer_credential');
+  if (credential.scope !== 'consumer' || credential.kind !== 'ordinary') {
+    throw new PlatformSessionContractError('consumer_credential must have consumer scope and ordinary kind');
+  }
+  const containerId = optionalString(item.container_id, 'container_id');
+  const error = optionalString(item.error, 'error');
+  return {
+    sessionId,
+    status,
+    agentHostId: nonEmptyString(item.agent_host_id, 'agent_host_id'),
+    workspaceId: nonEmptyString(item.workspace_id, 'workspace_id'),
+    environmentId: nonEmptyString(item.environment_id, 'environment_id'),
+    environmentGeneration: generation as number,
+    workspaceRoot,
+    defaultCwd,
+    services,
+    consumerCredential: {
+      token: nonEmptyString(credential.token, 'consumer_credential.token'),
+      scope: 'consumer',
+      kind: 'ordinary',
+    },
+    ...(item.websocket_url === undefined || item.websocket_url === null
+      ? {}
+      : { websocketUrl: remoteUrl(item.websocket_url, 'websocket_url', ['ws:', 'wss:']) }),
+    ...(containerId === undefined ? {} : { containerId }),
+    ...(error === undefined ? {} : { error }),
+  };
+}
 
 /**
  * The compute surface `AgentProcess` drives in *platform mode* (a remote agent
@@ -38,10 +192,12 @@ export type PlatformSession = {
  * via the `aci` sandbox profile (omniagents AzureContainerSandbox).
  *
  * `extras` is a generic record of per-call hints that specific
- * implementations may read. `PlatformClient` ignores it. The
- * `RemoteElectronComputeClient` (computer-as-sandbox) reads `sessionId`,
- * `profileName`, `workspaceDir`, `projectId`, and `env` so it can ship
- * the right launch args to the laptop's local `ProcessManager`.
+ * implementations may read. `PlatformClient` ignores it.
+ * Computer-as-sandbox does not implement this remote compute contract:
+ * `local:<machineId>` uses the explicit local `host_bridge` + `omni serve`
+ * path, whose readiness payload is validated independently. This keeps local
+ * loopback credentials out of a contract that requires a remote consumer
+ * credential and complete AgentHost routing metadata.
  */
 export interface IComputeClient {
   /**
@@ -49,11 +205,9 @@ export interface IComputeClient {
    * the sandbox is reachable and serving — the caller MUST NOT run its own
    * HTTP/WS readiness probe.
    *
-   * `RemoteElectronComputeClient` sets this: the laptop confirms readiness
-   * locally (its own `AgentProcess` only reports `running` after probing
-   * `omni serve`), and the loopback URL it returns isn't reachable from the
-   * cloud, so a second probe would hang forever. `PlatformClient` leaves it
-   * falsy — its gateway URL is publicly reachable and worth probing.
+   * A trusted adapter may set this only after completing an equivalent
+   * readiness proof. `PlatformClient` leaves it falsy because its public
+   * gateway remains independently probeable.
    */
   readonly confirmsReadiness?: boolean;
   startSession(
@@ -245,12 +399,7 @@ export class PlatformClient implements IComputeClient {
     if (!res.ok) {
       throw new Error(`Start session failed: ${res.status}`);
     }
-    const data = (await res.json()) as { session_id: string; runtime_token: string; status: string };
-    return {
-      sessionId: data.session_id,
-      runtimeToken: data.runtime_token,
-      status: data.status as PlatformSession['status'],
-    };
+    return parsePlatformSession(await res.json());
   }
 
   async pollSessionStatus(sessionId: string): Promise<PlatformSession> {
@@ -258,24 +407,7 @@ export class PlatformClient implements IComputeClient {
     if (!res.ok) {
       throw new Error(`Status poll failed: ${res.status}`);
     }
-    const data = (await res.json()) as {
-      session_id: string;
-      status: string;
-      container_id?: string;
-      websocket_url?: string;
-      auth_token?: string;
-      ready?: boolean;
-      error?: string;
-    };
-    return {
-      sessionId: data.session_id,
-      runtimeToken: '', // already issued at start
-      status: data.status as PlatformSession['status'],
-      websocketUrl: data.websocket_url,
-      containerId: data.container_id,
-      authToken: data.auth_token,
-      error: data.error,
-    };
+    return parsePlatformSession(await res.json(), sessionId);
   }
 
   async waitForSession(sessionId: string, maxAttempts = 120): Promise<PlatformSession> {

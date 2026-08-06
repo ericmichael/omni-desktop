@@ -24,8 +24,26 @@ export async function openCode(page: Page): Promise<void> {
 }
 
 export async function openSettings(page: Page): Promise<void> {
-  await page.getByRole('tab', { name: 'Settings' }).click();
-  await expect(page.getByRole('tab', { name: 'Settings' })).toHaveAttribute('aria-selected', 'true');
+  const settingsButton = page.getByRole('button', { name: 'Settings', exact: true });
+  if (await settingsButton.count()) {
+    await settingsButton.click();
+    await expect(settingsButton).toHaveAttribute('data-active', 'true');
+    return;
+  }
+
+  const settingsTab = page.getByRole('tab', { name: 'Settings' });
+  await settingsTab.click();
+  await expect(settingsTab).toHaveAttribute('aria-selected', 'true');
+}
+
+export async function openPlugins(page: Page): Promise<void> {
+  const heading = page.getByRole('heading', { name: 'Plugins', exact: true });
+  if (await heading.isVisible().catch(() => false)) {
+    return;
+  }
+  await page.getByRole('button', { name: 'More', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Plugins', exact: true }).click();
+  await expect(heading).toBeVisible();
 }
 
 export async function openRoutines(page: Page): Promise<void> {

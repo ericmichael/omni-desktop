@@ -1,5 +1,15 @@
 import { execFileSync } from 'node:child_process';
-import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -13,6 +23,8 @@ export type E2eState = {
 
 export type SeedState =
   | 'blank'
+  | 'codex-account'
+  | 'mcp-migration'
   | 'planning'
   | 'no-workspace'
   | 'workspace-files'
@@ -25,6 +37,28 @@ export type SeedState =
   | 'lazy-error-pending'
   | 'lazy-error-empty';
 
+export type E2eCodexCredentialState = {
+  exists: boolean;
+  mode: number | null;
+};
+
+export type E2eMcpConfigState = {
+  exists: boolean;
+  mode: number | null;
+  ownedByOmniagents: boolean;
+  migratedServerPresent: boolean;
+  migratedServerUpdated: boolean;
+  migratedSecretPreserved: boolean;
+  createdServerPresent: boolean;
+  createdServerUpdated: boolean;
+  managedServerPresent: boolean;
+};
+
+export const E2E_MCP_SECRET = 'e2e-mcp-secret-never-render';
+export const E2E_MCP_SERVER_NAME = 'legacy-safe';
+export const E2E_MCP_CREATED_SERVER_NAME = 'e2e-created';
+export const E2E_MCP_FIXTURE_FILE = 'e2e-mcp-server.mjs';
+
 const modelsConfig = {
   version: 3,
   default: 'sandbox/gpt-5.2',
@@ -34,7 +68,18 @@ const modelsConfig = {
       type: 'openai-compatible',
       base_url: '$' + '{OPENAI_BASE_URL}',
       api_key: '$' + '{OPENAI_API_KEY}',
-      models: { 'gpt-5.2': { model: 'gpt-5.2' } },
+      models: {
+        'gpt-5.2': {
+          model: 'gpt-5.2',
+          label: 'GPT 5.2 E2E',
+          reasoning: 'medium',
+        },
+        'gpt-5.2-mini': {
+          model: 'gpt-5.2-mini',
+          label: 'GPT 5.2 Mini E2E',
+          reasoning: 'low',
+        },
+      },
     },
   },
 };
@@ -48,6 +93,112 @@ function e2eModelsConfig() {
 }
 
 const seededAt = 1_700_000_000_000;
+
+const syntheticCodexTokens = {
+  refresh: 'e2e-refresh-placeholder',
+  access: 'e2e-access-placeholder',
+  expires: 4_102_444_800_000,
+  account_id: 'acct_e2e_durable_logout',
+};
+
+const mcpFixtureScript = `import { createInterface } from 'node:readline';
+
+const input = createInterface({ input: process.stdin, terminal: false });
+const send = (message) => process.stdout.write(JSON.stringify(message) + '\\n');
+
+input.on('line', (line) => {
+  let request;
+  try {
+    request = JSON.parse(line);
+  } catch {
+    return;
+  }
+  if (request.id === undefined) {
+    return;
+  }
+  if (request.method === 'initialize') {
+    send({
+      jsonrpc: '2.0',
+      id: request.id,
+      result: {
+        protocolVersion: request.params?.protocolVersion ?? '2025-06-18',
+        capabilities: { tools: {} },
+        serverInfo: { name: 'omni-e2e-mcp', version: '1.0.0' },
+      },
+    });
+    return;
+  }
+  if (request.method === 'tools/list') {
+    send({
+      jsonrpc: '2.0',
+      id: request.id,
+      result: {
+        tools: [
+          {
+            name: 'fixture_ping',
+            description: 'Returns a deterministic local response.',
+            inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+          },
+        ],
+      },
+    });
+    return;
+  }
+  if (request.method === 'tools/call') {
+    send({ jsonrpc: '2.0', id: request.id, result: { content: [{ type: 'text', text: 'pong' }] } });
+    return;
+  }
+  send({ jsonrpc: '2.0', id: request.id, result: {} });
+});
+`;
+
+const electronCodexCredentialPath = (state: E2eState): string =>
+  path.join(state.xdgConfigHome, 'omni_code', 'codex.json');
+
+export function inspectElectronCodexCredential(state: E2eState): E2eCodexCredentialState {
+  const credentialPath = electronCodexCredentialPath(state);
+  if (!existsSync(credentialPath)) {
+    return { exists: false, mode: null };
+  }
+  return { exists: true, mode: statSync(credentialPath).mode & 0o777 };
+}
+
+function readJsonRecord(filePath: string): Record<string, unknown> | null {
+  try {
+    const value = JSON.parse(readFileSync(filePath, 'utf-8')) as unknown;
+    return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+function nestedRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
+export function inspectElectronMcpConfig(state: E2eState): E2eMcpConfigState {
+  const mcpPath = path.join(state.xdgConfigHome, 'omni_code', 'mcp.json');
+  const launcherPath = path.join(state.xdgConfigHome, 'Omni Code', 'config.json');
+  const launcher = readJsonRecord(launcherPath);
+  const mcp = readJsonRecord(mcpPath);
+  const servers = nestedRecord(mcp?.['mcpServers']) ?? {};
+  const migrated = nestedRecord(servers[E2E_MCP_SERVER_NAME]);
+  const created = nestedRecord(servers[E2E_MCP_CREATED_SERVER_NAME]);
+  const migratedEnv = nestedRecord(migrated?.['env']);
+  const migratedArgs = Array.isArray(migrated?.['args']) ? migrated.args : [];
+  const createdArgs = Array.isArray(created?.['args']) ? created.args : [];
+  return {
+    exists: mcp !== null,
+    mode: existsSync(mcpPath) ? statSync(mcpPath).mode & 0o777 : null,
+    ownedByOmniagents: launcher?.['mcpConfigOwnership'] === 'omniagents',
+    migratedServerPresent: migrated !== null,
+    migratedServerUpdated: migratedArgs.includes('--updated'),
+    migratedSecretPreserved: migratedEnv?.['E2E_MCP_TOKEN'] === E2E_MCP_SECRET,
+    createdServerPresent: created !== null,
+    createdServerUpdated: createdArgs.includes('--created-v2'),
+    managedServerPresent: nestedRecord(servers['omni-projects']) !== null,
+  };
+}
 
 const workspaceFilesSeed = (workspaceDir: string) => ({
   projects: [
@@ -115,6 +266,21 @@ const workspaceGitSeed = (workspaceDir: string) => ({
   ],
   activeCodeTabId: 'code-e2e-workspace-git',
   codeLayoutMode: 'focus',
+  chatConversations: [
+    {
+      sessionId: 'session-e2e-workspace-git',
+      title: 'Canonical workspace thread',
+      lastActiveAt: seededAt + 2,
+      profileName: 'host',
+      projectId: 'proj_e2e_workspace_git',
+    },
+    {
+      sessionId: 'session-e2e-retained-thread',
+      title: 'Retained canonical thread',
+      lastActiveAt: seededAt + 1,
+      profileName: 'host',
+    },
+  ],
 });
 
 const pooledWorkspacesSeed = (workspaceDir: string, profileName: 'host' | 'devbox' = 'host') => {
@@ -190,6 +356,13 @@ function seedWorkspaceFiles(workspaceDir: string): void {
     'utf-8'
   );
   writeFileSync(path.join(sourceDir, 'utility.ts'), 'export const answer = 42;\n', 'utf-8');
+}
+
+function seedMcpFixture(workspaceDir: string): void {
+  writeFileSync(path.join(workspaceDir, E2E_MCP_FIXTURE_FILE), mcpFixtureScript, {
+    encoding: 'utf-8',
+    mode: 0o600,
+  });
 }
 
 function seedWorkspaceGit(workspaceDir: string): void {
@@ -293,6 +466,20 @@ function launcherConfig(seedState: SeedState, workspaceDir: string) {
     defaultProfileName: seedState.startsWith('lazy-error') ? errorProfile : firstMessage ? 'devbox' : 'host',
     modelsConfig: e2eModelsConfig(),
     envVars: '',
+    ...(seedState === 'mcp-migration'
+      ? {
+          mcpConfig: {
+            mcpServers: {
+              [E2E_MCP_SERVER_NAME]: {
+                type: 'stdio',
+                command: process.execPath,
+                args: [path.join(workspaceDir, E2E_MCP_FIXTURE_FILE)],
+                env: { E2E_MCP_TOKEN: E2E_MCP_SECRET },
+              },
+            },
+          },
+        }
+      : {}),
     ...(seedState !== 'no-workspace'
       ? {
           workspaceDir:
@@ -347,6 +534,9 @@ export function createE2eState(label: string): E2eState {
 }
 
 export function seedServerState(state: E2eState, seedState: SeedState): void {
+  if (seedState === 'mcp-migration') {
+    seedMcpFixture(state.workspaceDir);
+  }
   if (seedState === 'workspace-files') {
     seedWorkspaceFiles(state.workspaceDir);
   }
@@ -366,6 +556,9 @@ export function seedServerState(state: E2eState, seedState: SeedState): void {
 }
 
 export function seedElectronState(state: E2eState, seedState: SeedState): void {
+  if (seedState === 'mcp-migration') {
+    seedMcpFixture(state.workspaceDir);
+  }
   if (seedState === 'workspace-files') {
     seedWorkspaceFiles(state.workspaceDir);
   }
@@ -382,11 +575,22 @@ export function seedElectronState(state: E2eState, seedState: SeedState): void {
     `${JSON.stringify(launcherConfig(seedState, state.workspaceDir), null, 2)}\n`,
     'utf-8'
   );
+  const productConfigDir = path.join(state.xdgConfigHome, 'omni_code');
+  if (seedState === 'codex-account') {
+    mkdirSync(productConfigDir, { recursive: true });
+    const destination = electronCodexCredentialPath(state);
+    writeFileSync(destination, `${JSON.stringify(syntheticCodexTokens, null, 2)}\n`, {
+      encoding: 'utf-8',
+      mode: 0o600,
+    });
+    chmodSync(destination, 0o600);
+    return;
+  }
+
   const codexPath = process.env.E2E_REAL_CODEX_FILE;
   if (codexPath) {
-    const productConfigDir = path.join(state.xdgConfigHome, 'omni_code');
     mkdirSync(productConfigDir, { recursive: true });
-    const destination = path.join(productConfigDir, 'codex.json');
+    const destination = electronCodexCredentialPath(state);
     copyFileSync(codexPath, destination);
     chmodSync(destination, 0o600);
   }

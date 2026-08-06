@@ -28,7 +28,7 @@ import { persistedStoreApi } from '@/renderer/services/store';
 import { isLocalVoiceCapable } from '@/renderer/services/voice-client';
 import { $hoveredVoiceScope, VoiceScopeContext } from '@/renderer/services/voice-recording';
 import type { AppId } from '@/shared/app-registry';
-import type { CodeTab, CodeTabId, TicketId } from '@/shared/types';
+import type { CodeTab, CodeTabId, ExecutionTarget, TicketId } from '@/shared/types';
 import { firstSource, isChatColumn } from '@/shared/types';
 import { getActivePersona } from '@/shared/voice-personas';
 
@@ -58,7 +58,7 @@ CodeErrorView.displayName = 'CodeErrorView';
 const CodeRunningView = memo(
   ({
     sandboxUrls,
-    environmentId,
+    executionTarget,
     sessionId,
     onSessionChange,
     variables,
@@ -88,7 +88,7 @@ const CodeRunningView = memo(
     onPendingMessagesFlushed,
   }: {
     sandboxUrls: { uiUrl: string; authToken?: string; services?: Record<string, string> };
-    environmentId?: string;
+    executionTarget?: ExecutionTarget;
     sessionId?: string;
     onSessionChange?: (sessionId: string | undefined) => void;
     variables?: Record<string, unknown>;
@@ -145,7 +145,7 @@ const CodeRunningView = memo(
         <div className="flex-1 min-h-0 relative">
           <CodeWorkspaceLayout
             connection={runtimeConnection}
-            environmentId={environmentId}
+            executionTarget={executionTarget}
             sessionId={sessionId}
             onSessionChange={onSessionChange}
             variables={variables}
@@ -383,7 +383,17 @@ export const CodeTabContent = memo(
         );
       }
     }, [pendingMessages, sandboxUrls, tab.id, tab.sessionId]);
-    const environmentId = sandboxUrls?.environmentId;
+    const executionTarget = useMemo(
+      () =>
+        sandboxUrls?.workspaceId && sandboxUrls.environmentId && sandboxUrls.environmentGeneration !== undefined
+          ? {
+              workspaceId: sandboxUrls.workspaceId,
+              environmentId: sandboxUrls.environmentId,
+              environmentGeneration: sandboxUrls.environmentGeneration,
+            }
+          : undefined,
+      [sandboxUrls?.workspaceId, sandboxUrls?.environmentId, sandboxUrls?.environmentGeneration]
+    );
     // The provisioned environment owns this value. Renderer guesses were the
     // source of Host/Devbox drift whenever source layouts differed.
     const agentWorkspaceDir = sandboxUrls?.workspaceRoot;
@@ -483,7 +493,7 @@ export const CodeTabContent = memo(
           <VoiceScopeContext.Provider value={tab.id}>
             <CodeRunningView
               sandboxUrls={sandboxUrls}
-              environmentId={environmentId}
+              executionTarget={executionTarget}
               sessionId={tab.sessionId}
               onSessionChange={handleSessionChange}
               variables={clientToolVariables}

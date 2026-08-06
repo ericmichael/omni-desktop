@@ -10,8 +10,13 @@ const hoisted = vi.hoisted(() => ({
   spawnCalls: [] as unknown[][],
   controlCalls: [] as Array<{ method: string; params: Record<string, unknown> }>,
   controlFailureMethod: null as string | null,
+  resourceSnapshot: null as Record<string, unknown> | null,
+  resourceSnapshotQueue: [] as Record<string, unknown>[],
   snapshotPull: vi.fn(async () => false),
-  snapshotPush: vi.fn(async () => {}),
+  snapshotVerify: vi.fn(async () => true),
+  snapshotPush: vi.fn(async () => true),
+  ledgerRecord: vi.fn(() => true),
+  ledgerComplete: vi.fn(() => true),
 }));
 
 vi.mock('node:child_process', async () => {
@@ -47,16 +52,55 @@ vi.mock('@/main/profile-resolver', () => ({
   }),
 }));
 
+vi.mock('@/main/product-runtime', () => ({
+  assertServeProtocolSupported: vi.fn(async () => {}),
+}));
+
 vi.mock('@/main/agent-host-control-client', () => ({
   AgentHostControlClient: class {
     async call(method: string, params: Record<string, unknown>): Promise<Record<string, unknown>> {
       hoisted.controlCalls.push({ method, params });
+      if (method === 'agent_host_list_resources') {
+        if (hoisted.resourceSnapshotQueue.length > 0) {
+          return hoisted.resourceSnapshotQueue.shift()!;
+        }
+        if (hoisted.resourceSnapshot) {
+          return hoisted.resourceSnapshot;
+        }
+        const workspaceCalls = hoisted.controlCalls.filter((call) => call.method === 'agent_host_register_workspace');
+        const profileCalls = hoisted.controlCalls.filter((call) => call.method === 'agent_host_register_profile');
+        const materialized = hoisted.controlCalls.some((call) => call.method === 'agent_host_materialize_environment');
+        const stopped = hoisted.controlCalls.some((call) => call.method === 'agent_host_stop_environment');
+        return {
+          agent_host_id: 'agent-host-test',
+          workspaces: workspaceCalls.map((call) => ({
+            workspace_id: call.params.workspace_id,
+            owner_user_id: call.params.owner_user_id,
+            snapshot_ref: call.params.snapshot_ref,
+            sources: call.params.sources,
+          })),
+          profiles: Object.fromEntries(
+            profileCalls.map((call) => [call.params.profile_id, call.params.definition]) as Array<[string, unknown]>
+          ),
+          environments: materialized
+            ? [
+                {
+                  environment_id: 'environment-materialized',
+                  workspace_id: workspaceCalls.at(-1)?.params.workspace_id ?? 'workspace-2',
+                  generation: 3,
+                  state: stopped ? 'stopped' : 'ready',
+                },
+              ]
+            : [],
+        };
+      }
       if (method === hoisted.controlFailureMethod) {
         throw new Error(`${method} failed`);
       }
       if (method === 'agent_host_materialize_environment') {
         return {
           environment_id: 'environment-materialized',
+          generation: 3,
           workspace_root: '/workspace',
           default_cwd: '/workspace',
           services: { code_server: 'http://service' },
@@ -78,9 +122,14 @@ vi.mock('@/main/workspace-sync', () => ({
 vi.mock('@/main/snapshot-blob-store', () => ({
   getSnapshotStore: () => ({
     pull: hoisted.snapshotPull,
+    verify: hoisted.snapshotVerify,
     push: hoisted.snapshotPush,
     remove: vi.fn(async () => {}),
   }),
+}));
+vi.mock('@/main/snapshot-upload-ledger', () => ({
+  recordPendingSnapshotUpload: hoisted.ledgerRecord,
+  completePendingSnapshotUpload: hoisted.ledgerComplete,
 }));
 vi.mock('@/lib/simple-logger', () => ({
   SimpleLogger: class {
@@ -112,6 +161,7 @@ import { EventEmitter } from 'node:events';
 import path from 'node:path';
 
 import { AgentProcess, type AgentProcessStartArg } from '@/main/agent-process';
+import type { IComputeClient, PlatformSession } from '@/main/platform-client';
 import type { AgentProcessStatus, WithTimestamp } from '@/shared/types';
 
 // ---------------------------------------------------------------------------
@@ -156,7 +206,14 @@ type Harness = {
   fetchFn: ReturnType<typeof vi.fn>;
 };
 
-const makeHarness = (): Harness => {
+const makeHarness = (
+  opts: {
+    processStopTimeoutMs?: number;
+    snapshotRetryDelayMs?: number;
+    stopReconcilePollMs?: number;
+    stopReconcileTimeoutMs?: number;
+  } = {}
+): Harness => {
   const child = makeMockChild();
   hoisted.nextChild = child;
   hoisted.spawnCalls.length = 0;
@@ -171,6 +228,10 @@ const makeHarness = (): Harness => {
     ipcRawOutput: () => {},
     onStatusChange: (s) => statuses.push(s),
     fetchFn: fetchFn as unknown as typeof globalThis.fetch,
+    ...(opts.processStopTimeoutMs !== undefined ? { processStopTimeoutMs: opts.processStopTimeoutMs } : {}),
+    ...(opts.snapshotRetryDelayMs !== undefined ? { snapshotRetryDelayMs: opts.snapshotRetryDelayMs } : {}),
+    ...(opts.stopReconcilePollMs !== undefined ? { stopReconcilePollMs: opts.stopReconcilePollMs } : {}),
+    ...(opts.stopReconcileTimeoutMs !== undefined ? { stopReconcileTimeoutMs: opts.stopReconcileTimeoutMs } : {}),
   });
 
   return { proc, statuses, child, fetchFn };
@@ -197,8 +258,16 @@ describe('AgentProcess (serve mode)', () => {
     hoisted.spawnCalls.length = 0;
     hoisted.controlCalls.length = 0;
     hoisted.controlFailureMethod = null;
+    hoisted.resourceSnapshot = null;
+    hoisted.resourceSnapshotQueue.length = 0;
     hoisted.snapshotPull.mockClear();
+    hoisted.snapshotVerify.mockReset();
+    hoisted.snapshotVerify.mockResolvedValue(true);
     hoisted.snapshotPush.mockClear();
+    hoisted.snapshotPush.mockReset();
+    hoisted.snapshotPush.mockResolvedValue(true);
+    hoisted.ledgerRecord.mockClear();
+    hoisted.ledgerComplete.mockClear();
   });
 
   afterEach(() => {
@@ -285,30 +354,33 @@ describe('AgentProcess (serve mode)', () => {
     expect(runtime).toEqual({
       workspaceId: 'workspace-2',
       environmentId: 'environment-materialized',
+      environmentGeneration: 3,
       workspaceRoot: '/workspace',
       defaultCwd: '/workspace',
       services: { code_server: 'http://service' },
       containerId: 'container-materialized',
     });
     expect(hoisted.controlCalls.map((call) => call.method)).toEqual([
+      'agent_host_list_resources',
       'agent_host_register_workspace',
       'agent_host_register_profile',
       'agent_host_materialize_environment',
       'agent_host_bind_thread',
     ]);
-    expect(hoisted.controlCalls[0]!.params).toMatchObject({
+    expect(hoisted.controlCalls[1]!.params).toMatchObject({
       workspace_id: 'workspace-2',
       materialization_path: '/repos/second',
       snapshot_ref: 'workspace-2',
       owner_user_id: 'token_user',
     });
-    expect(hoisted.controlCalls[3]!.params).toMatchObject({
+    expect(hoisted.controlCalls[4]!.params).toMatchObject({
       thread_id: 'thread-2',
       binding: {
         workspace_id: 'workspace-2',
         environment_selection: {
           mode: 'existing',
           environment_id: 'environment-materialized',
+          environment_generation: 3,
         },
       },
     });
@@ -317,6 +389,158 @@ describe('AgentProcess (serve mode)', () => {
       method: 'agent_host_stop_environment',
       params: { environment_id: 'environment-materialized' },
     });
+  });
+
+  it('adopts an authoritative ready environment after a control/renderer reconnect', async () => {
+    const h = makeHarness();
+    const arg: AgentProcessStartArg = {
+      profileName: 'host',
+      sources: [localSource('/repos/reconnect', 'reconnect')],
+      sessionId: 'conversation-reconnect',
+    };
+    await h.proc.start(arg);
+    const mutable = h.proc as unknown as { status: WithTimestamp<AgentProcessStatus> };
+    mutable.status = {
+      type: 'running',
+      timestamp: Date.now(),
+      data: {
+        uiUrl: 'http://127.0.0.1:9000',
+        wsUrl: 'ws://127.0.0.1:9000/ws',
+        agentHostId: 'agent-host-test',
+      },
+    };
+
+    const first = await h.proc.configureConsumer('tab-reconnect', 'workspace-reconnect', arg);
+    const firstCallCount = hoisted.controlCalls.length;
+    const second = await h.proc.configureConsumer('tab-reconnect', 'workspace-reconnect', arg);
+
+    expect(second).toEqual(first);
+    expect(hoisted.controlCalls.slice(firstCallCount).map((call) => call.method)).toEqual([
+      'agent_host_list_resources',
+      'agent_host_bind_thread',
+    ]);
+    expect(hoisted.snapshotPull).toHaveBeenCalledTimes(1);
+  });
+
+  it('fails closed when reconciliation reaches a different AgentHost', async () => {
+    const h = makeHarness();
+    const arg: AgentProcessStartArg = { profileName: 'host', sources: [localSource('/repos/mismatch')] };
+    await h.proc.start(arg);
+    const mutable = h.proc as unknown as { status: WithTimestamp<AgentProcessStatus> };
+    mutable.status = {
+      type: 'running',
+      timestamp: Date.now(),
+      data: {
+        uiUrl: 'http://127.0.0.1:9000',
+        wsUrl: 'ws://127.0.0.1:9000/ws',
+        agentHostId: 'expected-host',
+      },
+    };
+    hoisted.resourceSnapshot = {
+      agent_host_id: 'unexpected-host',
+      workspaces: [],
+      profiles: {},
+      environments: [],
+    };
+
+    await expect(h.proc.configureConsumer('tab', 'workspace', arg)).rejects.toThrow('host restart required');
+    expect(hoisted.controlCalls.map((call) => call.method)).toEqual(['agent_host_list_resources']);
+  });
+
+  it('refuses to stop a newer environment generation through a stale target', async () => {
+    const h = makeHarness();
+    await h.proc.start({ profileName: 'host', sources: [localSource('/ws')] });
+    const mutable = h.proc as unknown as { status: WithTimestamp<AgentProcessStatus> };
+    mutable.status = {
+      type: 'running',
+      timestamp: Date.now(),
+      data: { uiUrl: 'http://127.0.0.1:9000', wsUrl: 'ws://127.0.0.1:9000/ws' },
+    };
+    const runtime = await h.proc.configureConsumer('thread', 'workspace', {
+      profileName: 'host',
+      sources: [localSource('/ws')],
+    });
+    hoisted.resourceSnapshot = {
+      agent_host_id: 'agent-host-test',
+      workspaces: [],
+      profiles: {},
+      environments: [
+        {
+          environment_id: runtime.environmentId,
+          workspace_id: runtime.workspaceId,
+          generation: runtime.environmentGeneration + 1,
+          state: 'ready',
+        },
+      ],
+    };
+
+    await expect(h.proc.stopConsumerEnvironment(runtime)).rejects.toThrow('Refusing to stop stale environment target');
+    expect(hoisted.controlCalls.filter((call) => call.method === 'agent_host_stop_environment')).toHaveLength(0);
+  });
+
+  it('reconciles a lost stop response before persisting the snapshot', async () => {
+    const h = makeHarness();
+    await h.proc.start({ profileName: 'host', sources: [localSource('/ws')] });
+    const mutable = h.proc as unknown as { status: WithTimestamp<AgentProcessStatus> };
+    mutable.status = {
+      type: 'running',
+      timestamp: Date.now(),
+      data: { uiUrl: 'http://127.0.0.1:9000', wsUrl: 'ws://127.0.0.1:9000/ws' },
+    };
+    const runtime = await h.proc.configureConsumer('thread', 'workspace', {
+      profileName: 'host',
+      sources: [localSource('/ws')],
+      snapshotRef: 'snapshot-reconcile',
+    });
+    hoisted.controlFailureMethod = 'agent_host_stop_environment';
+
+    await expect(h.proc.stopConsumerEnvironment(runtime)).resolves.toMatchObject({
+      scope: 'environment',
+      snapshotPersistence: 'complete',
+    });
+    expect(
+      hoisted.controlCalls.filter((call) => call.method === 'agent_host_list_resources').length
+    ).toBeGreaterThanOrEqual(3);
+    expect(hoisted.snapshotPush).toHaveBeenCalledWith('snapshot-reconcile', path.join('/fake/config', 'snapshots'));
+  });
+
+  it('waits for an already-committed stopping environment instead of retrying the mutation', async () => {
+    const h = makeHarness({ stopReconcilePollMs: 1, stopReconcileTimeoutMs: 100 });
+    await h.proc.start({ profileName: 'host', sources: [localSource('/ws')] });
+    const mutable = h.proc as unknown as { status: WithTimestamp<AgentProcessStatus> };
+    mutable.status = {
+      type: 'running',
+      timestamp: Date.now(),
+      data: { uiUrl: 'http://127.0.0.1:9000', wsUrl: 'ws://127.0.0.1:9000/ws' },
+    };
+    const runtime = await h.proc.configureConsumer('thread-stopping', 'workspace-stopping', {
+      profileName: 'host',
+      sources: [localSource('/ws')],
+      snapshotRef: 'snapshot-stopping',
+    });
+    const resources = (state: 'stopping' | 'stopped'): Record<string, unknown> => ({
+      agent_host_id: 'agent-host-test',
+      workspaces: [],
+      profiles: {},
+      environments: [
+        {
+          environment_id: runtime.environmentId,
+          workspace_id: runtime.workspaceId,
+          generation: runtime.environmentGeneration,
+          state,
+        },
+      ],
+    });
+    hoisted.resourceSnapshotQueue.push(resources('stopping'), resources('stopped'));
+    const stopCallsBefore = hoisted.controlCalls.filter((call) => call.method === 'agent_host_stop_environment').length;
+
+    await expect(h.proc.stopConsumerEnvironment(runtime)).resolves.toMatchObject({
+      snapshotPersistence: 'complete',
+    });
+    expect(hoisted.controlCalls.filter((call) => call.method === 'agent_host_stop_environment')).toHaveLength(
+      stopCallsBefore
+    );
+    expect(hoisted.snapshotPush).toHaveBeenCalledWith('snapshot-stopping', path.join('/fake/config', 'snapshots'));
   });
 
   it('binds the conversation session rather than the launcher consumer', async () => {
@@ -336,7 +560,7 @@ describe('AgentProcess (serve mode)', () => {
 
     await h.proc.configureConsumer('ui-tab-consumer', 'workspace-2', arg);
 
-    expect(hoisted.controlCalls[0]!.params.materialization_path).toBe('/repos/second');
+    expect(hoisted.controlCalls[1]!.params.materialization_path).toBe('/repos/second');
     expect(hoisted.controlCalls.find((call) => call.method === 'agent_host_bind_thread')?.params).toMatchObject({
       thread_id: 'conversation-session',
     });
@@ -381,9 +605,117 @@ describe('AgentProcess (serve mode)', () => {
       snapshotRef: 'snapshot-thread-1',
     });
 
-    await h.proc.stop();
+    const result = await h.proc.stop();
 
+    expect(result).toEqual({
+      scope: 'host',
+      shutdown: 'graceful',
+      snapshotPersistence: 'complete',
+      pendingSnapshotRefs: [],
+    });
+    expect(hoisted.snapshotVerify).toHaveBeenCalledWith('snapshot-thread-1', path.join('/fake/config', 'snapshots'));
     expect(hoisted.snapshotPush).toHaveBeenCalledWith('snapshot-thread-1', path.join('/fake/config', 'snapshots'));
+  });
+
+  it('retains snapshot retry bookkeeping until a committed stop is durably uploaded', async () => {
+    const h = makeHarness({ snapshotRetryDelayMs: 1 });
+    await h.proc.start({ profileName: 'host', sources: [localSource('/ws')] });
+    const mutable = h.proc as unknown as { status: WithTimestamp<AgentProcessStatus> };
+    mutable.status = {
+      type: 'running',
+      timestamp: Date.now(),
+      data: { uiUrl: 'http://127.0.0.1:9000', wsUrl: 'ws://127.0.0.1:9000/ws' },
+    };
+    const runtime = await h.proc.configureConsumer('thread-retry', 'workspace-retry', {
+      profileName: 'host',
+      sources: [localSource('/ws')],
+      snapshotRef: 'snapshot-retry',
+    });
+    hoisted.snapshotPush.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+
+    await expect(h.proc.stopConsumerEnvironment(runtime)).resolves.toEqual({
+      scope: 'environment',
+      shutdown: 'not-applicable',
+      snapshotPersistence: 'uncertain',
+      pendingSnapshotRefs: ['snapshot-retry'],
+    });
+    expect(hoisted.ledgerRecord).toHaveBeenCalledWith(
+      'snapshot-retry',
+      path.join('/fake/config', 'snapshots'),
+      'retryable'
+    );
+    await vi.waitFor(() => expect(hoisted.snapshotPush).toHaveBeenCalledTimes(2));
+    expect(hoisted.ledgerComplete).toHaveBeenCalledWith('snapshot-retry', path.join('/fake/config', 'snapshots'));
+    await expect(h.proc.stopConsumerEnvironment(runtime)).resolves.toEqual({
+      scope: 'environment',
+      shutdown: 'not-applicable',
+      snapshotPersistence: 'complete',
+      pendingSnapshotRefs: [],
+    });
+    expect(hoisted.snapshotPush).toHaveBeenCalledTimes(2);
+  });
+
+  it('reports uncertain persistence when a graceful pooled-host teardown leaves no valid snapshot', async () => {
+    const h = makeHarness();
+    await h.proc.start({ profileName: 'host', sources: [localSource('/ws')] });
+    const mutable = h.proc as unknown as { status: WithTimestamp<AgentProcessStatus> };
+    mutable.status = {
+      type: 'running',
+      timestamp: Date.now(),
+      data: { uiUrl: 'http://127.0.0.1:9000', wsUrl: 'ws://127.0.0.1:9000/ws' },
+    };
+    await h.proc.configureConsumer('thread-invalid', 'workspace-invalid', {
+      profileName: 'host',
+      sources: [localSource('/ws')],
+      snapshotRef: 'snapshot-invalid',
+    });
+    hoisted.snapshotVerify.mockResolvedValue(false);
+
+    await expect(h.proc.stop()).resolves.toEqual({
+      scope: 'host',
+      shutdown: 'graceful',
+      snapshotPersistence: 'uncertain',
+      pendingSnapshotRefs: ['snapshot-invalid'],
+    });
+    expect(hoisted.snapshotPush).not.toHaveBeenCalled();
+  });
+
+  it('reports forced shutdown and never uploads a possibly partial snapshot after SIGKILL', async () => {
+    const h = makeHarness({ processStopTimeoutMs: 1 });
+    h.child.kill.mockImplementation((signal?: string) => {
+      if (signal === 'SIGKILL') {
+        h.child.exitCode = 0;
+        setImmediate(() => h.child.emit('close', null, 'SIGKILL'));
+      }
+      return true;
+    });
+    await h.proc.start({ profileName: 'host', sources: [localSource('/ws')] });
+    const mutable = h.proc as unknown as { status: WithTimestamp<AgentProcessStatus> };
+    mutable.status = {
+      type: 'running',
+      timestamp: Date.now(),
+      data: { uiUrl: 'http://127.0.0.1:9000', wsUrl: 'ws://127.0.0.1:9000/ws' },
+    };
+    await h.proc.configureConsumer('thread-forced', 'workspace-forced', {
+      profileName: 'host',
+      sources: [localSource('/ws')],
+      snapshotRef: 'snapshot-forced',
+    });
+
+    await expect(h.proc.stop()).resolves.toEqual({
+      scope: 'host',
+      shutdown: 'forced',
+      snapshotPersistence: 'uncertain',
+      pendingSnapshotRefs: ['snapshot-forced'],
+    });
+    expect(h.child.kill.mock.calls.map(([signal]) => signal)).toEqual(['SIGTERM', 'SIGKILL']);
+    expect(hoisted.ledgerRecord).toHaveBeenCalledWith(
+      'snapshot-forced',
+      path.join('/fake/config', 'snapshots'),
+      'forced-uncertain'
+    );
+    expect(hoisted.snapshotVerify).not.toHaveBeenCalled();
+    expect(hoisted.snapshotPush).not.toHaveBeenCalled();
   });
 
   it('stops a newly materialized environment when thread binding fails', async () => {
@@ -438,10 +770,10 @@ describe('AgentProcess (serve mode)', () => {
         remoteSource('https://github.com/me/omniagents.git', 'omniagents', 'main'),
       ],
     });
-    expect(hoisted.controlCalls[0]!.params.materialization_path).toBe(
+    expect(hoisted.controlCalls[1]!.params.materialization_path).toBe(
       path.join('/fake/config', 'workspaces', 'workspace-1')
     );
-    expect(hoisted.controlCalls[0]!.params.sources).toEqual([
+    expect(hoisted.controlCalls[1]!.params.sources).toEqual([
       { kind: 'local-git', mountName: 'launcher', writable: true, path: '/repos/launcher' },
       { kind: 'local-git', mountName: 'omni-code', writable: true, path: '/repos/omni-code' },
       {
@@ -628,5 +960,64 @@ describe('AgentProcess (serve mode)', () => {
     });
     expect(isDirSpy).not.toHaveBeenCalled();
     expect(spawnCallCount()).toBe(1);
+  });
+});
+
+describe('AgentProcess (platform compute mode)', () => {
+  it('publishes complete routed AgentHost data with only the ordinary consumer credential', async () => {
+    const ready: PlatformSession = {
+      sessionId: 'platform-session-1',
+      status: 'active',
+      agentHostId: 'remote-agent-host-1',
+      workspaceId: 'remote-workspace-1',
+      environmentId: 'remote-environment-1',
+      environmentGeneration: 7,
+      workspaceRoot: '/workspace/project',
+      defaultCwd: '/workspace/project',
+      services: { code_server: 'https://code.example.test' },
+      consumerCredential: { token: 'ordinary-consumer-token', scope: 'consumer', kind: 'ordinary' },
+      websocketUrl: 'wss://runtime.example.test/ws',
+      containerId: 'remote-container-1',
+    };
+    const computeClient: IComputeClient = {
+      confirmsReadiness: true,
+      startSession: vi.fn(
+        async (): Promise<PlatformSession> => ({ ...ready, status: 'pending', websocketUrl: undefined })
+      ),
+      waitForSession: vi.fn(async () => ready),
+      stopSession: vi.fn(async () => {}),
+      finalizeWorkspace: vi.fn(async () => ({ downloadSasUrl: 'https://download.example.test' })),
+    };
+    const statuses: WithTimestamp<AgentProcessStatus>[] = [];
+    const proc = new AgentProcess({
+      mode: 'compute',
+      computeClient,
+      ipcRawOutput: () => {},
+      onStatusChange: (status) => statuses.push(status),
+    });
+
+    await proc.start({ profileName: 'platform', sources: [], sessionId: 'conversation-1' });
+
+    const running = statuses.at(-1);
+    expect(running).toMatchObject({
+      type: 'running',
+      data: {
+        uiUrl: 'https://runtime.example.test',
+        wsUrl: 'wss://runtime.example.test/ws',
+        agentHostId: 'remote-agent-host-1',
+        workspaceId: 'remote-workspace-1',
+        environmentId: 'remote-environment-1',
+        environmentGeneration: 7,
+        workspaceRoot: '/workspace/project',
+        defaultCwd: '/workspace/project',
+        services: { code_server: 'https://code.example.test' },
+        authToken: 'ordinary-consumer-token',
+        containerId: 'remote-container-1',
+      },
+    });
+    if (running?.type === 'running') {
+      expect(running.data.uiUrl).not.toContain('token');
+      expect(JSON.stringify(running.data)).not.toContain('admin');
+    }
   });
 });

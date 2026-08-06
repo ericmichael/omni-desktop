@@ -63,6 +63,7 @@ import {
 } from '@/main/sandbox-inventory';
 import { registerScheduledTaskHandlers, ScheduledTaskManager } from '@/main/scheduled-task-manager';
 import { protectedSnapshotsFromTabs, registerSnapshotHandlers } from '@/main/snapshot-manager';
+import { reconcilePendingSnapshotUploads } from '@/main/snapshot-upload-ledger';
 import { registerSupervisorHandlers } from '@/main/supervisor-handlers';
 import { getOmniConfigDir } from '@/main/util';
 import { WorkspaceSyncManager } from '@/main/workspace-sync-manager';
@@ -135,6 +136,18 @@ export const wireGlobalHandlers = async (arg: {
   // can scope writes and route `store:changed` back to only the caller's
   // tenant. Handlers that ignore the event (`_`) are unaffected.
   const ipc = new ServerIpcAdapter(wsHandler.handleCtx.bind(wsHandler));
+
+  try {
+    const recovery = await reconcilePendingSnapshotUploads(join(getOmniConfigDir(), 'snapshots'), { force: true });
+    if (recovery.persisted.length > 0) {
+      console.log(`[snapshot-upload] recovered ${recovery.persisted.length} pending snapshot upload(s)`);
+    }
+    if (recovery.forcedUncertain.length > 0) {
+      console.warn(`[snapshot-upload] ${recovery.forcedUncertain.length} forced-shutdown snapshot(s) remain uncertain`);
+    }
+  } catch (err) {
+    console.error('[snapshot-upload] startup reconciliation failed:', err);
+  }
 
   // Project manager — shared across all clients so machines/sandboxes survive reconnections
   const sendToAll: typeof wsHandler.sendToAll = wsHandler.sendToAll.bind(wsHandler);
@@ -457,6 +470,7 @@ export const wireGlobalHandlers = async (arg: {
       // Cloud: git/github tokens are this principal's (U-identity), so agent
       // pushes carry their own identity. Local: the on-disk store.
       resolveGitToken: (id) => (pgSecret ? pgSecret.getUserGitToken(principalId, id) : secretStore.getGitToken(id)),
+      waitForRuntimeInstall: () => omniInstall.waitForInstallCompletion(),
       // Cloud: mint a fresh per-(team, principal) runtime token for each
       // omni-serve spawn, so the agent's HTTP MCP calls resolve to THIS team's
       // data as THIS user. The route verifies it; a sandbox can't forge another.

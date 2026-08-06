@@ -150,15 +150,20 @@ export function materializeAgentConfig(opts: {
   network: NetworkConfig;
   mode: MaterializeMode;
   managedMcpEntry: ManagedMcpEntry;
+  /** Local Electron relinquishes mcp.json after canonical ownership transfer.
+   * Other configs remain Desktop-owned and continue to materialize. */
+  writeMcp?: boolean;
 }): { secretEnv: SecretEnv } {
-  const { configDir, models, mcp, network, mode, managedMcpEntry } = opts;
+  const { configDir, models, mcp, network, mode, managedMcpEntry, writeMcp = true } = opts;
   mkdirSync(configDir, { recursive: true });
 
   const mergedMcp: McpConfig = { ...mcp, mcpServers: mergeManagedMcpEntry(mcp.mcpServers, managedMcpEntry) };
 
   if (mode === 'plaintext') {
     writeJson(join(configDir, 'models.json'), models);
-    writeJson(join(configDir, 'mcp.json'), mergedMcp);
+    if (writeMcp) {
+      writeJson(join(configDir, 'mcp.json'), mergedMcp);
+    }
     writeJson(join(configDir, 'network.json'), network);
     return { secretEnv: {} };
   }
@@ -166,7 +171,9 @@ export function materializeAgentConfig(opts: {
   const modelsOut = extractModelSecrets(models);
   const mcpOut = extractMcpSecrets(mergedMcp);
   writeJson(join(configDir, 'models.json'), modelsOut.sanitized);
-  writeJson(join(configDir, 'mcp.json'), mcpOut.sanitized);
+  if (writeMcp) {
+    writeJson(join(configDir, 'mcp.json'), mcpOut.sanitized);
+  }
   writeJson(join(configDir, 'network.json'), network);
   return { secretEnv: { ...modelsOut.secrets, ...mcpOut.secrets } };
 }

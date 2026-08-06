@@ -9,6 +9,7 @@ import { Card, CardContent } from '@/renderer/ds/ui/card';
 import { Input } from '@/renderer/ds/ui/input';
 import { Spinner } from '@/renderer/ds/ui/spinner';
 import { probeFailureCopy } from '@/renderer/features/Onboarding/probe-copy';
+import type { ProviderDescriptor } from '@/renderer/omniagents-ui/rpc/model-catalog';
 import { emitter } from '@/renderer/services/ipc';
 import type { ModelsConfig, ProviderEntry, ProviderProbeResult } from '@/shared/types';
 
@@ -47,6 +48,8 @@ type CardModel = {
   name: string;
   provider: ProviderEntry;
   probeable: boolean;
+  runtimeHealth?: ProviderDescriptor['health'];
+  allowLegacyProbe: boolean;
 };
 
 type ConnectionCardProps = {
@@ -57,7 +60,7 @@ type ConnectionCardProps = {
 };
 
 const ConnectionCard = memo(({ card, defaultModel, onFixKey }: ConnectionCardProps) => {
-  const { name, provider, probeable } = card;
+  const { name, provider, probeable, runtimeHealth, allowLegacyProbe } = card;
   const [health, setHealth] = useState<Health>(probeable ? { state: 'checking' } : { state: 'unchecked' });
   const [fixing, setFixing] = useState(false);
   const [fixKey, setFixKey] = useState('');
@@ -65,6 +68,25 @@ const ConnectionCard = memo(({ card, defaultModel, onFixKey }: ConnectionCardPro
   const [fixError, setFixError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (runtimeHealth) {
+      setHealth(
+        runtimeHealth.status === 'ok'
+          ? { state: 'ok' }
+          : {
+              state: 'failed',
+              result: {
+                ok: false,
+                code: runtimeHealth.status === 'needs_auth' ? 'unauthorized' : 'network',
+                detail: runtimeHealth.detail ?? 'Runtime provider health check failed',
+              },
+            }
+      );
+      return;
+    }
+    if (!allowLegacyProbe) {
+      setHealth(probeable ? { state: 'checking' } : { state: 'unchecked' });
+      return;
+    }
     const probe = probeForProvider(name, provider);
     if (!probe) {
       setHealth({ state: 'unchecked' });
@@ -87,7 +109,7 @@ const ConnectionCard = memo(({ card, defaultModel, onFixKey }: ConnectionCardPro
     return () => {
       cancelled = true;
     };
-  }, [name, provider]);
+  }, [allowLegacyProbe, name, probeable, provider, runtimeHealth]);
 
   const label = displayName(name, provider);
   const usesDefault = defaultModel?.startsWith(`${name}/`) ?? false;
@@ -206,6 +228,8 @@ ConnectionCard.displayName = 'ConnectionCard';
 type Props = {
   config: ModelsConfig;
   onFixKey: (providerName: string, apiKey: string) => Promise<ProviderProbeResult>;
+  runtimeProviders?: ProviderDescriptor[];
+  allowLegacyProbe?: boolean;
 };
 
 /**
@@ -214,23 +238,36 @@ type Props = {
  * The Codex/ChatGPT entry's health is its sign-in status, rendered by the
  * sign-in card above, so it's skipped here.
  */
-export const SettingsModalConnectionCards = memo(({ config, onFixKey }: Props) => {
-  const entries = Object.entries(config.providers).filter(([, p]) => p.type !== 'openai-oauth');
-  if (entries.length === 0) {
-    return null;
-  }
+export const SettingsModalConnectionCards = memo(
+  ({ config, onFixKey, runtimeProviders, allowLegacyProbe = true }: Props) => {
+    const entries = Object.entries(config.providers).filter(([, p]) => p.type !== 'openai-oauth');
+    if (entries.length === 0) {
+      return null;
+    }
 
-  return (
-    <div className="flex flex-col gap-2">
-      {entries.map(([name, provider]) => (
-        <ConnectionCard
-          key={`${name}:${provider.api_key ?? ''}:${provider.base_url ?? ''}`}
-          card={{ name, provider, probeable: probeForProvider(name, provider) !== null }}
-          defaultModel={config.default}
-          onFixKey={onFixKey}
-        />
-      ))}
-    </div>
-  );
-});
+    return (
+      <div className="flex flex-col gap-2">
+        {entries.map(([name, provider]) => {
+          const exact = runtimeProviders?.find((candidate) => candidate.name === name);
+          const sameType = runtimeProviders?.filter((candidate) => candidate.type === provider.type) ?? [];
+          const runtimeHealth = exact?.health ?? (sameType.length === 1 ? sameType.at(0)?.health : undefined);
+          return (
+            <ConnectionCard
+              key={`${name}:${provider.api_key ?? ''}:${provider.base_url ?? ''}`}
+              card={{
+                name,
+                provider,
+                probeable: probeForProvider(name, provider) !== null,
+                allowLegacyProbe,
+                ...(runtimeHealth ? { runtimeHealth } : {}),
+              }}
+              defaultModel={config.default}
+              onFixKey={onFixKey}
+            />
+          );
+        })}
+      </div>
+    );
+  }
+);
 SettingsModalConnectionCards.displayName = 'SettingsModalConnectionCards';

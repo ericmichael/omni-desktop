@@ -15,6 +15,8 @@ const CONTROL_OPERATIONS = [
   'agent_host_list_resources',
   'agent_host_materialize_environment',
   'agent_host_stop_environment',
+  'validate_config',
+  'write_config',
 ] as const;
 type PendingCall = {
   resolve: (value: unknown) => void;
@@ -29,6 +31,23 @@ type PendingCall = {
 type AgentHostControlCallContext = {
   consumerId?: string;
   profileName?: string;
+};
+
+/** Runtime validation for the capability envelope used to expose privileged
+ * mutation availability. Malformed or partial initialize payloads fail closed. */
+export const experimentalOperationsFromInitialize = (value: unknown): readonly string[] => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return [];
+  }
+  const capabilities = (value as { capabilities?: unknown }).capabilities;
+  if (!capabilities || typeof capabilities !== 'object' || Array.isArray(capabilities)) {
+    return [];
+  }
+  const operations = (capabilities as { experimental_operations?: unknown }).experimental_operations;
+  if (!Array.isArray(operations) || operations.some((operation) => typeof operation !== 'string')) {
+    return [];
+  }
+  return operations;
 };
 
 export const agentHostControlTimeoutMs = (method: keyof RpcMethodMap, overrideMs?: number): number => {
@@ -58,6 +77,7 @@ export class AgentHostControlClient {
   private connecting: Promise<WebSocket> | null = null;
   private nextId = 1;
   private socketGeneration = 0;
+  private negotiatedExperimentalOperations: readonly string[] = [];
   private readonly pending = new Map<number, PendingCall>();
 
   constructor(
@@ -73,6 +93,13 @@ export class AgentHostControlClient {
   ): Promise<RpcMethodMap[Method]['result']> {
     const socket = await this.ensureConnected();
     return this.sendRequest(socket, method, params, context);
+  }
+
+  /** Capabilities negotiated on the privileged control connection. The
+   * credential remains encapsulated; callers receive operation names only. */
+  async getExperimentalOperations(): Promise<readonly string[]> {
+    await this.ensureConnected();
+    return this.negotiatedExperimentalOperations;
   }
 
   private sendRequest<Method extends keyof RpcMethodMap>(
@@ -130,6 +157,7 @@ export class AgentHostControlClient {
     const socket = this.socket;
     this.socket = null;
     this.connecting = null;
+    this.negotiatedExperimentalOperations = [];
     this.rejectPending(new Error('AgentHost control connection closed'));
     if (socket && socket.readyState < WebSocket.CLOSING) {
       socket.close();
@@ -158,7 +186,7 @@ export class AgentHostControlClient {
       socket.once('open', async () => {
         opened = true;
         try {
-          await initializeMainRpcConnection({
+          const initialized = await initializeMainRpcConnection({
             name: 'omni-desktop-agent-host-control',
             capabilities: { experimental_operations: [...CONTROL_OPERATIONS] },
             request: (method, params) => this.sendRequest(socket, method, params),
@@ -173,11 +201,13 @@ export class AgentHostControlClient {
                 });
               }),
           });
+          this.negotiatedExperimentalOperations = experimentalOperationsFromInitialize(initialized);
           this.connecting = null;
           resolve(socket);
         } catch (error) {
           this.socket = null;
           this.connecting = null;
+          this.negotiatedExperimentalOperations = [];
           socket.close();
           reject(error as Error);
         }
@@ -194,6 +224,7 @@ export class AgentHostControlClient {
         failConnect(new Error('AgentHost control connection closed before it opened'));
         if (this.socket === socket) {
           this.socket = null;
+          this.negotiatedExperimentalOperations = [];
         }
         this.connecting = null;
         this.rejectPending(new Error('AgentHost control connection closed unexpectedly'));

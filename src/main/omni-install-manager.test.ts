@@ -16,6 +16,7 @@ const hoisted = vi.hoisted(() => ({
   commandRunnerResults: [] as Array<{ exitCode: number; signal?: number }>,
   commandRunnerCalls: [] as Array<{ command: string; args: string[]; env?: Record<string, string> }>,
   commandRunnerCallIndex: 0,
+  commandRunnerGates: [] as Array<Promise<void> | undefined>,
   commandRunnerIsRunning: false,
   networkReachable: true,
   diskFreeBytes: 10 * 1024 * 1024 * 1024, // 10 GB by default
@@ -88,8 +89,10 @@ vi.mock('@/lib/command-runner', () => ({
     ) {
       this.running = true;
       hoisted.commandRunnerCalls.push({ command, args, env: opts?.env });
-      const result = hoisted.commandRunnerResults[hoisted.commandRunnerCallIndex] ?? { exitCode: 0 };
+      const callIndex = hoisted.commandRunnerCallIndex;
+      const result = hoisted.commandRunnerResults[callIndex] ?? { exitCode: 0 };
       hoisted.commandRunnerCallIndex++;
+      await hoisted.commandRunnerGates[callIndex];
       callbacks?.onData?.('mock output\r\n');
       this.running = false;
       if (result.exitCode !== 0) {
@@ -214,6 +217,7 @@ function makeMgr() {
   hoisted.commandRunnerResults = [];
   hoisted.commandRunnerCalls = [];
   hoisted.commandRunnerCallIndex = 0;
+  hoisted.commandRunnerGates = [];
   hoisted.commandRunnerIsRunning = false;
   hoisted.networkReachable = true;
   hoisted.diskFreeBytes = 10 * 1024 * 1024 * 1024;
@@ -248,6 +252,46 @@ describe('OmniInstallManager', () => {
   });
 
   describe('status lifecycle', () => {
+    it('keeps runtime consumers blocked until the editable omniagents overlay finishes', async () => {
+      const { mgr } = makeMgr();
+      hoisted.fsFiles.set('/workspace/omni-code/pyproject.toml', '');
+      hoisted.fsFiles.set('/workspace/omniagents/pyproject.toml', '');
+      let finishOverlay!: () => void;
+      hoisted.commandRunnerGates[4] = new Promise<void>((resolve) => {
+        finishOverlay = resolve;
+      });
+
+      const installing = mgr.startInstall();
+      await vi.waitFor(() => expect(hoisted.commandRunnerCalls).toHaveLength(5));
+      let consumerReleased = false;
+      const consumer = mgr.waitForInstallCompletion().then(() => {
+        consumerReleased = true;
+      });
+      await Promise.resolve();
+      expect(consumerReleased).toBe(false);
+
+      finishOverlay();
+      await Promise.all([installing, consumer]);
+      expect(consumerReleased).toBe(true);
+      expect(mgr.getStatus().type).toBe('completed');
+    });
+
+    it('releases waiters with the install error instead of deadlocking', async () => {
+      const { mgr } = makeMgr();
+      hoisted.commandRunnerResults = [{ exitCode: 1 }, { exitCode: 1 }];
+
+      await mgr.startInstall();
+
+      await expect(mgr.waitForInstallCompletion()).rejects.toThrow('Omni runtime installation failed');
+    });
+
+    it('releases waiters when an install was canceled', async () => {
+      const { mgr } = makeMgr();
+      mgr.updateStatus({ type: 'canceled' });
+
+      await expect(mgr.waitForInstallCompletion()).rejects.toThrow('Omni runtime installation was canceled');
+    });
+
     it('starts as uninitialized', () => {
       const { mgr } = makeMgr();
       expect(mgr.getStatus().type).toBe('uninitialized');

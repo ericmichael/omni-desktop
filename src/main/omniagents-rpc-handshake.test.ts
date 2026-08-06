@@ -22,13 +22,22 @@ describe('main-process OmniAgents RPC handshake', () => {
     const order: string[] = [];
     const request = vi.fn(async () => {
       order.push('initialize');
-      return { protocol_version: '1.0.0' };
+      return {
+        protocol_version: '1.0.0',
+        identity: { name: 'test-server', version: '1.0.0' },
+        platform: { os: 'linux', arch: 'x64' },
+        capabilities: mainRpcInitializeParams('test-server').capabilities,
+        agent_host: { agent_host_id: 'host-1' },
+      };
     });
     const notify = vi.fn(async () => {
       order.push('initialized');
     });
 
-    await expect(initializeMainRpcConnection({ name: 'test-client', request, notify })).resolves.toBeUndefined();
+    await expect(initializeMainRpcConnection({ name: 'test-client', request, notify })).resolves.toMatchObject({
+      protocol_version: '1.0.0',
+      agent_host: { agent_host_id: 'host-1' },
+    });
     expect(order).toEqual(['initialize', 'initialized']);
   });
 

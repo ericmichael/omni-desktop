@@ -1,4 +1,14 @@
 import { withConnectTicket } from '@/renderer/omniagents-ui/rpc/ws-ticket';
+import {
+  classifyCloseCode,
+  ConnectionClosedError,
+  DEFAULT_LIFECYCLE_POLICY,
+  type LifecyclePolicy,
+  ReconnectController,
+  RpcAbortError,
+  RpcTimeoutError,
+} from '@/shared/lifecycle';
+import { OmniagentsRpcError } from '@/shared/omniagents-rpc';
 
 type JSONRPCId = number | string;
 
@@ -22,134 +32,321 @@ type JSONRPCNotification = {
   params?: Record<string, unknown>;
 };
 
-type Listener = (payload: any) => void;
+export type RealtimeEventPayload = Record<string, unknown> | undefined;
+type Listener = (payload: RealtimeEventPayload) => void;
 
+export type RealtimeRequestOptions = {
+  /** Per-call deadline. Omit for the policy default; null disables it. */
+  timeoutMs?: number | null;
+  /** Abort a long-running call without closing the realtime connection. */
+  signal?: AbortSignal;
+};
+
+type PendingEntry = {
+  resolve: (value: unknown) => void;
+  reject: (error: Error) => void;
+  cleanup: () => void;
+};
+
+/**
+ * JSON-RPC client for the realtime/voice channel.
+ *
+ * Realtime uses the same lifecycle contract as the main GUI connection:
+ * whole-attempt connect deadlines, bounded RPC calls, structured close
+ * errors, permanent close classification, and the standard jittered
+ * reconnect budget.
+ */
 export class RealtimeRPCClient {
   private ws: WebSocket | null = null;
-  private url: string;
-  private token?: string;
-  private debug: boolean = false;
+  private readonly reconnectController: ReconnectController;
   private nextId = 0;
-  private pending = new Map<JSONRPCId, { resolve: (v: any) => void; reject: (e: Error) => void }>();
+  private pending = new Map<JSONRPCId, PendingEntry>();
   private listeners = new Map<string, Set<Listener>>();
-  private intentionalClose = false;
-  private reconnectAttempt = 0;
+  private closedByUser = false;
+  private reconnecting = false;
+  private generation = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  private static MAX_RECONNECT_DELAY = 10_000;
+  private rejectReconnectWait: ((error: Error) => void) | null = null;
 
-  constructor(url: string, token?: string, debug?: boolean) {
-    this.url = url;
-    this.token = token;
-    this.debug = !!debug;
+  constructor(
+    private readonly url: string,
+    private readonly token?: string,
+    private readonly debug: boolean = false,
+    private readonly policy: LifecyclePolicy = DEFAULT_LIFECYCLE_POLICY,
+    random: () => number = Math.random
+  ) {
+    this.reconnectController = new ReconnectController(policy, random);
   }
 
   async connect(): Promise<void> {
-    this.intentionalClose = false;
-    this.reconnectAttempt = 0;
-    await this.connectInternal();
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      return;
+    }
+    this.closedByUser = false;
+    this.reconnectController.recordSuccess();
+    const generation = ++this.generation;
+    await this.connectWithRetries(generation);
   }
 
-  private async connectInternal(): Promise<void> {
-    // Bearer token → one-time /auth/ws-ticket ticket; only the single-use
-    // ticket may appear in a dial URL, never the token. Log the base URL
-    // only so no credential (even the ticket) lands in the console.
-    const wsUrl = await withConnectTicket(this.url, this.token);
+  private async connectWithRetries(generation: number): Promise<void> {
+    while (!this.closedByUser && generation === this.generation) {
+      try {
+        await this.connectOnce(generation);
+        return;
+      } catch (error) {
+        if (this.closedByUser || generation !== this.generation) {
+          throw new ConnectionClosedError('Connection closed by client', { permanent: true });
+        }
+        const closeError =
+          error instanceof ConnectionClosedError
+            ? error
+            : new ConnectionClosedError((error as Error).message || 'Connection failed');
+        const decision = this.reconnectController.recordFailure({ permanent: closeError.permanent });
+        if (!decision.retry) {
+          throw new ConnectionClosedError(closeError.message, {
+            permanent: true,
+            closeCode: closeError.closeCode,
+            reason: closeError.reason,
+          });
+        }
+        if (this.debug) {
+          console.log(`[rpc] reconnecting in ${Math.round(decision.delayMs)}ms (attempt ${decision.attempt})`);
+        }
+        await this.waitForReconnect(decision.delayMs, generation);
+      }
+    }
+    throw new ConnectionClosedError('Connection closed by client', { permanent: true });
+  }
+
+  private waitForReconnect(delayMs: number, generation: number): Promise<void> {
+    return new Promise((resolve, reject) => {
+      this.rejectReconnectWait = reject;
+      this.reconnectTimer = setTimeout(() => {
+        this.reconnectTimer = null;
+        this.rejectReconnectWait = null;
+        if (this.closedByUser || generation !== this.generation) {
+          reject(new ConnectionClosedError('Connection closed by client', { permanent: true }));
+        } else {
+          resolve();
+        }
+      }, delayMs);
+    });
+  }
+
+  private async connectOnce(generation: number): Promise<void> {
+    const deadline = Date.now() + this.policy.connectTimeoutMs;
+    let wsUrl: string;
+    try {
+      wsUrl = await this.withDeadline(
+        withConnectTicket(this.url, this.token),
+        this.policy.connectTimeoutMs,
+        new RpcTimeoutError('connect', this.policy.connectTimeoutMs)
+      );
+    } catch (error) {
+      // Ticket exchange failures are credential failures and deterministic.
+      // A deadline remains retryable because the credential was not rejected.
+      if (error instanceof RpcTimeoutError) {
+        throw error;
+      }
+      throw new ConnectionClosedError((error as Error).message || 'Authentication failed', { permanent: true });
+    }
+
+    if (this.closedByUser || generation !== this.generation) {
+      throw new ConnectionClosedError('Connection closed by client', { permanent: true });
+    }
+
     if (this.debug) {
+      // Deliberately log the base URL, never the one-time ticket URL.
       console.log('[rpc] connect', this.url);
     }
-    this.ws = new WebSocket(wsUrl);
+    const ws = new WebSocket(wsUrl);
+    this.ws = ws;
+    const remainingMs = Math.max(1, deadline - Date.now());
+
     await new Promise<void>((resolve, reject) => {
-      if (!this.ws) {
-        reject(new Error('WebSocket init failed'));
-        return;
-      }
-      this.ws.onopen = () => {
+      let settled = false;
+      const finish = (error?: Error): void => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimeout(timer);
+        ws.onopen = null;
+        ws.onerror = null;
+        ws.onclose = null;
+        if (error) {
+          if (this.ws === ws) {
+            this.ws = null;
+          }
+          try {
+            ws.close();
+          } catch {}
+          reject(error);
+          return;
+        }
+        this.attachOpenSocket(ws, generation);
+        this.reconnectController.recordSuccess();
+        resolve();
+      };
+      const timer = setTimeout(() => {
+        finish(new ConnectionClosedError(`Connect timed out after ${this.policy.connectTimeoutMs}ms`));
+      }, remainingMs);
+      ws.onopen = () => {
         if (this.debug) {
           console.log('[rpc] open');
         }
-        this.reconnectAttempt = 0;
-        resolve();
+        finish();
       };
-      this.ws.onerror = (e) => {
+      ws.onerror = (event) => {
         if (this.debug) {
-          console.error('[rpc] error', e);
+          console.error('[rpc] error', event);
         }
-        reject(new Error('WebSocket error'));
+        finish(new ConnectionClosedError('WebSocket error'));
+      };
+      ws.onclose = (event) => {
+        const permanent = classifyCloseCode(event.code) === 'permanent';
+        const reason = event.reason || (permanent ? 'Connection rejected' : 'Connection closed during connect');
+        finish(
+          new ConnectionClosedError(reason, {
+            permanent,
+            closeCode: event.code,
+            reason: event.reason,
+          })
+        );
       };
     });
-    if (!this.ws) {
-      throw new Error('WebSocket disconnected');
-    }
-    this.ws.onmessage = (ev) => {
+  }
+
+  private attachOpenSocket(ws: WebSocket, generation: number): void {
+    ws.onmessage = (event) => {
       try {
-        const msg = JSON.parse(ev.data as string) as JSONRPCResponse | JSONRPCNotification;
+        const message = JSON.parse(event.data as string) as JSONRPCResponse | JSONRPCNotification;
         if (this.debug) {
-          console.log('[rpc] recv', msg);
+          console.log('[rpc] recv', message);
         }
-        if ('id' in msg) {
-          const pending = this.pending.get(msg.id);
-          if (pending) {
-            this.pending.delete(msg.id);
-            if ((msg as JSONRPCResponse).error) {
-              pending.reject(new Error((msg as JSONRPCResponse).error!.message));
-            } else {
-              pending.resolve((msg as JSONRPCResponse).result);
-            }
+        if ('id' in message) {
+          const pending = this.pending.get(message.id);
+          if (!pending) {
+            return;
+          }
+          this.pending.delete(message.id);
+          pending.cleanup();
+          if (message.error) {
+            pending.reject(
+              new OmniagentsRpcError({
+                code: message.error.code ?? -32603,
+                message: message.error.message,
+                data: message.error.data,
+              })
+            );
+          } else {
+            pending.resolve(message.result);
           }
         } else {
-          const evt = msg as JSONRPCNotification;
-          this.emit(evt.method, evt.params);
+          this.emit(message.method, message.params);
         }
-      } catch (e) {
+      } catch (error) {
         if (this.debug) {
-          console.error('[rpc] parse error', e);
+          console.error('[rpc] parse error', error);
         }
       }
     };
-    this.ws.onclose = (e) => {
+    ws.onerror = () => {
+      // Browser WebSockets report the actionable close code through onclose.
+    };
+    ws.onclose = (event) => {
+      if (this.ws !== ws || generation !== this.generation) {
+        return;
+      }
+      this.ws = null;
+      const error = new ConnectionClosedError(event.reason || 'Connection closed', {
+        permanent: this.closedByUser || classifyCloseCode(event.code) === 'permanent',
+        closeCode: event.code,
+        reason: event.reason,
+      });
       if (this.debug) {
-        console.log('[rpc] close', e?.code, e?.reason);
+        console.log('[rpc] close', event.code, event.reason);
       }
-      // Reject all pending RPCs
-      for (const [id, p] of this.pending) {
-        p.reject(new Error('WebSocket closed'));
-        this.pending.delete(id);
-      }
-      if (!this.intentionalClose) {
-        this.scheduleReconnect();
+      this.rejectAllPending(error);
+      if (!this.closedByUser && !error.permanent) {
+        void this.reconnectAfterClose(generation);
       }
     };
   }
 
-  private scheduleReconnect(): void {
-    const delay = Math.min(1000 * 2 ** this.reconnectAttempt, RealtimeRPCClient.MAX_RECONNECT_DELAY);
-    this.reconnectAttempt++;
-    if (this.debug) {
-      console.log(`[rpc] reconnecting in ${delay}ms (attempt ${this.reconnectAttempt})`);
+  private async reconnectAfterClose(generation: number): Promise<void> {
+    if (this.reconnecting) {
+      return;
     }
-    this.reconnectTimer = setTimeout(async () => {
-      try {
-        await this.connectInternal();
-        if (this.debug) {
-          console.log('[rpc] reconnected');
-        }
-      } catch {
-        if (!this.intentionalClose) {
-          this.scheduleReconnect();
-        }
+    this.reconnecting = true;
+    try {
+      // A live connection was lost, so the first reconnect is delayed too;
+      // attempt 1 uses the canonical 500ms (plus configured jitter).
+      const decision = this.reconnectController.recordFailure();
+      if (!decision.retry) {
+        return;
       }
-    }, delay);
+      if (this.debug) {
+        console.log(`[rpc] reconnecting in ${Math.round(decision.delayMs)}ms (attempt ${decision.attempt})`);
+      }
+      await this.waitForReconnect(decision.delayMs, generation);
+      await this.connectWithRetries(generation);
+      if (this.debug) {
+        console.log('[rpc] reconnected');
+      }
+    } catch (error) {
+      if (this.debug && !this.closedByUser) {
+        console.error('[rpc] reconnect stopped', error);
+      }
+    } finally {
+      this.reconnecting = false;
+    }
+  }
+
+  private withDeadline<T>(promise: Promise<T>, timeoutMs: number, error: Error): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(() => reject(error), timeoutMs);
+      promise.then(
+        (value) => {
+          clearTimeout(timer);
+          resolve(value);
+        },
+        (reason) => {
+          clearTimeout(timer);
+          reject(reason);
+        }
+      );
+    });
+  }
+
+  private rejectAllPending(error: ConnectionClosedError): void {
+    const entries = [...this.pending.values()];
+    this.pending.clear();
+    for (const entry of entries) {
+      entry.cleanup();
+      entry.reject(error);
+    }
   }
 
   disconnect(): void {
-    this.intentionalClose = true;
-    if (this.reconnectTimer) {
+    this.closedByUser = true;
+    this.generation += 1;
+    if (this.reconnectTimer !== null) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
+    this.rejectReconnectWait?.(new ConnectionClosedError('Connection closed by client', { permanent: true }));
+    this.rejectReconnectWait = null;
+    this.rejectAllPending(new ConnectionClosedError('Connection closed by client', { permanent: true }));
     if (this.ws) {
-      this.ws.close();
+      const ws = this.ws;
       this.ws = null;
+      ws.onclose = null;
+      ws.onerror = null;
+      ws.onmessage = null;
+      try {
+        ws.close();
+      } catch {}
     }
   }
 
@@ -162,7 +359,7 @@ export class RealtimeRPCClient {
     return () => set.delete(handler);
   }
 
-  private emit(event: string, payload: any): void {
+  private emit(event: string, payload: RealtimeEventPayload): void {
     const set = this.listeners.get(event);
     if (!set) {
       return;
@@ -174,34 +371,74 @@ export class RealtimeRPCClient {
     }
   }
 
-  private async call<T = any>(method: string, params?: Record<string, unknown>): Promise<T> {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      throw new Error('WebSocket not connected');
-    }
-    const id = ++this.nextId;
-    const req: JSONRPCRequest = { jsonrpc: '2.0', id, method, params };
-    if (this.debug) {
-      console.log('[rpc] call', method, params);
-    }
-    const p = new Promise<T>((resolve, reject) => {
-      this.pending.set(id, { resolve: resolve as any, reject });
-    });
-    this.ws.send(JSON.stringify(req));
-    return p;
+  request<T = unknown>(
+    method: string,
+    params?: Record<string, unknown>,
+    options: RealtimeRequestOptions = {}
+  ): Promise<T> {
+    return this.call<T>(method, params, options);
   }
 
-  private async notify(method: string, params?: Record<string, unknown>): Promise<void> {
+  private call<T = unknown>(
+    method: string,
+    params?: Record<string, unknown>,
+    options: RealtimeRequestOptions = {}
+  ): Promise<T> {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      throw new Error('WebSocket not connected');
+      throw new ConnectionClosedError('WebSocket not connected', { permanent: this.closedByUser });
     }
-    const msg: any = { jsonrpc: '2.0', method };
+    if (options.signal?.aborted) {
+      throw new RpcAbortError(method);
+    }
+    const id = ++this.nextId;
+    const request: JSONRPCRequest = { jsonrpc: '2.0', id, method, params };
+    const timeoutMs = options.timeoutMs === undefined ? this.policy.rpcTimeoutMs : options.timeoutMs;
+    const response = new Promise<T>((resolve, reject) => {
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      const onAbort = (): void => {
+        this.pending.delete(id);
+        cleanup();
+        reject(new RpcAbortError(method));
+      };
+      const cleanup = (): void => {
+        if (timer !== null) {
+          clearTimeout(timer);
+        }
+        options.signal?.removeEventListener('abort', onAbort);
+      };
+      if (timeoutMs !== null) {
+        timer = setTimeout(() => {
+          this.pending.delete(id);
+          cleanup();
+          reject(new RpcTimeoutError(method, timeoutMs));
+        }, timeoutMs);
+      }
+      options.signal?.addEventListener('abort', onAbort);
+      this.pending.set(id, { resolve: resolve as (value: unknown) => void, reject, cleanup });
+    });
+    try {
+      this.ws.send(JSON.stringify(request));
+    } catch (error) {
+      const pending = this.pending.get(id);
+      this.pending.delete(id);
+      pending?.cleanup();
+      pending?.reject(error as Error);
+    }
+    return response;
+  }
+
+  private notify(method: string, params?: Record<string, unknown>): void {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      throw new ConnectionClosedError('WebSocket not connected', { permanent: this.closedByUser });
+    }
+    const message: JSONRPCNotification = { jsonrpc: '2.0', method };
     if (params) {
-      msg.params = params;
+      message.params = params;
     }
     if (this.debug) {
       console.log('[rpc] notify', method, params);
     }
-    this.ws.send(JSON.stringify(msg));
+    this.ws.send(JSON.stringify(message));
   }
 
   async capabilities(): Promise<{ enabled: boolean; kind?: string; agent_name?: string | null }> {
@@ -226,7 +463,7 @@ export class RealtimeRPCClient {
       params.commit = true;
     }
     try {
-      await this.notify('send_audio', params);
+      this.notify('send_audio', params);
       return true;
     } catch {
       return false;
@@ -245,13 +482,6 @@ export class RealtimeRPCClient {
     return this.call('client_response', { request_id: requestId, ok, result });
   }
 
-  /**
-   * Respond to a ``tool_approval_requested`` event forwarded via
-   * ``realtime_event`` → ``agent_event``. Same wire as the chat client:
-   * dedicated ``tool_approval_response`` RPC keyed by ``call_id`` (the
-   * model-minted tool-call id), with optional ``always_approve`` and
-   * ``rejection_message`` fields.
-   */
   async toolApprovalResponse(
     callId: string,
     decision: 'approve' | 'reject',
@@ -268,11 +498,6 @@ export class RealtimeRPCClient {
     return this.call('tool_approval_response', params);
   }
 
-  /**
-   * Respond to an ``mcp_approval_requested`` event forwarded via the
-   * realtime channel. Same wire as the chat client: keyed by request_id,
-   * no ``always_approve``.
-   */
   async mcpApprovalResponse(
     requestId: string,
     decision: 'approve' | 'reject',

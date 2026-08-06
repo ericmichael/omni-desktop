@@ -8,6 +8,8 @@ import {
   type LifecyclePolicy,
   ReconnectController,
   reconnectDelayMs,
+  RpcAbortError,
+  RpcTimeoutError,
 } from '@/shared/lifecycle';
 
 describe('DEFAULT_LIFECYCLE_POLICY', () => {
@@ -144,5 +146,26 @@ describe('ConnectionClosedError', () => {
     const err = new ConnectionClosedError();
     expect(err.permanent).toBe(false);
     expect(err.closeCode).toBeUndefined();
+  });
+});
+
+describe('RPC deadline errors', () => {
+  it('carries timeout metadata', () => {
+    const err = new RpcTimeoutError('get_thread', 1234);
+    expect(err).toMatchObject({
+      name: 'RpcTimeoutError',
+      method: 'get_thread',
+      timeoutMs: 1234,
+      message: "RPC call 'get_thread' timed out after 1234ms",
+    });
+  });
+
+  it('carries the aborted method', () => {
+    const err = new RpcAbortError('git_push');
+    expect(err).toMatchObject({
+      name: 'RpcAbortError',
+      method: 'git_push',
+      message: "RPC call 'git_push' was aborted",
+    });
   });
 });

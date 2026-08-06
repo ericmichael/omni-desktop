@@ -161,24 +161,41 @@ export const InstalledSection = memo(
                       <ItemTitle className="max-w-full">
                         <span className="truncate">{item.id}</span>
                         <Badge variant="secondary">{KIND_LABELS.connector}</Badge>
+                        {item.runtime && (
+                          <Badge variant={item.runtime.status.state === 'failed' ? 'destructive' : 'outline'}>
+                            {item.runtime.status.state}
+                          </Badge>
+                        )}
+                        {item.runtime?.read_only && <Badge variant="secondary">Managed</Badge>}
                       </ItemTitle>
                       <ItemDescription>{connectorSummary(item.server)}</ItemDescription>
+                      {item.runtime?.disabled_reason && (
+                        <span className="text-xs text-muted-foreground">{item.runtime.disabled_reason}</span>
+                      )}
+                      {item.runtime?.read_only && (
+                        <span className="text-xs text-muted-foreground">
+                          Managed by the Omniagents host
+                          {item.runtime.read_only_reason ? ` · ${item.runtime.read_only_reason}` : ''}
+                        </span>
+                      )}
                     </ItemContent>
-                    <ItemActions>
-                      <Button size="sm" variant="ghost" onClick={() => onConfigureConnector(item.id)}>
-                        <Settings className="mr-1 size-4" />
-                        Configure
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-sm"
-                        aria-label={`Remove ${item.id}`}
-                        onClick={() => setRemoveConnectorId(item.id)}
-                      >
-                        <Trash2 />
-                      </Button>
-                    </ItemActions>
+                    {!item.runtime?.read_only && (
+                      <ItemActions>
+                        <Button size="sm" variant="ghost" onClick={() => onConfigureConnector(item.id)}>
+                          <Settings className="mr-1 size-4" />
+                          Configure
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-sm"
+                          aria-label={`Remove ${item.id}`}
+                          onClick={() => setRemoveConnectorId(item.id)}
+                        >
+                          <Trash2 />
+                        </Button>
+                      </ItemActions>
+                    )}
                   </Item>
                 );
 

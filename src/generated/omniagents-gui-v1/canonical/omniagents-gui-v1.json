@@ -6901,6 +6901,13 @@
           }
         },
         {
+          "name": "include_untracked",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_diff/properties/include_untracked"
+          }
+        },
+        {
           "name": "workspace_id",
           "required": false,
           "schema": {

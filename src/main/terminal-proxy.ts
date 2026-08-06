@@ -104,7 +104,9 @@ export class TerminalProxy {
     const wsUrl = status.data.wsUrl;
     const authToken = status.data.authToken;
     const environmentId = status.data.environmentId;
-    if (!environmentId) {
+    const workspaceId = status.data.workspaceId;
+    const environmentGeneration = status.data.environmentGeneration;
+    if (!environmentId || !workspaceId || environmentGeneration === undefined) {
       throw new ConsoleError(
         'terminal_unavailable',
         'This code session does not have an execution environment for terminals.'
@@ -123,7 +125,9 @@ export class TerminalProxy {
       function: 'terminal.create',
       args: { cols: 80, rows: 24 },
       session_id: sessionId,
+      workspace_id: workspaceId,
       environment_id: environmentId,
+      environment_generation: environmentGeneration,
     });
     if (!isObject(created)) {
       throw new ConsoleError('rpc_failed', 'terminal.create returned an unexpected payload');

@@ -13,6 +13,13 @@ import { ConnectorConfigDialog } from '@/renderer/features/Plugins/ConnectorConf
 import { ExploreSection, FEATURED_MARKETPLACES, installKeyOf } from '@/renderer/features/Plugins/ExploreSection';
 import { InstalledSection } from '@/renderer/features/Plugins/InstalledSection';
 import { MarketplaceDialog } from '@/renderer/features/Plugins/MarketplaceDialog';
+import {
+  hasDurableLocalMcpPersistence,
+  mcpConfigFromSnapshots,
+  mcpCreateInput,
+  mcpUpdateInput,
+  storedMcpSecretKeys,
+} from '@/renderer/features/Plugins/mcp-config-adapter';
 import type { ExplorePlugin, PluginKind } from '@/renderer/features/Plugins/plugin-cards';
 import {
   buildExplorePlugins,
@@ -23,8 +30,13 @@ import {
 } from '@/renderer/features/Plugins/plugin-cards';
 import { $pluginsInitialFilter } from '@/renderer/features/Plugins/plugins-nav';
 import { useFeaturedManifests, usePluginsData } from '@/renderer/features/Plugins/state';
+import {
+  useProductManagementRefresh,
+  useProductManagementSnapshot,
+} from '@/renderer/omniagents-ui/product-management-context';
 import { agentConfigApi } from '@/renderer/services/config';
 import { emitter, isElectron } from '@/renderer/services/ipc';
+import { managementAdminApi } from '@/renderer/services/management-admin';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { CustomAppEntry } from '@/shared/app-registry';
 import type { BundleUpdateInfo, MarketplaceApp, McpServerEntry } from '@/shared/types';
@@ -70,6 +82,8 @@ function updateMarketplaceAppEntry(app: MarketplaceApp): void {
 
 export const PluginsView = memo(() => {
   const data = usePluginsData();
+  const managementSnapshot = useProductManagementSnapshot();
+  const refreshManagement = useProductManagementRefresh();
   const isDesktop = useIsDesktop();
   const store = useStore(persistedStoreApi.$atom);
   const storeCustomApps = store.customApps;
@@ -96,22 +110,35 @@ export const PluginsView = memo(() => {
 
   const { refresh } = data;
 
+  /** The ownership marker is written only after the main process has proved
+   * parity. Until then, the legacy store remains the source for UI reads and
+   * writes; once owned, all MCP mutations go through the canonical RPCs. */
+  const canonicalMcpCapability = hasDurableLocalMcpPersistence(
+    managementSnapshot.mcp.data?.mutation_persistence ?? null
+  );
+  const canonicalMcpOwned = isElectron && store.mcpConfigOwnership === 'omniagents' && canonicalMcpCapability;
+  const canonicalMcpConfig = canonicalMcpOwned
+    ? mcpConfigFromSnapshots(managementSnapshot.mcp.data?.servers ?? [])
+    : null;
+  const effectiveMcpConfig = canonicalMcpConfig ?? data.mcpConfig;
+
   const installed = useMemo(
     () =>
       buildInstalledPlugins({
-        mcpConfig: data.mcpConfig,
+        mcpConfig: effectiveMcpConfig,
         skills: data.skills,
         updates: data.updates,
         customApps,
         extensions: data.extensions,
+        runtimeMcpServers: managementSnapshot.mcp.data?.servers,
       }),
-    [data.mcpConfig, data.skills, data.updates, customApps, data.extensions]
+    [effectiveMcpConfig, data.skills, data.updates, customApps, data.extensions, managementSnapshot.mcp.data?.servers]
   );
   const filteredInstalled = useMemo(() => filterPlugins(installed, filter, query), [installed, filter, query]);
 
   const ctx = useMemo(
-    () => ({ mcpConfig: data.mcpConfig, skills: data.skills, updates: data.updates, customApps }),
-    [data.mcpConfig, data.skills, data.updates, customApps]
+    () => ({ mcpConfig: effectiveMcpConfig, skills: data.skills, updates: data.updates, customApps }),
+    [effectiveMcpConfig, data.skills, data.updates, customApps]
   );
 
   const manifests = useFeaturedManifests(FEATURED_REPOS);
@@ -123,21 +150,60 @@ export const PluginsView = memo(() => {
   );
   const driftedItems = useMemo(() => collectDriftedItems(exploreItems), [exploreItems]);
 
-  /** Replace-one-entry write; reads fresh config so concurrent edits aren't clobbered. */
+  /** Canonical per-server mutation after local ownership; legacy full-config
+   * writes remain available only during migration or in server mode. */
   const saveConnector = useCallback(
     async (id: string, entry: McpServerEntry) => {
+      if (isElectron && store.mcpConfigOwnership === 'omniagents' && !canonicalMcpCapability) {
+        throw new Error('Omniagents MCP persistence is unavailable; restart the local agent before editing servers.');
+      }
+      const runtime = managementSnapshot.mcp.data?.servers.find((server) => server.server_name === id);
+      if (runtime?.read_only) {
+        throw new Error(`MCP server "${id}" is managed by the Omniagents host and cannot be changed.`);
+      }
+      if (canonicalMcpOwned) {
+        if (runtime) {
+          await managementAdminApi.updateMcpServer(id, mcpUpdateInput(entry, runtime));
+        } else {
+          await managementAdminApi.createMcpServer(mcpCreateInput(id, entry));
+        }
+        await refreshManagement();
+        await refresh();
+        return;
+      }
       const config = await agentConfigApi.getMcp();
       await agentConfigApi.setMcp({ ...config, mcpServers: { ...config.mcpServers, [id]: entry } });
       await refresh();
     },
-    [refresh]
+    [
+      canonicalMcpCapability,
+      canonicalMcpOwned,
+      managementSnapshot.mcp.data?.servers,
+      refresh,
+      refreshManagement,
+      store.mcpConfigOwnership,
+    ]
   );
 
-  const removeConnector = useCallback(async (id: string) => {
-    const config = await agentConfigApi.getMcp();
-    const { [id]: _, ...rest } = config.mcpServers;
-    await agentConfigApi.setMcp({ ...config, mcpServers: rest });
-  }, []);
+  const removeConnector = useCallback(
+    async (id: string) => {
+      const runtime = managementSnapshot.mcp.data?.servers.find((server) => server.server_name === id);
+      if (runtime?.read_only) {
+        throw new Error(`MCP server "${id}" is managed by the Omniagents host and cannot be removed.`);
+      }
+      if (canonicalMcpOwned) {
+        await managementAdminApi.deleteMcpServer(id);
+        await refreshManagement();
+        await refresh();
+        return;
+      }
+      const config = await agentConfigApi.getMcp();
+      const { [id]: _, ...rest } = config.mcpServers;
+      await agentConfigApi.setMcp({ ...config, mcpServers: rest });
+      await refresh();
+    },
+    [canonicalMcpOwned, managementSnapshot.mcp.data?.servers, refresh, refreshManagement]
+  );
 
   const handleInstall = useCallback(
     async (item: ExplorePlugin, mode: 'install' | 'update') => {
@@ -148,14 +214,9 @@ export const PluginsView = memo(() => {
           if (mode === 'update') {
             // Take the upstream transport config but keep the env/header
             // values the user filled in (API keys, tokens).
-            const config = await agentConfigApi.getMcp();
-            const existing = config.mcpServers[item.connector.id];
+            const existing = effectiveMcpConfig?.mcpServers[item.connector.id];
             const merged = existing ? mergeConnectorUpdate(existing, item.connector.server) : item.connector.server;
-            await agentConfigApi.setMcp({
-              ...config,
-              mcpServers: { ...config.mcpServers, [item.connector.id]: merged },
-            });
-            await refresh();
+            await saveConnector(item.connector.id, merged);
           } else {
             await saveConnector(item.connector.id, item.connector.server);
           }
@@ -174,7 +235,7 @@ export const PluginsView = memo(() => {
         setInstallingKey(null);
       }
     },
-    [saveConnector, refresh]
+    [effectiveMcpConfig, saveConnector, refresh]
   );
 
   /** Installed bundles with an upstream update, one entry per bundle. */
@@ -191,16 +252,15 @@ export const PluginsView = memo(() => {
         await emitter.invoke('skills:update-marketplace-plugin', u.repo, u.plugin);
       }
 
-      // Drifted connectors: merge every update into one McpConfig write.
+      // Drifted connectors use the same canonical per-server path as the
+      // dialog, preserving write-only secret markers across each update.
       const connectors = driftedItems.filter((p) => p.kind === 'connector');
       if (connectors.length > 0) {
-        const config = await agentConfigApi.getMcp();
-        const servers = { ...config.mcpServers };
         for (const c of connectors) {
-          const existing = servers[c.connector.id];
-          servers[c.connector.id] = existing ? mergeConnectorUpdate(existing, c.connector.server) : c.connector.server;
+          const existing = effectiveMcpConfig?.mcpServers[c.connector.id];
+          const merged = existing ? mergeConnectorUpdate(existing, c.connector.server) : c.connector.server;
+          await saveConnector(c.connector.id, merged);
         }
-        await agentConfigApi.setMcp({ ...config, mcpServers: servers });
       }
 
       // Drifted apps: patch label/icon in one store write.
@@ -222,7 +282,7 @@ export const PluginsView = memo(() => {
       setInstallingKey(null);
       await refresh();
     }
-  }, [pendingUpdates, driftedItems, refresh]);
+  }, [effectiveMcpConfig, pendingUpdates, driftedItems, refresh, saveConnector]);
 
   const handleUpdateBundle = useCallback(
     async (update: BundleUpdateInfo) => {
@@ -255,9 +315,14 @@ export const PluginsView = memo(() => {
   }, [refresh]);
 
   const error = actionError ?? data.error;
-  const existingServerIds = Object.keys(data.mcpConfig?.mcpServers ?? {});
+  const existingServerIds = Object.keys(effectiveMcpConfig?.mcpServers ?? {});
   const editedServer =
-    connectorDialog?.serverId != null ? (data.mcpConfig?.mcpServers[connectorDialog.serverId] ?? null) : null;
+    connectorDialog?.serverId != null ? (effectiveMcpConfig?.mcpServers[connectorDialog.serverId] ?? null) : null;
+  const editedRuntime =
+    connectorDialog?.serverId != null
+      ? managementSnapshot.mcp.data?.servers.find((server) => server.server_name === connectorDialog.serverId)
+      : undefined;
+  const userMcpAllowed = managementSnapshot.mcp.data?.user_mcp_allowed ?? true;
 
   return (
     <div className="h-full min-h-0 overflow-y-auto bg-background">
@@ -336,7 +401,13 @@ export const PluginsView = memo(() => {
                   <Plus className="mr-1" />
                   Add custom app
                 </Button>
-                <Button size="sm" variant="ghost" onClick={() => setConnectorDialog({ serverId: null })}>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setConnectorDialog({ serverId: null })}
+                  disabled={canonicalMcpOwned && !userMcpAllowed}
+                  title={canonicalMcpOwned && !userMcpAllowed ? 'User MCP servers are disabled by the host' : undefined}
+                >
                   <PlugZap className="mr-1" />
                   Add MCP server
                 </Button>
@@ -363,6 +434,7 @@ export const PluginsView = memo(() => {
         serverId={connectorDialog?.serverId ?? null}
         initial={editedServer}
         existingIds={existingServerIds}
+        storedSecrets={storedMcpSecretKeys(editedRuntime)}
         onSave={saveConnector}
         onClose={() => setConnectorDialog(null)}
       />

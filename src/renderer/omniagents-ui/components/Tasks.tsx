@@ -6,7 +6,7 @@ export type TaskSummary = {
   id: string;
   subject: string;
   activeForm?: string;
-  status: 'pending' | 'in_progress' | 'completed';
+  status: 'pending' | 'in_progress' | 'completed' | 'blocked';
   owner?: string;
   blockedBy?: string[];
 };
@@ -17,6 +17,7 @@ const DOT_CLASS: Record<TaskSummary['status'], string> = {
   pending: 'bg-muted-foreground/50',
   in_progress: 'bg-primary',
   completed: 'bg-success',
+  blocked: 'bg-warning',
 };
 
 // Docked task panel rendered just above the input. Mirrors the upstream
@@ -31,7 +32,8 @@ export function Tasks({ tasks }: { tasks: TaskSummary[] }) {
   const inProgress = tasks.filter((t) => t.status === 'in_progress');
   const pending = tasks.filter((t) => t.status === 'pending');
   const completed = tasks.filter((t) => t.status === 'completed');
-  const ordered = [...inProgress, ...pending, ...completed];
+  const blocked = tasks.filter((t) => t.status === 'blocked');
+  const ordered = [...inProgress, ...blocked, ...pending, ...completed];
   const visible = ordered.slice(0, MAX_VISIBLE);
   const overflow = ordered.length - visible.length;
   const live = inProgress[0];
@@ -47,6 +49,12 @@ export function Tasks({ tasks }: { tasks: TaskSummary[] }) {
           </span>
           <span aria-hidden>·</span>
           <span>{pending.length} pending</span>
+          {blocked.length > 0 ? (
+            <>
+              <span aria-hidden>·</span>
+              <span className="text-warning">{blocked.length} blocked</span>
+            </>
+          ) : null}
           <span aria-hidden>·</span>
           <span>
             <span className="text-success">{completed.length}</span> done

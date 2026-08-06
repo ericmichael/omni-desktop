@@ -3,6 +3,10 @@ import { memo, useCallback, useEffect, useState } from 'react';
 import { buildCodexConfig } from '@/lib/provider-config';
 import { Button } from '@/renderer/ds/ui/button';
 import { Spinner } from '@/renderer/ds/ui/spinner';
+import {
+  runtimeModelListFromManagement,
+  useProductManagementRefresh,
+} from '@/renderer/omniagents-ui/product-management-context';
 import { agentConfigApi } from '@/renderer/services/config';
 import { emitter, ipc } from '@/renderer/services/ipc';
 import type { CodexDeviceCode } from '@/shared/types';
@@ -14,6 +18,7 @@ type Props = {
 };
 
 export const OnboardingChatGptStep = memo(({ onConnected, onBack }: Props) => {
+  const refreshManagement = useProductManagementRefresh();
   const [busy, setBusy] = useState(false);
   const [deviceCode, setDeviceCode] = useState<CodexDeviceCode | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -32,7 +37,9 @@ export const OnboardingChatGptStep = memo(({ onConnected, onBack }: Props) => {
         return;
       }
       const current = await agentConfigApi.getModels();
-      const runtime = await emitter.invoke('util:list-models').catch(() => null);
+      const refreshed = await refreshManagement().catch(() => null);
+      const canonical = refreshed ? runtimeModelListFromManagement(refreshed) : null;
+      const runtime = canonical ?? (await emitter.invoke('util:list-models').catch(() => null));
       const { config, madeDefault } = buildCodexConfig(current, runtime);
       await agentConfigApi.setModels(config);
       onConnected(madeDefault);
@@ -42,7 +49,7 @@ export const OnboardingChatGptStep = memo(({ onConnected, onBack }: Props) => {
       setBusy(false);
       setDeviceCode(null);
     }
-  }, [onConnected]);
+  }, [onConnected, refreshManagement]);
 
   return (
     <div className="flex flex-col gap-5">

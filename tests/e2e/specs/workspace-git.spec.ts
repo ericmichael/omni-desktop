@@ -7,7 +7,7 @@ import { attachProofScreenshot } from 'tests/e2e/support/proof';
 test.use({ seedState: 'workspace-git' });
 
 async function openSourceControl(page: Page) {
-  const seededSession = page.getByRole('tree', { name: 'Sessions' }).getByRole('treeitem', { name: /Workspace Git/ });
+  const seededSession = page.getByRole('button', { name: 'Canonical workspace thread', exact: true });
   await expect(seededSession).toBeVisible({ timeout: 120_000 });
   await seededSession.click();
 
@@ -25,6 +25,10 @@ async function openSourceControl(page: Page) {
 
 function stagedPaths(workspaceDir: string): string {
   return execFileSync('git', ['diff', '--cached', '--name-only'], { cwd: workspaceDir, encoding: 'utf-8' }).trim();
+}
+
+function latestCommitSubject(workspaceDir: string): string {
+  return execFileSync('git', ['log', '-1', '--format=%s'], { cwd: workspaceDir, encoding: 'utf-8' }).trim();
 }
 
 test.describe('workspace source control', () => {
@@ -88,5 +92,30 @@ test.describe('workspace source control', () => {
     await expect(filesSurface.getByRole('status').filter({ hasText: 'Opened src/index.ts at line 2' })).toBeVisible();
     await expect(filesSurface.locator('.cm-activeLine')).toContainText("export const target = 'after';");
     await attachProofScreenshot(filesSurface, testInfo, 'changed line opened in Files');
+  });
+
+  test('commits staged work and refreshes canonical repository history', async ({ app }, testInfo) => {
+    test.setTimeout(240_000);
+    const sourceControl = await openSourceControl(app.page);
+
+    await sourceControl.getByRole('button', { name: 'src/index.ts', exact: true }).click();
+    const diff = sourceControl.getByRole('article', { name: 'Diff for src/index.ts' });
+    await diff.getByRole('button', { name: 'Stage file', exact: true }).click();
+    await expect.poll(() => stagedPaths(app.workspaceDir)).toBe('src/index.ts');
+
+    await sourceControl.getByRole('button', { name: 'Repository tools', exact: true }).click();
+    const commitMessage = 'exercise v2 Git actions';
+    await sourceControl.getByRole('textbox', { name: 'Commit message' }).fill(commitMessage);
+    await attachProofScreenshot(sourceControl, testInfo, 'v2 repository commit ready');
+    await sourceControl.getByRole('button', { name: 'Commit staged changes', exact: true }).click();
+
+    await expect(sourceControl.getByRole('status')).toContainText('Changes committed.');
+    await expect.poll(() => latestCommitSubject(app.workspaceDir)).toBe(commitMessage);
+    await expect.poll(() => stagedPaths(app.workspaceDir)).toBe('');
+
+    await sourceControl.getByRole('tab', { name: 'History', exact: true }).click();
+    await expect(sourceControl.getByText(commitMessage, { exact: true })).toBeVisible();
+    await expect(sourceControl.getByText('fixture baseline', { exact: true })).toBeVisible();
+    await attachProofScreenshot(sourceControl, testInfo, 'v2 repository history refreshed');
   });
 });

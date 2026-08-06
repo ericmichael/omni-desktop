@@ -3,11 +3,13 @@ import { Terminal } from '@xterm/xterm';
 import { map } from 'nanostores';
 
 import { DEFAULT_XTERM_OPTIONS } from '@/renderer/constants';
+import { toast } from '@/renderer/features/Toast/state';
 import { emitter, ipc } from '@/renderer/services/ipc';
 import type {
   AgentProcessStartOptions,
   AgentProcessStatus,
   AgentProcessStopOptions,
+  AgentProcessStopResult,
   SandboxPauseResult,
   SandboxSwitchResult,
   WithTimestamp,
@@ -20,6 +22,43 @@ export const $agentStatuses = map<Record<string, WithTimestamp<AgentProcessStatu
 export const $agentXTerms = map<Record<string, Terminal>>({});
 
 const xtermSubscriptions = new Map<string, Set<() => void>>();
+
+const SAFE_SNAPSHOT_IDENTIFIER = /^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,63})$/;
+
+const snapshotSummary = (refs: string[]): string => {
+  const unique = [...new Set(refs)];
+  const safe = unique.filter((ref) => SAFE_SNAPSHOT_IDENTIFIER.test(ref) && !ref.includes('..')).slice(0, 3);
+  const noun = unique.length === 1 ? 'workspace snapshot' : 'workspace snapshots';
+  if (safe.length === 0) {
+    return `${unique.length} ${noun}`;
+  }
+  const omitted = unique.length - safe.length;
+  return `${unique.length} ${noun} (${safe.join(', ')}${omitted > 0 ? `, +${omitted} more` : ''})`;
+};
+
+export const warnForUncertainStop = (result: AgentProcessStopResult | null | undefined): void => {
+  if (!result || (result.shutdown !== 'forced' && result.snapshotPersistence !== 'uncertain')) {
+    return;
+  }
+  const pending = result.pendingSnapshotRefs.length > 0 ? snapshotSummary(result.pendingSnapshotRefs) : null;
+  if (result.shutdown === 'forced') {
+    toast.warning(
+      'Sandbox force-closed',
+      pending
+        ? `The agent host could not finish a graceful shutdown. ${pending} may not have been saved.`
+        : 'The agent host could not finish a graceful shutdown. No pending workspace snapshots were reported.',
+      { durationMs: 12_000 }
+    );
+    return;
+  }
+  toast.warning(
+    'Workspace snapshot may not be saved',
+    pending
+      ? `${pending} could not be verified or persisted. Omni Desktop will keep retrying while it remains open.`
+      : 'Snapshot persistence could not be verified. Omni Desktop will keep retrying while it remains open.',
+    { durationMs: 12_000 }
+  );
+};
 
 export const initializeTerminal = (processId: string): Terminal => {
   const existing = $agentXTerms.get()[processId];
@@ -75,8 +114,10 @@ export const agentProcessApi = {
   },
 
   stop: async (processId: string, opts?: AgentProcessStopOptions) => {
-    await emitter.invoke('agent-process:stop', processId, opts);
+    const result = await emitter.invoke('agent-process:stop', processId, opts);
+    warnForUncertainStop(result);
     teardownTerminal(processId);
+    return result;
   },
 
   rebuild: (processId: string, arg: AgentProcessStartOptions) => {

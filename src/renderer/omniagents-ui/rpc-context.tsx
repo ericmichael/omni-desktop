@@ -1,9 +1,14 @@
 import { useSelector } from '@xstate/react';
-import { createContext, type ReactNode, useContext, useEffect, useMemo } from 'react';
+import { createContext, type ReactNode, useContext, useEffect, useMemo, useSyncExternalStore } from 'react';
 
 import type { RPCClientActor } from '@/shared/machines/rpc-client.machine';
 
 import { RPCClient } from './rpc/client';
+import {
+  ManagementRepository,
+  type ManagementRepositoryStatus,
+  type ManagementSnapshot,
+} from './rpc/management-repository';
 import { useUiConfig } from './ui-config';
 
 // ---------------------------------------------------------------------------
@@ -13,6 +18,7 @@ import { useUiConfig } from './ui-config';
 type RPCClientContextValue = {
   client: RPCClient;
   actor: RPCClientActor;
+  management: ManagementRepository;
 };
 
 const RPCClientContext = createContext<RPCClientContextValue | null>(null);
@@ -21,10 +27,21 @@ const RPCClientContext = createContext<RPCClientContextValue | null>(null);
 // Provider
 // ---------------------------------------------------------------------------
 
-export const RPCClientProvider = ({ children }: { children: ReactNode }) => {
+export type RPCClientFactory = (url: string, token?: string) => RPCClient;
+
+const defaultRPCClientFactory: RPCClientFactory = (url, token) => new RPCClient(url, token);
+
+export const RPCClientProvider = ({
+  children,
+  createClient = defaultRPCClientFactory,
+}: {
+  children: ReactNode;
+  createClient?: RPCClientFactory;
+}) => {
   const { wsBaseUrl, token } = useUiConfig();
 
-  const client = useMemo(() => new RPCClient(wsBaseUrl, token), [wsBaseUrl, token]);
+  const client = useMemo(() => createClient(wsBaseUrl, token), [createClient, token, wsBaseUrl]);
+  const management = useMemo(() => new ManagementRepository(client), [client]);
 
   useEffect(() => {
     // Use disconnect() (reversible) instead of dispose() (permanent) because
@@ -33,7 +50,15 @@ export const RPCClientProvider = ({ children }: { children: ReactNode }) => {
     return () => client.disconnect();
   }, [client]);
 
-  const value = useMemo<RPCClientContextValue>(() => ({ client, actor: client.actor }), [client]);
+  useEffect(() => {
+    management.start();
+    return () => management.stop();
+  }, [management]);
+
+  const value = useMemo<RPCClientContextValue>(
+    () => ({ client, actor: client.actor, management }),
+    [client, management]
+  );
 
   return <RPCClientContext.Provider value={value}>{children}</RPCClientContext.Provider>;
 };
@@ -50,6 +75,30 @@ export const useRPCClient = (): RPCClient => {
   }
   return ctx.client;
 };
+
+/**
+ * Connection-scoped runtime management cache and typed RPC boundaries.
+ *
+ * Today RPC ownership is inside each OmniAgentsApp/code column. Lifting this
+ * provider above code columns (or attaching a synthetic management consumer
+ * to the pooled AgentHost) remains required for one product-scoped Settings
+ * and onboarding repository.
+ */
+export const useManagementRepository = (): ManagementRepository => {
+  const ctx = useContext(RPCClientContext);
+  if (!ctx) {
+    throw new Error('RPCClientProvider is missing');
+  }
+  return ctx.management;
+};
+
+/** Subscribe to immutable management snapshots with React tear protection. */
+export const useManagementSnapshot = (): ManagementSnapshot => {
+  const repository = useManagementRepository();
+  return useSyncExternalStore(repository.subscribe, repository.getSnapshot, repository.getSnapshot);
+};
+
+export const useManagementStatus = (): ManagementRepositoryStatus => useManagementSnapshot().status;
 
 /** Reactive boolean — true only when the WebSocket is in the `connected` state. */
 export const useRPCConnected = (): boolean => {

@@ -1,3 +1,5 @@
+import { writeFile } from 'node:fs/promises';
+
 import type { Locator, Page, TestInfo } from '@playwright/test';
 
 export const visualProofEnabled = process.env.VISUAL_PROOF === '1';
@@ -38,6 +40,16 @@ export async function attachProofScreenshot(
     animations: options.animations ?? 'disabled',
     caret: options.caret ?? 'hide',
   });
+  await testInfo.attach(name, { path, contentType: 'image/png' });
+  return path;
+}
+
+export async function attachProofPng(testInfo: TestInfo, name: string, body: Buffer): Promise<string | null> {
+  if (!visualProofEnabled) {
+    return null;
+  }
+  const path = testInfo.outputPath(`${safeProofName(name)}.png`);
+  await writeFile(path, body);
   await testInfo.attach(name, { path, contentType: 'image/png' });
   return path;
 }

@@ -828,6 +828,104 @@ describe('chatSessionMachine', () => {
   });
 
   // -----------------------------------------------------------------------
+  // Canonical item revisions
+  // -----------------------------------------------------------------------
+
+  describe('CANONICAL_ITEM_UPDATED', () => {
+    const planItem = (revision: number, seq = 4): MessageItem => ({
+      type: 'plan',
+      id: 'plan-1',
+      title: `Plan revision ${revision}`,
+      steps: [],
+      canonical: {
+        item_id: 'plan-1',
+        thread_id: 'sess-1',
+        turn_id: 'turn-1',
+        seq,
+        kind: 'plan',
+        status: 'started',
+        revision,
+        created_at: 1,
+        updated_at: revision,
+        content: {},
+        source_ref: {},
+      },
+    });
+
+    it('inserts by canonical sequence and replaces only newer revisions', () => {
+      let snap = next(idleSnap(), {
+        type: 'HISTORY_LOADED',
+        items: [
+          {
+            type: 'structured',
+            kind: 'run_diff',
+            title: 'Run changes',
+            canonical: {
+              item_id: 'diff-1',
+              thread_id: 'sess-1',
+              turn_id: 'turn-1',
+              seq: 8,
+              kind: 'run_diff',
+              status: 'completed',
+              revision: 1,
+              created_at: 1,
+              updated_at: 1,
+              content: {},
+              source_ref: {},
+            },
+          },
+        ],
+      });
+      snap = next(snap, { type: 'CANONICAL_ITEM_UPDATED', item: planItem(2), session_id: 'sess-1' });
+      snap = next(snap, { type: 'CANONICAL_ITEM_UPDATED', item: planItem(1), session_id: 'sess-1' });
+
+      expect(ctx(snap).items.map((item) => item.canonical?.item_id)).toEqual(['plan-1', 'diff-1']);
+      expect(ctx(snap).items[0]).toMatchObject({ title: 'Plan revision 2' });
+    });
+
+    it('does not move live noncanonical items ahead of canonical history', () => {
+      const history: MessageItem[] = [
+        {
+          type: 'chat',
+          role: 'user',
+          content: 'historical prompt',
+          canonical: {
+            item_id: 'message-1',
+            thread_id: 'sess-1',
+            turn_id: 'turn-1',
+            seq: 1,
+            kind: 'user_message',
+            status: 'completed',
+            revision: 0,
+            created_at: 1,
+            updated_at: 1,
+            content: {},
+            source_ref: {},
+          },
+        },
+      ];
+      let snap = next(idleSnap(), { type: 'HISTORY_LOADED', items: history });
+      snap = next(snap, { type: 'SUBMIT', text: 'live prompt' });
+      snap = next(snap, { type: 'CANONICAL_ITEM_UPDATED', item: planItem(1, 2), session_id: 'sess-1' });
+
+      expect(ctx(snap).items.map((item) => (item.type === 'chat' ? item.content : item.type))).toEqual([
+        'historical prompt',
+        'live prompt',
+        'plan',
+      ]);
+    });
+
+    it('rejects updates for another session', () => {
+      const snap = next(idleSnap(), {
+        type: 'CANONICAL_ITEM_UPDATED',
+        item: planItem(1),
+        session_id: 'sess-other',
+      });
+      expect(ctx(snap).items).toEqual([]);
+    });
+  });
+
+  // -----------------------------------------------------------------------
   // Full lifecycle scenario
   // -----------------------------------------------------------------------
 

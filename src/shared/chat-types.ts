@@ -21,6 +21,26 @@ export type Attachment = {
 // Message items
 // ---------------------------------------------------------------------------
 
+/**
+ * Canonical conversation identity retained on UI rows loaded through the v2
+ * conversation surface. Keeping the original structured content here makes
+ * adapters additive: newer server fields and item kinds survive even when the
+ * current renderer only has a compact presentation for them.
+ */
+export type CanonicalItemEnvelope = {
+  item_id: string;
+  thread_id: string;
+  turn_id: string | null;
+  seq: number;
+  kind: string;
+  status: 'started' | 'completed' | 'failed' | 'cancelled';
+  revision: number;
+  created_at: number;
+  updated_at: number;
+  content: Record<string, unknown>;
+  source_ref: Record<string, unknown>;
+};
+
 export type ChatMessage = {
   type: 'chat';
   role: 'user' | 'assistant' | 'system';
@@ -35,6 +55,7 @@ export type ChatMessage = {
    * something was attached.
    */
   staged_context?: ReadonlyArray<{ source: string; text: string }>;
+  canonical?: CanonicalItemEnvelope;
 };
 
 export type ToolItem = {
@@ -51,6 +72,7 @@ export type ToolItem = {
   status: 'called' | 'result';
   metadata?: ChatItemMetadata;
   runId?: string;
+  canonical?: CanonicalItemEnvelope;
 };
 
 export type ApprovalItem = {
@@ -72,6 +94,7 @@ export type ApprovalItem = {
   server_label?: string;
   // Original (unprefixed) MCP tool name for display on local-MCP approvals.
   tool_label?: string;
+  canonical?: CanonicalItemEnvelope;
 };
 
 export type ChatItemMetadata = {
@@ -85,6 +108,11 @@ export type ChatItemMetadata = {
 export type PlanStep = {
   title: string;
   description?: string;
+  id?: string;
+  activeForm?: string;
+  status?: 'pending' | 'in_progress' | 'completed' | 'blocked';
+  owner?: string;
+  blockedBy?: string[];
 };
 
 export type PlanItem = {
@@ -93,6 +121,51 @@ export type PlanItem = {
   title: string;
   description?: string;
   steps: PlanStep[];
+  scope?: string;
+  status?: CanonicalItemEnvelope['status'];
+  canonical?: CanonicalItemEnvelope;
+};
+
+export type RunDiffFile = {
+  path: string;
+  changeType: 'added' | 'modified' | 'deleted';
+  additions: number;
+  deletions: number;
+  opaque: boolean;
+  baselineUnknown: boolean;
+};
+
+export type RunDiffItem = {
+  type: 'run_diff';
+  id: string;
+  diff: string;
+  files: RunDiffFile[];
+  stats: {
+    filesChanged: number;
+    additions: number;
+    deletions: number;
+  };
+  truncated: boolean;
+  filesTruncated: boolean;
+  status: CanonicalItemEnvelope['status'];
+  canonical: CanonicalItemEnvelope;
+};
+
+export type ReasoningItem = {
+  type: 'reasoning';
+  summary: string;
+  status: CanonicalItemEnvelope['status'];
+  canonical: CanonicalItemEnvelope;
+};
+
+/** Explicit forward-compatible presentation for canonical kinds without a
+ * purpose-built transcript component yet (including future unknown kinds). */
+export type StructuredItem = {
+  type: 'structured';
+  kind: string;
+  title: string;
+  summary?: string;
+  canonical: CanonicalItemEnvelope;
 };
 
 /**
@@ -146,9 +219,18 @@ export type ArtifactItem = {
   updated_at?: number;
   /** Set for MCP-Apps UI resources surfaced via tool_result metadata. */
   mcp_ui?: ArtifactMcpUi;
+  canonical?: CanonicalItemEnvelope;
 };
 
-export type MessageItem = ChatMessage | ToolItem | ApprovalItem | ArtifactItem;
+export type MessageItem =
+  | ChatMessage
+  | ToolItem
+  | ApprovalItem
+  | ArtifactItem
+  | ReasoningItem
+  | PlanItem
+  | RunDiffItem
+  | StructuredItem;
 
 // ---------------------------------------------------------------------------
 // Preamble buffer

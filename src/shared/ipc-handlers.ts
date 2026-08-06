@@ -72,7 +72,11 @@ export interface UtilHandlerOptions {
  * Register `config:*` handlers. All file I/O goes through `validateConfigPath`
  * so callers cannot escape the config directory.
  */
-export function registerConfigHandlers(ipc: IIpcListener, configDir: string): void {
+export function registerConfigHandlers(
+  ipc: IIpcListener,
+  configDir: string,
+  hooks: { beforeWrite?: (filePath: string) => void | Promise<void> } = {}
+): void {
   ipc.handle('config:get-omni-config-dir', () => configDir);
   ipc.handle('config:get-env-file-path', () => join(configDir, '.env'));
 
@@ -88,6 +92,7 @@ export function registerConfigHandlers(ipc: IIpcListener, configDir: string): vo
 
   ipc.handle('config:write-json-file', async (_: unknown, filePath: string, data: unknown) => {
     validateConfigPath(filePath, configDir);
+    await hooks.beforeWrite?.(filePath);
     await mkdir(dirname(filePath), { recursive: true });
     await writeFile(filePath, `${JSON.stringify(data, null, 2)}\n`, 'utf-8');
   });
@@ -103,6 +108,7 @@ export function registerConfigHandlers(ipc: IIpcListener, configDir: string): vo
 
   ipc.handle('config:write-text-file', async (_: unknown, filePath: string, content: string) => {
     validateConfigPath(filePath, configDir);
+    await hooks.beforeWrite?.(filePath);
     await mkdir(dirname(filePath), { recursive: true });
     await writeFile(filePath, content, 'utf-8');
   });
@@ -137,11 +143,21 @@ export interface SettingsSecretMask {
   restoreModels?: (incoming: ModelsConfig, stored: ModelsConfig) => ModelsConfig;
 }
 
+export interface SettingsConfigHooks {
+  /** Run before returning the local MCP document so ownership transfer can
+   * complete before a renderer selects its canonical CRUD path. */
+  beforeGetMcp?: (event: unknown) => void | Promise<void>;
+  /** Throw to reject a legacy full-document MCP write. Local Electron uses
+   * this after canonical ownership transfers; server stores remain unchanged. */
+  beforeSetMcp?: (event: unknown, config: McpConfig) => void | Promise<void>;
+}
+
 export function registerSettingsConfigHandlers(
   ipc: IIpcListener,
   resolveStore: (event: unknown) => SettingsConfigStore,
   afterWrite: (event: unknown) => void,
-  mask: SettingsSecretMask = {}
+  mask: SettingsSecretMask = {},
+  hooks: SettingsConfigHooks = {}
 ): void {
   ipc.handle('settings:get-models-config', (e: unknown) => {
     const c = resolveStore(e).get('modelsConfig') ?? emptyModelsConfig();
@@ -156,10 +172,13 @@ export function registerSettingsConfigHandlers(
     afterWrite(e);
   });
   ipc.handle('settings:get-mcp-config', (e: unknown) => {
-    const c = resolveStore(e).get('mcpConfig') ?? emptyMcpConfig();
-    return mask.maskMcp ? mask.maskMcp(c) : c;
+    return Promise.resolve(hooks.beforeGetMcp?.(e)).then(() => {
+      const c = resolveStore(e).get('mcpConfig') ?? emptyMcpConfig();
+      return mask.maskMcp ? mask.maskMcp(c) : c;
+    });
   });
-  ipc.handle('settings:set-mcp-config', (e: unknown, config: McpConfig) => {
+  ipc.handle('settings:set-mcp-config', async (e: unknown, config: McpConfig) => {
+    await hooks.beforeSetMcp?.(e, config);
     resolveStore(e).set('mcpConfig', config);
     afterWrite(e);
   });

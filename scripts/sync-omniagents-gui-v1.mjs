@@ -19,6 +19,7 @@ const { values } = parseArgs({
   options: {
     sync: { type: 'boolean' },
     check: { type: 'boolean' },
+    'verify-source': { type: 'boolean' },
     'verify-source-root': { type: 'string' },
     'source-ts': { type: 'string' },
     'source-manifest': { type: 'string' },
@@ -37,10 +38,12 @@ const provenancePath = resolve(outputDir, 'provenance.json');
 const transportedManifestPath = resolve(outputDir, transportManifestPath);
 const transportedOpenRpcPath = resolve(outputDir, transportOpenRpcPath);
 const transportedSchemaPath = resolve(outputDir, transportSchemaPath);
-const selectedModes = [values.sync, values.check, values['verify-source-root']].filter(Boolean);
+const selectedModes = [values.sync, values.check, values['verify-source'], values['verify-source-root']].filter(
+  Boolean
+);
 
 if (selectedModes.length !== 1) {
-  throw new Error('Pass exactly one of --sync, --check, or --verify-source-root <path>');
+  throw new Error('Pass exactly one of --sync, --check, --verify-source, or --verify-source-root <path>');
 }
 
 const readLocal = async () => {
@@ -139,6 +142,33 @@ const normalizeRepository = (repository) =>
     .replace(/^ssh:\/\/git@github\.com\//, 'https://github.com/')
     .replace(/\/$/, '');
 
+const sourceRepositoryMatches = (sourceRoot) => {
+  const result = spawnSync('git', ['-C', sourceRoot, 'remote', 'get-url', '--all', 'origin'], { encoding: 'utf8' });
+  if (result.status !== 0) return false;
+  return result.stdout.trim().split('\n').map(normalizeRepository).includes(expectedRepository);
+};
+
+const discoverSourceRoot = () => {
+  const configured = process.env.OMNIAGENTS_SOURCE_ROOT?.trim();
+  if (configured) {
+    const candidate = resolve(configured);
+    if (!sourceRepositoryMatches(candidate)) {
+      throw new Error(`OMNIAGENTS_SOURCE_ROOT does not identify the ${expectedRepository} checkout: ${candidate}`);
+    }
+    return candidate;
+  }
+
+  // Omni's development workspace keeps launcher and omniagents as siblings.
+  // CI jobs with a different checkout layout should set OMNIAGENTS_SOURCE_ROOT.
+  const candidates = [resolve(root, '../omniagents')];
+  const discovered = candidates.find(sourceRepositoryMatches);
+  if (discovered) return discovered;
+
+  throw new Error(
+    `Could not find an OmniAgents source checkout. Set OMNIAGENTS_SOURCE_ROOT to a checkout of ${expectedRepository}.`
+  );
+};
+
 const gitShow = (sourceRoot, commit, path, encoding) => git(sourceRoot, ['show', `${commit}:${path}`], encoding);
 
 const canonicalBytes = (content) => {
@@ -212,7 +242,7 @@ if (values.sync) {
   const { provenance } = await readLocal();
   console.log(`Verified OmniAgents GUI protocol ${provenance.protocol_version} (${provenance.source_commit})`);
 } else {
-  const sourceRoot = resolve(values['verify-source-root']);
+  const sourceRoot = values['verify-source-root'] ? resolve(values['verify-source-root']) : discoverSourceRoot();
   const { artifact, provenance, transportedManifest, transportedOpenRpc, transportedSchema } = await readLocal();
   if (normalizeRepository(provenance.source_repository) !== expectedRepository) {
     throw new Error(`Unexpected provenance source repository: ${provenance.source_repository}`);

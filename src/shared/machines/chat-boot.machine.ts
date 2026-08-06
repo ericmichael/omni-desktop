@@ -28,6 +28,7 @@ export type ChatBootPhase =
   | 'bootstrapping'
   | 'loadingSession'
   | 'ready'
+  | 'connectionError'
   | 'bootstrapError'
   | 'sessionError';
 
@@ -63,6 +64,7 @@ export type ChatBootEvent =
   // Server / RPC lifecycle signals (from the hook-provided invokers)
   | { type: 'RPC_CONNECTED' }
   | { type: 'RPC_DISCONNECTED' }
+  | { type: 'RPC_FAILED'; error: string }
   // Bootstrap step signals
   | { type: 'BOOTSTRAP_OK'; capabilities: ChatBootCapabilities }
   | { type: 'BOOTSTRAP_FAILED'; error: string }
@@ -99,7 +101,8 @@ export const chatBootMachine = setup({
       error: null,
     }),
     setError: assign({
-      error: ({ event }) => (event as Extract<ChatBootEvent, { type: 'BOOTSTRAP_FAILED' | 'SESSION_ERROR' }>).error,
+      error: ({ event }) =>
+        (event as Extract<ChatBootEvent, { type: 'RPC_FAILED' | 'BOOTSTRAP_FAILED' | 'SESSION_ERROR' }>).error,
     }),
     clearError: assign({ error: null }),
     markBooted: assign({ hasBooted: true }),
@@ -141,6 +144,7 @@ export const chatBootMachine = setup({
       invoke: { src: 'waitForConnection' },
       on: {
         RPC_CONNECTED: { target: 'bootstrapping' },
+        RPC_FAILED: { target: 'connectionError', actions: 'setError' },
       },
     },
 
@@ -187,6 +191,12 @@ export const chatBootMachine = setup({
 
     ready: {
       // Terminal-ish: the user can interact. Disconnects unwind via root `on`.
+    },
+
+    connectionError: {
+      on: {
+        RETRY: { target: 'awaitingConnection', actions: 'clearError' },
+      },
     },
 
     bootstrapError: {

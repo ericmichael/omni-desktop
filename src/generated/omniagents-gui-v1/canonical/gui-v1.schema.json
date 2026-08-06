@@ -219,6 +219,10 @@
                 {
                   "additionalProperties": false,
                   "properties": {
+                    "environment_generation": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
                     "environment_id": {
                       "minLength": 1,
                       "type": "string"
@@ -1476,6 +1480,9 @@
         },
         "from_rev": {
           "type": "string"
+        },
+        "include_untracked": {
+          "type": "boolean"
         },
         "mode": {
           "type": "string"

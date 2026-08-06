@@ -11,6 +11,8 @@ const artifact = resolve(root, 'src/generated/omniagents-gui-v1/gui-v1.ts');
 const provenance = resolve(root, 'src/generated/omniagents-gui-v1/provenance.json');
 
 const run = (...args: string[]) => spawnSync(process.execPath, [script, ...args], { encoding: 'utf8' });
+const runWithEnv = (env: NodeJS.ProcessEnv, ...args: string[]) =>
+  spawnSync(process.execPath, [script, ...args], { encoding: 'utf8', env: { ...process.env, ...env } });
 const git = (directory: string, ...args: string[]) => {
   const result = spawnSync('git', ['-C', directory, ...args], { encoding: 'utf8' });
   expect(result.status, result.stderr).toBe(0);
@@ -188,6 +190,31 @@ describe('OmniAgents GUI protocol sync', () => {
     const result = run('--verify-source-root', fixture.directory, '--output-dir', fixture.output);
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toContain(fixture.commit);
+  });
+
+  it('discovers the source root from OMNIAGENTS_SOURCE_ROOT', async () => {
+    const fixture = await sourceFixture();
+    const result = runWithEnv(
+      { OMNIAGENTS_SOURCE_ROOT: fixture.directory },
+      '--verify-source',
+      '--output-dir',
+      fixture.output
+    );
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain(fixture.commit);
+  });
+
+  it('fails safely when OMNIAGENTS_SOURCE_ROOT points at the wrong repository', async () => {
+    const fixture = await sourceFixture();
+    git(fixture.directory, 'remote', 'set-url', 'origin', 'https://github.com/example/wrong.git');
+    const result = runWithEnv(
+      { OMNIAGENTS_SOURCE_ROOT: fixture.directory },
+      '--verify-source',
+      '--output-dir',
+      fixture.output
+    );
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('OMNIAGENTS_SOURCE_ROOT does not identify');
   });
 
   it('verifies a source repository path containing spaces', async () => {

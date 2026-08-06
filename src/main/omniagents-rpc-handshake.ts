@@ -1,4 +1,4 @@
-import type { RpcMethodMap } from '@/generated/omniagents-gui-v1/gui-v1';
+import type { InitializeResult, RpcMethodMap } from '@/generated/omniagents-gui-v1/gui-v1';
 
 type InitializeParams = RpcMethodMap['initialize']['params'];
 export type OmniagentsRpcCapabilities = InitializeParams['capabilities'];
@@ -37,7 +37,11 @@ export async function initializeMainRpcConnection(options: {
   capabilities?: Partial<OmniagentsRpcCapabilities>;
   request: (method: 'initialize', params: InitializeParams) => Promise<unknown>;
   notify: (method: 'initialized', params: Record<string, never>) => void | Promise<void>;
-}): Promise<void> {
-  await options.request('initialize', mainRpcInitializeParams(options.name, options.capabilities));
+}): Promise<InitializeResult> {
+  const initialized = (await options.request(
+    'initialize',
+    mainRpcInitializeParams(options.name, options.capabilities)
+  )) as InitializeResult;
   await options.notify('initialized', {});
+  return initialized;
 }

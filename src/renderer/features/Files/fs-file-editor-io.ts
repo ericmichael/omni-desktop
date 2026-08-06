@@ -1,4 +1,5 @@
 import type {
+  ExecutionTargetInput,
   FsClient,
   TextFileReadResult,
   WatchCallbacks,
@@ -69,17 +70,17 @@ export class FsFileEditorIO implements FileEditorIO {
   constructor(
     private readonly fsClient: FsClient,
     private readonly watchRegistry: WatchRegistry,
-    private readonly environmentId: string
+    private readonly executionTarget: ExecutionTargetInput
   ) {}
 
   async load(identity: FileEditorIdentity): Promise<FileEditorFile> {
-    return textFile(await this.fsClient.readTextFile(this.environmentId, identity.path));
+    return textFile(await this.fsClient.readTextFile(this.executionTarget, identity.path));
   }
 
   async save(input: Parameters<FileEditorIO['save']>[0]): Promise<FileEditorFile> {
     const newline = ['lf', 'crlf', 'cr'].includes(input.newline) ? (input.newline as 'lf' | 'crlf' | 'cr') : undefined;
     try {
-      const result = await this.fsClient.writeTextFile(this.environmentId, input.identity.path, input.content, {
+      const result = await this.fsClient.writeTextFile(this.executionTarget, input.identity.path, input.content, {
         bom: input.encoding === 'utf-8-bom',
         expectedSha256: input.expectedVersion ?? undefined,
         newline,

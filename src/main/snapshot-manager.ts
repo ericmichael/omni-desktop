@@ -29,6 +29,7 @@ import type { IIpcListener } from '@/shared/ipc-listener';
 import type { CodeTab, SandboxSnapshotSummary } from '@/shared/types';
 
 import { getSnapshotStore } from './snapshot-blob-store';
+import { completePendingSnapshotUpload, listPendingSnapshotUploads } from './snapshot-upload-ledger';
 import { getOmniConfigDir } from './util';
 
 /** TTL applied to chat snapshots that aren't explicitly protected. */
@@ -68,6 +69,7 @@ export async function deleteSnapshot(snapshotRef: string, dir: string = snapshot
   await getSnapshotStore()
     .remove(snapshotRef)
     .catch((err) => console.error('[snapshot-manager] blob remove failed:', err));
+  completePendingSnapshotUpload(snapshotRef, dir);
   return unlinked;
 }
 
@@ -76,8 +78,9 @@ export async function deleteSnapshot(snapshotRef: string, dir: string = snapshot
  * older than *ttlMs* ago. Files in *keep* are never deleted regardless
  * of age. Returns the list of deleted snapshot references.
  */
-export async function gcStaleSnapshots(opts: { keep: Set<string>; ttlMs: number }): Promise<string[]> {
-  const dir = snapshotsDir();
+export async function gcStaleSnapshots(opts: { keep: Set<string>; ttlMs: number; dir?: string }): Promise<string[]> {
+  const dir = opts.dir ?? snapshotsDir();
+  const durablePending = new Set(listPendingSnapshotUploads(dir).map((entry) => entry.snapshotRef));
   let entries: string[];
   try {
     entries = await fs.readdir(dir);
@@ -96,7 +99,7 @@ export async function gcStaleSnapshots(opts: { keep: Set<string>; ttlMs: number 
       continue;
     }
     const snapshotRef = entry.slice(0, -SNAPSHOT_SUFFIX.length);
-    if (opts.keep.has(snapshotRef)) {
+    if (opts.keep.has(snapshotRef) || durablePending.has(snapshotRef)) {
       continue;
     }
 
@@ -114,6 +117,7 @@ export async function gcStaleSnapshots(opts: { keep: Set<string>; ttlMs: number 
     try {
       await fs.unlink(fullPath);
       deleted.push(snapshotRef);
+      completePendingSnapshotUpload(snapshotRef, dir);
     } catch {
       // best-effort
     }

@@ -17,7 +17,7 @@ import {
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { AppId } from '@/shared/app-registry';
 import { buildAppRegistry } from '@/shared/app-registry';
-import type { AgentRuntimeConnection, TicketId } from '@/shared/types';
+import type { AgentRuntimeConnection, ExecutionTarget, TicketId } from '@/shared/types';
 
 import { EnvironmentDock } from './EnvironmentDock';
 
@@ -74,7 +74,7 @@ type CodeWorkspaceLayoutProps = {
   /** Stable portal host for the Git surface owned by this session column. */
   gitHost: HTMLDivElement;
   /** Execution environment whose workspace the Files and Git RPC surfaces address. */
-  environmentId?: string;
+  executionTarget?: ExecutionTarget;
   /** Ticket bound to this column — enables the supervisor bridge actor. */
   ticketId?: TicketId;
   /** Routine bound to this column — enables the routine bridge actor. */
@@ -111,7 +111,7 @@ export const CodeWorkspaceLayout = memo(
     agentWorkspaceDir,
     filesHost,
     gitHost,
-    environmentId,
+    executionTarget,
     ticketId,
     routineId,
   }: CodeWorkspaceLayoutProps) => {
@@ -205,7 +205,7 @@ export const CodeWorkspaceLayout = memo(
           <div className="h-full w-full min-w-0">
             <OmniAgentsApp
               connection={connection}
-              environmentId={environmentId}
+              executionTarget={executionTarget}
               greeting={greeting}
               suggestions={suggestions}
               pendingMessages={pendingMessages}
@@ -231,12 +231,12 @@ export const CodeWorkspaceLayout = memo(
               routineId={routineId}
               workspaceDir={agentWorkspaceDir}
               providerChildren={
-                environmentId && (filesActivated || gitActivated) ? (
+                executionTarget && (filesActivated || gitActivated) ? (
                   <>
                     {filesActivated && (
                       <WorkspaceFilesPortal
                         host={filesHost}
-                        environmentId={environmentId}
+                        executionTarget={executionTarget}
                         sessionId={sessionId}
                         workspaceRoot={agentWorkspaceDir}
                       />
@@ -246,7 +246,7 @@ export const CodeWorkspaceLayout = memo(
                         host={gitHost}
                         active={activeApp === 'git'}
                         tabId={tabId}
-                        environmentId={environmentId}
+                        executionTarget={executionTarget}
                         sessionId={sessionId}
                         workspaceRoot={agentWorkspaceDir}
                         onOpenFile={handleGitOpenFile}

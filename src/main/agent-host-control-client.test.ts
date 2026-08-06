@@ -4,7 +4,11 @@ import type { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
 import { WebSocketServer } from 'ws';
 
-import { AgentHostControlClient, agentHostControlTimeoutMs } from '@/main/agent-host-control-client';
+import {
+  AgentHostControlClient,
+  agentHostControlTimeoutMs,
+  experimentalOperationsFromInitialize,
+} from '@/main/agent-host-control-client';
 import type { OmniagentsRpcError } from '@/shared/omniagents-rpc';
 
 describe('AgentHostControlClient', () => {
@@ -28,6 +32,21 @@ describe('AgentHostControlClient', () => {
     expect(agentHostControlTimeoutMs('agent_host_materialize_environment', 25)).toBe(25);
   });
 
+  it('fails closed on malformed negotiated capability envelopes', () => {
+    expect(experimentalOperationsFromInitialize(null)).toEqual([]);
+    expect(experimentalOperationsFromInitialize({ capabilities: {} })).toEqual([]);
+    expect(
+      experimentalOperationsFromInitialize({
+        capabilities: { experimental_operations: ['validate_config', 42] },
+      })
+    ).toEqual([]);
+    expect(
+      experimentalOperationsFromInitialize({
+        capabilities: { experimental_operations: ['validate_config', 'write_config'] },
+      })
+    ).toEqual(['validate_config', 'write_config']);
+  });
+
   it('uses the private bearer credential and multiplexes typed calls', async () => {
     server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
     await new Promise<void>((resolve) => server!.once('listening', resolve));
@@ -45,7 +64,16 @@ describe('AgentHostControlClient', () => {
           JSON.stringify({
             jsonrpc: '2.0',
             id: message['id'],
-            result: message['method'] === 'initialize' ? { protocol_version: '1.0.0' } : { agent_host_id: 'host-1' },
+            result:
+              message['method'] === 'initialize'
+                ? {
+                    protocol_version: '1.0.0',
+                    identity: { name: 'test-server', version: '1.0.0' },
+                    platform: { os: 'linux', arch: 'x64' },
+                    capabilities: (message['params'] as { capabilities: unknown }).capabilities,
+                    agent_host: { agent_host_id: 'host-1' },
+                  }
+                : { agent_host_id: 'host-1' },
           })
         );
       });
@@ -68,8 +96,11 @@ describe('AgentHostControlClient', () => {
       'agent_host_list_resources',
     ]);
     expect((calls[0]!['params'] as Record<string, unknown>)['capabilities']).toMatchObject({
-      experimental_operations: expect.arrayContaining(['agent_host_list_resources']),
+      experimental_operations: expect.arrayContaining(['agent_host_list_resources', 'validate_config', 'write_config']),
     });
+    await expect(client.getExperimentalOperations()).resolves.toEqual(
+      expect.arrayContaining(['validate_config', 'write_config'])
+    );
     expect(new Set(calls.slice(2).map((call) => call['id'])).size).toBe(2);
     client.close();
   });

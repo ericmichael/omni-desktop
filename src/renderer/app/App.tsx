@@ -28,6 +28,7 @@ import { MigrationNotice } from '@/renderer/features/MigrationNotice/MigrationNo
 import { ToastContainer } from '@/renderer/features/Toast/ToastContainer';
 import { VoiceHotkeys } from '@/renderer/features/Voice/VoiceHotkeys';
 import { SyncBar } from '@/renderer/features/WorkspaceSync/SyncBar';
+import { ProductManagementProvider } from '@/renderer/omniagents-ui/product-management-context';
 import { initAgentAttention } from '@/renderer/services/agent-attention';
 import { initAppHistory } from '@/renderer/services/app-history';
 import { initPwaInstall } from '@/renderer/services/pwa-install';
@@ -75,16 +76,18 @@ export const App = () => {
             <ErrorBoundary FallbackComponent={ErrorBoundaryFallback}>
               <SystemInfoLoadingGate>
                 <AuthGate>
-                  <ConnectionStatusBanner />
-                  <MigrationNotice />
-                  <div className="flex min-h-0 w-full flex-1">
-                    <MainContent />
-                  </div>
-                  <QuickCapture />
-                  <VoiceHotkeys />
-                  <CommandPalette />
-                  <SyncBar />
-                  <StatusAnnouncer />
+                  <ProductManagementProvider>
+                    <ConnectionStatusBanner />
+                    <MigrationNotice />
+                    <div className="flex min-h-0 w-full flex-1">
+                      <MainContent />
+                    </div>
+                    <QuickCapture />
+                    <VoiceHotkeys />
+                    <CommandPalette />
+                    <SyncBar />
+                    <StatusAnnouncer />
+                  </ProductManagementProvider>
                 </AuthGate>
               </SystemInfoLoadingGate>
               <ToastContainer />

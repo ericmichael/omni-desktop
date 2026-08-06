@@ -40,6 +40,8 @@ import {
   listOrgs as githubListOrgs,
   searchRepos as githubSearchRepos,
 } from '@/main/github-auth';
+import { durableLocalCodexAgentHostEnv, LocalCodexAccountOwner } from '@/main/local-codex-account-owner';
+import { durableLocalMcpAgentHostEnv, LocalMcpConfigOwner } from '@/main/local-mcp-config-owner';
 import { getOrCreateMachineIdentity, renameMachine } from '@/main/machine-identity';
 import { MainProcessManager } from '@/main/main-process-manager';
 import { getMcpBinPath } from '@/main/mcp-config-manager';
@@ -72,6 +74,7 @@ import {
   protectedSnapshotsFromTabs,
   registerSnapshotHandlers,
 } from '@/main/snapshot-manager';
+import { reconcilePendingSnapshotUploads } from '@/main/snapshot-upload-ledger';
 import { getStore } from '@/main/store';
 import { wireTunnelReverseHandlers } from '@/main/tunnel-handler';
 import {
@@ -243,9 +246,10 @@ try {
 
 /**
  * Materialize the agent's on-disk config from the store (desktop = single user,
- * plaintext). The store is the source of truth; these files are a derived copy
- * `omni serve` reads. Merges the managed `omni-projects` stdio MCP entry and
- * writes a real `.env`. Runs at startup and after every `settings:*` write.
+ * plaintext). Models/network/env remain Desktop-owned; mcp.json is a derived
+ * copy only until the local MCP ownership marker transfers it to Omniagents.
+ * Merges the managed `omni-projects` stdio MCP entry and writes a real `.env`.
+ * Runs at startup and after every `settings:*` write.
  */
 function materializeDesktopConfig(): void {
   try {
@@ -256,6 +260,7 @@ function materializeDesktopConfig(): void {
       network: store.get('networkConfig') ?? emptyNetworkConfig(),
       mode: 'plaintext',
       managedMcpEntry: buildStdioMcpEntry(getMcpBinPath()),
+      writeMcp: store.get('mcpConfigOwnership') !== 'omniagents',
     });
     writeFileSync(join(OMNI_CONFIG_DIR, '.env'), store.get('envVars') ?? '', 'utf-8');
   } catch (err) {
@@ -295,6 +300,8 @@ const [omniInstall, cleanupOmniInstall] = createOmniInstallManager({
   ipc: main.ipc,
   sendToWindow: main.sendToWindow,
 });
+let localMcpConfigOwner: LocalMcpConfigOwner;
+let localMcpOwnershipPromise: Promise<void> | null = null;
 const [processManager, cleanupProcessManager] = createProcessManager({
   ipc: main.ipc,
   sendToWindow: main.sendToWindow,
@@ -305,11 +312,66 @@ const [processManager, cleanupProcessManager] = createProcessManager({
     gitCredentials: store.get('gitCredentials') ?? [],
   }),
   resolveGitToken: (id) => secretStore.getGitToken(id),
+  waitForRuntimeInstall: () => omniInstall.waitForInstallCompletion(),
   // Inject the user's Settings → Environment vars into the `omni serve` process
   // (the agent/model loop), mirroring server mode's getExtraEnv. The sandbox
   // *container* gets these separately via the materialized `<config>/.env`,
   // which omni serve folds into manifest.environment (`_inject_user_env`).
-  getExtraEnv: () => parseEnvVars(store.get('envVars') ?? ''),
+  // Trusted local-Electron topology attestation. Deliberately overrides a
+  // user-authored value; server managers never inject it and keep the broker
+  // account-mutation gate disabled.
+  getExtraEnv: () =>
+    durableLocalMcpAgentHostEnv(durableLocalCodexAgentHostEnv(parseEnvVars(store.get('envVars') ?? ''))),
+  durableLocalCodexAccountMutations: true,
+  durableLocalMcpMutations: true,
+  prepareLocalMcpOwnership: (status) => ensureLocalMcpOwnership(status),
+  onManagementReady: async (proc) => {
+    try {
+      await ensureLocalMcpOwnership(await proc.getManagementMcpStatus());
+    } catch (error) {
+      // Keep the management read surface available during migration. The
+      // canonical mutation broker still reruns the same parity proof and
+      // fails closed until it succeeds.
+      console.warn(`[mcp-ownership] local transfer deferred: ${(error as Error).message}`);
+    }
+  },
+});
+localMcpConfigOwner = new LocalMcpConfigOwner({
+  store,
+  managedEntry: buildStdioMcpEntry(getMcpBinPath()),
+  environment: () => ({ ...process.env, ...parseEnvVars(store.get('envVars') ?? '') }),
+});
+/** Complete the local MCP ownership transfer once the management host is
+ * ready. The transfer is fail-closed and idempotent; legacy reads can still
+ * render while a cold host is starting. */
+function ensureLocalMcpOwnership(status?: Record<string, unknown>): Promise<void> {
+  if (store.get('mcpConfigOwnership') === 'omniagents') {
+    return Promise.resolve();
+  }
+  if (!localMcpOwnershipPromise) {
+    localMcpOwnershipPromise = (status ? Promise.resolve(status) : processManager.getManagementMcpStatus())
+      .then((current) => localMcpConfigOwner.ensureOwnership(current))
+      .then(() => {
+        main.sendToWindow('store:changed', main.getStoreSnapshot ? main.getStoreSnapshot() : store.store);
+      })
+      .finally(() => {
+        localMcpOwnershipPromise = null;
+      });
+  }
+  return localMcpOwnershipPromise;
+}
+const localCodexAccount = new LocalCodexAccountOwner({
+  store,
+  runtime: {
+    status: () => processManager.getManagementAccountStatus(),
+    mutate: (request) => processManager.mutateManagement(request),
+  },
+  legacy: {
+    status: codexStatus,
+    login: () => loginWithBrowser((url) => void shell.openExternal(url)),
+    link: (onCode) => loginWithDeviceFlow({ onCode }),
+    logout: codexLogout,
+  },
 });
 const routineBridge = new RoutineBridge(main.sendToWindow);
 const scheduledTaskManager = new ScheduledTaskManager({
@@ -378,12 +440,23 @@ registerSandboxInventoryHandlers(main.ipc, {
     ),
 });
 
-// Startup snapshot GC. Code tabs cascade-delete on remove; this sweep
+// Startup snapshot upload recovery + GC. Code tabs cascade-delete on remove; this sweep
 // catches stale conversation snapshots older than 14 days (and any tar
 // orphaned by a crashed cascade). Protected set = every code tab's
 // snapshotRef. Best-effort; failures
 // don't block boot.
 void (async () => {
+  try {
+    const recovery = await reconcilePendingSnapshotUploads(join(OMNI_CONFIG_DIR, 'snapshots'), { force: true });
+    if (recovery.persisted.length > 0) {
+      console.log(`[snapshot-upload] recovered ${recovery.persisted.length} pending snapshot upload(s)`);
+    }
+    if (recovery.forcedUncertain.length > 0) {
+      console.warn(`[snapshot-upload] ${recovery.forcedUncertain.length} forced-shutdown snapshot(s) remain uncertain`);
+    }
+  } catch (err) {
+    console.error('[snapshot-upload] startup reconciliation failed:', err);
+  }
   try {
     const keep = new Set<string>();
     for (const tab of store.get('codeTabs') ?? []) {
@@ -842,7 +915,16 @@ for (const sig of ['SIGINT', 'SIGTERM'] as const) {
 
 //#region Shared IPC handlers (config:*, util:*, skills:*)
 
-registerConfigHandlers(main.ipc, OMNI_CONFIG_DIR);
+registerConfigHandlers(main.ipc, OMNI_CONFIG_DIR, {
+  beforeWrite: (filePath) => {
+    if (
+      store.get('mcpConfigOwnership') === 'omniagents' &&
+      resolve(filePath) === resolve(OMNI_CONFIG_DIR, 'mcp.json')
+    ) {
+      throw new Error('Omniagents owns mcp.json; use the canonical per-server MCP controls');
+    }
+  },
+});
 registerUtilHandlers(main.ipc, {
   fetchFn: ((input, init) => net.fetch(input as string, init)) as typeof globalThis.fetch,
   launcherVersion: app.getVersion(),
@@ -858,6 +940,17 @@ registerSettingsConfigHandlers(
   () => {
     materializeDesktopConfig();
     main.sendToWindow('store:changed', main.getStoreSnapshot ? main.getStoreSnapshot() : store.store);
+  },
+  {},
+  {
+    // Reading the legacy document must remain responsive while a cold
+    // management host starts. Ownership is transferred by the readiness hook
+    // above; this guard only blocks writes after the marker is durable.
+    beforeSetMcp: () => {
+      if (store.get('mcpConfigOwnership') === 'omniagents') {
+        throw new Error('Omniagents owns MCP configuration; use the canonical per-server MCP controls');
+      }
+    },
   }
 );
 registerGitCredentialHandlers(
@@ -947,12 +1040,10 @@ main.ipc.handle('util:open-external', (_, url) => shell.openExternal(url));
 
 //#region Codex (ChatGPT OAuth) handlers
 
-main.ipc.handle('codex:login', () => loginWithBrowser((url) => void shell.openExternal(url)));
-main.ipc.handle('codex:link', () =>
-  loginWithDeviceFlow({ onCode: (code) => main.sendToWindow('codex:device-code', code) })
-);
-main.ipc.handle('codex:logout', () => codexLogout());
-main.ipc.handle('codex:status', () => codexStatus());
+main.ipc.handle('codex:login', () => localCodexAccount.login());
+main.ipc.handle('codex:link', () => localCodexAccount.link((code) => main.sendToWindow('codex:device-code', code)));
+main.ipc.handle('codex:logout', () => localCodexAccount.logout());
+main.ipc.handle('codex:status', () => localCodexAccount.status());
 
 //#endregion
 

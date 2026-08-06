@@ -22,6 +22,7 @@ import {
   isBootReady,
 } from '@/shared/machines/chat-boot.machine';
 import { createMachineLogger } from '@/shared/machines/machine-logger';
+import type { ExecutionTarget } from '@/shared/types';
 
 import type { UseChatSessionReturn } from './use-chat-session';
 
@@ -35,7 +36,7 @@ export type UseChatBootOptions = {
   chatSession: UseChatSessionReturn;
   sessionId: string | undefined;
   /** Explicit execution identity for workspace capability probes. */
-  environmentId?: string;
+  executionTarget?: ExecutionTarget;
   /** Realtime WS URL, for the voice capability probe. */
   wsRealtimeUrl?: string;
   /** Optional auth token for the realtime probe. */
@@ -52,7 +53,7 @@ export type UseChatBootOptions = {
  * invoker wrapper catches and dispatches BOOTSTRAP_FAILED.
  */
 async function runBootstrap(opts: UseChatBootOptions): Promise<ChatBootCapabilities> {
-  const { client, environmentId, wsRealtimeUrl, token } = opts;
+  const { client, executionTarget, wsRealtimeUrl, token } = opts;
 
   // 1. Register client-callable functions the server can invoke.
   // ``ui.request_tool_approval`` is gone: omniagents 0.16 moved
@@ -85,14 +86,14 @@ async function runBootstrap(opts: UseChatBootOptions): Promise<ChatBootCapabilit
   try {
     const funcs = await client.listServerFunctions();
     const names = new Set(funcs.map((f) => f.name));
-    if (environmentId && names.has('fs_list_dir') && names.has('fs_get_workspace_root')) {
+    if (executionTarget && names.has('fs_list_dir') && names.has('fs_get_workspace_root')) {
       workspaceSupported = true;
       try {
         // Use fs_get_workspace_root, not fs_get_cwd: for sandboxed agents
         // the manifest root (what the agent's tools actually see) may
         // differ from omni serve's host cwd, and the prompt must match
         // tool reality.
-        const res = (await client.serverCall('fs_get_workspace_root', undefined, undefined, environmentId)) as any;
+        const res = (await client.serverCall('fs_get_workspace_root', undefined, undefined, executionTarget)) as any;
         if (res?.path) {
           workspacePath = String(res.path);
         }
@@ -148,7 +149,7 @@ function normalizeAgentName(name: string): string {
 // ---------------------------------------------------------------------------
 
 export function useChatBoot(opts: UseChatBootOptions) {
-  const { client, chatSession, environmentId, sessionId, wsRealtimeUrl, token } = opts;
+  const { client, chatSession, executionTarget, sessionId, wsRealtimeUrl, token } = opts;
 
   // Actor wiring — we close over the live dependencies inside the actor
   // definitions so the machine stays pure.
@@ -160,9 +161,21 @@ export function useChatBoot(opts: UseChatBootOptions) {
         // dispatches RPC_CONNECTED on transition. Cleaned up when the
         // boot machine leaves awaitingConnection.
         waitForConnection: fromCallback<ChatBootEvent>(({ sendBack }) => {
+          let failureSent = false;
           const check = () => {
             if (client.isConnected) {
               sendBack({ type: 'RPC_CONNECTED' });
+              return;
+            }
+            const snapshot = client.actor.getSnapshot();
+            if (
+              !failureSent &&
+              snapshot.value === 'disconnected' &&
+              snapshot.context.permanent &&
+              snapshot.context.error
+            ) {
+              failureSent = true;
+              sendBack({ type: 'RPC_FAILED', error: snapshot.context.error });
             }
           };
           // Seed: already connected?
@@ -180,7 +193,7 @@ export function useChatBoot(opts: UseChatBootOptions) {
         // Runs the bootstrap capability calls and dispatches the result.
         bootstrap: fromCallback<ChatBootEvent>(({ sendBack }) => {
           let cancelled = false;
-          runBootstrap({ client, chatSession, environmentId, sessionId, wsRealtimeUrl, token })
+          runBootstrap({ client, chatSession, executionTarget, sessionId, wsRealtimeUrl, token })
             .then((capabilities) => {
               if (!cancelled) {
                 sendBack({ type: 'BOOTSTRAP_OK', capabilities });
@@ -250,7 +263,7 @@ export function useChatBoot(opts: UseChatBootOptions) {
     // invokers via closure and propagated via SET_SESSION_ID events. If
     // we re-created the machine on every sessionId change, the boot state
     // would reset.
-  }, [client, chatSession, environmentId, wsRealtimeUrl, token]);
+  }, [client, chatSession, executionTarget, wsRealtimeUrl, token]);
 
   const actor = useActorRef(machine, {
     input: { sessionId },
