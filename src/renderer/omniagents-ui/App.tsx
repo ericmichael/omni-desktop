@@ -29,21 +29,24 @@ import {
 import { persistedStoreApi } from '@/renderer/services/store';
 import { forwardEvent, registerColumnActor } from '@/renderer/services/supervisor-bridge';
 import { VoiceScopeContext } from '@/renderer/services/voice-recording';
-import type { TicketId } from '@/shared/types';
+import type { ExecutionTarget, TicketId } from '@/shared/types';
 
+import { negotiatedPlanTasks } from './canonical-plan-tasks';
 import type { PendingMessage } from './ChatShell';
 import { type ArtifactItem, ArtifactsPanel } from './components/ArtifactsPanel';
 import { BashJobs, type BashJobsKillResult, type BashJobsTailResult, type BashJobSummary } from './components/BashJobs';
+import { ElicitationCard } from './components/ElicitationCard';
 import { EscalationBanner, type EscalationInfo } from './components/EscalationBanner';
 import { GoalPanel, type GoalSnapshot } from './components/GoalPanel';
 import { Header } from './components/Header';
 import { Input } from './components/Input';
 import { LoopPanel, type LoopTaskSnapshot } from './components/LoopPanel';
 import { ArtifactPortalProvider, type Attachment, MessageList } from './components/MessageList';
+import { ModelSessionControls } from './components/ModelSessionControls';
 import { type NotificationInfo, Notifications } from './components/Notifications';
 import { QueuedMessages } from './components/QueuedMessages';
 import { type RecapInfo, RecapPanel } from './components/RecapPanel';
-import { type SessionItem, SessionList } from './components/SessionList';
+import { SessionList } from './components/SessionList';
 import { Sidebar } from './components/Sidebar';
 import { Tasks, type TaskSummary } from './components/Tasks';
 import { WakeupPanel, type WakeupSnapshot } from './components/WakeupPanel';
@@ -52,6 +55,9 @@ import { WorkspacePicker } from './components/WorkspacePicker';
 import { OmniAgentsHeaderActionsPortal, OmniAgentsHeaderActionsProvider } from './header-actions';
 import { useChatBoot } from './hooks/use-chat-boot';
 import { useChatSession } from './hooks/use-chat-session';
+import { useConversationManagement } from './hooks/use-conversation-management';
+import { loadCanonicalSessionList } from './rpc/canonical-session-list';
+import type { ElicitationRequest, ElicitationResponse } from './rpc/elicitation';
 import { useRPCClient, useRPCConnected } from './rpc-context';
 import { useUiConfig } from './ui-config';
 
@@ -64,7 +70,7 @@ export type ClientToolCallHandler = (
 
 export function App({
   sessionId: sessionIdProp,
-  environmentId,
+  executionTarget,
   onSessionChange,
   variables: variablesProp,
   voiceVariables,
@@ -91,7 +97,7 @@ export function App({
 }: {
   sessionId?: string;
   /** Explicit execution identity. Never inferred from the conversation id. */
-  environmentId?: string;
+  executionTarget?: ExecutionTarget;
   onSessionChange?: (sessionId: string | undefined) => void;
   variables?: Record<string, unknown>;
   voiceVariables?: Record<string, unknown>;
@@ -119,6 +125,7 @@ export function App({
   routineId?: string;
   workspaceDir?: string;
 }) {
+  const environmentId = executionTarget?.environmentId;
   const uiConfig = useUiConfig();
   const launcherStore = useStore(persistedStoreApi.$atom);
   const [ui, setUI] = useState<UIState>('connecting');
@@ -131,7 +138,6 @@ export function App({
   onRunStartedRef.current = onRunStarted;
   const connected = useRPCConnected();
   const [voiceEnabled, setVoiceEnabled] = useState(false);
-  const [sessions, setSessions] = useState<SessionItem[]>([]);
   const [_usageTotals, setUsageTotals] = useState<any | undefined>(undefined);
   const [_usageDelta, setUsageDelta] = useState<any | undefined>(undefined);
   const [_modelInfo, setModelInfo] = useState<
@@ -270,24 +276,54 @@ export function App({
     client,
     chatSession: machine,
     sessionId: initialBootSessionId,
-    environmentId,
+    executionTarget,
     wsRealtimeUrl: uiConfig.wsRealtimeUrl,
     token: uiConfig.token,
   });
 
-  const refreshSessions = useCallback(async () => {
-    try {
-      const list = await client.listSessions();
-      setSessions(list);
-    } catch {}
-  }, [client]);
+  const {
+    sessions,
+    refreshSessions,
+    managementSupported,
+    setSearchQuery,
+    searchResults,
+    searching: conversationsSearching,
+    busyThreadIds,
+    operationError: conversationOperationError,
+    dismissOperationError: dismissConversationOperationError,
+    renameThread,
+    setThreadPinned,
+    archiveThread,
+    restoreThread,
+  } = useConversationManagement(client, connected);
+
+  const [elicitations, setElicitations] = useState<ElicitationRequest[]>([]);
+  useEffect(() => {
+    const refresh = () => {
+      setElicitations(
+        client.elicitations
+          .list()
+          .filter((request) => request.sessionId === undefined || request.sessionId === sessionId)
+      );
+    };
+    refresh();
+    return client.elicitations.onChange(refresh);
+  }, [client, sessionId]);
+  const respondToElicitation = useCallback(
+    (request: ElicitationRequest, response: ElicitationResponse) =>
+      client.elicitations.respond(request.elicitationId, response),
+    [client]
+  );
 
   // Publish this column's live activity (thinking / tool line / pending
   // approval) so deck chrome can show a glanceable "now doing X" without
   // reaching into the transcript. Scoped by the same context the voice
   // system uses (the Code tab id).
   const activityScope = useContext(VoiceScopeContext);
-  const pendingApproval = useMemo(() => items.some((it) => (it as { type?: string }).type === 'approval'), [items]);
+  const pendingApproval = useMemo(
+    () => items.some((it) => (it as { type?: string }).type === 'approval') || elicitations.length > 0,
+    [items, elicitations.length]
+  );
   useEffect(() => {
     if (!activityScope) {
       return;
@@ -330,7 +366,11 @@ export function App({
   // once bootstrap is done. Otherwise, show chat as soon as boot is
   // ready.
   useEffect(() => {
-    if (bootState.phase === 'bootstrapError') {
+    if (
+      bootState.phase === 'connectionError' ||
+      bootState.phase === 'bootstrapError' ||
+      bootState.phase === 'sessionError'
+    ) {
       setUI('error');
       return;
     }
@@ -340,15 +380,12 @@ export function App({
     const resume = uiConfig.searchParams.get('resume') === 'true';
     const sid = sessionIdProp || uiConfig.searchParams.get('session') || undefined;
     if (resume && !sid) {
-      client
-        .listSessions()
-        .then((list) => setSessions(list))
-        .catch(() => {});
+      void refreshSessions();
       setUI('resume');
     } else {
       setUI('chat');
     }
-  }, [bootState.phase, bootState.ready, client, sessionIdProp, uiConfig.searchParams]);
+  }, [bootState.phase, bootState.ready, refreshSessions, sessionIdProp, uiConfig.searchParams]);
 
   // Side-effect-only listeners for events the machine doesn't handle
   // (session state + filtering is handled by the useChatSession hook).
@@ -453,10 +490,14 @@ export function App({
         }
         return;
       }
-      if (fn === 'ui.workers.update') {
-        // Broadcast from omni-code's worker spawn / completion hooks.
-        // Snapshot is the full per-session workers list; replace state
-        // wholesale.
+      if (fn === 'ui.workers.update' || fn === 'ui.subagents.update') {
+        // Worker snapshot broadcast. Older omniagents (the pinned PyPI
+        // release) sends ``ui.workers.update``; newer ones send the
+        // unified ``ui.subagents.update`` from the subagent bus, whose
+        // entries carry ``kind`` (workers plus agent-tool runs — this
+        // panel renders workers only, and agent_tool entries have no
+        // worker_id). The launcher must speak both across its supported
+        // server range; drop the legacy branch when the pin advances.
         const request_id = String(p?.request_id ?? '');
         const eventSessionId = typeof p?.session_id === 'string' ? p.session_id : undefined;
         const currentSessionId = actor.getSnapshot().context.sessionId;
@@ -469,7 +510,11 @@ export function App({
         const args = p?.args || {};
         const snap = args?.snapshot;
         if (Array.isArray(snap)) {
-          setWorkers(snap as WorkerSummary[]);
+          setWorkers(
+            (snap as Array<WorkerSummary & { kind?: string }>).filter(
+              (entry) => entry.kind !== 'agent_tool',
+            ),
+          );
         }
         if (request_id) {
           client.clientResponse(request_id, true, { ack: true }).catch(() => {});
@@ -679,12 +724,12 @@ export function App({
     return items.filter((it): it is ArtifactItem => it.type === 'artifact');
   }, [items]);
 
-  // Derive Tasks + BashJobs from the items stream — every tool_result whose
-  // metadata carries a `tasks_snapshot` / `bash_jobs_snapshot` overwrites the
-  // running snapshot, so the latest one wins. This makes the panels self-
-  // populating on session load (history replay) without a separate listener.
+  // The canonical main plan is authoritative when the complete plans/diffs
+  // feature was negotiated. Legacy task snapshots remain a compatibility
+  // fallback only for older runtimes. Bash-job snapshots are unrelated and
+  // continue to use their existing projection.
   const { rawTasks, tasks, derivedBashJobs } = useMemo(() => {
-    let lastTasks: TaskSummary[] = [];
+    let legacyTasks: TaskSummary[] = [];
     let lastJobs: BashJobSummary[] = [];
     for (const it of items) {
       if (it.type !== 'tool') {
@@ -692,19 +737,21 @@ export function App({
       }
       const md = (it as { metadata?: { tasks_snapshot?: unknown; bash_jobs_snapshot?: unknown } }).metadata;
       if (Array.isArray(md?.tasks_snapshot)) {
-        lastTasks = md.tasks_snapshot as TaskSummary[];
+        legacyTasks = md.tasks_snapshot as TaskSummary[];
       }
       if (Array.isArray(md?.bash_jobs_snapshot)) {
         lastJobs = md.bash_jobs_snapshot as BashJobSummary[];
       }
     }
+    const planFeatureSupported = connected && client.supportsExperimentalFeature('plansAndDiffs');
+    const lastTasks = negotiatedPlanTasks(items, legacyTasks, planFeatureSupported);
     // Filter out completed tasks that were dismissed at the last user
     // submit, then apply the idle-mode "hide completed" rule on top so
     // the panel quiets down between runs.
     const liveTasks = lastTasks.filter((t) => !(t.status === 'completed' && dismissedTaskIds.has(t.id)));
     const filteredTasks = runActive ? liveTasks : liveTasks.filter((t) => t.status !== 'completed');
     return { rawTasks: lastTasks, tasks: filteredTasks, derivedBashJobs: lastJobs };
-  }, [items, runActive, dismissedTaskIds]);
+  }, [client, connected, items, runActive, dismissedTaskIds]);
 
   // Live override (from ui.bash_jobs.update broadcasts and bash_jobs.* server
   // calls) takes precedence over history-derived state when present. Mirror
@@ -750,14 +797,14 @@ export function App({
         'workers.kill',
         { worker_id },
         sessionId,
-        environmentId
+        executionTarget
       )) as unknown as WorkersKillResult;
       if (Array.isArray(res?.snapshot)) {
         setWorkers(res.snapshot as WorkerSummary[]);
       }
       return res;
     },
-    [client, environmentId, sessionId]
+    [client, executionTarget, sessionId]
   );
 
   const handleBashKill = useCallback(
@@ -769,14 +816,14 @@ export function App({
         'bash_jobs.kill',
         { job_id },
         sessionId,
-        environmentId
+        executionTarget
       )) as unknown as BashJobsKillResult;
       if (Array.isArray(res?.snapshot)) {
         setLiveBashJobs(res.snapshot);
       }
       return res;
     },
-    [client, environmentId, sessionId]
+    [client, executionTarget, sessionId]
   );
 
   const handleBashTail = useCallback(
@@ -792,7 +839,7 @@ export function App({
         'bash_jobs.tail',
         args,
         sessionId,
-        environmentId
+        executionTarget
       )) as unknown as BashJobsTailResult & {
         snapshot?: BashJobSummary[];
       };
@@ -801,20 +848,20 @@ export function App({
       }
       return res;
     },
-    [client, environmentId, sessionId]
+    [client, executionTarget, sessionId]
   );
 
   const handleBashWarmup = useCallback(async () => {
     if (!environmentId) {
       throw new Error('Execution environment unavailable');
     }
-    const res = (await client.serverCall('bash_jobs.list', {}, sessionId, environmentId)) as unknown as {
+    const res = (await client.serverCall('bash_jobs.list', {}, sessionId, executionTarget)) as unknown as {
       snapshot?: BashJobSummary[];
     };
     if (Array.isArray(res?.snapshot)) {
       setLiveBashJobs(res.snapshot);
     }
-  }, [client, environmentId, sessionId]);
+  }, [client, executionTarget, sessionId]);
 
   const handleBashDismiss = useCallback((job_id: string) => {
     setDismissedJobIds((prev) => {
@@ -945,7 +992,13 @@ export function App({
             } else {
               await client.startRun(
                 text,
-                environmentId ? { mode: 'explicit', environment_id: environmentId } : { mode: 'none' },
+                executionTarget
+                  ? {
+                      mode: 'explicit',
+                      environment_id: executionTarget.environmentId,
+                      environment_generation: executionTarget.environmentGeneration,
+                    }
+                  : { mode: 'none' },
                 sessionId
               );
             }
@@ -968,7 +1021,7 @@ export function App({
               args = { text: argText };
             }
           }
-          const result = await client.serverCall(name, args, sessionId, environmentId);
+          const result = await client.serverCall(name, args, sessionId, executionTarget);
           // /recap renders in the docked RecapPanel via the ui.recap
           // broadcast — don't also dump it into the chat transcript. The
           // return value carries the text as a fallback if the broadcast
@@ -1124,7 +1177,13 @@ export function App({
 
         const startResult = await client.startRun(
           agentPrompt,
-          environmentId ? { mode: 'explicit', environment_id: environmentId } : { mode: 'none' },
+          executionTarget
+            ? {
+                mode: 'explicit',
+                environment_id: executionTarget.environmentId,
+                environment_generation: executionTarget.environmentGeneration,
+              }
+            : { mode: 'none' },
           liveSessionId,
           variables,
           content
@@ -1140,7 +1199,7 @@ export function App({
     },
     [
       client,
-      environmentId,
+      executionTarget,
       sessionId,
       actor,
       bootState.actor,
@@ -1331,14 +1390,14 @@ export function App({
         if (runOverrides?.safeToolOverrides) {
           goalArgs.safe_tool_overrides = runOverrides.safeToolOverrides;
         }
-        await client.serverCall('goal', goalArgs, sid, environmentId);
+        await client.serverCall('goal', goalArgs, sid, executionTarget);
       },
       goalStop: async () => {
         const sid = actor.getSnapshot().context.sessionId;
         if (!sid) {
           return;
         }
-        await client.serverCall('goal.stop', {}, sid, environmentId).catch(() => {});
+        await client.serverCall('goal.stop', {}, sid, executionTarget).catch(() => {});
       },
       send: async (message) => {
         await awaitChatReady();
@@ -1618,7 +1677,7 @@ export function App({
       newSession: () => newSessionRef.current(),
       // Feeds the launcher's Projects and Recents sections — cap the server
       // response so a long history isn't serialized on every poll.
-      listSessions: () => client.listSessions({ limit: MAX_CHAT_CONVERSATIONS }),
+      listSessions: () => loadCanonicalSessionList(client, MAX_CHAT_CONVERSATIONS),
       notify: (content: string, source: string) =>
         // Deliver as a role="assistant" history item that triggers a run — the
         // exact wakeup the notification flusher uses internally. Uses the
@@ -1659,7 +1718,7 @@ export function App({
       if (id) {
         if (workspaceSupported) {
           try {
-            const res = (await client.serverCall('fs_get_workspace_root', {}, id, environmentId)) as any;
+            const res = (await client.serverCall('fs_get_workspace_root', {}, id, executionTarget)) as any;
             if (res?.path) {
               setWorkspacePath(res.path);
             }
@@ -1673,7 +1732,12 @@ export function App({
             // Match the chat-boot path: prefer the sandbox manifest root
             // over omni serve's host cwd so docker / remote sandboxes show
             // the path the agent's tools actually operate on.
-            const res = (await client.serverCall('fs_get_workspace_root', undefined, undefined, environmentId)) as any;
+            const res = (await client.serverCall(
+              'fs_get_workspace_root',
+              undefined,
+              undefined,
+              executionTarget
+            )) as any;
             if (res?.path) {
               setWorkspacePath(res.path);
             }
@@ -1687,7 +1751,9 @@ export function App({
       // immediately instead of waiting for the next turn boundary.
       if (resolvedId) {
         try {
-          const res = (await client.serverCall('goal.status', {}, resolvedId)) as { snapshot?: unknown } | undefined;
+          const res = (await client.serverCall('goal.status', {}, resolvedId, executionTarget)) as
+            | { snapshot?: unknown }
+            | undefined;
           const snap = res?.snapshot;
           setGoalSnapshot(snap && typeof snap === 'object' ? (snap as GoalSnapshot) : null);
         } catch {
@@ -1702,7 +1768,9 @@ export function App({
       // ignore so the panel stays empty.
       if (resolvedId) {
         try {
-          const res = (await client.serverCall('wakeup.status', {}, resolvedId)) as { snapshot?: unknown } | undefined;
+          const res = (await client.serverCall('wakeup.status', {}, resolvedId, executionTarget)) as
+            | { snapshot?: unknown }
+            | undefined;
           const snap = res?.snapshot;
           setWakeupSnapshot(snap && typeof snap === 'object' ? (snap as WakeupSnapshot) : null);
         } catch {
@@ -1713,7 +1781,9 @@ export function App({
       }
       if (resolvedId) {
         try {
-          const res = (await client.serverCall('loop.status', {}, resolvedId)) as { snapshot?: unknown } | undefined;
+          const res = (await client.serverCall('loop.status', {}, resolvedId, executionTarget)) as
+            | { snapshot?: unknown }
+            | undefined;
           const snap = res?.snapshot;
           setLoopTasks(Array.isArray(snap) ? (snap as LoopTaskSnapshot[]) : []);
         } catch {
@@ -1727,7 +1797,7 @@ export function App({
       // running when we attach.
       if (resolvedId) {
         try {
-          const res = (await client.serverCall('workers.list', {}, resolvedId, environmentId)) as
+          const res = (await client.serverCall('workers.list', {}, resolvedId, executionTarget)) as
             | { snapshot?: unknown }
             | undefined;
           const snap = res?.snapshot;
@@ -1740,7 +1810,7 @@ export function App({
       }
       setUI('chat');
     },
-    [client, environmentId, loadSession, workspaceSupported, onSessionChange]
+    [client, executionTarget, loadSession, workspaceSupported, onSessionChange]
   );
   // Controller `newSession` → fresh conversation (loadSession mints a new id).
   newSessionRef.current = () => void handleSelectSession(undefined);
@@ -1764,16 +1834,10 @@ export function App({
       await handleSelectSession(initialSessionParam);
       const initial = uiConfig.searchParams.get('initial');
       if (initial && !initialSent) {
-        // Check if session has history - if items is still empty after handleSelectSession, it's a new session
-        // We need to check the actual history since handleSelectSession sets items
-        try {
-          const history = await client.getSessionHistory(initialSessionParam);
-          if (history.length === 0) {
-            handleSubmit(initial);
-            setInitialSent(true);
-          }
-        } catch {
-          // If we can't get history, assume it's new and send initial
+        // handleSelectSession has already loaded the authoritative canonical
+        // transcript into the actor. Do not issue a second legacy history read
+        // merely to decide whether the URL-provided initial prompt is needed.
+        if (actor.getSnapshot().context.items.length === 0) {
           handleSubmit(initial);
           setInitialSent(true);
         }
@@ -1800,13 +1864,6 @@ export function App({
   }, [sessionIdProp, connected, handleSelectSession, actor]);
 
   useEffect(() => {
-    if (!connected) {
-      return;
-    }
-    refreshSessions();
-  }, [connected, refreshSessions]);
-
-  useEffect(() => {
     if (readyRef.current || !onReady) {
       return;
     }
@@ -1828,7 +1885,7 @@ export function App({
         if (text) {
           args.text = text;
         }
-        await client.serverCall(func, args, sessionId);
+        await client.serverCall(func, args, sessionId, executionTarget);
       } catch {}
     },
     [client, sessionId]
@@ -1868,7 +1925,22 @@ export function App({
   };
 
   let content: React.ReactNode = null;
-  if (ui === 'resume') {
+  if (ui === 'error') {
+    content = (
+      <div className="app flex-col">
+        <Header agentName={agentName} />
+        <div className="flex flex-1 items-center justify-center p-6">
+          <div className="max-w-md space-y-3 rounded-lg border bg-card p-5 text-center shadow-sm">
+            <h2 className="text-base font-semibold">Couldn’t connect to Omniagents</h2>
+            <p className="text-sm text-muted-foreground">{bootState.error || 'The agent runtime is unavailable.'}</p>
+            <Button type="button" onClick={bootState.retry}>
+              Try again
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  } else if (ui === 'resume') {
     content = (
       <div className="app flex-col">
         <Header agentName={agentName} />
@@ -1888,6 +1960,17 @@ export function App({
             onClose={() => setSidebarOpen(false)}
             onNewChat={onNewChat}
             onSelect={(id) => handleSelectSession(id)}
+            managementSupported={managementSupported}
+            searchResults={searchResults}
+            searching={conversationsSearching}
+            onSearchQueryChange={setSearchQuery}
+            busyThreadIds={busyThreadIds}
+            operationError={conversationOperationError}
+            onDismissOperationError={dismissConversationOperationError}
+            onRename={renameThread}
+            onSetPinned={setThreadPinned}
+            onArchive={archiveThread}
+            onRestore={restoreThread}
           />
         )}
         <div className="flex-1 flex flex-col min-h-0 min-w-0">
@@ -1975,6 +2058,13 @@ export function App({
                 />
                 <RecapPanel recap={recap} onDismiss={() => setRecap(null)} />
                 <EscalationBanner escalation={escalation} />
+                {elicitations.map((request) => (
+                  <ElicitationCard
+                    key={request.elicitationId}
+                    request={request}
+                    onRespond={(response) => respondToElicitation(request, response)}
+                  />
+                ))}
                 {stagedContext.length > 0 && (
                   // MCP-Apps staged context chips. Each ``ui/update-model-context``
                   // entry shows up here so the user knows what'll be sent on the
@@ -2004,6 +2094,9 @@ export function App({
                     ))}
                   </div>
                 )}
+                {sessionId && connected && bootState.ready ? (
+                  <ModelSessionControls sessionId={sessionId} transport={client} disabled={runActive} />
+                ) : null}
                 <Input
                   disabled={!connected || !bootState.ready}
                   thinking={thinking}
@@ -2069,7 +2162,7 @@ export function App({
         {workspacePickerOpen && (
           <WorkspacePicker
             sessionId={sessionId}
-            environmentId={environmentId}
+            executionTarget={executionTarget}
             initialPath={workspacePath || undefined}
             onSelect={(path) => {
               setWorkspacePath(path);
