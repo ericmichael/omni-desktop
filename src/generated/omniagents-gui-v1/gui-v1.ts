@@ -22,6 +22,7 @@ export interface StartRunParams {
   workflow_name?: string;
   group_id?: string;
   safe_tool_overrides?: Record<string, unknown>;
+  approvals_reviewer?: string;
   prompt_role?: string;
 }
 export interface StartRunResult { run_id: string; session_id: string }
@@ -220,6 +221,10 @@ export interface ListItemsParams {
 export interface GetItemParams {
   thread_id: string;
   item_id: string;
+}
+export interface SetSessionApprovalsParams {
+  session_id: string;
+  reviewer: string;
 }
 export interface AgentHostRegisterWorkspaceParams {
   workspace_id: string;
@@ -782,6 +787,20 @@ export interface McpServerStatusChangedParams {
   seq?: number;
   stream_id?: string;
 }
+export interface ToolApprovalReviewedParams {
+  call_id: string;
+  tool_name: string;
+  outcome: string;
+  reviewer: string;
+  kind?: string;
+  session_id?: string;
+  run_id?: string;
+  server_label?: string;
+  risk_level?: string;
+  rationale?: string;
+  seq?: number;
+  stream_id?: string;
+}
 export interface SessionForkedParams {
   session_id: string;
   new_session_id: string;
@@ -909,6 +928,7 @@ export interface RpcMethodMap {
   "list_turns": { params: ListTurnsParams; result: Record<string, unknown> };
   "list_items": { params: ListItemsParams; result: Record<string, unknown> };
   "get_item": { params: GetItemParams; result: Record<string, unknown> };
+  "set_session_approvals": { params: SetSessionApprovalsParams; result: Record<string, unknown> };
   "agent_host_register_workspace": { params: AgentHostRegisterWorkspaceParams; result: Record<string, unknown> };
   "agent_host_register_profile": { params: AgentHostRegisterProfileParams; result: Record<string, unknown> };
   "agent_host_bind_thread": { params: AgentHostBindThreadParams; result: Record<string, unknown> };
@@ -986,6 +1006,7 @@ export interface RpcNotificationMap {
   "elicitation_requested": ElicitationRequestedParams;
   "elicitation_resolved": ElicitationResolvedParams;
   "mcp_server_status_changed": McpServerStatusChangedParams;
+  "tool_approval_reviewed": ToolApprovalReviewedParams;
   "session_forked": SessionForkedParams;
   "session_variables_changed": SessionVariablesChangedParams;
   "fs_events": FsEventsParams;

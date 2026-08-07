@@ -334,6 +334,29 @@ export function useChatSession(client: RPCClient) {
         }
       }),
 
+      // Reviewer/sandbox-resolved approvals that never surfaced as prompts
+      // (guardian "Approve for me" and sandbox auto-approval). Journaled, so
+      // replay re-delivers them; the machine appends a transcript chip.
+      client.on('tool_approval_reviewed', (p: any) => {
+        const call_id = String(p?.call_id ?? '');
+        const outcome = p?.outcome === 'deny' ? 'deny' : p?.outcome === 'allow' ? 'allow' : null;
+        if (!call_id || !outcome) {
+          return;
+        }
+        actor.send({
+          type: 'GUARDIAN_REVIEWED',
+          request_id: call_id,
+          tool: String(p?.tool_name ?? 'tool'),
+          reviewer: String(p?.reviewer ?? 'reviewer'),
+          outcome,
+          risk_level: typeof p?.risk_level === 'string' ? p.risk_level : undefined,
+          rationale: typeof p?.rationale === 'string' ? p.rationale : undefined,
+          kind: p?.kind === 'mcp' ? 'mcp' : 'tool',
+          server_label: typeof p?.server_label === 'string' ? p.server_label : undefined,
+          session_id: typeof p?.session_id === 'string' ? p.session_id : undefined,
+        });
+      }),
+
       // Hosted-MCP approval flow (omniagents 0.16+). Parallel to the
       // function-tool path but keyed by ``request_id`` (the model's
       // ``McpApprovalRequest.id``) and identifies the MCP server via

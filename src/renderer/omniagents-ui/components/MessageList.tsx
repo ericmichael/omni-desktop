@@ -13,6 +13,8 @@ import {
   Maximize2Icon,
   Minimize2Icon,
   PaperclipIcon,
+  ShieldCheckIcon,
+  ShieldXIcon,
   ThumbsDownIcon,
   ThumbsUpIcon,
 } from 'lucide-react';
@@ -66,6 +68,7 @@ import type {
   ArtifactMcpUi,
   Attachment,
   ChatMessage,
+  GuardianReviewItem as GuardianReviewItemType,
   MessageItem,
   PlanItem,
   ReasoningItem,
@@ -288,6 +291,10 @@ export function MessageList({
                   queueTotal={queueTotal}
                 />
               );
+            }
+            if (m.type === 'guardian_review') {
+              const review = m as GuardianReviewItemType;
+              return <GuardianReviewChip key={`${review.request_id}-review`} item={review} />;
             }
             if (m.type === 'reasoning') {
               const reasoning = m as ReasoningItem;
@@ -1234,6 +1241,40 @@ const SELF_CONTAINED_DISPLAY_TYPES = new Set([
   'web_content',
   'table',
 ]);
+
+/**
+ * Compact record of an approval the user never saw: resolved by the guardian
+ * reviewer ("Approve for me") or by sandbox policy. Denials expand to show
+ * the rationale the model received.
+ */
+function GuardianReviewChip({ item }: { item: GuardianReviewItemType }) {
+  const [expanded, setExpanded] = useState(false);
+  const denied = item.outcome === 'deny';
+  const reviewerLabel = item.reviewer === 'sandbox-policy' ? 'sandbox policy' : item.reviewer;
+  const toolLabel = item.server_label ? `${item.server_label} · ${item.tool}` : item.tool;
+  const summary = denied ? `${toolLabel} denied by ${reviewerLabel}` : `${toolLabel} approved by ${reviewerLabel}`;
+  return (
+    <div className="my-1 min-w-0 text-xs text-muted-foreground" data-testid="guardian-review-chip">
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className="flex min-w-0 max-w-full items-center gap-1.5 rounded-md px-1 py-0.5 hover:bg-accent/50"
+        title={item.rationale || summary}
+      >
+        {denied ? (
+          <ShieldXIcon className="size-3.5 shrink-0 text-destructive" />
+        ) : (
+          <ShieldCheckIcon className="size-3.5 shrink-0 text-primary/70" />
+        )}
+        <span className="truncate">{summary}</span>
+        {item.risk_level ? <span className="shrink-0 opacity-70">({item.risk_level} risk)</span> : null}
+      </button>
+      {expanded && item.rationale ? (
+        <div className="mt-0.5 whitespace-pre-wrap break-words pl-6 pr-2 text-xs">{item.rationale}</div>
+      ) : null}
+    </div>
+  );
+}
 
 function ApprovalCard({
   item,

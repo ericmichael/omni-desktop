@@ -220,6 +220,17 @@ const mapEntry = (it: MessageItem, cursor: Cursor, index: number): TranscriptEnt
         args: capField(it.argumentsText, 'args', t),
       };
       break;
+    case 'guardian_review':
+      // Reviewer-resolved approvals surface as system messages: the voice /
+      // remote surfaces need the record, not an answerable card.
+      entry = {
+        cursor,
+        index,
+        kind: 'message',
+        role: 'system',
+        text: `Tool ${it.tool} ${it.outcome === 'deny' ? 'denied' : 'approved'} by ${it.reviewer}${it.rationale ? `: ${it.rationale}` : ''}`,
+      };
+      break;
     case 'artifact':
       return { cursor, index, kind: 'artifact', title: it.title, artifactId: it.artifact_id };
     case 'reasoning':
@@ -301,6 +312,15 @@ export function fullEntry(items: readonly MessageItem[], cursors: readonly Curso
         requestId: it.request_id,
         tool: it.tool,
         args: it.argumentsText,
+      };
+    case 'guardian_review':
+      return {
+        cursor,
+        index,
+        total,
+        kind: 'message',
+        role: 'system',
+        text: `Tool ${it.tool} ${it.outcome === 'deny' ? 'denied' : 'approved'} by ${it.reviewer}${it.rationale ? `: ${it.rationale}` : ''}`,
       };
     case 'artifact':
       return { cursor, index, total, kind: 'artifact', title: it.title, content: it.content };

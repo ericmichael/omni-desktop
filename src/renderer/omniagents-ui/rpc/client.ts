@@ -137,6 +137,10 @@ export const EXPERIMENTAL_FEATURE_MANIFESTS = {
   // projection stale, so negotiate the notification atomically with both
   // recovery reads.
   plansAndDiffs: ['get_plan', 'get_run_diff', 'item_updated'],
+  // Approval reviewer ("Approve for me"): the session toggle and the
+  // journaled reviewed-decision record are one feature — a toggle without
+  // the transcript record would hide what the guardian did.
+  approvalReviewer: ['set_session_approvals', 'tool_approval_reviewed'],
 } as const;
 
 export type ExperimentalFeature = keyof typeof EXPERIMENTAL_FEATURE_MANIFESTS;
@@ -153,6 +157,7 @@ export const WORKSPACE_EXPERIMENTAL_OPERATIONS = [
   ...EXPERIMENTAL_FEATURE_MANIFESTS.layeredConfig,
   ...EXPERIMENTAL_FEATURE_MANIFESTS.conversationOrganization,
   ...EXPERIMENTAL_FEATURE_MANIFESTS.plansAndDiffs,
+  ...EXPERIMENTAL_FEATURE_MANIFESTS.approvalReviewer,
 ] as const;
 
 const requestedCapabilities = (experimentalOperations: readonly string[]): Capabilities => ({
@@ -993,19 +998,28 @@ export class RPCClient {
       params.session_id = sessionId;
     }
     if (variables) {
-      // Extract safe_tool_overrides — it's a top-level start_run param, not a variable
-      const { safe_tool_overrides, ...rest } = variables;
+      // Extract safe_tool_overrides / approvals_reviewer — top-level
+      // start_run params, not variables.
+      const { safe_tool_overrides, approvals_reviewer, ...rest } = variables;
       if (Object.keys(rest).length > 0) {
         params.variables = rest;
       }
       if (safe_tool_overrides) {
         params.safe_tool_overrides = safe_tool_overrides as Record<string, unknown>;
       }
+      if (typeof approvals_reviewer === 'string') {
+        params.approvals_reviewer = approvals_reviewer;
+      }
     }
     if (content != null) {
       params.content = content as string;
     }
     return this.call('start_run', params);
+  }
+
+  /** Set the session's approval reviewer ("user" | "auto"). */
+  async setSessionApprovals(sessionId: string, reviewer: 'user' | 'auto'): Promise<Record<string, unknown>> {
+    return this.call('set_session_approvals', { session_id: sessionId, reviewer });
   }
 
   async stopRun(runId: string): Promise<void> {

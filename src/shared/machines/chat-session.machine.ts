@@ -16,6 +16,7 @@ import type {
   Attachment,
   ChatItemMetadata,
   ChatMessage,
+  GuardianReviewItem,
   MessageItem,
   PreambleChunk,
   ToolItem,
@@ -137,6 +138,18 @@ export type ChatSessionEvent =
       tool_label?: string;
     }
   | { type: 'APPROVAL_RESOLVED'; request_id: string }
+  | {
+      type: 'GUARDIAN_REVIEWED';
+      request_id: string;
+      tool: string;
+      reviewer: string;
+      outcome: 'allow' | 'deny';
+      risk_level?: string;
+      rationale?: string;
+      kind?: 'tool' | 'mcp';
+      server_label?: string;
+      session_id?: string;
+    }
   | { type: 'SET_STATUS'; text?: string; showSpinner?: boolean; session_id?: string }
   // History loading
   | { type: 'HISTORY_LOADED'; items: MessageItem[] }
@@ -415,6 +428,27 @@ export const chatSessionMachine = setup({
       return { pendingApprovals: newPending, items: [...filtered, item] };
     }),
 
+    appendGuardianReview: assign(({ context, event }) => {
+      const e = event as Extract<ChatSessionEvent, { type: 'GUARDIAN_REVIEWED' }>;
+      const item: GuardianReviewItem = {
+        type: 'guardian_review',
+        request_id: e.request_id,
+        tool: e.tool,
+        reviewer: e.reviewer,
+        outcome: e.outcome,
+        risk_level: e.risk_level,
+        rationale: e.rationale,
+        kind: e.kind,
+        server_label: e.server_label,
+        session_id: e.session_id,
+      };
+      // Replay re-delivers journaled reviews; the record is append-once.
+      const filtered = context.items.filter(
+        (it) => !(it.type === 'guardian_review' && (it as GuardianReviewItem).request_id === e.request_id)
+      );
+      return { items: [...filtered, item] };
+    }),
+
     removeApproval: assign(({ context, event }) => {
       const e = event as Extract<ChatSessionEvent, { type: 'APPROVAL_DECIDED' | 'APPROVAL_RESOLVED' }>;
       const newPending = new Map(context.pendingApprovals);
@@ -691,6 +725,7 @@ export const chatSessionMachine = setup({
           on: {
             MESSAGE_OUTPUT: { guard: 'acceptStrict', actions: 'bufferPreamble' },
             TOOL_CALLED: { guard: 'acceptStrict', actions: 'appendToolItem' },
+            GUARDIAN_REVIEWED: { guard: 'acceptStrict', actions: 'appendGuardianReview' },
             TOOL_RESULT: { guard: 'acceptStrict', actions: 'updateToolResult' },
             RUN_STATUS: { guard: 'acceptLoose', actions: 'updateRunStatus' },
             TOKEN: { guard: 'acceptLoose' },
@@ -726,6 +761,7 @@ export const chatSessionMachine = setup({
             // Events can still flow while awaiting approval
             MESSAGE_OUTPUT: { guard: 'acceptStrict', actions: 'bufferPreamble' },
             TOOL_CALLED: { guard: 'acceptStrict', actions: 'appendToolItem' },
+            GUARDIAN_REVIEWED: { guard: 'acceptStrict', actions: 'appendGuardianReview' },
             TOOL_RESULT: { guard: 'acceptStrict', actions: 'updateToolResult' },
             RUN_STATUS: { guard: 'acceptLoose', actions: 'updateRunStatus' },
             SET_STATUS: { guard: 'acceptLoose', actions: 'setStatusFromServer' },
@@ -742,6 +778,7 @@ export const chatSessionMachine = setup({
             // Events can still arrive while stopping
             MESSAGE_OUTPUT: { guard: 'acceptStrict', actions: 'bufferPreamble' },
             TOOL_CALLED: { guard: 'acceptStrict', actions: 'appendToolItem' },
+            GUARDIAN_REVIEWED: { guard: 'acceptStrict', actions: 'appendGuardianReview' },
             TOOL_RESULT: { guard: 'acceptStrict', actions: 'updateToolResult' },
           },
         },

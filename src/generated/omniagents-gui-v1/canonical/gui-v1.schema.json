@@ -3017,6 +3017,23 @@
       "type": "object",
       "x-omni-stability": "experimental"
     },
+    "set_session_approvals": {
+      "additionalProperties": false,
+      "properties": {
+        "reviewer": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "reviewer"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
     "set_session_hold": {
       "additionalProperties": false,
       "properties": {
@@ -3084,6 +3101,9 @@
     "start_run": {
       "additionalProperties": false,
       "properties": {
+        "approvals_reviewer": {
+          "type": "string"
+        },
         "content": {
           "type": "string"
         },
@@ -3348,6 +3368,55 @@
       ],
       "type": "object",
       "x-omni-stability": "stable"
+    },
+    "tool_approval_reviewed": {
+      "additionalProperties": false,
+      "properties": {
+        "call_id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "outcome": {
+          "type": "string"
+        },
+        "rationale": {
+          "type": "string"
+        },
+        "reviewer": {
+          "type": "string"
+        },
+        "risk_level": {
+          "type": "string"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "seq": {
+          "type": "integer"
+        },
+        "server_label": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "stream_id": {
+          "type": "string"
+        },
+        "tool_name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "call_id",
+        "tool_name",
+        "outcome",
+        "reviewer"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
     },
     "tool_called": {
       "additionalProperties": false,
@@ -3645,6 +3714,9 @@
       "$ref": "#/$defs/get_item"
     },
     {
+      "$ref": "#/$defs/set_session_approvals"
+    },
+    {
       "$ref": "#/$defs/agent_host_register_workspace"
     },
     {
@@ -3871,6 +3943,9 @@
     },
     {
       "$ref": "#/$defs/mcp_server_status_changed"
+    },
+    {
+      "$ref": "#/$defs/tool_approval_reviewed"
     },
     {
       "$ref": "#/$defs/session_forked"

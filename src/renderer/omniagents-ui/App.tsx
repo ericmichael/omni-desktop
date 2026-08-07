@@ -1135,6 +1135,7 @@ export function App({
                   }
                 : {}),
               ...(runOverrides.safeToolOverrides ? { safe_tool_overrides: runOverrides.safeToolOverrides } : {}),
+              ...(runOverrides.approvalsReviewer ? { approvals_reviewer: runOverrides.approvalsReviewer } : {}),
             }
           : baseVariables;
 
@@ -1374,6 +1375,11 @@ export function App({
           session_id: sid,
           variables,
         });
+        // Goal ticks start their runs server-side, so the reviewer must be
+        // set durably on the session rather than ride a start_run param.
+        if (runOverrides?.approvalsReviewer && client.supportsExperimentalFeature('approvalReviewer')) {
+          await client.setSessionApprovals(sid, runOverrides.approvalsReviewer).catch(() => {});
+        }
         // Kick off the /goal loop. The agent-side server function
         // enqueues the initial prompt, installs the tick, and registers
         // the run-end listener — launcher reacts via ui.goal.update.
@@ -2092,7 +2098,13 @@ export function App({
                   </div>
                 )}
                 {sessionId && connected && bootState.ready ? (
-                  <ModelSessionControls sessionId={sessionId} transport={client} disabled={runActive} />
+                  <ModelSessionControls
+                    sessionId={sessionId}
+                    transport={client}
+                    disabled={runActive}
+                    approvalsSupported={client.supportsExperimentalFeature('approvalReviewer')}
+                    onSetApprovalsReviewer={(reviewer) => client.setSessionApprovals(sessionId!, reviewer)}
+                  />
                 ) : null}
                 <Input
                   disabled={!connected || !bootState.ready}

@@ -121,12 +121,22 @@ describe('client_tools shape', () => {
     expect(safeNames).not.toContain('stop_ticket');
   });
 
-  it('autopilot mode uses safe_tool_patterns catch-all', () => {
+  it('autopilot routes approvals to the guardian instead of a catch-all skip', () => {
     const vars = buildSessionVariables({ surface: 'code', autopilot: true }) as {
       safe_tool_overrides: { safe_tool_names?: string[]; safe_tool_patterns?: string[] };
+      approvals_reviewer?: string;
     };
-    expect(vars.safe_tool_overrides.safe_tool_patterns).toEqual(['.*']);
-    expect(vars.safe_tool_overrides.safe_tool_names).toBeUndefined();
+    expect(vars.approvals_reviewer).toBe('auto');
+    expect(vars.safe_tool_overrides.safe_tool_patterns).toBeUndefined();
+    // The ordinary client-safe tool list still applies under autopilot.
+    expect(vars.safe_tool_overrides.safe_tool_names).toBeDefined();
+  });
+
+  it('interactive mode sets no approvals reviewer', () => {
+    const vars = buildSessionVariables({ surface: 'code', autopilot: false }) as {
+      approvals_reviewer?: string;
+    };
+    expect(vars.approvals_reviewer).toBeUndefined();
   });
 
   it('interactive mode pre-authorizes omni-projects via (server, tool) tuples', () => {

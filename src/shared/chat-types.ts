@@ -97,6 +97,27 @@ export type ApprovalItem = {
   canonical?: CanonicalItemEnvelope;
 };
 
+/**
+ * A reviewer/sandbox-resolved approval decision that never reached the user
+ * as a prompt (omniagents ``tool_approval_reviewed``). Rendered as a compact
+ * transcript chip so the record shows what was auto-approved or denied and by
+ * whom.
+ */
+export type GuardianReviewItem = {
+  type: 'guardian_review';
+  request_id: string;
+  tool: string;
+  /** 'guardian' | 'sandbox-policy' (open set — render verbatim fallback). */
+  reviewer: string;
+  outcome: 'allow' | 'deny';
+  risk_level?: string;
+  rationale?: string;
+  kind?: 'tool' | 'mcp';
+  server_label?: string;
+  session_id?: string;
+  canonical?: CanonicalItemEnvelope;
+};
+
 export type ChatItemMetadata = {
   hidden?: boolean;
   summary?: string;
@@ -226,6 +247,7 @@ export type MessageItem =
   | ChatMessage
   | ToolItem
   | ApprovalItem
+  | GuardianReviewItem
   | ArtifactItem
   | ReasoningItem
   | PlanItem

@@ -1301,6 +1301,13 @@
           }
         },
         {
+          "name": "approvals_reviewer",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/start_run/properties/approvals_reviewer"
+          }
+        },
+        {
           "name": "prompt_role",
           "required": false,
           "schema": {
@@ -4267,6 +4274,61 @@
       },
       "x-omni-resource-scope": "thread",
       "x-omni-stability": "stable"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        }
+      ],
+      "name": "set_session_approvals",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "session_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/set_session_approvals/properties/session_id"
+          }
+        },
+        {
+          "name": "reviewer",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/set_session_approvals/properties/reviewer"
+          }
+        }
+      ],
+      "result": {
+        "name": "set_session_approvals_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation set_session_approvals",
+      "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/set_session_approvals"
+      },
+      "x-omni-resource-scope": "thread",
+      "x-omni-stability": "experimental"
     },
     {
       "errors": [
@@ -10504,6 +10566,111 @@
       },
       "x-omni-resource-scope": "agent",
       "x-omni-stability": "stable"
+    },
+    {
+      "name": "tool_approval_reviewed",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "call_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/tool_approval_reviewed/properties/call_id"
+          }
+        },
+        {
+          "name": "tool_name",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/tool_approval_reviewed/properties/tool_name"
+          }
+        },
+        {
+          "name": "outcome",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/tool_approval_reviewed/properties/outcome"
+          }
+        },
+        {
+          "name": "reviewer",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/tool_approval_reviewed/properties/reviewer"
+          }
+        },
+        {
+          "name": "kind",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/tool_approval_reviewed/properties/kind"
+          }
+        },
+        {
+          "name": "session_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/tool_approval_reviewed/properties/session_id"
+          }
+        },
+        {
+          "name": "run_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/tool_approval_reviewed/properties/run_id"
+          }
+        },
+        {
+          "name": "server_label",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/tool_approval_reviewed/properties/server_label"
+          }
+        },
+        {
+          "name": "risk_level",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/tool_approval_reviewed/properties/risk_level"
+          }
+        },
+        {
+          "name": "rationale",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/tool_approval_reviewed/properties/rationale"
+          }
+        },
+        {
+          "name": "seq",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/tool_approval_reviewed/properties/seq"
+          }
+        },
+        {
+          "name": "stream_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/tool_approval_reviewed/properties/stream_id"
+          }
+        }
+      ],
+      "result": {
+        "name": "tool_approval_reviewed_result",
+        "schema": {
+          "type": "null"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation tool_approval_reviewed",
+      "x-omni-direction": "server_to_client",
+      "x-omni-execution-requirements": [],
+      "x-omni-kind": "notification",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/tool_approval_reviewed"
+      },
+      "x-omni-resource-scope": "run",
+      "x-omni-stability": "experimental"
     },
     {
       "name": "session_forked",

@@ -3334,6 +3334,8 @@ type ProjectIpcEvents = Namespaced<
 export type RunOverrides = {
   /** Prepended to the column's existing additional_instructions. */
   additionalInstructions?: string;
+  /** Session approval reviewer: 'auto' routes approvals to the guardian. */
+  approvalsReviewer?: 'user' | 'auto';
   /** Approval policy override; replaces the column's default. */
   safeToolOverrides?: {
     safe_tool_names?: string[];

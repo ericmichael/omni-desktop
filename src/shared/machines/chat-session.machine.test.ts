@@ -982,3 +982,43 @@ describe('chatSessionMachine', () => {
     });
   });
 });
+
+describe('GUARDIAN_REVIEWED', () => {
+  const reviewed = (overrides: Record<string, unknown> = {}) => ({
+    type: 'GUARDIAN_REVIEWED' as const,
+    request_id: 'call-9',
+    tool: 'execute_bash',
+    reviewer: 'guardian',
+    outcome: 'allow' as const,
+    session_id: 'sess-1',
+    ...overrides,
+  });
+
+  it('appends a guardian_review transcript item while running', () => {
+    const snap = next(runningSnap(), reviewed({ risk_level: 'low', rationale: 'Covered by the task.' }));
+    const items = snap.context.items.filter((it) => it.type === 'guardian_review');
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      request_id: 'call-9',
+      tool: 'execute_bash',
+      reviewer: 'guardian',
+      outcome: 'allow',
+      risk_level: 'low',
+    });
+  });
+
+  it('re-delivery replaces rather than duplicates the record', () => {
+    const first = next(runningSnap(), reviewed());
+    const second = next(first, reviewed({ outcome: 'deny', rationale: 'Sends secrets off-box.' }));
+    const items = second.context.items.filter((it) => it.type === 'guardian_review');
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ outcome: 'deny' });
+  });
+
+  it('is accepted while awaiting a different approval', () => {
+    const snap = next(awaitingApprovalSnap(), reviewed());
+    expect(snap.context.items.some((it) => it.type === 'guardian_review')).toBe(true);
+    // The pending human approval card is untouched.
+    expect(snap.context.pendingApprovals.has('req-1')).toBe(true);
+  });
+});

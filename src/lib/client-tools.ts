@@ -1102,10 +1102,11 @@ const buildOutputGuidance = (opts?: ContextIdentifierOpts): string => {
  *
  * - `surface` picks the tool set. Chat surface gets project/inbox/page tools but
  *   not code-deck-only tools. Code surface gets everything.
- * - `autopilot` picks the approval policy. When true, we emit the catch-all
- *   `safe_tool_patterns: ['.*']` so every tool runs without approval, and the
- *   caller can supply a `supervisorPrompt` to prepend to additional_instructions.
- *   When false, only tools marked `safe: true` on the client skip approval.
+ * - `autopilot` picks the approval policy. When true, the session's approval
+ *   reviewer is set to the guardian (`approvals_reviewer: 'auto'`) so every
+ *   tool call gets risk review instead of a blanket skip, and the caller can
+ *   supply a `supervisorPrompt` to prepend to additional_instructions. When
+ *   false, only tools marked `safe: true` on the client skip approval.
  *
  * One builder, two switches — this replaces the old `buildAutopilotVariables` /
  * `buildInteractiveVariables` / `buildCodeVariables` trio whose divergent
@@ -1187,15 +1188,17 @@ export const buildSessionVariables = (args: SessionVariablesArgs): Record<string
 
   return {
     client_tools: tools,
-    safe_tool_overrides: autopilot
-      ? { safe_tool_patterns: ['.*'] }
-      : {
-          safe_tool_names: extractSafeToolNames(tools),
-          safe_mcp_tools: OMNI_PROJECTS_SAFE_TOOLS.map((name) => ({
-            server_label: OMNI_PROJECTS_SERVER_LABEL,
-            tool_name: name,
-          })),
-        },
+    safe_tool_overrides: {
+      safe_tool_names: extractSafeToolNames(tools),
+      safe_mcp_tools: OMNI_PROJECTS_SAFE_TOOLS.map((name) => ({
+        server_label: OMNI_PROJECTS_SERVER_LABEL,
+        tool_name: name,
+      })),
+    },
+    // Autopilot routes approvals to the guardian reviewer instead of the
+    // old blanket `.*` skip: unattended runs get risk review, and denials
+    // return to the model with a rationale rather than never existing.
+    ...(autopilot ? { approvals_reviewer: 'auto' } : {}),
     additional_instructions: instructions,
     // Structured ticket context — omniagents persists these into
     // ``session.variables`` so omni-code tools / server functions /

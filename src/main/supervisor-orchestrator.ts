@@ -798,7 +798,9 @@ export class SupervisorOrchestrator {
         maxTurns,
         runOverrides: {
           additionalInstructions,
-          safeToolOverrides: { safe_tool_patterns: ['.*'] },
+          // Guardian-reviewed autopilot: approvals route to the reviewer
+          // instead of the old blanket `.*` skip.
+          approvalsReviewer: 'auto',
         },
       })
       .catch((error) => {

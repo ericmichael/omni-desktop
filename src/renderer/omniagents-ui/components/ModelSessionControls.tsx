@@ -1,4 +1,4 @@
-import { BrainIcon, ChevronDownIcon, SparklesIcon } from 'lucide-react';
+import { BrainIcon, ChevronDownIcon, ShieldCheckIcon, SparklesIcon } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 
 import { Button } from '@/renderer/ds/ui/button';
@@ -37,15 +37,21 @@ export function ModelSessionControls({
   sessionId,
   transport,
   disabled = false,
+  approvalsSupported = false,
+  onSetApprovalsReviewer,
 }: {
   sessionId: string;
   transport: ModelCatalogRpcTransport;
   disabled?: boolean;
+  /** True only when the runtime negotiated the approvalReviewer feature. */
+  approvalsSupported?: boolean;
+  onSetApprovalsReviewer?: (reviewer: 'user' | 'auto') => Promise<unknown>;
 }) {
   const catalog = useMemo(() => new ModelCatalogClient(transport), [transport]);
   const [models, setModels] = useState<ModelDescriptor[]>([]);
   const [activeModel, setActiveModel] = useState<string | null>(null);
   const [reasoningEffort, setReasoningEffort] = useState<string | null>(null);
+  const [approvalsReviewer, setApprovalsReviewer] = useState<'user' | 'auto'>('user');
   const [loading, setLoading] = useState(true);
   const [mutating, setMutating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -65,6 +71,7 @@ export function ModelSessionControls({
         );
         setActiveModel(result.session?.active_model ?? result.default_model);
         setReasoningEffort(result.session?.reasoning_effort ?? null);
+        setApprovalsReviewer(result.session?.approvals_reviewer === 'auto' ? 'auto' : 'user');
       })
       .catch((cause: unknown) => {
         if (current) {
@@ -122,6 +129,23 @@ export function ModelSessionControls({
       if (result.model) {
         setActiveModel(result.model);
       }
+    } catch (cause: unknown) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setMutating(false);
+    }
+  };
+
+  const chooseReviewer = async (value: string) => {
+    const reviewer = value === 'auto' ? 'auto' : 'user';
+    if (reviewer === approvalsReviewer || locked || !onSetApprovalsReviewer) {
+      return;
+    }
+    setMutating(true);
+    setError(null);
+    try {
+      await onSetApprovalsReviewer(reviewer);
+      setApprovalsReviewer(reviewer);
     } catch (cause: unknown) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -198,6 +222,35 @@ export function ModelSessionControls({
                   {effort}
                 </DropdownMenuRadioItem>
               ))}
+            </DropdownMenuRadioGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ) : null}
+
+      {approvalsSupported && onSetApprovalsReviewer ? (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              disabled={locked}
+              className="h-7 gap-1.5 px-2 text-xs font-normal"
+              title="Who reviews tool approvals in this conversation"
+              data-testid="approvals-reviewer-control"
+            >
+              <ShieldCheckIcon
+                className={`size-3.5 ${approvalsReviewer === 'auto' ? 'text-primary' : 'text-muted-foreground'}`}
+              />
+              {approvalsReviewer === 'auto' ? 'Approve for me' : 'Ask me'}
+              <ChevronDownIcon className="size-3" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent side="top" align="start">
+            <DropdownMenuLabel>Tool approvals</DropdownMenuLabel>
+            <DropdownMenuRadioGroup value={approvalsReviewer} onValueChange={(value) => void chooseReviewer(value)}>
+              <DropdownMenuRadioItem value="user">Ask me</DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="auto">Approve for me</DropdownMenuRadioItem>
             </DropdownMenuRadioGroup>
           </DropdownMenuContent>
         </DropdownMenu>

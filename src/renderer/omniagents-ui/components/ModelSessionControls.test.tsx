@@ -93,3 +93,62 @@ describe('ModelSessionControls', () => {
     expect([...container.querySelectorAll('button')].every((button) => button.disabled)).toBe(true);
   });
 });
+
+describe('approvals reviewer control', () => {
+  const transportWith = (reviewer: string | null) =>
+    ({
+      request: vi.fn(async () => ({
+        models: [model('model-1', 'Model One')],
+        default_model: 'model-1',
+        voice_default_model: null,
+        errors: [],
+        reasons: [],
+        session: {
+          session_id: 'session-1',
+          active_model: 'model-1',
+          reasoning_effort: 'medium',
+          approvals_reviewer: reviewer,
+        },
+      })),
+    }) as unknown as ModelCatalogRpcTransport;
+
+  it('renders only when the feature negotiated, restoring the session state', async () => {
+    await act(async () => {
+      root.render(
+        <ModelSessionControls
+          sessionId="session-1"
+          transport={transportWith('auto')}
+          approvalsSupported
+          onSetApprovalsReviewer={vi.fn(async () => ({}))}
+        />
+      );
+      await Promise.resolve();
+    });
+    const control = container.querySelector('[data-testid="approvals-reviewer-control"]');
+    expect(control).not.toBeNull();
+    expect(control!.textContent).toContain('Approve for me');
+  });
+
+  it('stays hidden without negotiation', async () => {
+    await act(async () => {
+      root.render(<ModelSessionControls sessionId="session-1" transport={transportWith(null)} />);
+      await Promise.resolve();
+    });
+    expect(container.querySelector('[data-testid="approvals-reviewer-control"]')).toBeNull();
+  });
+
+  it('defaults to Ask me when the session has no override', async () => {
+    await act(async () => {
+      root.render(
+        <ModelSessionControls
+          sessionId="session-1"
+          transport={transportWith(null)}
+          approvalsSupported
+          onSetApprovalsReviewer={vi.fn(async () => ({}))}
+        />
+      );
+      await Promise.resolve();
+    });
+    expect(container.querySelector('[data-testid="approvals-reviewer-control"]')!.textContent).toContain('Ask me');
+  });
+});
