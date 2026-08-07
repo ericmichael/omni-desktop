@@ -24,11 +24,17 @@ type ChatShellProps = {
   onRetry?: () => void;
   onLaunch?: () => void;
   launchDisabled?: boolean;
-  prelaunchExtras?: ReactNode;
   onSubmit: (msg: PendingMessage) => void;
   pendingMessages?: PendingMessage[];
   suggestions?: ReadonlyArray<ChatShellSuggestion>;
   sandboxLabel?: string;
+  /** Sandbox choices for the composer chip — same control, same place as the
+   *  live session, so the composer looks identical pre- and post-launch. */
+  sandboxOptions?: { value: string; label: string }[];
+  currentSandboxProfile?: string;
+  onSandboxChange?: (value: string) => void;
+  /** Extra composer chips (e.g. attach-project), mirrored into the live app. */
+  composerExtras?: ReactNode;
   workspaceReady?: boolean;
   onOpenWorkspaceSettings?: () => void;
 };
@@ -46,11 +52,14 @@ export const ChatShell = memo(
     onRetry,
     onLaunch,
     launchDisabled,
-    prelaunchExtras,
     onSubmit,
     pendingMessages,
     suggestions,
     sandboxLabel = 'sandbox',
+    sandboxOptions,
+    currentSandboxProfile,
+    onSandboxChange,
+    composerExtras,
     workspaceReady = true,
     onOpenWorkspaceSettings,
   }: ChatShellProps) => {
@@ -186,11 +195,6 @@ export const ChatShell = memo(
                                     </CardContent>
                                   </Card>
                                 )}
-                                {prelaunchExtras && (
-                                  <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
-                                    {prelaunchExtras}
-                                  </div>
-                                )}
                               </motion.div>
                             )}
                           </AnimatePresence>
@@ -202,7 +206,15 @@ export const ChatShell = memo(
                     </div>
                   )}
                 </div>
-                <Input onSubmit={handleSubmit} disabled={!workspaceReady} />
+                <Input
+                  onSubmit={handleSubmit}
+                  disabled={!workspaceReady}
+                  sandboxLabel={sandboxLabel}
+                  sandboxOptions={sandboxOptions}
+                  currentSandboxProfile={currentSandboxProfile}
+                  onSandboxChange={onSandboxChange}
+                  composerExtras={composerExtras}
+                />
               </div>
             </div>
           </div>

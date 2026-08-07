@@ -51,7 +51,6 @@ import { Sidebar } from './components/Sidebar';
 import { Tasks, type TaskSummary } from './components/Tasks';
 import { WakeupPanel, type WakeupSnapshot } from './components/WakeupPanel';
 import { type WorkersKillResult, WorkersPanel, type WorkerSummary } from './components/WorkersPanel';
-import { WorkspacePicker } from './components/WorkspacePicker';
 import { OmniAgentsHeaderActionsPortal, OmniAgentsHeaderActionsProvider } from './header-actions';
 import { useChatBoot } from './hooks/use-chat-boot';
 import { useChatSession } from './hooks/use-chat-session';
@@ -85,6 +84,7 @@ export function App({
   sandboxOptions,
   currentSandboxProfile,
   onSandboxChange,
+  composerExtras,
   onClientToolCall,
   onController,
   onRunEnd,
@@ -114,6 +114,8 @@ export function App({
   sandboxOptions?: { value: string; label: string }[];
   currentSandboxProfile?: string;
   onSandboxChange?: (value: string) => void;
+  /** Extra composer chips (e.g. attach-project) forwarded to the Input row. */
+  composerExtras?: React.ReactNode;
   onClientToolCall?: ClientToolCallHandler;
   onController?: (controller: SessionController | null) => void;
   onRunEnd?: (info: { runId?: string; reason?: string }) => void;
@@ -175,7 +177,7 @@ export function App({
   const [workspaceSupported, setWorkspaceSupported] = useState(false);
   // Seed from the workspaceDir prop the launcher passes down for project-scoped
   // surfaces (Code tab). The chat-boot RPC still runs after connect to confirm
-  // and refresh — but the chip avoids flashing "Select workspace" while the
+  // and refresh — but seeding keeps the folder chip stable while the
   // round-trip is in flight.
   const [workspacePath, setWorkspacePath] = useState<string | null>(workspaceDir ?? null);
   // Keep workspacePath aligned with the prop when the launcher swaps the
@@ -188,7 +190,6 @@ export function App({
     }
   }, [workspaceDir]);
   const [workspaceLocked, setWorkspaceLocked] = useState(false);
-  const [workspacePickerOpen, setWorkspacePickerOpen] = useState(false);
   // Background-bash live override: `ui.bash_jobs.update` broadcasts (and the
   // kill/tail/list server calls below) push a fresh snapshot here. When non-
   // null this takes precedence over the snapshot derived from tool_result
@@ -510,11 +511,7 @@ export function App({
         const args = p?.args || {};
         const snap = args?.snapshot;
         if (Array.isArray(snap)) {
-          setWorkers(
-            (snap as Array<WorkerSummary & { kind?: string }>).filter(
-              (entry) => entry.kind !== 'agent_tool',
-            ),
-          );
+          setWorkers((snap as Array<WorkerSummary & { kind?: string }>).filter((entry) => entry.kind !== 'agent_tool'));
         }
         if (request_id) {
           client.clientResponse(request_id, true, { ack: true }).catch(() => {});
@@ -2109,12 +2106,11 @@ export function App({
                   speakRepliesEnabled={!!voiceVariables && speakRepliesEnabled}
                   onSpeakRepliesChange={setSpeakRepliesEnabled}
                   workspacePath={workspaceSupported ? workspacePath : undefined}
-                  workspaceLocked={workspaceLocked}
-                  onWorkspaceClick={() => setWorkspacePickerOpen(true)}
                   sandboxLabel={sandboxLabel}
                   sandboxOptions={sandboxOptions}
                   currentSandboxProfile={currentSandboxProfile}
                   onSandboxChange={handleSandboxChange}
+                  composerExtras={composerExtras}
                   sandboxLoading={!connected}
                   sessionId={sessionId}
                   onVoiceSessionCreated={(id: string) => setSessionId(id)}
@@ -2157,18 +2153,6 @@ export function App({
             onClose={() => setArtifactsPanelOpen(false)}
             onScrollTo={handleScrollToArtifact}
             asOverlay
-          />
-        )}
-        {workspacePickerOpen && (
-          <WorkspacePicker
-            sessionId={sessionId}
-            executionTarget={executionTarget}
-            initialPath={workspacePath || undefined}
-            onSelect={(path) => {
-              setWorkspacePath(path);
-              setWorkspacePickerOpen(false);
-            }}
-            onClose={() => setWorkspacePickerOpen(false)}
           />
         )}
         <AlertDialog

@@ -41,12 +41,13 @@ function basename(p: string): string {
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/** Human label for the workspace chip. Session workspaces live in UUID-named
- *  directories; a raw UUID in the composer reads as a bug, so fall back to a
- *  generic label (the full path stays available via the title attribute). */
-function workspaceLabel(p: string): string {
-  const tail = basename(p);
-  return UUID_RE.test(tail) ? 'Workspace' : tail;
+/** Projectless chats run in a launcher-created per-session scratch directory
+ *  (`Sessions/<uuid>`, `/workspace/<uuid>` in a container). That folder is an
+ *  implementation detail, so the composer shows no folder chip for it — a
+ *  generic "Workspace" label implied a real attached folder, and a raw UUID
+ *  reads as a bug. Attaching a project is what gives a chat a real folder. */
+function isSessionScratchPath(p: string): boolean {
+  return UUID_RE.test(basename(p));
 }
 
 export function Input({
@@ -59,14 +60,13 @@ export function Input({
   speakRepliesEnabled,
   onSpeakRepliesChange,
   workspacePath,
-  workspaceLocked,
-  onWorkspaceClick,
   sandboxLabel,
   sandboxLocked,
   sandboxLoading,
   sandboxOptions,
   currentSandboxProfile,
   onSandboxChange,
+  composerExtras,
   sessionId,
   onVoiceSessionCreated,
   onVoiceClose,
@@ -80,14 +80,16 @@ export function Input({
   speakRepliesEnabled?: boolean;
   onSpeakRepliesChange?: (enabled: boolean) => void;
   workspacePath?: string | null;
-  workspaceLocked?: boolean;
-  onWorkspaceClick?: () => void;
   sandboxLabel?: string;
   sandboxLocked?: boolean;
   sandboxLoading?: boolean;
   sandboxOptions?: { value: string; label: string }[];
   currentSandboxProfile?: string;
   onSandboxChange?: (value: string) => void;
+  /** Extra chips rendered after the sandbox chip (e.g. attach-project). The
+   *  chip row is the one home for column-context controls, pre- and
+   *  post-launch, so callers pass the same node to ChatShell and the app. */
+  composerExtras?: React.ReactNode;
   sessionId?: string;
   onVoiceSessionCreated?: (id: string) => void;
   onVoiceClose?: () => void;
@@ -337,24 +339,16 @@ export function Input({
                 <PaperclipIcon className="size-4 text-foreground" />
               </label>
 
-              {workspacePath !== undefined && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={workspaceLocked ? undefined : onWorkspaceClick}
-                  disabled={workspaceLocked}
-                  className="h-7 min-w-0 gap-1.5 px-2 text-xs font-normal"
-                  title={workspacePath || 'Select workspace'}
+              {!!workspacePath && !isSessionScratchPath(workspacePath) && (
+                /* Passive indicator of the attached folder. The environment is
+                   bound at launch, so there is nothing to click. */
+                <span
+                  className="flex h-7 min-w-0 items-center gap-1.5 px-2 text-xs font-normal text-muted-foreground"
+                  title={workspacePath}
                 >
-                  <FolderIcon
-                    className={`size-3.5 shrink-0 ${workspaceLocked ? 'text-muted-foreground' : 'text-primary'}`}
-                  />
-                  <span className="max-w-24 truncate sm:max-w-50">
-                    {workspacePath ? workspaceLabel(workspacePath) : 'Select workspace'}
-                  </span>
-                  {workspaceLocked && <LockIcon className="size-2.5 shrink-0 text-muted-foreground" />}
-                </Button>
+                  <FolderIcon className="size-3.5 shrink-0" />
+                  <span className="max-w-24 truncate sm:max-w-50">{basename(workspacePath)}</span>
+                </span>
               )}
 
               {sandboxLabel && (
@@ -391,6 +385,8 @@ export function Input({
                   </DropdownMenuContent>
                 </DropdownMenu>
               )}
+
+              {composerExtras}
             </div>
 
             <div className="flex items-center gap-1 sm:gap-2 shrink-0">

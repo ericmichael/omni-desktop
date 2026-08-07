@@ -1,5 +1,5 @@
 import { useStore } from '@nanostores/react';
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { dispatchOpenFileIntent, WorkspaceFilesPortal } from '@/renderer/features/Files';
@@ -38,6 +38,7 @@ type CodeWorkspaceLayoutProps = {
   sandboxOptions?: { value: string; label: string }[];
   currentSandboxProfile?: string;
   onSandboxChange?: (value: string) => void;
+  composerExtras?: ReactNode;
   onClientToolCall?: ClientToolCallHandler;
   pendingPlan?: import('@/shared/chat-types').PlanItem | null;
   onPlanDecision?: (approved: boolean) => void;
@@ -99,6 +100,7 @@ export const CodeWorkspaceLayout = memo(
     sandboxOptions,
     currentSandboxProfile,
     onSandboxChange,
+    composerExtras,
     onClientToolCall,
     pendingPlan,
     onPlanDecision,
@@ -221,6 +223,7 @@ export const CodeWorkspaceLayout = memo(
               sandboxOptions={sandboxOptions}
               currentSandboxProfile={currentSandboxProfile}
               onSandboxChange={onSandboxChange}
+              composerExtras={composerExtras}
               onClientToolCall={onClientToolCall}
               onController={handleController}
               onRunEnd={handleRunEnd}

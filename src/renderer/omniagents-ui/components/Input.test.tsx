@@ -66,3 +66,39 @@ describe('Input ArrowDown history', () => {
     expect(getTextarea().value).toBe('hello world');
   });
 });
+
+describe('composer folder chip', () => {
+  const chipFor = (workspacePath?: string | null) => {
+    act(() => {
+      root.render(<Input onSubmit={vi.fn()} workspacePath={workspacePath} />);
+    });
+    return container.querySelector('span[title]');
+  };
+
+  it('shows the folder basename for an attached project folder', () => {
+    const chip = chipFor('/home/user/code/my-project');
+    expect(chip).not.toBeNull();
+    expect(chip!.getAttribute('title')).toBe('/home/user/code/my-project');
+    expect(chip!.textContent).toBe('my-project');
+  });
+
+  it('renders no chip for a projectless session scratch directory', () => {
+    expect(chipFor('/home/user/Omni/Workspace/Sessions/2f9d43a1-8b31-4b57-9a0e-7c2d59c4f3aa')).toBeNull();
+  });
+
+  it('renders no chip for a containerized scratch workspace root', () => {
+    expect(chipFor('/workspace/2f9d43a1-8b31-4b57-9a0e-7c2d59c4f3aa')).toBeNull();
+  });
+
+  it('renders no chip when no workspace path is known', () => {
+    expect(chipFor(undefined)).toBeNull();
+    expect(chipFor(null)).toBeNull();
+  });
+
+  it('never renders the misleading generic "Workspace" label', () => {
+    act(() => {
+      root.render(<Input onSubmit={vi.fn()} workspacePath="/workspace/2f9d43a1-8b31-4b57-9a0e-7c2d59c4f3aa" />);
+    });
+    expect(container.textContent).not.toContain('Workspace');
+  });
+});

@@ -1,5 +1,6 @@
 import { useStore } from '@nanostores/react';
 import { motion } from 'framer-motion';
+import { FolderOpen } from 'lucide-react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 
 import { getArtifactsDir, getContainerArtifactsDir, profileRunsOnHost } from '@/lib/artifacts';
@@ -11,7 +12,6 @@ import { Button } from '@/renderer/ds/ui/button';
 import { Spinner } from '@/renderer/ds/ui/spinner';
 import { SessionStatusBanner } from '@/renderer/features/Banner/SessionStatusBanner';
 import { getAvailableProfileNames, getProfileMenuLabel } from '@/renderer/features/SandboxProfile/profile-list';
-import { SandboxPicker } from '@/renderer/features/SandboxProfile/SandboxPicker';
 import { openSettingsTab } from '@/renderer/features/SettingsModal/settings-nav';
 import { buildClientToolHandler } from '@/renderer/features/Tickets/client-tool-handler';
 import { $pendingPlan, resolvePlanApproval } from '@/renderer/features/Tickets/plan-approval-bridge';
@@ -73,6 +73,7 @@ const CodeRunningView = memo(
     sandboxOptions,
     currentSandboxProfile,
     onSandboxChange,
+    composerExtras,
     onClientToolCall,
     dockTargetId,
     tabId,
@@ -103,6 +104,7 @@ const CodeRunningView = memo(
     sandboxOptions?: { value: string; label: string }[];
     currentSandboxProfile?: string;
     onSandboxChange?: (value: string) => void;
+    composerExtras?: React.ReactNode;
     onClientToolCall?: ClientToolCallHandler;
     dockTargetId?: string;
     tabId?: string;
@@ -161,6 +163,7 @@ const CodeRunningView = memo(
             sandboxOptions={sandboxOptions}
             currentSandboxProfile={currentSandboxProfile}
             onSandboxChange={onSandboxChange}
+            composerExtras={composerExtras}
             onClientToolCall={onClientToolCall}
             pendingPlan={pendingPlan}
             onPlanDecision={resolvePlanApproval}
@@ -319,6 +322,32 @@ export const CodeTabContent = memo(
           label: getProfileMenuLabel(name, machines),
         })),
       [isEnterprise, store.availableSandboxProfiles, machines]
+    );
+
+    // Attach-project chip for projectless chats, rendered in the composer chip
+    // row pre- and post-launch (same node both places, so the composer never
+    // changes shape when the session starts). Attaching mid-conversation is
+    // supported: it binds the project and relaunches; the transcript continues.
+    const composerExtras = useMemo(
+      () =>
+        chatMode ? (
+          <AttachProjectMenu
+            tabId={tab.id}
+            trigger={
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 min-w-0 gap-1.5 px-2 text-xs font-normal"
+                title="Attach a project to this chat"
+              >
+                <FolderOpen className="size-3.5 shrink-0 text-primary" />
+                <span className="max-w-24 truncate sm:max-w-50">Attach project</span>
+              </Button>
+            }
+          />
+        ) : undefined,
+      [chatMode, tab.id]
     );
 
     const [greeting] = useState(getGreeting);
@@ -508,6 +537,7 @@ export const CodeTabContent = memo(
               sandboxOptions={sandboxOptions}
               currentSandboxProfile={profileName}
               onSandboxChange={handleProfileChange}
+              composerExtras={composerExtras}
               onClientToolCall={handleClientToolCall}
               dockTargetId={dockTargetId}
               tabId={tab.id}
@@ -537,20 +567,12 @@ export const CodeTabContent = memo(
             pendingMessages={pendingMessages}
             suggestions={!tab.activatedAt ? CHAT_SUGGESTIONS : undefined}
             sandboxLabel={sandboxLabel}
+            sandboxOptions={!tab.activatedAt ? sandboxOptions : undefined}
+            currentSandboxProfile={profileName}
+            onSandboxChange={handleProfileChange}
+            composerExtras={composerExtras}
             workspaceReady={Boolean(store.workspaceDir)}
             onOpenWorkspaceSettings={() => openSettingsTab('Workspace')}
-            prelaunchExtras={
-              !tab.activatedAt ? (
-                <>
-                  <SandboxPicker
-                    value={profileName}
-                    onChange={handleProfileChange}
-                    context={{ isEnterprise, available: store.availableSandboxProfiles }}
-                  />
-                  <AttachProjectMenu tabId={tab.id} />
-                </>
-              ) : undefined
-            }
           />
         ) : phase === 'error' ? (
           <CodeErrorView tabId={tab.id} retry={retry} />

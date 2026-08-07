@@ -36,6 +36,8 @@ type OmniAgentsAppProps = {
   currentSandboxProfile?: string;
   /** Called when the user picks a different profile from the in-composer menu. */
   onSandboxChange?: (value: string) => void;
+  /** Extra composer chips (e.g. attach-project) rendered after the sandbox chip. */
+  composerExtras?: ReactNode;
   onClientToolCall?: ClientToolCallHandler;
   /** Hands an imperative controller up so the global orchestrator can drive this column. */
   onController?: (controller: SessionController | null) => void;
@@ -50,8 +52,8 @@ type OmniAgentsAppProps = {
   /** Routine (scheduled task) bound to this column. When set, the app registers a routine bridge actor. */
   routineId?: string;
   /** Project workspace directory the launcher already knows about. Used to
-   *  pre-fill the workspace chip so it doesn't flash "Select workspace" while
-   *  the chat-boot RPC resolves. */
+   *  pre-fill the composer folder chip while the chat-boot RPC resolves.
+   *  Session scratch dirs (UUID basename) render no chip. */
   workspaceDir?: string;
   /** Additional column UI that must share this exact RPC connection. */
   providerChildren?: ReactNode;
@@ -75,6 +77,7 @@ export const OmniAgentsApp = ({
   sandboxOptions,
   currentSandboxProfile,
   onSandboxChange,
+  composerExtras,
   onClientToolCall,
   onController,
   onRunEnd,
@@ -114,6 +117,7 @@ export const OmniAgentsApp = ({
           sandboxOptions={sandboxOptions}
           currentSandboxProfile={currentSandboxProfile}
           onSandboxChange={onSandboxChange}
+          composerExtras={composerExtras}
           onClientToolCall={onClientToolCall}
           onController={onController}
           onRunEnd={onRunEnd}

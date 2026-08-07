@@ -36,7 +36,7 @@ const renderShell = async (
         sandboxLabel="Devbox"
         workspaceReady
         onOpenWorkspaceSettings={vi.fn()}
-        prelaunchExtras={<button type="button">Attach project</button>}
+        composerExtras={<button type="button">Attach project</button>}
         {...overrides}
       />
     );
