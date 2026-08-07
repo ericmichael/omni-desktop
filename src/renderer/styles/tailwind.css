@@ -1,3 +1,14 @@
+/* Establish the cascade-layer order BEFORE Tailwind declares its own, adding
+ * a `yoopta` layer between base and components. The @yoopta packages inject
+ * global stylesheets at import time carrying their own copies of utility
+ * classes in the shadcn-v3 convention (`hsl(var(--background))`) — invalid
+ * against our v4 full-color tokens, and unlayered, so they'd beat Tailwind's
+ * correct utilities and paint nothing (transparent dialogs/popovers).
+ * `yoopta-style-demote.ts` wraps those injected sheets in @layer yoopta:
+ * above base (their component chrome still beats preflight), below
+ * components/utilities (our valid utilities win every collision). */
+@layer theme, base, yoopta, components, utilities;
+
 @import 'tailwindcss';
 @plugin '@tailwindcss/typography';
 

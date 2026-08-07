@@ -36,6 +36,13 @@ import {
 } from 'lucide-react';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { demoteLegacyYooptaStyles } from './yoopta-style-demote';
+
+// The @yoopta imports above style-inject global sheets as a side effect (ESM
+// imports all run before this module body). Demote them below Tailwind's
+// utilities immediately, before anything renders against the broken rules.
+demoteLegacyYooptaStyles();
+
 // ---------------------------------------------------------------------------
 // Plugins & Marks
 // ---------------------------------------------------------------------------

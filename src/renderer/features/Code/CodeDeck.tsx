@@ -2000,7 +2000,11 @@ export const CodeDeck = memo(() => {
   }, []);
 
   const handlePreviewUrlChange = useCallback((tabId: CodeTabId, url: string) => {
-    setPreviewUrls((prev) => ({ ...prev, [tabId]: url }));
+    // Idempotent on purpose: BrowserView re-reports the active URL whenever
+    // its sync effect re-runs, and the inline arrow prop below renews its
+    // identity every render. Returning the same reference lets React bail
+    // out instead of looping render → new arrow → effect → setState.
+    setPreviewUrls((prev) => (prev[tabId] === url ? prev : { ...prev, [tabId]: url }));
   }, []);
 
   const handleDragEnd = useCallback(

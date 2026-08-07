@@ -217,7 +217,10 @@ export const AddSourceDialog = memo(({ open, onClose, project }: AddSourceDialog
           <DialogHeader>
             <DialogTitle>Add source</DialogTitle>
           </DialogHeader>
-          <div className={cn('min-h-0 overflow-y-auto', 'flex flex-col gap-5')}>
+          {/* max-h backstop: overflow-y-auto only scrolls against a real
+              constraint, and DialogContent has none — without this, tall
+              provider bodies push the dialog past the viewport. */}
+          <div className={cn('min-h-0 overflow-y-auto', 'flex max-h-[70vh] flex-col gap-5')}>
             <div className="flex flex-col gap-1">
               <label className="text-sm text-foreground">Source</label>
               <Select aria-label="Source type" value={provider} onChange={handleProvider} className="w-full">

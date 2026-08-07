@@ -189,7 +189,10 @@ export const RepoPicker = memo(
           </div>
         ) : (
           <Command shouldFilter={false} className="bg-transparent">
-            <CommandList className="max-h-2/5">
+            {/* A real viewport-relative cap: the percentage `max-h-2/5` this
+                replaced resolved against an auto-height parent, so browsers
+                ignored it and long repo lists grew past the dialog. */}
+            <CommandList className="max-h-[40vh]">
               <CommandEmpty>{emptyHint?.(selectedScope) ?? 'No repositories found.'}</CommandEmpty>
               <CommandGroup>
                 {(repos ?? []).map((repo) => (
