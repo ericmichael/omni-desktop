@@ -159,6 +159,14 @@ app.commandLine.appendSwitch('disable-renderer-backgrounding');
 // windows open at a time so this should have no effect. But just in case, we disable the limit.
 app.commandLine.appendSwitch('disable-backing-store-limit');
 
+// Chromium caps a renderer at 6 sockets per host. The shared AgentHost puts
+// EVERY column's chat WS, terminal WS, realtime WS, and ticket fetch on one
+// loopback origin, so the 7th connection — typically a reconnect's
+// /auth/ws-ticket fetch — queues in the socket pool forever and the column
+// hangs at "Connecting…" with zero packets on the wire. Lift the cap for
+// loopback only; remote origins keep Chromium's default limits.
+app.commandLine.appendSwitch('ignore-connections-limit', '127.0.0.1,localhost');
+
 // Expose a Chrome DevTools Protocol endpoint in development so external tools
 // (chrome://inspect, puppeteer, `curl http://localhost:9222/json`) can attach
 // to the running renderer without restarting. Opt-in via OMNI_DEBUG_PORT.

@@ -3,7 +3,6 @@ import { createActor, getNextSnapshot } from 'xstate';
 
 import {
   INITIAL_RECONNECT_DELAY_MS,
-  MAX_RECONNECT_ATTEMPTS,
   MAX_RECONNECT_DELAY_MS,
   type RPCClientEvent,
   rpcClientMachine,
@@ -217,16 +216,18 @@ describe('rpcClientMachine', () => {
     expect(snap.context.reconnectDelay).toBeLessThanOrEqual(MAX_RECONNECT_DELAY_MS);
   });
 
-  it('transitions to disconnected after max reconnect attempts', () => {
+  it('keeps reconnecting forever on transient failures (no permanent give-up)', () => {
+    // A local/embedded backend can be unreachable for minutes; the machine
+    // must stay in the retry loop with capped backoff, never parking itself
+    // in permanent `disconnected` on transient errors.
     let snap = connectingSnapshot() as any;
-    for (let i = 0; i < MAX_RECONNECT_ATTEMPTS; i++) {
+    for (let i = 0; i < 50; i++) {
       const reconnecting = next(snap, { type: 'WS_ERROR', error: 'fail' });
+      expect(reconnecting.value).toBe('reconnecting');
+      expect(reconnecting.context.permanent).toBe(false);
       snap = { ...reconnecting, value: 'connecting' as const };
     }
-    // One more failure exceeds max — always guard fires
-    const final = next(snap, { type: 'WS_ERROR', error: 'fail' });
-    expect(final.value).toBe('disconnected');
-    expect(final.context.error).toBe('Max reconnect attempts reached');
+    expect(snap.context.reconnectDelay).toBeLessThanOrEqual(MAX_RECONNECT_DELAY_MS);
   });
 
   // -----------------------------------------------------------------------

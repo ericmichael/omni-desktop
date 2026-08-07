@@ -20,7 +20,6 @@ export const WS_CONNECT_TIMEOUT_MS = DEFAULT_LIFECYCLE_POLICY.connectTimeoutMs;
 export const MAX_PENDING_CALLS = 100;
 export const INITIAL_RECONNECT_DELAY_MS = DEFAULT_LIFECYCLE_POLICY.reconnectInitialDelayMs;
 export const MAX_RECONNECT_DELAY_MS = DEFAULT_LIFECYCLE_POLICY.reconnectMaxDelayMs;
-export const MAX_RECONNECT_ATTEMPTS = DEFAULT_LIFECYCLE_POLICY.reconnectMaxAttempts;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -95,7 +94,6 @@ export const rpcClientMachine = setup({
     reconnectDelay: ({ context }: { context: RPCClientContext }) => context.reconnectDelay,
   },
   guards: {
-    hasReachedMaxAttempts: ({ context }) => context.reconnectAttempt >= MAX_RECONNECT_ATTEMPTS,
     isPermanentFailure: ({ event }) =>
       (event.type === 'WS_CLOSE' && classifyCloseCode(event.code) === 'permanent') ||
       (event.type === 'WS_ERROR' && event.permanent === true),
@@ -194,13 +192,15 @@ export const rpcClientMachine = setup({
     },
 
     reconnecting: {
-      always: [
-        {
-          guard: 'hasReachedMaxAttempts',
-          target: 'disconnected',
-          actions: assign({ error: 'Max reconnect attempts reached', permanent: true }),
-        },
-      ],
+      // Transient failures NEVER park the machine permanently. The backend
+      // is a local/embedded process that can be gone for minutes (serve
+      // restart, dev rebuild, a busy boot pushing `initialize` past its
+      // deadline) and must be re-reached the moment it returns — a capped
+      // backoff retries forever. Giving up after N attempts left columns
+      // showing "Connecting…" eternally while a healthy server sat one
+      // dial away; only genuinely permanent failures (auth-class close
+      // codes, explicit `permanent` errors) reach `disconnected`, via the
+      // isPermanentFailure guard on WS_CLOSE / WS_ERROR.
       entry: 'incrementReconnect',
       after: {
         reconnectDelay: {

@@ -151,6 +151,9 @@ export class SessionReplayCoordinator {
   private pendingRetry = new Set<string>();
   private needsResync = new Set<string>();
   private buffered = new Map<string, ReplayedEvent[]>();
+  /** Server-provided cursor from the last ``-32030`` error data, adopted by
+   *  ``completeResync`` when the host has no better cursor. */
+  private resyncCursors = new Map<string, { streamId: string; lastSeq: number }>();
 
   constructor(
     private resume: (sessionId: string, streamId: string | null, afterSeq: number) => Promise<ResumeResult>,
@@ -185,16 +188,28 @@ export class SessionReplayCoordinator {
     this.pendingRetry.delete(sessionId);
     this.needsResync.delete(sessionId);
     this.buffered.delete(sessionId);
+    this.resyncCursors.delete(sessionId);
   }
 
   /**
    * Seed a fresh cursor after the host has refetched authoritative state.
-   * Passing no epoch leaves the session cursorless; the next ``resumeAll``
-   * adopts the server's current stream from sequence zero.
+   * When the host passes no epoch, adopt the cursor the server named in
+   * its ``-32030`` error data (``stream_id`` + ``retained_last_seq``) —
+   * the server's contract is "refetch authoritative state and resume from
+   * the returned last_seq". Leaving the session cursorless instead made
+   * the next ``resumeAll`` send another cursorless resume, which the
+   * server rejects with ``-32030`` again: an infinite resync loop that
+   * reset the transcript on every cycle.
    */
   completeResync(sessionId: string, streamId: string | null = null, lastSeq = 0): void {
+    const adopted = streamId === null ? this.resyncCursors.get(sessionId) : undefined;
+    this.resyncCursors.delete(sessionId);
     const tracker = this.tracker(sessionId);
-    tracker.reset(streamId, lastSeq);
+    if (adopted) {
+      tracker.reset(adopted.streamId, adopted.lastSeq);
+    } else {
+      tracker.reset(streamId, lastSeq);
+    }
     this.needsResync.delete(sessionId);
     this.pendingRetry.delete(sessionId);
     this.buffered.delete(sessionId);
@@ -294,6 +309,15 @@ export class SessionReplayCoordinator {
     } catch (err) {
       if ((err as { code?: unknown } | null)?.code === RESYNC_REQUIRED_CODE) {
         outcome = 'resync';
+        // The error data names the server's current stream and its retained
+        // tail; that's the cursor the post-reload completeResync must adopt.
+        const data = (err as { data?: unknown }).data as Record<string, unknown> | undefined;
+        if (data && typeof data.stream_id === 'string') {
+          this.resyncCursors.set(sessionId, {
+            streamId: data.stream_id,
+            lastSeq: typeof data.retained_last_seq === 'number' ? data.retained_last_seq : 0,
+          });
+        }
         this.requireResync(sessionId);
       } else {
         // A transport failure while resuming is not evidence that the durable

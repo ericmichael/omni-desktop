@@ -315,12 +315,23 @@ export class RPCClient {
       return this.connectInFlight;
     }
 
-    // If already connected, noop
+    // Noop only when the connection is genuinely usable: socket open AND the
+    // GUI handshake completed AND the lifecycle machine agrees. An open
+    // socket without those is a leftover from a partially-failed attempt —
+    // trusting it here caused a silent livelock (machine retrying forever,
+    // connect() no-oping forever, zero packets on the wire). Tear it down
+    // and dial fresh instead.
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      return;
-    }
-    if (this.ws && this.ws.readyState === WebSocket.CONNECTING) {
-      return;
+      if (this.negotiatedInitialization && this.actor.getSnapshot().value === 'connected') {
+        return;
+      }
+      this.teardownSocket(this.ws);
+    } else if (this.ws && this.ws.readyState === WebSocket.CONNECTING) {
+      if (this.connectInFlight) {
+        return this.connectInFlight;
+      }
+      // Orphaned CONNECTING socket with no active attempt — abandon it.
+      this.teardownSocket(this.ws);
     }
 
     // Emit CONNECT only when we're actually leaving `disconnected`. When
@@ -361,19 +372,16 @@ export class RPCClient {
     try {
       await Promise.race([this.connectAttempt(controller.signal), deadline]);
     } catch (error) {
+      // A failed attempt must never leave its socket behind: an OPEN-but-
+      // unhandshaken `this.ws` makes every later connect() no-op (see the
+      // OPEN check in connect()) while the machine retries forever.
+      // `connectInFlight` serializes attempts, so any socket present here
+      // belongs to this failed attempt.
+      const failedSocket = this.ws;
+      if (failedSocket) {
+        this.teardownSocket(failedSocket);
+      }
       if (controller.signal.aborted) {
-        const timedOutSocket = this.ws;
-        if (timedOutSocket) {
-          timedOutSocket.onmessage = null;
-          timedOutSocket.onclose = null;
-          timedOutSocket.onerror = null;
-          try {
-            timedOutSocket.close();
-          } catch {}
-          if (this.ws === timedOutSocket) {
-            this.ws = null;
-          }
-        }
         this.rejectAllPending(new RpcTimeoutError('initialize', WS_CONNECT_TIMEOUT_MS));
         this.send({
           type: 'WS_ERROR',
@@ -385,6 +393,19 @@ export class RPCClient {
       if (timeout) {
         clearTimeout(timeout);
       }
+    }
+  }
+
+  /** Detach handlers, close, and clear `this.ws` if it still points at the socket. */
+  private teardownSocket(socket: WebSocket): void {
+    socket.onmessage = null;
+    socket.onclose = null;
+    socket.onerror = null;
+    try {
+      socket.close();
+    } catch {}
+    if (this.ws === socket) {
+      this.ws = null;
     }
   }
 
