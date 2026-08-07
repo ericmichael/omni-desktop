@@ -1,5 +1,6 @@
 import React from 'react';
 
+import { truncateOneLine } from '@/lib/text';
 import { Button } from '@/renderer/ds/ui/button';
 import { Card } from '@/renderer/ds/ui/card';
 
@@ -21,14 +22,6 @@ export type GoalSnapshot = {
 };
 
 const GOAL_TRUNCATE = 100;
-
-function shortGoal(goal: string, max: number): string {
-  const oneLine = goal.replace(/\s+/g, ' ').trim();
-  if (oneLine.length <= max) {
-    return oneLine;
-  }
-  return `${oneLine.slice(0, max - 1)}…`;
-}
 
 function dotClass(status: GoalSnapshot['status']): string {
   if (status === 'active') {
@@ -64,7 +57,7 @@ export function GoalPanel({ snapshot, onDismiss }: { snapshot: GoalSnapshot | nu
           <span className="font-medium text-foreground">goal</span>
           <span aria-hidden>·</span>
           <span className="truncate min-w-0 text-foreground" title={snapshot.goal}>
-            {shortGoal(snapshot.goal, GOAL_TRUNCATE)}
+            {truncateOneLine(snapshot.goal, GOAL_TRUNCATE)}
           </span>
           {snapshot.status !== 'active' && (
             <span

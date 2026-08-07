@@ -1,4 +1,5 @@
 import {
+  Bot,
   Code,
   Folder,
   GitBranch,
@@ -31,6 +32,7 @@ const APP_ICON_SIZE_CLASSES: Record<AppIconSize, string> = {
  * Map of Lucide icon name → component for builtin + user-picker icons.
  */
 export const ICON_MAP: Record<string, LucideIcon> = {
+  Bot,
   GitBranch,
   MessageCircle,
   Code,

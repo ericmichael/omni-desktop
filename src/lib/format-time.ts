@@ -43,6 +43,21 @@ export function formatDayLabel(ts: number, now: number = Date.now()): string {
   });
 }
 
+/** Live elapsed clock for running work: "42s", "3m02s", "1h05m". Seconds
+ *  stay visible under an hour so a ticking value reads as ticking. */
+export function formatElapsed(ms: number): string {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  if (totalSeconds < 60) {
+    return `${totalSeconds}s`;
+  }
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  if (totalMinutes < 60) {
+    return `${totalMinutes}m${(totalSeconds % 60).toString().padStart(2, '0')}s`;
+  }
+  const hours = Math.floor(totalMinutes / 60);
+  return `${hours}h${(totalMinutes % 60).toString().padStart(2, '0')}m`;
+}
+
 /** Compact duration: "42s", "3m", "1h 5m". */
 export function formatDuration(ms: number): string {
   if (ms < 1000) {

@@ -162,7 +162,8 @@ export function ModelSessionControls({
   }
 
   return (
-    <div className="flex min-h-8 items-center gap-1 px-3 pb-1" data-testid="model-session-controls">
+    // Row padding comes from the parent PillStrip row.
+    <div className="flex min-w-0 items-center gap-1" data-testid="model-session-controls">
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button

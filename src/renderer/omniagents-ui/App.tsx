@@ -31,10 +31,22 @@ import { forwardEvent, registerColumnActor } from '@/renderer/services/superviso
 import { VoiceScopeContext } from '@/renderer/services/voice-recording';
 import type { ExecutionTarget, TicketId } from '@/shared/types';
 
-import { negotiatedPlanTasks } from './canonical-plan-tasks';
+import {
+  $activityBySession,
+  type BashJobsKillResult,
+  type BashJobsTailResult,
+  type BashJobSummary,
+  mergeWorkersSnapshot,
+  normalizeSubagentSnapshot,
+  publishBashJobs,
+  publishSubagentEvent,
+  publishSubagentsSnapshot,
+  registerActivityActions,
+  type WorkersKillResult,
+} from './activity-store';
+import { negotiatedPlanTasks, type TaskSummary } from './canonical-plan-tasks';
 import type { PendingMessage } from './ChatShell';
 import { type ArtifactItem, ArtifactsPanel } from './components/ArtifactsPanel';
-import { BashJobs, type BashJobsKillResult, type BashJobsTailResult, type BashJobSummary } from './components/BashJobs';
 import { ElicitationCard } from './components/ElicitationCard';
 import { EscalationBanner, type EscalationInfo } from './components/EscalationBanner';
 import { GoalPanel, type GoalSnapshot } from './components/GoalPanel';
@@ -44,13 +56,12 @@ import { LoopPanel, type LoopTaskSnapshot } from './components/LoopPanel';
 import { ArtifactPortalProvider, type Attachment, MessageList } from './components/MessageList';
 import { ModelSessionControls } from './components/ModelSessionControls';
 import { type NotificationInfo, Notifications } from './components/Notifications';
+import { PillStrip } from './components/PillStrip';
 import { QueuedMessages } from './components/QueuedMessages';
 import { type RecapInfo, RecapPanel } from './components/RecapPanel';
 import { SessionList } from './components/SessionList';
 import { Sidebar } from './components/Sidebar';
-import { Tasks, type TaskSummary } from './components/Tasks';
 import { WakeupPanel, type WakeupSnapshot } from './components/WakeupPanel';
-import { type WorkersKillResult, WorkersPanel, type WorkerSummary } from './components/WorkersPanel';
 import { OmniAgentsHeaderActionsPortal, OmniAgentsHeaderActionsProvider } from './header-actions';
 import { useChatBoot } from './hooks/use-chat-boot';
 import { useChatSession } from './hooks/use-chat-session';
@@ -94,6 +105,7 @@ export function App({
   ticketId,
   routineId,
   workspaceDir,
+  onOpenApp,
 }: {
   sessionId?: string;
   /** Explicit execution identity. Never inferred from the conversation id. */
@@ -126,6 +138,10 @@ export function App({
   /** Routine (scheduled task) id when this column hosts a routine run. */
   routineId?: string;
   workspaceDir?: string;
+  /** Opens a column app (deck sidecar tab). When absent — hosts without a
+   *  deck column, e.g. Residents — pills that would deep-link fall back to
+   *  a popover. */
+  onOpenApp?: (appId: string) => void;
 }) {
   const environmentId = executionTarget?.environmentId;
   const uiConfig = useUiConfig();
@@ -199,7 +215,6 @@ export function App({
   const [goalSnapshot, setGoalSnapshot] = useState<GoalSnapshot | null>(null);
   const [wakeupSnapshot, setWakeupSnapshot] = useState<WakeupSnapshot | null>(null);
   const [loopTasks, setLoopTasks] = useState<LoopTaskSnapshot[]>([]);
-  const [workers, setWorkers] = useState<WorkerSummary[]>([]);
   // Dismissed IDs for each docked panel. Snapshotted on user submit:
   // every item currently in a terminal state gets added so it disappears
   // from the panel when the next run begins. Items spawned during the
@@ -268,6 +283,16 @@ export function App({
     stageContext,
     clearStagedContext,
   } = machine;
+
+  // Unified subagent list (workers + agent-tool runs). The session-keyed
+  // activity store is the single source of truth — this component publishes
+  // into it (broadcasts, seeds, kill responses) and reads its own session's
+  // slice back for the pill row, the same data the Agents sidecar renders.
+  const activityBySession = useStore($activityBySession, { keys: sessionId ? [sessionId] : [] });
+  const subagents = useMemo(
+    () => (sessionId ? (activityBySession[sessionId]?.subagents ?? []) : []),
+    [activityBySession, sessionId]
+  );
 
   // Boot orchestrator — composes server → RPC → bootstrap → session load into
   // a single state machine with automatic teardown on disconnect. Replaces the
@@ -492,13 +517,12 @@ export function App({
         return;
       }
       if (fn === 'ui.workers.update' || fn === 'ui.subagents.update') {
-        // Worker snapshot broadcast. Older omniagents (the pinned PyPI
-        // release) sends ``ui.workers.update``; newer ones send the
-        // unified ``ui.subagents.update`` from the subagent bus, whose
-        // entries carry ``kind`` (workers plus agent-tool runs — this
-        // panel renders workers only, and agent_tool entries have no
-        // worker_id). The launcher must speak both across its supported
-        // server range; drop the legacy branch when the pin advances.
+        // Subagent snapshot broadcast. Older omniagents (the pinned PyPI
+        // release) sends ``ui.workers.update`` (workers only, no ``kind``);
+        // newer ones send the unified ``ui.subagents.update`` from the
+        // subagent bus (workers plus agent-tool runs). The launcher must
+        // speak both across its supported server range; drop the legacy
+        // branch when the pin advances.
         const request_id = String(p?.request_id ?? '');
         const eventSessionId = typeof p?.session_id === 'string' ? p.session_id : undefined;
         const currentSessionId = actor.getSnapshot().context.sessionId;
@@ -511,7 +535,31 @@ export function App({
         const args = p?.args || {};
         const snap = args?.snapshot;
         if (Array.isArray(snap)) {
-          setWorkers((snap as Array<WorkerSummary & { kind?: string }>).filter((entry) => entry.kind !== 'agent_tool'));
+          const sid = eventSessionId ?? currentSessionId;
+          if (sid) {
+            publishSubagentsSnapshot(sid, normalizeSubagentSnapshot(snap));
+          }
+        }
+        if (request_id) {
+          client.clientResponse(request_id, true, { ack: true }).catch(() => {});
+        }
+        return;
+      }
+      if (fn === 'ui.subagent.event') {
+        // One narrative event from a subagent's run (tool_called /
+        // tool_result / message_output / run_*). Feeds the Agents
+        // surface's live activity view via the shared store.
+        const request_id = String(p?.request_id ?? '');
+        const eventSessionId = typeof p?.session_id === 'string' ? p.session_id : undefined;
+        const currentSessionId = actor.getSnapshot().context.sessionId;
+        const args = (p?.args || {}) as Record<string, unknown>;
+        const sid = eventSessionId ?? currentSessionId;
+        const subagentId = typeof args.subagent_id === 'string' ? args.subagent_id : '';
+        if (sid && subagentId && (!eventSessionId || !currentSessionId || eventSessionId === currentSessionId)) {
+          publishSubagentEvent(sid, subagentId, {
+            method: String(args.method ?? ''),
+            params: (args.params ?? {}) as Record<string, unknown>,
+          });
         }
         if (request_id) {
           client.clientResponse(request_id, true, { ack: true }).catch(() => {});
@@ -755,29 +803,39 @@ export function App({
   // the Tasks behavior: while a run is active keep everything visible (minus
   // dismissed exits), and once idle drop successful exits but keep failures
   // (non-zero/null exit_code) visible until the user dismisses them.
+  const allBashJobs = liveBashJobs ?? derivedBashJobs;
   const bashJobs = useMemo(() => {
-    const source = liveBashJobs ?? derivedBashJobs;
-    const live = source.filter((j) => !(!j.running && dismissedJobIds.has(j.job_id)));
+    const live = allBashJobs.filter((j) => !(!j.running && dismissedJobIds.has(j.job_id)));
     return runActive ? live : live.filter((j) => j.running || j.exit_code !== 0);
-  }, [liveBashJobs, derivedBashJobs, runActive, dismissedJobIds]);
+  }, [allBashJobs, runActive, dismissedJobIds]);
 
-  // Same shape for workers: drop dismissed exits, then idle-hide only
-  // successful completions so failures (error/cancelled) stay visible
-  // until the user dismisses them.
-  const visibleWorkers = useMemo(() => {
-    const live = workers.filter((w) => !(w.status !== 'running' && dismissedWorkerIds.has(w.worker_id)));
-    return runActive ? live : live.filter((w) => w.status !== 'completed');
-  }, [workers, runActive, dismissedWorkerIds]);
+  // Same shape for subagents: drop dismissed worker exits, then idle-hide
+  // only successful completions so failures (error/cancelled) stay visible
+  // until the user dismisses them. Agent-tool entries can't be dismissed —
+  // the server ages their ended tail out of the snapshot.
+  const visibleSubagents = useMemo(() => {
+    const live = subagents.filter(
+      (s) => !(s.status !== 'running' && s.worker_id && dismissedWorkerIds.has(s.worker_id))
+    );
+    return runActive ? live : live.filter((s) => s.status !== 'completed');
+  }, [subagents, runActive, dismissedWorkerIds]);
+
+  // Mirror bash jobs into the activity store (unfiltered — the Agents
+  // surface shows truth; dismissal only quiets the pill row).
+  useEffect(() => {
+    if (sessionId) {
+      publishBashJobs(sessionId, allBashJobs);
+    }
+  }, [sessionId, allBashJobs]);
 
   // Clear the live override on session change so the next session starts
   // from its own history-derived snapshot instead of the previous session's
   // last broadcast.
   useEffect(() => {
     setLiveBashJobs(null);
-    // Workers panel has no history-derived seed (workers are runtime
-    // only); clear so the prior session's list doesn't leak into the new
-    // one until ``workers.list`` resolves below.
-    setWorkers([]);
+    // Subagents need no clearing here: the activity store is keyed by
+    // session, so the pill reads the new session's slice immediately and
+    // the ``workers.list`` seed below refreshes it.
     // Reset dismissal sets on session change so a fresh session starts
     // with the panels showing their full server-side snapshot.
     setDismissedWorkerIds(new Set());
@@ -796,8 +854,10 @@ export function App({
         sessionId,
         executionTarget
       )) as unknown as WorkersKillResult;
-      if (Array.isArray(res?.snapshot)) {
-        setWorkers(res.snapshot as WorkerSummary[]);
+      if (Array.isArray(res?.snapshot) && sessionId) {
+        // ``workers.kill`` snapshots workers only; the merge keeps the
+        // agent-tool entries until the next bus broadcast.
+        mergeWorkersSnapshot(sessionId, normalizeSubagentSnapshot(res.snapshot));
       }
       return res;
     },
@@ -860,6 +920,39 @@ export function App({
     }
   }, [client, executionTarget, sessionId]);
 
+  // The Agents sidecar surface and the pill popovers live outside this
+  // React tree; they stop/tail through the per-session action registry
+  // instead of props.
+  useEffect(() => {
+    if (!sessionId) {
+      return;
+    }
+    registerActivityActions(sessionId, {
+      killWorker: handleWorkerKill,
+      killJob: handleBashKill,
+      tailJob: handleBashTail,
+    });
+    return () => registerActivityActions(sessionId, null);
+  }, [sessionId, handleWorkerKill, handleBashKill, handleBashTail]);
+
+  // Once per session with a running job, poke ``bash_jobs.list`` so the
+  // server-side sweeper captures a service handle and starts pushing
+  // ``ui.bash_jobs.update`` on natural exits. (Previously the docked
+  // BashJobs panel fired this on mount.)
+  const bashWarmupSessionRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!sessionId || bashWarmupSessionRef.current === sessionId) {
+      return;
+    }
+    if (!allBashJobs.some((j) => j.running)) {
+      return;
+    }
+    bashWarmupSessionRef.current = sessionId;
+    handleBashWarmup().catch(() => {
+      bashWarmupSessionRef.current = null;
+    });
+  }, [sessionId, allBashJobs, handleBashWarmup]);
+
   const handleBashDismiss = useCallback((job_id: string) => {
     setDismissedJobIds((prev) => {
       const next = new Set(prev);
@@ -920,8 +1013,8 @@ export function App({
       // — a slash is still a user-initiated step boundary.
       setDismissedWorkerIds((prev) => {
         const next = new Set(prev);
-        for (const w of workers) {
-          if (w.status === 'completed') {
+        for (const w of subagents) {
+          if (w.kind === 'worker' && w.worker_id && w.status === 'completed') {
             next.add(w.worker_id);
           }
         }
@@ -929,8 +1022,7 @@ export function App({
       });
       setDismissedJobIds((prev) => {
         const next = new Set(prev);
-        const source = liveBashJobs ?? derivedBashJobs;
-        for (const j of source) {
+        for (const j of allBashJobs) {
           if (!j.running && j.exit_code === 0) {
             next.add(j.job_id);
           }
@@ -1213,9 +1305,8 @@ export function App({
       runActive,
       queuedMessages.length,
       escalation,
-      workers,
-      liveBashJobs,
-      derivedBashJobs,
+      subagents,
+      allBashJobs,
       rawTasks,
     ]
   );
@@ -1795,7 +1886,7 @@ export function App({
       } else {
         setLoopTasks([]);
       }
-      // Seed the workers panel from server state. Same rationale as goal:
+      // Seed the subagent list from server state. Same rationale as goal:
       // catches the case where workers were spawned earlier and are still
       // running when we attach.
       if (resolvedId) {
@@ -1804,12 +1895,11 @@ export function App({
             | { snapshot?: unknown }
             | undefined;
           const snap = res?.snapshot;
-          setWorkers(Array.isArray(snap) ? (snap as WorkerSummary[]) : []);
+          publishSubagentsSnapshot(resolvedId, Array.isArray(snap) ? normalizeSubagentSnapshot(snap) : []);
         } catch {
-          setWorkers([]);
+          // Keep whatever the store holds — a failed seed is not evidence
+          // the session has no subagents, and broadcasts may be fresher.
         }
-      } else {
-        setWorkers([]);
       }
       setUI('chat');
     },
@@ -1854,10 +1944,16 @@ export function App({
     if (sessionIdProp === prevSessionIdProp.current) {
       return;
     }
-    prevSessionIdProp.current = sessionIdProp;
     if (!connected) {
+      // Not connected yet — leave the change unconsumed. `connected` is a
+      // dependency, so this effect re-fires on reconnect and applies the
+      // selection then. Consuming it here and bailing (the old behavior)
+      // silently dropped any session selected during a disconnected
+      // window: the column header showed the new chat while the transcript
+      // stayed on the old session forever, with no history fetch.
       return;
     }
+    prevSessionIdProp.current = sessionIdProp;
     const currentSessionId = actor.getSnapshot().context.sessionId;
     if (sessionIdProp && sessionIdProp !== currentSessionId) {
       handleSelectSession(sessionIdProp, { fromProp: true });
@@ -2032,15 +2128,6 @@ export function App({
                 <GoalPanel snapshot={goalSnapshot} onDismiss={handleGoalDismiss} />
                 <WakeupPanel snapshot={wakeupSnapshot} onDismiss={handleWakeupDismiss} />
                 <LoopPanel tasks={loopTasks} onDismiss={handleLoopDismiss} />
-                <Tasks tasks={tasks} />
-                <WorkersPanel workers={visibleWorkers} onKill={handleWorkerKill} onDismiss={handleWorkerDismiss} />
-                <BashJobs
-                  jobs={bashJobs}
-                  onKill={handleBashKill}
-                  onTail={handleBashTail}
-                  onWarmup={handleBashWarmup}
-                  onDismiss={handleBashDismiss}
-                />
                 <QueuedMessages
                   items={queuedMessages}
                   onCancel={(id) => {
@@ -2097,15 +2184,27 @@ export function App({
                     ))}
                   </div>
                 )}
-                {sessionId && connected && bootState.ready ? (
-                  <ModelSessionControls
-                    sessionId={sessionId}
-                    transport={client}
-                    disabled={runActive}
-                    approvalsSupported={client.supportsExperimentalFeature('approvalReviewer')}
-                    onSetApprovalsReviewer={(reviewer) => client.setSessionApprovals(sessionId!, reviewer)}
-                  />
-                ) : null}
+                <PillStrip
+                  sessionId={sessionId}
+                  subagents={visibleSubagents}
+                  tasks={tasks}
+                  jobs={bashJobs}
+                  onOpenAgents={onOpenApp ? () => onOpenApp('agents') : undefined}
+                  onWorkerKill={handleWorkerKill}
+                  onWorkerDismiss={handleWorkerDismiss}
+                  onJobKill={handleBashKill}
+                  onJobDismiss={handleBashDismiss}
+                >
+                  {sessionId && connected && bootState.ready ? (
+                    <ModelSessionControls
+                      sessionId={sessionId}
+                      transport={client}
+                      disabled={runActive}
+                      approvalsSupported={client.supportsExperimentalFeature('approvalReviewer')}
+                      onSetApprovalsReviewer={(reviewer) => client.setSessionApprovals(sessionId!, reviewer)}
+                    />
+                  ) : null}
+                </PillStrip>
                 <Input
                   disabled={!connected || !bootState.ready}
                   thinking={thinking}

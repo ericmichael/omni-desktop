@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { formatDuration, formatTimestamp } from './format-time';
+import { formatDuration, formatElapsed, formatTimestamp } from './format-time';
 
 describe('formatTimestamp', () => {
   const now = new Date('2026-07-14T15:00:00').getTime();
@@ -31,5 +31,15 @@ describe('formatDuration', () => {
     expect(formatDuration(3 * 60_000)).toBe('3m');
     expect(formatDuration(65 * 60_000)).toBe('1h 5m');
     expect(formatDuration(120 * 60_000)).toBe('2h');
+  });
+});
+
+describe('formatElapsed', () => {
+  it('keeps seconds visible under an hour and clamps negatives', () => {
+    expect(formatElapsed(-500)).toBe('0s');
+    expect(formatElapsed(42_000)).toBe('42s');
+    expect(formatElapsed(3 * 60_000 + 2_000)).toBe('3m02s');
+    expect(formatElapsed(65 * 60_000)).toBe('1h05m');
+    expect(formatElapsed(600 * 60_000)).toBe('10h00m');
   });
 });

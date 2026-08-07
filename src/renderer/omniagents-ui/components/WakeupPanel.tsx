@@ -1,5 +1,6 @@
 import React from 'react';
 
+import { truncateOneLine } from '@/lib/text';
 import { Button } from '@/renderer/ds/ui/button';
 import { Card } from '@/renderer/ds/ui/card';
 
@@ -20,14 +21,6 @@ export type WakeupSnapshot = {
 };
 
 const MESSAGE_TRUNCATE = 100;
-
-function shortMessage(message: string, max: number): string {
-  const oneLine = message.replace(/\s+/g, ' ').trim();
-  if (oneLine.length <= max) {
-    return oneLine;
-  }
-  return `${oneLine.slice(0, max - 1)}…`;
-}
 
 function formatInterval(seconds: number): string {
   if (seconds < 60) {
@@ -95,7 +88,7 @@ export function WakeupPanel({ snapshot, onDismiss }: { snapshot: WakeupSnapshot 
           <span className="font-medium text-foreground">wakeup</span>
           <span aria-hidden>·</span>
           <span className="truncate min-w-0 text-foreground" title={snapshot.message}>
-            {shortMessage(snapshot.message, MESSAGE_TRUNCATE)}
+            {truncateOneLine(snapshot.message, MESSAGE_TRUNCATE)}
           </span>
           {tail.map((part, idx) => (
             <React.Fragment key={idx}>

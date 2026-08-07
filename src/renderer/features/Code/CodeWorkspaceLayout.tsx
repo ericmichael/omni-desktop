@@ -20,6 +20,7 @@ import { buildAppRegistry } from '@/shared/app-registry';
 import type { AgentRuntimeConnection, ExecutionTarget, TicketId } from '@/shared/types';
 
 import { EnvironmentDock } from './EnvironmentDock';
+import { codeApi } from './state';
 
 type CodeWorkspaceLayoutProps = {
   connection: AgentRuntimeConnection;
@@ -201,6 +202,17 @@ export const CodeWorkspaceLayout = memo(
       [onActiveAppChange]
     );
 
+    // In-chat entry points (e.g. the Agents pill) open (not toggle) a
+    // sidecar app — same path as the `launch_app` client tool.
+    const handleOpenApp = useCallback(
+      (appId: string) => {
+        if (tabId) {
+          void codeApi.openSidecarApp(tabId, appId);
+        }
+      },
+      [tabId]
+    );
+
     return (
       <div className="relative flex h-full w-full flex-col bg-card">
         <div className="relative min-h-0 flex-1">
@@ -233,6 +245,7 @@ export const CodeWorkspaceLayout = memo(
               ticketId={ticketId}
               routineId={routineId}
               workspaceDir={agentWorkspaceDir}
+              onOpenApp={tabId ? handleOpenApp : undefined}
               providerChildren={
                 executionTarget && (filesActivated || gitActivated) ? (
                   <>

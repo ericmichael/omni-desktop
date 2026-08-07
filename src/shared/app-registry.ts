@@ -7,6 +7,7 @@ export type AppKind =
   | 'builtin-browser'
   | 'builtin-files'
   | 'builtin-git'
+  | 'builtin-agents'
   | 'builtin-terminal'
   | 'webview';
 
@@ -107,6 +108,19 @@ export const BUILTIN_APPS: AppDescriptor[] = [
     scope: 'always',
     builtin: true,
     order: 37,
+    columnScoped: true,
+  },
+  {
+    id: 'agents',
+    label: 'Agents',
+    icon: 'Bot',
+    kind: 'builtin-agents',
+    // Subagent observability rides the session's RPC connection, so the
+    // surface has content only once the sandbox runs — same `scope:
+    // 'always'` + empty-state approach as Terminal below.
+    scope: 'always',
+    builtin: true,
+    order: 39,
     columnScoped: true,
   },
   {

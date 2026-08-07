@@ -55,6 +55,8 @@ type OmniAgentsAppProps = {
    *  pre-fill the composer folder chip while the chat-boot RPC resolves.
    *  Session scratch dirs (UUID basename) render no chip. */
   workspaceDir?: string;
+  /** Opens a column app (deck sidecar tab) — e.g. the Agents pill. */
+  onOpenApp?: (appId: string) => void;
   /** Additional column UI that must share this exact RPC connection. */
   providerChildren?: ReactNode;
 };
@@ -87,6 +89,7 @@ export const OmniAgentsApp = ({
   ticketId,
   routineId,
   workspaceDir,
+  onOpenApp,
   providerChildren,
 }: OmniAgentsAppProps) => {
   // Resolve relative ``/proxy/...`` payloads against the launcher's actual
@@ -127,6 +130,7 @@ export const OmniAgentsApp = ({
           ticketId={ticketId}
           routineId={routineId}
           workspaceDir={workspaceDir}
+          onOpenApp={onOpenApp}
         />
         {providerChildren}
       </RPCClientProvider>

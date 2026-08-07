@@ -1,5 +1,6 @@
 import React from 'react';
 
+import { truncateOneLine } from '@/lib/text';
 import { Button } from '@/renderer/ds/ui/button';
 import { Card } from '@/renderer/ds/ui/card';
 
@@ -21,14 +22,6 @@ export type LoopTaskSnapshot = {
 };
 
 const PROMPT_TRUNCATE = 100;
-
-function shortPrompt(prompt: string, max: number): string {
-  const oneLine = prompt.replace(/\s+/g, ' ').trim();
-  if (oneLine.length <= max) {
-    return oneLine;
-  }
-  return `${oneLine.slice(0, max - 1)}…`;
-}
 
 function formatInterval(seconds: number): string {
   if (seconds < 60) {
@@ -82,7 +75,7 @@ export function LoopPanel({ tasks, onDismiss }: { tasks: LoopTaskSnapshot[]; onD
           <span className="font-medium text-foreground">loop</span>
           <span aria-hidden>·</span>
           <span className="truncate min-w-0 text-foreground" title={next.prompt}>
-            {shortPrompt(next.prompt, PROMPT_TRUNCATE)}
+            {truncateOneLine(next.prompt, PROMPT_TRUNCATE)}
           </span>
           {tail.map((part, idx) => (
             <React.Fragment key={idx}>

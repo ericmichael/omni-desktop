@@ -1,6 +1,14 @@
 import type { MessageItem, PlanItem } from '@/shared/chat-types';
 
-import type { TaskSummary } from './components/Tasks';
+/** One row of the session's plan, as the Tasks pill/popover renders it. */
+export type TaskSummary = {
+  id: string;
+  subject: string;
+  activeForm?: string;
+  status: 'pending' | 'in_progress' | 'completed' | 'blocked';
+  owner?: string;
+  blockedBy?: string[];
+};
 
 /**
  * Select the newest canonical main plan and project it into the compact task

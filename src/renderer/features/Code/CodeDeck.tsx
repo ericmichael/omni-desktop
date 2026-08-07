@@ -55,6 +55,7 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/renderer
 import { SidebarTrigger, useSidebar } from '@/renderer/ds/ui/sidebar';
 import { Tabs, TabsList, TabsTrigger } from '@/renderer/ds/ui/tabs';
 import { Toggle } from '@/renderer/ds/ui/toggle';
+import { AgentsSurface } from '@/renderer/features/Agents';
 import { $appLaunchRequest, clearAppLaunchRequest } from '@/renderer/features/AppControl/app-launch-bridge';
 import { BrowserView } from '@/renderer/features/Browser/BrowserView';
 import { ConsoleStarted } from '@/renderer/features/Console/ConsoleRunning';
@@ -885,6 +886,9 @@ BrowserColumn.displayName = 'BrowserColumn';
 type SidecarBodyProps = {
   app: AppDescriptor;
   originTabId: CodeTabId;
+  /** Session bound to the origin column — the Agents surface reads the
+   *  subagents store by session id. */
+  sessionId?: string;
   filesHost: HTMLDivElement;
   gitHost: HTMLDivElement;
   sandboxUrls: { environmentId?: string; services?: Record<string, string> } | undefined;
@@ -899,7 +903,16 @@ type SidecarBodyProps = {
  * switches.
  */
 const SidecarBody = memo(
-  ({ app, originTabId, filesHost, gitHost, sandboxUrls, previewUrl, onPreviewUrlChange }: SidecarBodyProps) => {
+  ({
+    app,
+    originTabId,
+    sessionId,
+    filesHost,
+    gitHost,
+    sandboxUrls,
+    previewUrl,
+    onPreviewUrlChange,
+  }: SidecarBodyProps) => {
     const registryProps = useMemo(
       () => ({
         handleId: makeAppHandleId('column', app.id, originTabId),
@@ -947,6 +960,15 @@ const SidecarBody = memo(
           Git is available after the session starts.
         </div>
       );
+    } else if (app.kind === 'builtin-agents') {
+      body =
+        sessionId && sandboxUrls ? (
+          <AgentsSurface sessionId={sessionId} />
+        ) : (
+          <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+            Agents are available after the session starts.
+          </div>
+        );
     } else if (app.kind === 'builtin-code') {
       body = sandboxUrls?.services?.['code_server'] ? (
         <Webview src={sandboxUrls.services['code_server']} showUnavailable={false} registry={registryProps} />
@@ -2135,7 +2157,12 @@ export const CodeDeck = memo(() => {
       if (!app.columnScoped || app.id === 'chat') {
         return false;
       }
-      if (app.kind === 'builtin-files' || app.kind === 'builtin-git' || app.kind === 'builtin-terminal') {
+      if (
+        app.kind === 'builtin-files' ||
+        app.kind === 'builtin-git' ||
+        app.kind === 'builtin-terminal' ||
+        app.kind === 'builtin-agents'
+      ) {
         return Boolean(sandboxUrls);
       }
       if (app.scope !== 'sandbox') {
@@ -2511,6 +2538,7 @@ export const CodeDeck = memo(() => {
               <SidecarBody
                 app={app}
                 originTabId={tab.id}
+                sessionId={tab.sessionId}
                 filesHost={getFilesHost(tab.id)}
                 gitHost={getGitHost(tab.id)}
                 sandboxUrls={sandboxUrls}

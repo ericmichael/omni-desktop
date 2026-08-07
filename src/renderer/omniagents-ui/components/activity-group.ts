@@ -1,3 +1,4 @@
+import { oneLine } from '@/lib/text';
 import type { MessageItem, ToolItem } from '@/shared/chat-types';
 
 export type ActivityGroupData = {
@@ -155,7 +156,7 @@ export function formatArgsPreview(args: string, maxLen: number) {
     });
     text = parts.join(', ');
   } else {
-    text = args.replace(/\s+/g, ' ').trim();
+    text = oneLine(args);
   }
   if (text.length > maxLen) {
     return `${text.slice(0, maxLen - 3)}...`;
