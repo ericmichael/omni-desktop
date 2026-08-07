@@ -26,7 +26,7 @@ const OMNI_CODE_DESCRIBE = {
   prog: 'omni',
   label: 'Omni Code',
   slug: 'omni_code',
-  version: '0.6.23',
+  version: '0.6.24',
   config_dir: '/home/user/.config/omni_code',
   env_prefix: 'OMNI_CODE',
   update: {
@@ -46,7 +46,7 @@ describe('bundled ProductDefinition (omni-code parity)', () => {
       packageName: 'omni-code',
       extraIndexUrl: 'https://pypi.fury.io/ericmichael/',
       prog: 'omni',
-      pinnedVersion: '0.6.23',
+      pinnedVersion: '0.6.24',
     });
     expect(getActiveProduct()).toBe(BUNDLED_PRODUCT);
   });
@@ -69,7 +69,7 @@ describe('describe --json payload parsing', () => {
       prog: 'omni',
       label: 'Omni Code',
       slug: 'omni_code',
-      version: '0.6.23',
+      version: '0.6.24',
       configDir: '/home/user/.config/omni_code',
       envPrefix: 'OMNI_CODE',
       update: {
