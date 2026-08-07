@@ -40,7 +40,7 @@ export const BUNDLED_PRODUCT: ProductDefinition = {
   packageName: 'omni-code',
   extraIndexUrl: 'https://pypi.fury.io/ericmichael/',
   prog: 'omni',
-  pinnedVersion: '0.6.21',
+  pinnedVersion: '0.6.22',
 };
 
 /** The product this launcher instance hosts. */
