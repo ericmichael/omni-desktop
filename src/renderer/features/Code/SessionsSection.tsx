@@ -175,7 +175,6 @@ export const ProjectSessionRows = memo(function ProjectSessionRows({
       } else {
         void codeApi.addTabForConversation(entry.conversation);
       }
-      codeApi.setLayoutMode('focus');
       if (persistedStoreApi.$atom.get().layoutMode !== 'chat') {
         persistedStoreApi.setKey('layoutMode', 'chat');
       }
@@ -406,7 +405,8 @@ export function RecentsSection({
   }, []);
 
   // "Take me to this conversation" — whether that means activating a column
-  // or materializing one from retained history is the app's business.
+  // or materializing one from retained history is the app's business. Layout
+  // mode is preserved: in Spaces the deck scrolls the column into view.
   const handleActivate = useCallback(
     (entry: SessionEntry) => {
       if (entry.kind === 'open') {
@@ -414,7 +414,6 @@ export function RecentsSection({
       } else {
         void codeApi.addTabForConversation(entry.conversation);
       }
-      codeApi.setLayoutMode('focus');
       raiseDeck();
       onNavigate?.();
     },

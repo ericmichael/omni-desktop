@@ -18,7 +18,6 @@ import { emptyMcpConfig, emptyModelsConfig, emptyNetworkConfig, parseEnvVars } f
 import { getProductSlug } from '@/lib/product';
 import { parseResidentPrincipal, residentPrincipalId } from '@/lib/resident-agent';
 import { uuidv4 } from '@/lib/uuid';
-import { ACI_DESKTOP_PROFILE_NAME, ACI_PROFILE_NAME, writeAciProfile } from '@/main/aci-profile';
 import { listRepos as azureListRepos } from '@/main/azure-repos';
 import { type BrowserContext, buildBrowserContext, registerBrowserHandlers } from '@/main/browser-manager';
 import {
@@ -60,10 +59,10 @@ import {
   defaultSandboxInventoryDeps,
   processOwnersFromState,
   registerSandboxInventoryHandlers,
+  suspendedSessionOwners,
 } from '@/main/sandbox-inventory';
 import { registerScheduledTaskHandlers, ScheduledTaskManager } from '@/main/scheduled-task-manager';
 import { protectedSnapshotsFromTabs, registerSnapshotHandlers } from '@/main/snapshot-manager';
-import { reconcilePendingSnapshotUploads } from '@/main/snapshot-upload-ledger';
 import { registerSupervisorHandlers } from '@/main/supervisor-handlers';
 import { getOmniConfigDir } from '@/main/util';
 import { WorkspaceSyncManager } from '@/main/workspace-sync-manager';
@@ -136,18 +135,6 @@ export const wireGlobalHandlers = async (arg: {
   // can scope writes and route `store:changed` back to only the caller's
   // tenant. Handlers that ignore the event (`_`) are unaffected.
   const ipc = new ServerIpcAdapter(wsHandler.handleCtx.bind(wsHandler));
-
-  try {
-    const recovery = await reconcilePendingSnapshotUploads(join(getOmniConfigDir(), 'snapshots'), { force: true });
-    if (recovery.persisted.length > 0) {
-      console.log(`[snapshot-upload] recovered ${recovery.persisted.length} pending snapshot upload(s)`);
-    }
-    if (recovery.forcedUncertain.length > 0) {
-      console.warn(`[snapshot-upload] ${recovery.forcedUncertain.length} forced-shutdown snapshot(s) remain uncertain`);
-    }
-  } catch (err) {
-    console.error('[snapshot-upload] startup reconciliation failed:', err);
-  }
 
   // Project manager — shared across all clients so machines/sandboxes survive reconnections
   const sendToAll: typeof wsHandler.sendToAll = wsHandler.sendToAll.bind(wsHandler);
@@ -273,21 +260,6 @@ export const wireGlobalHandlers = async (arg: {
   // over the shared SQLite DB locally.
   const port = process.env['PORT'] ?? '3001';
 
-  // When Azure is configured, write the `aci` sandbox profile so `omni serve
-  // --profile aci` drives the serverless ACI sandbox. When present, the cloud
-  // Restricts the picker to the ACI profiles (host/devbox disabled) — see
-  // getStoreSnapshot + the ProcessManager allowedProfileNames below.
-  let aciConfigured = false;
-  try {
-    const aciProfilePath = writeAciProfile(getOmniConfigDir());
-    aciConfigured = aciProfilePath !== null;
-    if (aciProfilePath) {
-      console.log(`[aci] wrote sandbox profile to ${aciProfilePath}`);
-    }
-  } catch (err) {
-    console.error('[aci] failed to write sandbox profile:', err);
-  }
-
   // --- Per-tenant manager registry ---
   //
   // Each tenant gets its own ProjectManager (in-memory projection over a
@@ -302,12 +274,6 @@ export const wireGlobalHandlers = async (arg: {
   // This replica's id — tagged onto Postgres change-notifications so we ignore
   // our own writes and re-hydrate only on writes from other replicas / the MCP.
   const replicaId = uuidv4();
-
-  // Azure sandboxing is host-runs-agent: `omni serve` runs here and drives a
-  // serverless ACI container via the `aci` sandbox profile (omniagents
-  // AzureContainerSandbox) — selected through the agent's profile, NOT a
-  // platform client. So there's no Azure compute client here; `platformClient`
-  // stays the omni-platform delegation path for enterprise-platform builds.
 
   // Secret for signing/verifying the runtime tokens the agent uses to call back
   // into the tenant-scoped HTTP MCP route (minted into the omni-serve env at
@@ -573,11 +539,6 @@ export const wireGlobalHandlers = async (arg: {
             };
           }
         : undefined,
-      // Cloud with Azure → agents run in a serverless ACI sandbox; host/devbox
-      // are not selectable, but the user picks between the fast and desktop
-      // ACI profiles. Local machines (`local:<id>`) are appended to the
-      // allow-list per-tenant when the principal has any registered.
-      allowedProfileNames: aciConfigured ? [ACI_PROFILE_NAME, ACI_DESKTOP_PROFILE_NAME] : undefined,
       // Computer-as-sandbox: when a machine registry exists (cloud), a
       // `local:<machineId>` pick spawns `omni serve` HERE with a host_bridge
       // profile pointing the sandbox at the user's laptop. No registry → the
@@ -591,9 +552,8 @@ export const wireGlobalHandlers = async (arg: {
           )
         : undefined,
     });
-    // Keep this tenant's platform client in sync with its own credentials.
-    // (omni-platform delegation for enterprise-platform builds; the ACI sandbox
-    // path does not use a platform client — see note above.)
+    // Keep this tenant's platform client in sync with its own credentials
+    // (omni-platform delegation for enterprise-platform builds).
     const applyPlatformClient = (): void => {
       processManager.platformClient = createPlatformClient(settings.get('platform'), globalThis.fetch);
     };
@@ -773,24 +733,6 @@ export const wireGlobalHandlers = async (arg: {
     // a `local:<machineId>` profile entry. The renderer's picker pulls
     // labels + online status from `$machines` so we only need the id here.
     const localProfiles: string[] = (localMachineIdsByPrincipal.get(principalId) ?? []).map((id) => `local:${id}`);
-    // Cloud/ACI: the picker offers the two ACI profiles plus the principal's
-    // own machines. The default is COMPUTED (not blindly persisted) so a stale
-    // value can't leak in — but we HONOR a persisted default that's valid in
-    // this deployment: either ACI profile, or one of the user's registered
-    // machines. Defaulting to `local:<my-laptop>` gives instant exploratory
-    // chats (agent in cloud, sandbox on the laptop — no ACI spin-up). Anything
-    // else (a leftover `host`/`devbox`, or a machine that's since been removed)
-    // falls back to fast ACI.
-    if (aciConfigured) {
-      const validDefaults = new Set([ACI_PROFILE_NAME, ACI_DESKTOP_PROFILE_NAME, ...localProfiles]);
-      const persisted = snapshot.defaultProfileName;
-      const effectiveDefault = persisted && validDefaults.has(persisted) ? persisted : ACI_PROFILE_NAME;
-      return {
-        ...snapshot,
-        defaultProfileName: effectiveDefault,
-        availableSandboxProfiles: [ACI_PROFILE_NAME, ACI_DESKTOP_PROFILE_NAME, ...localProfiles],
-      };
-    }
     if (localProfiles.length > 0) {
       return {
         ...snapshot,
@@ -810,12 +752,6 @@ export const wireGlobalHandlers = async (arg: {
     if (name === 'platform') {
       return 'Cloud (managed)';
     }
-    if (name === ACI_PROFILE_NAME) {
-      return 'Cloud · Fast';
-    }
-    if (name === ACI_DESKTOP_PROFILE_NAME) {
-      return 'Cloud · Desktop (IDE + VNC)';
-    }
     if (name.startsWith('local:')) {
       return `Local · ${name.slice('local:'.length, 'local:'.length + 8)}`;
     }
@@ -833,7 +769,7 @@ export const wireGlobalHandlers = async (arg: {
         name,
         label: sandboxProfileLabel(name),
         available: true,
-        source: name.startsWith('local:') ? 'local-machine' : name.startsWith('aci') ? 'cloud' : 'builtin',
+        source: name.startsWith('local:') ? 'local-machine' : 'builtin',
       }));
     },
     listTeamMembers: async () => {
@@ -1236,7 +1172,7 @@ export const wireGlobalHandlers = async (arg: {
   // uses the same dirs as AgentHost profile registration: the launcher's
   // bundled assets/profiles (resolved relative to out/server → repo checkout,
   // exactly like agent-process's resolveProfile) plus the shared
-  // <config>/sandbox dir (where writeAciProfile lands in cloud). The
+  // <config>/sandbox dir of user-editable profiles. The
   // availableSandboxProfiles filter is per-tenant — resolved from the same
   // snapshot the picker reads, so both surfaces always agree.
   registerProfileCatalogHandlers(ipc, {
@@ -1252,14 +1188,18 @@ export const wireGlobalHandlers = async (arg: {
   // one tenant's live container must never look like another's orphan.
   registerSandboxInventoryHandlers(ipc, {
     ...defaultSandboxInventoryDeps(),
-    getProcessOwners: () =>
-      [...tenants.values()].flatMap((t) =>
+    getProcessOwners: () => [
+      ...[...tenants.values()].flatMap((t) =>
         processOwnersFromState(
           t.processManager.getContainerOwners(),
           t.settings.get('codeTabs') ?? [],
           t.residentAgentManager.getDurableSnapshot().residentAgents
         )
       ),
+      // Durable container sessions with no live serve process. The state dir
+      // is singular on this backend, so claims aggregate across all tenants.
+      ...suspendedSessionOwners([...tenants.values()].flatMap((t) => t.settings.get('codeTabs') ?? [])),
+    ],
   });
 
   // GitHub / Azure DevOps discovery + GitHub status/unlink. All resolve their

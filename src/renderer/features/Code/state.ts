@@ -134,8 +134,8 @@ export const codeApi = {
       // Terminal sockets are also connections into omni serve — close them
       // BEFORE the stop so the drain doesn't wait on them either.
       await destroyAllTerminalsForTab(tabId);
-      // Removing the column is terminal for its sandbox — the
-      // snapshot is deleted below, so tell serve to skip persisting one.
+      // Removing the column is terminal for its sandbox — tell serve to
+      // destroy the environment (container + session-state record).
       await codeApi.stopSandbox(tabId, { discardSnapshot: true });
     } finally {
       // Clean up per-tab state
@@ -149,9 +149,9 @@ export const codeApi = {
       delete errors[tabId];
       $codeTabErrors.set(errors);
 
-      // Cascade: delete the tab's Workspace snapshot. Archived sessions
-      // resume into fresh columns instead of rehydrating the old tab, so the
-      // tar is dead weight.
+      // Cascade backstop: retire the tab's Workspace remains (container +
+      // state record when serve wasn't running to do it, plus any legacy
+      // snapshot tar). Idempotent after the serve-side destroy above.
       if (tab?.snapshotRef) {
         void emitter.invoke('snapshot:delete', tab.snapshotRef);
       }
@@ -438,6 +438,23 @@ export const codeApi = {
     const tabs = (persistedStoreApi.getKey('codeTabs') ?? []).map((tab) =>
       tab.id === tabId && tab.sidecarAppIds?.includes(appId) ? { ...tab, activeSidecarAppId: appId } : tab
     );
+    await persistedStoreApi.setKey('codeTabs', tabs);
+  },
+
+  reorderSidecarApps: async (tabId: CodeTabId, appIds: string[]) => {
+    const tabs = (persistedStoreApi.getKey('codeTabs') ?? []).map((tab) => {
+      if (tab.id !== tabId || !tab.sidecarAppIds) {
+        return tab;
+      }
+      // Accept only a permutation of the currently open set — a stale
+      // drag result must not open or close apps as a side effect.
+      const open = new Set(tab.sidecarAppIds);
+      const next = appIds.filter((id) => open.has(id));
+      if (next.length !== tab.sidecarAppIds.length) {
+        return tab;
+      }
+      return { ...tab, sidecarAppIds: next };
+    });
     await persistedStoreApi.setKey('codeTabs', tabs);
   },
 

@@ -519,6 +519,21 @@ body,
   background-color: var(--safe-area-background);
 }
 
+/* iOS standalone clips element painting at the layout viewport, so the band
+   below it can only ever show this backstop, never element paint. While the
+   desktop sidebar is expanded (AppSidebar stamps the attribute + width var),
+   the bottom edge is two surfaces side by side — split the backstop with a
+   hard stop so the sidebar column stays sidebar-colored in that band. */
+html[data-sidebar-backstop='expanded'],
+html[data-sidebar-backstop='expanded'] body,
+html[data-sidebar-backstop='expanded'] #root {
+  background: linear-gradient(
+    to right,
+    var(--sidebar) var(--backstop-sidebar-width, 16rem),
+    var(--safe-area-background) var(--backstop-sidebar-width, 16rem)
+  );
+}
+
 /* Base styles */
 ::selection {
   background-color: var(--accent);

@@ -15,6 +15,7 @@ import { atom } from 'nanostores';
 import { memo, useCallback, useMemo, useState } from 'react';
 import { useHotkeys } from 'react-hotkeys-hook';
 
+import { $viewportDebug } from '@/renderer/common/ViewportDebug';
 import { Button } from '@/renderer/ds/ui/button';
 import {
   CommandDialog,
@@ -126,6 +127,9 @@ export const CommandPalette = memo(() => {
         setDeckLayout: (mode) => {
           codeApi.setLayoutMode(mode);
           persistedStoreApi.setKey('layoutMode', 'chat');
+        },
+        toggleViewportDebug: () => {
+          $viewportDebug.set(!$viewportDebug.get());
         },
       }),
     [

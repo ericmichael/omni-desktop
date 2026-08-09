@@ -38,6 +38,7 @@ import { Button } from '@/renderer/ds/ui/button';
 } from '@/renderer/ds/ui/dropdown-menu';
 import {
   Sidebar,
+  SIDEBAR_WIDTH,
   SidebarContent,
   SidebarFooter,
   SidebarGroup,
@@ -71,7 +72,7 @@ export const AppSidebar = memo(() => {
   const residentsView = useStore($residentsView);
   const inboxCount = useStore($activeInboxCount);
   const needsYouCount = useStore($needsYouCount);
-  const { setOpenMobile } = useSidebar();
+  const { isMobile, setOpenMobile, state: sidebarState } = useSidebar();
   const { recent: recentConversations, sessionTitles } = useRecentConversations(store.codeTabs ?? []);
 
   const [isEnterprise, setIsEnterprise] = useState(false);
@@ -81,6 +82,26 @@ export const AppSidebar = memo(() => {
       .then(setIsEnterprise)
       .catch(() => setIsEnterprise(false));
   }, []);
+
+  // iOS standalone clips element painting at the layout viewport, so the
+  // band below it can only ever show the html/body backstop. With the
+  // desktop sidebar expanded the app's bottom edge is two surfaces side by
+  // side — stamp <html> so tailwind.css can split the backstop and keep the
+  // sidebar column sidebar-colored in that band.
+  useEffect(() => {
+    const root = document.documentElement;
+    const clear = () => {
+      delete root.dataset.sidebarBackstop;
+      root.style.removeProperty('--backstop-sidebar-width');
+    };
+    if (!isMobile && sidebarState === 'expanded') {
+      root.dataset.sidebarBackstop = 'expanded';
+      root.style.setProperty('--backstop-sidebar-width', SIDEBAR_WIDTH);
+    } else {
+      clear();
+    }
+    return clear;
+  }, [isMobile, sidebarState]);
 
   const closeDrawer = useCallback(() => setOpenMobile(false), [setOpenMobile]);
   const setMode = useCallback(
@@ -92,7 +113,6 @@ export const AppSidebar = memo(() => {
   );
   const handleNewChat = useCallback(() => {
     void codeApi.openFreshChat();
-    codeApi.setLayoutMode('focus');
     setMode('chat');
   }, [setMode]);
   const handleSpaces = useCallback(() => {

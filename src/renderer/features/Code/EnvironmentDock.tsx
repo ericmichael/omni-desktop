@@ -33,7 +33,12 @@ export const EnvironmentDock = memo(({ apps, activeAppId, onSelect, sandboxUrls 
         value={activeAppId}
         onValueChange={handleValueChange}
         aria-label="Environment tools"
-        className="mx-3 mb-2 mt-1.5 h-11 min-w-0 shrink-0 overflow-x-auto overflow-y-hidden rounded-xl border border-border bg-card p-1 shadow-sm [&::-webkit-scrollbar]:hidden"
+        // The kit's ToggleGroup root is `w-fit`, so the bar must center
+        // itself inside the full-width dock slot: `mx-auto` when there's
+        // room, and the max-width keeps the 12px gutters when there isn't —
+        // which is also what lets `overflow-x-auto` engage instead of the
+        // slot clipping the icon row.
+        className="mx-auto mb-2 mt-1.5 h-11 max-w-[calc(100%-1.5rem)] min-w-0 shrink-0 overflow-x-auto overflow-y-hidden rounded-xl border border-border bg-card p-1 shadow-sm [&::-webkit-scrollbar]:hidden"
       >
         {apps.map((app) => {
           const isAvailable = app.scope === 'sandbox' ? !!sandboxUrls?.[app.sandboxUrlKey!] : true;

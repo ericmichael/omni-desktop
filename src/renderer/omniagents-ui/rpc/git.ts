@@ -772,7 +772,16 @@ export class GitClient {
 
   async diff(
     repo: WorkspaceRepo,
-    opts: { mode?: GitDiffMode; paths?: string[]; contextLines?: number; fromRev?: string; toRev?: string } = {}
+    opts: {
+      mode?: GitDiffMode;
+      paths?: string[];
+      contextLines?: number;
+      fromRev?: string;
+      toRev?: string;
+      /** Synthesize added-file hunks for untracked files (server accepts
+       *  this for `worktree` and `head` modes only). */
+      includeUntracked?: boolean;
+    } = {}
   ): Promise<GitDiffResult> {
     workspaceRepo(repo);
     opts.paths?.forEach(validateGitPath);
@@ -781,6 +790,7 @@ export class GitClient {
         environment_id: this.#environment,
         repo,
         ...(opts.mode === undefined ? {} : { mode: opts.mode }),
+        ...(opts.includeUntracked === undefined ? {} : { include_untracked: opts.includeUntracked }),
         ...(opts.paths === undefined ? {} : { paths: opts.paths }),
         ...(opts.contextLines === undefined ? {} : { context_lines: opts.contextLines }),
         ...(opts.fromRev === undefined ? {} : { from_rev: opts.fromRev }),

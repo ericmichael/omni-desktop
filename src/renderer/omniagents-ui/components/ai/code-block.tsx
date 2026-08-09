@@ -34,7 +34,7 @@ const addKeysToTokens = (lines: ThemedToken[][]): KeyedLine[] =>
     })),
   }));
 
-const TokenSpan = ({ token }: { token: ThemedToken }) => (
+export const TokenSpan = ({ token }: { token: ThemedToken }) => (
   <span
     style={
       {
@@ -77,7 +77,7 @@ type CodeBlockProps = HTMLAttributes<HTMLDivElement> & {
   showLineNumbers?: boolean;
 };
 
-interface TokenizedCode {
+export interface TokenizedCode {
   tokens: ThemedToken[][];
   fg: string;
   bg: string;

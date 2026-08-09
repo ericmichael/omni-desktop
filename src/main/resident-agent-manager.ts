@@ -980,6 +980,10 @@ export class ResidentAgentManager {
     this.enqueueChain(agentId, async () => {
       await this.park(agentId, { skipReflection: true });
       this.runtimes.delete(agentId);
+      // Deletion is terminal for the resident's durable workspace: retire
+      // its container + session-state record (park only detaches).
+      const { deleteSnapshot } = await import('@/main/snapshot-manager');
+      await deleteSnapshot(`resident-${agentId}`).catch(() => {});
     });
     this.data.agents = this.roster().filter((a) => a.id !== agentId);
     const memories = { ...this.data.memories };

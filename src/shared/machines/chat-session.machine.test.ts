@@ -424,6 +424,53 @@ describe('chatSessionMachine', () => {
       expect(tool.status).toBe('called');
     });
 
+    it('accepts tool events in idle so a mid-run attach shows pending calls', () => {
+      // A client that attached mid-run (worker transcript viewer, a
+      // reconnect whose replay was superseded) never saw RUN_STARTED and
+      // sits in ready.idle while the run streams.
+      let snap = idleSnap();
+      snap = next(snap, {
+        type: 'TOOL_CALLED',
+        call_id: 'c1',
+        tool: 'bash',
+        input: 'ls',
+        session_id: 'sess-1',
+      });
+      expect(snap.value).toEqual({ ready: 'idle' });
+      let tool = ctx(snap).items.find((it) => it.type === 'tool') as any;
+      expect(tool).toBeDefined();
+      expect(tool.status).toBe('called');
+      snap = next(snap, {
+        type: 'TOOL_RESULT',
+        call_id: 'c1',
+        tool: 'bash',
+        output: 'done',
+        session_id: 'sess-1',
+      });
+      tool = ctx(snap).items.find((it) => it.type === 'tool') as any;
+      expect(tool.status).toBe('result');
+    });
+
+    it('upserts by call_id instead of duplicating a rehydrated call', () => {
+      let snap = runningSnap();
+      snap = next(snap, {
+        type: 'TOOL_CALLED',
+        call_id: 'c1',
+        tool: 'bash',
+        input: 'ls',
+        session_id: 'sess-1',
+      });
+      snap = next(snap, {
+        type: 'TOOL_CALLED',
+        call_id: 'c1',
+        tool: 'bash',
+        input: 'ls',
+        session_id: 'sess-1',
+      });
+      const tools = ctx(snap).items.filter((it) => it.type === 'tool');
+      expect(tools).toHaveLength(1);
+    });
+
     it('stores (server, tool) identity labels for MCP-derived tools', () => {
       let snap = runningSnap();
       snap = next(snap, {

@@ -1,24 +1,24 @@
 /**
- * Downloads tray — a toolbar button that opens a dropdown listing every
- * download the main-process `DownloadsManager` has tracked this session.
+ * Downloads panel — popover content listing every download the
+ * main-process `DownloadsManager` has tracked this session. The host owns
+ * the Popover root and anchor (the browser anchors it to the overflow
+ * button and opens it from the Downloads menu item, with an
+ * active-download badge on that button).
  *
  * Click a completed item to open it; the context menu exposes "show in
- * folder" and "remove from list". A small badge on the button surfaces the
- * count of active downloads so users notice progress even without opening
- * the tray.
+ * folder" and "remove from list".
  */
 
 import { useStore } from '@nanostores/react';
 import { CircleCheck, CircleX, Download, FolderOpen, Trash2 } from 'lucide-react';
 import { atom } from 'nanostores';
-import { memo, useCallback, useState } from 'react';
+import { memo, useCallback } from 'react';
 
-import { Badge } from '@/renderer/ds/ui/badge';
 import { Button } from '@/renderer/ds/ui/button';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/renderer/ds/ui/context-menu';
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/renderer/ds/ui/empty';
 import { ItemContent, ItemGroup, ItemMedia } from '@/renderer/ds/ui/item';
-import { Popover, PopoverContent, PopoverTrigger } from '@/renderer/ds/ui/popover';
+import { PopoverContent } from '@/renderer/ds/ui/popover';
 import { Progress } from '@/renderer/ds/ui/progress';
 import { ScrollArea } from '@/renderer/ds/ui/scroll-area';
 import { emitter, ipc } from '@/renderer/services/ipc';
@@ -123,70 +123,43 @@ const DownloadRow = memo(({ entry }: { entry: BrowserDownloadEntry }) => {
 });
 DownloadRow.displayName = 'DownloadRow';
 
-export const DownloadsTray = memo(() => {
+export const DownloadsPopoverContent = memo(() => {
   const items = useStore($downloads);
-  const [open, setOpen] = useState(false);
-
-  const activeCount = items.filter((e) => e.state === 'progressing' || e.state === 'paused').length;
 
   const handleClear = useCallback(() => {
     void emitter.invoke('browser:downloads-clear').catch(() => {});
   }, []);
 
-  if (items.length === 0 && !open) {
-    // Hide the button entirely when nothing has downloaded yet — less chrome
-    // for the common case. Menu re-appears the moment a download starts.
-    return null;
-  }
-
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-xs"
-          className="relative"
-          aria-label={`Downloads (${items.length})`}
-        >
-          <Download className="size-4" />
-          {activeCount > 0 && (
-            <Badge className="pointer-events-none absolute -top-1 -right-1 h-3.5 min-w-3.5 px-1 text-xs">
-              {activeCount}
-            </Badge>
-          )}
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent align="end" className="flex w-80 flex-col p-0">
-        <div className="flex items-center justify-between border-b px-3 py-2.5">
-          <span className="text-sm font-semibold">Downloads</span>
-          {items.length > 0 && (
-            <Button type="button" variant="ghost" size="xs" onClick={handleClear}>
-              Clear completed
-            </Button>
-          )}
-        </div>
-        <ScrollArea className="max-h-96">
-          {items.length === 0 ? (
-            <Empty className="min-h-40 border-0 p-6">
-              <EmptyHeader>
-                <EmptyMedia variant="icon">
-                  <Download />
-                </EmptyMedia>
-                <EmptyTitle>No downloads</EmptyTitle>
-                <EmptyDescription>Downloads from this session will appear here.</EmptyDescription>
-              </EmptyHeader>
-            </Empty>
-          ) : (
-            <ItemGroup className="p-1">
-              {items.map((e) => (
-                <DownloadRow key={e.id} entry={e} />
-              ))}
-            </ItemGroup>
-          )}
-        </ScrollArea>
-      </PopoverContent>
-    </Popover>
+    <PopoverContent align="end" className="flex w-80 flex-col p-0">
+      <div className="flex items-center justify-between border-b px-3 py-2.5">
+        <span className="text-sm font-semibold">Downloads</span>
+        {items.length > 0 && (
+          <Button type="button" variant="ghost" size="xs" onClick={handleClear}>
+            Clear completed
+          </Button>
+        )}
+      </div>
+      <ScrollArea className="max-h-96">
+        {items.length === 0 ? (
+          <Empty className="min-h-40 border-0 p-6">
+            <EmptyHeader>
+              <EmptyMedia variant="icon">
+                <Download />
+              </EmptyMedia>
+              <EmptyTitle>No downloads</EmptyTitle>
+              <EmptyDescription>Downloads from this session will appear here.</EmptyDescription>
+            </EmptyHeader>
+          </Empty>
+        ) : (
+          <ItemGroup className="p-1">
+            {items.map((e) => (
+              <DownloadRow key={e.id} entry={e} />
+            ))}
+          </ItemGroup>
+        )}
+      </ScrollArea>
+    </PopoverContent>
   );
 });
-DownloadsTray.displayName = 'DownloadsTray';
+DownloadsPopoverContent.displayName = 'DownloadsPopoverContent';

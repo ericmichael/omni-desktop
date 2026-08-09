@@ -187,9 +187,7 @@ export function parsePlatformSession(value: unknown, expectedSessionId?: string)
 /**
  * The compute surface `AgentProcess` drives in *platform mode* (a remote agent
  * the launcher connects to). `PlatformClient` (omni-platform delegation)
- * implements it. NOTE: the Azure path is NOT platform mode — it's host-runs-
- * agent, where `omni serve` runs locally and drives a serverless ACI container
- * via the `aci` sandbox profile (omniagents AzureContainerSandbox).
+ * implements it.
  *
  * `extras` is a generic record of per-call hints that specific
  * implementations may read. `PlatformClient` ignores it.

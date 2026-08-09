@@ -30,8 +30,6 @@ import type { AgentProcessStopResult } from '@/shared/types';
 const result = (patch: Partial<AgentProcessStopResult> = {}): AgentProcessStopResult => ({
   scope: 'host',
   shutdown: 'graceful',
-  snapshotPersistence: 'complete',
-  pendingSnapshotRefs: [],
   ...patch,
 });
 
@@ -48,30 +46,13 @@ describe('agentProcessApi stop warnings', () => {
     await expect(agentProcessApi.stop('code-tab-1')).resolves.toEqual(stopped);
 
     expect(hoisted.warning).toHaveBeenCalledWith(
-      'Sandbox force-closed',
-      'The agent host could not finish a graceful shutdown. No pending workspace snapshots were reported.',
+      'Sandbox host force-closed',
+      'The agent host could not finish a graceful shutdown.',
       { durationMs: 12_000 }
     );
   });
 
-  it('lists only safe snapshot identifiers in an uncertainty warning', () => {
-    warnForUncertainStop(
-      result({
-        snapshotPersistence: 'uncertain',
-        pendingSnapshotRefs: ['snapshot-123', '../../private/key', 'token=secret', 'snapshot-456'],
-      })
-    );
-
-    expect(hoisted.warning).toHaveBeenCalledTimes(1);
-    const [title, description, options] = hoisted.warning.mock.calls[0]!;
-    expect(title).toBe('Workspace snapshot may not be saved');
-    expect(description).toContain('4 workspace snapshots (snapshot-123, snapshot-456, +2 more)');
-    expect(description).not.toContain('../../private/key');
-    expect(description).not.toContain('token=secret');
-    expect(options).toEqual({ durationMs: 12_000 });
-  });
-
-  it('does not warn for a graceful stop with complete persistence or a version-skewed empty result', () => {
+  it('does not warn for a graceful stop or a version-skewed empty result', () => {
     warnForUncertainStop(result());
     warnForUncertainStop(undefined);
 

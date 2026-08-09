@@ -366,8 +366,7 @@ export type StoreData = {
    */
   defaultProfileName: string;
   /**
-   * Sandbox profiles the UI picker should offer. When set by the backend
-   * (e.g. a cloud/ACI deployment forces `['aci']` to disable host/devbox),
+   * Sandbox profiles the UI picker should offer. When set by the backend,
    * the picker shows exactly these. Unset → the renderer falls back to the
    * built-in list (`host`/`devbox`, plus `platform` on enterprise builds).
    */
@@ -1610,10 +1609,6 @@ export type AgentProcessStopResult = {
   scope: 'environment' | 'host' | 'compute' | 'none';
   /** Host-process termination mode. Environment-only stops do not terminate it. */
   shutdown: 'graceful' | 'forced' | 'not-applicable';
-  /** `uncertain` means one or more durable snapshot uploads still need retrying. */
-  snapshotPersistence: 'complete' | 'uncertain';
-  /** Snapshot references retained in main-process retry bookkeeping. */
-  pendingSnapshotRefs: string[];
 };
 
 // Unified agent process data — emitted by `omni serve` and the platform path.
@@ -2574,13 +2569,6 @@ type AgentProcessIpcEvents = Namespaced<
     /** Thaw a previously-paused container. Same envelope shape as ``pause``. */
     unpause: (processId: string) => SandboxPauseResult;
     /**
-     * Reset the sandbox's idle timer. Fire-and-forget; used by the
-     * renderer to signal "user is engaging with this sandbox surface"
-     * (chat scroll, code tab focus, etc.) so the watcher doesn't pause
-     * during continuous interaction.
-     */
-    'notify-activity': (processId: string) => void;
-    /**
      * Materialize the selected profile as an environment and atomically rebind
      * this tab. The shared AgentHost and conversation remain alive when the
      * profile stays within the same security domain.
@@ -2617,9 +2605,9 @@ export type SandboxSwitchResult = {
   ok: boolean;
   /** New profile name once switched (display label). */
   profile?: string;
-  /** New backend client type (`docker` / `aci` / …). */
+  /** New backend client type (`docker` / `host_bridge` / …). */
   backend?: string;
-  /** New container id (docker/aci); absent for unix_local. */
+  /** New container id (docker); absent for unix_local. */
   containerId?: string;
   /** New in-sandbox service URLs (code_server / vnc / …). */
   services?: Record<string, string>;

@@ -335,8 +335,16 @@ export const chatSessionMachine = setup({
         metadata: e.metadata,
         runId: context.runId,
       };
+      // Upsert by call_id: a live tool_called can arrive after the same
+      // call was already rehydrated from the canonical transcript (late
+      // attach, post-resync replay) — appending blindly would duplicate it.
+      const idx = context.items.findIndex((it) => it.type === 'tool' && (it as ToolItem).call_id === e.call_id);
+      const items = idx >= 0 ? context.items.slice() : [...context.items, item];
+      if (idx >= 0) {
+        items[idx] = { ...(items[idx] as ToolItem), ...item };
+      }
       return {
-        items: [...context.items, item],
+        items,
         preambleBuffer: supersede(context.preambleBuffer),
       };
     }),
@@ -690,6 +698,15 @@ export const chatSessionMachine = setup({
             },
             // Late-arriving events from a previous run (session-filtered)
             MESSAGE_OUTPUT: { guard: 'acceptStrict', actions: 'bufferPreamble' },
+            // A client that attached MID-run (the read-only worker
+            // transcript viewer, a reconnect whose replay was superseded
+            // by the authoritative transcript) never saw RUN_STARTED —
+            // it sits here while the run streams. Tool events must still
+            // land or pending tool calls silently vanish; appendToolItem
+            // upserts by call_id so canonical rehydration + live delivery
+            // never duplicate.
+            TOOL_CALLED: { guard: 'acceptStrict', actions: 'appendToolItem' },
+            TOOL_RESULT: { guard: 'acceptStrict', actions: 'updateToolResult' },
           },
         },
 

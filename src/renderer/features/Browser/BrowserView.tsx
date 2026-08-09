@@ -10,7 +10,23 @@
 import './BrowserView.css';
 
 import { useStore } from '@nanostores/react';
-import { ArrowLeft, ArrowRight, Globe, RefreshCw, Star, Wrench, X } from 'lucide-react';
+import {
+  ArrowLeft,
+  ArrowRight,
+  Download,
+  EllipsisVertical,
+  Globe,
+  History,
+  RefreshCw,
+  RotateCcw,
+  Search,
+  Star,
+  Undo2,
+  Wrench,
+  X,
+  ZoomIn,
+  ZoomOut,
+} from 'lucide-react';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { fallbackTitle, normalizeAddress, parseOrigin } from '@/lib/url';
@@ -22,14 +38,23 @@ import {
   type WebviewLoadError,
 } from '@/renderer/common/webview-fallback';
 import { cn } from '@/renderer/ds/cn';
+import { Badge } from '@/renderer/ds/ui/badge';
 import { Button } from '@/renderer/ds/ui/button';
 import { ButtonGroup } from '@/renderer/ds/ui/button-group';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/renderer/ds/ui/collapsible';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuShortcut,
+  DropdownMenuTrigger,
+} from '@/renderer/ds/ui/dropdown-menu';
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/renderer/ds/ui/empty';
-import { Toggle } from '@/renderer/ds/ui/toggle';
+import { Popover, PopoverAnchor } from '@/renderer/ds/ui/popover';
 import { BookmarksBar } from '@/renderer/features/Browser/BookmarksBar';
 import { DevtoolsPanel } from '@/renderer/features/Browser/Devtools/DevtoolsPanel';
-import { DownloadsTray } from '@/renderer/features/Browser/DownloadsTray';
+import { $downloads, DownloadsPopoverContent } from '@/renderer/features/Browser/DownloadsTray';
 import { FindBar } from '@/renderer/features/Browser/FindBar';
 import { HistoryPanel } from '@/renderer/features/Browser/HistoryPanel';
 import { Omnibox, type OmniboxHandle } from '@/renderer/features/Browser/Omnibox';
@@ -90,6 +115,9 @@ export const BrowserView = memo(
     const [findOpen, setFindOpen] = useState(false);
     const [findResult, setFindResult] = useState<{ ordinal: number; matches: number } | null>(null);
     const [historyOpen, setHistoryOpen] = useState(false);
+    const [downloadsOpen, setDownloadsOpen] = useState(false);
+    const downloads = useStore($downloads);
+    const activeDownloads = downloads.filter((e) => e.state === 'progressing' || e.state === 'paused').length;
     const [ctxMenu, setCtxMenu] = useState<ContextMenuParams | null>(null);
     const [devtoolsOpen, setDevtoolsOpen] = useState(false);
     const [consoleLog, setConsoleLog] = useState<Array<ConsoleMessage & { timestamp: number }>>([]);
@@ -486,27 +514,82 @@ export const BrowserView = memo(
             </Button>
           )}
           <Omnibox ref={omniRef} value={activeTab.url} onSubmit={handleOmniboxSubmit} />
-          {isGlobal && (
-            <Toggle
-              size="sm"
-              pressed={bookmarked}
-              aria-label={bookmarked ? 'Remove bookmark' : 'Add bookmark'}
-              title={bookmarked ? `Remove bookmark (${MOD}D)` : `Add bookmark (${MOD}D)`}
-              onPressedChange={handleBookmarkToggle}
-            >
-              {bookmarked ? <Star className="size-4 text-warning" /> : <Star className="size-4" />}
-            </Toggle>
-          )}
-          <Toggle
-            size="sm"
-            pressed={devtoolsOpen}
-            aria-label={devtoolsOpen ? 'Close devtools' : 'Open devtools'}
-            title={devtoolsOpen ? 'Close devtools (F12)' : 'Open devtools (F12)'}
-            onPressedChange={setDevtoolsOpen}
-          >
-            <Wrench className={cn('size-3.5', devtoolsOpen && 'text-primary')} />
-          </Toggle>
-          <DownloadsTray />
+          <DropdownMenu>
+            <Popover open={downloadsOpen} onOpenChange={setDownloadsOpen}>
+              <PopoverAnchor asChild>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    className="relative"
+                    aria-label="More browser actions"
+                    title="More"
+                  >
+                    <EllipsisVertical className={cn('size-4', devtoolsOpen && 'text-primary')} />
+                    {activeDownloads > 0 && (
+                      <Badge className="pointer-events-none absolute -top-1 -right-1 h-3.5 min-w-3.5 px-1 text-xs">
+                        {activeDownloads}
+                      </Badge>
+                    )}
+                  </Button>
+                </DropdownMenuTrigger>
+              </PopoverAnchor>
+              <DownloadsPopoverContent />
+            </Popover>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => setDevtoolsOpen(!devtoolsOpen)}>
+                <Wrench />
+                Developer tools
+                <DropdownMenuShortcut>F12</DropdownMenuShortcut>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => setFindOpen(true)}>
+                <Search />
+                Find in page
+                <DropdownMenuShortcut>{MOD}F</DropdownMenuShortcut>
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => applyZoom(zoom + 0.1)}>
+                <ZoomIn />
+                Zoom in
+                <DropdownMenuShortcut>{MOD}+</DropdownMenuShortcut>
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => applyZoom(zoom - 0.1)}>
+                <ZoomOut />
+                Zoom out
+                <DropdownMenuShortcut>{MOD}−</DropdownMenuShortcut>
+              </DropdownMenuItem>
+              <DropdownMenuItem disabled={zoom === 1} onClick={() => applyZoom(1)}>
+                <RotateCcw />
+                {zoom === 1 ? 'Reset zoom' : `Reset zoom (${Math.round(zoom * 100)}%)`}
+                <DropdownMenuShortcut>{MOD}0</DropdownMenuShortcut>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              {isGlobal && (
+                <DropdownMenuItem onClick={handleBookmarkToggle}>
+                  <Star className={cn(bookmarked && 'text-warning')} />
+                  {bookmarked ? 'Remove bookmark' : 'Add bookmark'}
+                  <DropdownMenuShortcut>{MOD}D</DropdownMenuShortcut>
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuItem onClick={() => setDownloadsOpen(true)}>
+                <Download />
+                Downloads
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => void browserApi.reopenTab(tabsetId)}>
+                <Undo2 />
+                Reopen closed tab
+                <DropdownMenuShortcut>{MOD}⇧T</DropdownMenuShortcut>
+              </DropdownMenuItem>
+              {isGlobal && (
+                <DropdownMenuItem onClick={() => setHistoryOpen(true)}>
+                  <History />
+                  History
+                  <DropdownMenuShortcut>{MOD}⇧H</DropdownMenuShortcut>
+                </DropdownMenuItem>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
         {isGlobal && <BookmarksBar bookmarks={state.bookmarks} onOpen={navigateActive} />}
         <PermissionsBar partition={partition} />

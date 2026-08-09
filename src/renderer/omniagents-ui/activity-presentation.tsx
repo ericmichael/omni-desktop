@@ -1,12 +1,26 @@
-import { type RefObject, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useStore } from '@nanostores/react';
+import { ArrowLeftIcon, ChevronRightIcon, SquareIcon } from 'lucide-react';
+import {
+  Fragment,
+  type ReactNode,
+  type RefObject,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 import { toast } from 'sonner';
 
 import { formatElapsed } from '@/lib/format-time';
 import { oneLine } from '@/lib/text';
 import { cn } from '@/renderer/ds/cn';
 import { Badge } from '@/renderer/ds/ui/badge';
+import { Button } from '@/renderer/ds/ui/button';
+import { Item, ItemContent, ItemDescription, ItemMedia, ItemTitle } from '@/renderer/ds/ui/item';
+import { Spinner } from '@/renderer/ds/ui/spinner';
 
-import type { BashJobSummary, SubagentSummary } from './activity-store';
+import { $activityFocus, type BashJobSummary, clearActivityFocus, type SubagentSummary } from './activity-store';
 
 /**
  * The one presentation vocabulary for background activity — status colors,
@@ -187,4 +201,192 @@ export function useStickToBottom<T extends HTMLElement>(dep: unknown): RefObject
     }
   }, [dep]);
   return ref;
+}
+
+// --- state grouping ----------------------------------------------------------
+
+const byRecency = <T extends { started_at?: number | null }>(a: T, b: T): number =>
+  (b.started_at ?? 0) - (a.started_at ?? 0);
+
+/** The list sections, in the pill popovers' counting vocabulary: running
+ *  (live, snapshot order), failed (errors plus cancellations — the
+ *  needs-attention shelf), completed (successes, recent first). */
+export function groupSubagents(subagents: SubagentSummary[]): {
+  running: SubagentSummary[];
+  failed: SubagentSummary[];
+  completed: SubagentSummary[];
+} {
+  return {
+    running: subagents.filter((s) => s.status === 'running'),
+    failed: subagents.filter((s) => s.status === 'error' || s.status === 'cancelled').sort(byRecency),
+    completed: subagents.filter((s) => s.status === 'completed').sort(byRecency),
+  };
+}
+
+/** Jobs grouped the same way; a null exit code (killed) counts as failed. */
+export function groupJobs(jobs: BashJobSummary[]): {
+  running: BashJobSummary[];
+  failed: BashJobSummary[];
+  completed: BashJobSummary[];
+} {
+  return {
+    running: jobs.filter((j) => j.running),
+    failed: jobs.filter((j) => !j.running && j.exit_code !== 0).sort(byRecency),
+    completed: jobs.filter((j) => !j.running && j.exit_code === 0).sort(byRecency),
+  };
+}
+
+// --- master-list scaffolding -------------------------------------------------
+
+/** One list row: status dot, two-line label, badge + tail line, and a
+ *  chevron signalling navigation into the detail view. */
+export function ActivityListRow({
+  itemId,
+  dotClass,
+  badge,
+  label,
+  mono,
+  tail,
+  onOpen,
+}: {
+  itemId: string;
+  dotClass: string;
+  badge?: ReactNode;
+  label: string;
+  mono?: boolean;
+  tail: ReactNode;
+  onOpen: (id: string) => void;
+}) {
+  // flex-nowrap + min-w-0 down the chain — Item defaults to flex-wrap and
+  // ItemContent to min-width:auto, either of which defeats the title's
+  // single-line truncation.
+  return (
+    <Item asChild size="sm" className="w-full flex-nowrap gap-2 px-2 py-1.5 hover:bg-accent/50">
+      <button type="button" title={label} onClick={() => onOpen(itemId)}>
+        <ItemMedia>
+          <StatusDot className={dotClass} />
+        </ItemMedia>
+        <ItemContent className="min-w-0 gap-0.5">
+          <ItemTitle
+            className={cn('block w-full truncate text-left text-xs font-normal text-foreground', mono && 'font-mono')}
+          >
+            {label}
+          </ItemTitle>
+          <ItemDescription className="line-clamp-none flex w-full items-center gap-1.5 text-xs">
+            {badge}
+            <span className="ml-auto whitespace-nowrap">{tail}</span>
+          </ItemDescription>
+        </ItemContent>
+        <ChevronRightIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+      </button>
+    </Item>
+  );
+}
+
+export function ActivitySectionLabel({ children }: { children: string }) {
+  return (
+    <p
+      aria-hidden
+      className="px-2.5 pb-1 pt-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground first:pt-1"
+    >
+      {children}
+    </p>
+  );
+}
+
+/**
+ * List → detail navigation for one activity surface: null means the list
+ * view; an item id means its full-surface detail view (with a back
+ * affordance). Pill-popover deep links open the detail directly, scoped by
+ * item-id prefix so the Agents and Jobs apps each take only their own
+ * links.
+ */
+export function useActivityDetail(
+  sessionId: string,
+  focusPrefix: string
+): { openId: string | null; open: (id: string) => void; back: () => void } {
+  const [openId, setOpenId] = useState<string | null>(null);
+  const focus = useStore($activityFocus);
+  useEffect(() => {
+    if (focus && focus.sessionId === sessionId && focus.itemId.startsWith(focusPrefix)) {
+      setOpenId(focus.itemId);
+      clearActivityFocus();
+    }
+  }, [focus, sessionId, focusPrefix]);
+  const back = useCallback(() => setOpenId(null), []);
+  return { openId, open: setOpenId, back };
+}
+
+/** The detail view's back affordance, leading its header row. */
+export function ActivityBackButton({ onBack }: { onBack: () => void }) {
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon-sm"
+      className="shrink-0"
+      aria-label="Back to list"
+      title="Back to list"
+      onClick={onBack}
+    >
+      <ArrowLeftIcon className="size-4" />
+    </Button>
+  );
+}
+
+// --- detail-page shared pieces ----------------------------------------------
+
+export function ActivityStopButton({
+  id,
+  label,
+  stop,
+  controller,
+}: {
+  id: string;
+  label: string;
+  stop: () => Promise<{ ok: boolean; error?: string }>;
+  controller: StopController;
+}) {
+  const busy = controller.stopping.has(id);
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      className="shrink-0"
+      disabled={busy}
+      onClick={() => controller.runStop(id, label, stop)}
+    >
+      {busy ? <Spinner className="size-3.5" /> : <SquareIcon className="size-3.5" />}
+      Stop
+    </Button>
+  );
+}
+
+/** Overline heading for one detail-page section (Task, Activity, Result, Log). */
+export function ActivityDetailLabel({ className, children }: { className?: string; children: ReactNode }) {
+  return (
+    <p className={cn('mb-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground', className)}>
+      {children}
+    </p>
+  );
+}
+
+/** Labeled key/value facts — replaces the old unlabeled meta token soup.
+ *  Rows with empty values are dropped. */
+export function ActivityMetaGrid({ rows }: { rows: ReadonlyArray<readonly [string, ReactNode]> }) {
+  const shown = rows.filter(([, value]) => value !== null && value !== undefined && value !== '');
+  if (shown.length === 0) {
+    return null;
+  }
+  return (
+    <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 text-xs">
+      {shown.map(([label, value]) => (
+        <Fragment key={label}>
+          <dt className="text-muted-foreground">{label}</dt>
+          <dd className="min-w-0 break-all text-foreground">{value}</dd>
+        </Fragment>
+      ))}
+    </dl>
+  );
 }

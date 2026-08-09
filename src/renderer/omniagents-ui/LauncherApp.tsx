@@ -57,6 +57,8 @@ type OmniAgentsAppProps = {
   workspaceDir?: string;
   /** Opens a column app (deck sidecar tab) — e.g. the Agents pill. */
   onOpenApp?: (appId: string) => void;
+  /** Transcript-viewer mode: no composer or pill row. */
+  readOnly?: boolean;
   /** Additional column UI that must share this exact RPC connection. */
   providerChildren?: ReactNode;
 };
@@ -90,6 +92,7 @@ export const OmniAgentsApp = ({
   routineId,
   workspaceDir,
   onOpenApp,
+  readOnly,
   providerChildren,
 }: OmniAgentsAppProps) => {
   // Resolve relative ``/proxy/...`` payloads against the launcher's actual
@@ -131,6 +134,7 @@ export const OmniAgentsApp = ({
           routineId={routineId}
           workspaceDir={workspaceDir}
           onOpenApp={onOpenApp}
+          readOnly={readOnly}
         />
         {providerChildren}
       </RPCClientProvider>

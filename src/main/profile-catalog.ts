@@ -42,8 +42,6 @@ const PROFILE_LABELS: Record<string, string> = {
   host: 'This computer (no sandbox)',
   devbox: 'Devbox (Docker)',
   platform: 'Cloud (managed)',
-  aci: 'Cloud · Fast',
-  'aci-desktop': 'Cloud · Desktop (IDE + VNC)',
 };
 
 const labelFor = (name: string): string =>

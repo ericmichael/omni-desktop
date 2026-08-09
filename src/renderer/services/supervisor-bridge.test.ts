@@ -88,7 +88,7 @@ describe('renderer supervisor bridge', () => {
     startSupervisorBridge();
     const dispatch = on.mock.calls.find(([channel]) => channel === 'supervisor:dispatch')?.[1];
 
-    dispatch('req-1', { kind: 'ensure-column', ticketId: 't1', workspaceDir: '/ws', profileName: 'aci' });
+    dispatch('req-1', { kind: 'ensure-column', ticketId: 't1', workspaceDir: '/ws', profileName: 'devbox' });
     await new Promise((resolve) => {
       setTimeout(resolve, 0);
     });
@@ -96,7 +96,7 @@ describe('renderer supervisor bridge', () => {
     expect(addTabForTicket).toHaveBeenCalledWith('t1', 'p1', {
       ticketTitle: 'Ticket one',
       workspaceDir: '/ws',
-      profileName: 'aci',
+      profileName: 'devbox',
     });
     expect(invoke).toHaveBeenCalledWith('supervisor:dispatch-result', 'req-1', true, {}, undefined);
   });

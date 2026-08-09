@@ -23,6 +23,7 @@ const ctx = (codeTabs: CodeTab[] = []) => ({
   createProject: vi.fn(),
   newSession: vi.fn(),
   setDeckLayout: vi.fn(),
+  toggleViewportDebug: vi.fn(),
 });
 
 describe('paletteColumns', () => {

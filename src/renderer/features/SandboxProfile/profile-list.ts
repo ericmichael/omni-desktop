@@ -21,8 +21,6 @@ const PROFILE_LABELS: Record<string, string> = {
   host: 'This computer (no sandbox)',
   devbox: 'Devbox (Docker)',
   platform: 'Cloud (managed)',
-  aci: 'Cloud · Fast',
-  'aci-desktop': 'Cloud · Desktop (IDE + VNC)',
 };
 
 export type ProfileListContext = {
@@ -30,8 +28,8 @@ export type ProfileListContext = {
   isEnterprise: boolean;
   /**
    * Backend-provided profile list (``StoreData.availableSandboxProfiles``).
-   * When set, it's authoritative — e.g. a cloud/ACI deployment sends
-   * ``['aci']`` to offer only that and hide host/devbox.
+   * When set, it's authoritative — a deployment can restrict the picker to
+   * a subset and hide host/devbox.
    */
   available?: string[];
   /**

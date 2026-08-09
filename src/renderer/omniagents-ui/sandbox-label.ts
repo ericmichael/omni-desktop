@@ -17,8 +17,6 @@ const KNOWN_PROFILE_LABELS: Record<string, string> = {
   host: 'Host',
   devbox: 'Devbox',
   platform: 'Platform',
-  aci: 'Cloud · Fast',
-  'aci-desktop': 'Cloud · Desktop',
 };
 
 const titleCase = (s: string): string => (s.length === 0 ? s : s[0]!.toUpperCase() + s.slice(1));

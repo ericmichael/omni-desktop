@@ -15,7 +15,6 @@ import { getAvailableProfileNames, getProfileMenuLabel } from '@/renderer/featur
 import { openSettingsTab } from '@/renderer/features/SettingsModal/settings-nav';
 import { buildClientToolHandler } from '@/renderer/features/Tickets/client-tool-handler';
 import { $pendingPlan, resolvePlanApproval } from '@/renderer/features/Tickets/plan-approval-bridge';
-import { useSandboxActivityPing } from '@/renderer/hooks/use-sandbox-activity-ping';
 import { useSessionWorkspaceDir } from '@/renderer/hooks/use-session-workspace-dir';
 import type { ClientToolCallHandler } from '@/renderer/omniagents-ui/App';
 import { ChatShell, type PendingMessage } from '@/renderer/omniagents-ui/ChatShell';
@@ -75,11 +74,11 @@ const CodeRunningView = memo(
     onSandboxChange,
     composerExtras,
     onClientToolCall,
-    dockTargetId,
     tabId,
     agentWorkspaceDir,
     filesHost,
     gitHost,
+    reviewHost,
     ticketId,
     routineId,
     switching,
@@ -106,11 +105,11 @@ const CodeRunningView = memo(
     onSandboxChange?: (value: string) => void;
     composerExtras?: React.ReactNode;
     onClientToolCall?: ClientToolCallHandler;
-    dockTargetId?: string;
     tabId?: string;
     agentWorkspaceDir?: string;
     filesHost: HTMLDivElement;
     gitHost: HTMLDivElement;
+    reviewHost: HTMLDivElement;
     ticketId?: TicketId;
     routineId?: string;
     switching?: boolean;
@@ -167,11 +166,11 @@ const CodeRunningView = memo(
             onClientToolCall={onClientToolCall}
             pendingPlan={pendingPlan}
             onPlanDecision={resolvePlanApproval}
-            dockTargetId={dockTargetId}
             tabId={tabId}
             agentWorkspaceDir={agentWorkspaceDir}
             filesHost={filesHost}
             gitHost={gitHost}
+            reviewHost={reviewHost}
             ticketId={ticketId}
             routineId={routineId}
             greeting={greeting}
@@ -205,9 +204,9 @@ type CodeTabContentProps = {
   uiMinimal?: boolean;
   headerActionsTargetId?: string;
   headerActionsCompact?: boolean;
-  dockTargetId?: string;
   filesHost: HTMLDivElement;
   gitHost: HTMLDivElement;
+  reviewHost: HTMLDivElement;
 };
 
 export const CodeTabContent = memo(
@@ -219,9 +218,9 @@ export const CodeTabContent = memo(
     uiMinimal,
     headerActionsTargetId,
     headerActionsCompact,
-    dockTargetId,
     filesHost,
     gitHost,
+    reviewHost,
   }: CodeTabContentProps) => {
     const store = useStore(persistedStoreApi.$atom);
     // Chat mode is derived, not reserved: any projectless session column runs
@@ -388,7 +387,6 @@ export const CodeTabContent = memo(
       ...(tab.sessionId ? { sessionId: tab.sessionId } : {}),
       ...(tab.snapshotRef ? { snapshotRef: tab.snapshotRef } : {}),
     });
-    useSandboxActivityPing(tab.id);
 
     const allStatuses = useStore($codeTabStatuses);
     const sandboxStatus = allStatuses[tab.id];
@@ -539,11 +537,11 @@ export const CodeTabContent = memo(
               onSandboxChange={handleProfileChange}
               composerExtras={composerExtras}
               onClientToolCall={handleClientToolCall}
-              dockTargetId={dockTargetId}
               tabId={tab.id}
               agentWorkspaceDir={agentWorkspaceDir}
               filesHost={filesHost}
               gitHost={gitHost}
+              reviewHost={reviewHost}
               ticketId={tab.ticketId as TicketId | undefined}
               routineId={tab.routineId}
               switching={sandboxStatus?.type === 'running' && !!sandboxStatus.data.switching}

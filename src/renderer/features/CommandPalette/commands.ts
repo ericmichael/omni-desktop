@@ -28,6 +28,7 @@ export type PaletteContext = {
   createProject: () => void;
   newSession: () => void;
   setDeckLayout: (mode: CodeLayoutMode) => void;
+  toggleViewportDebug: () => void;
 };
 
 /** Session columns the palette can jump to (the deck's view of codeTabs). */
@@ -68,6 +69,12 @@ export function buildCommands(ctx: PaletteContext): PaletteCommand[] {
       label: ctx.codeLayoutMode === 'tile' ? 'Switch deck to Focus layout' : 'Switch deck to Tile layout',
       keywords: 'tile focus layout deck view',
       run: () => ctx.setDeckLayout(ctx.codeLayoutMode === 'tile' ? 'focus' : 'tile'),
+    },
+    {
+      id: 'toggle-viewport-debug',
+      label: 'Toggle viewport debug overlay',
+      keywords: 'diagnostics safe area inset ios ipad height dvh',
+      run: ctx.toggleViewportDebug,
     },
   ];
 

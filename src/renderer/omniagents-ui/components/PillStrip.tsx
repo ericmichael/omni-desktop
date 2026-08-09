@@ -57,7 +57,7 @@ function PopoverHeaderLine({ title, counts }: { title: string; counts: string })
   );
 }
 
-function OpenAgentsFooter({ onOpen }: { onOpen: () => void }) {
+function OpenAppFooter({ label, onOpen }: { label: string; onOpen: () => void }) {
   return (
     <div className="border-t border-border p-1">
       <Button
@@ -68,7 +68,7 @@ function OpenAgentsFooter({ onOpen }: { onOpen: () => void }) {
         onClick={onOpen}
       >
         <ArrowUpRightIcon className="size-3.5" />
-        Open Agents
+        {label}
       </Button>
     </div>
   );
@@ -201,6 +201,7 @@ export function PillStrip({
   tasks,
   jobs,
   onOpenAgents,
+  onOpenJobs,
   onWorkerKill,
   onWorkerDismiss,
   onJobKill,
@@ -215,6 +216,8 @@ export function PillStrip({
   /** Opens the Agents sidecar app. Absent on hosts without a deck column
    *  (e.g. Residents) — popovers stay, deep links disappear. */
   onOpenAgents?: () => void;
+  /** Opens the Jobs sidecar app (same host caveat as ``onOpenAgents``). */
+  onOpenJobs?: () => void;
   onWorkerKill?: (workerId: string) => Promise<WorkersKillResult>;
   onWorkerDismiss?: (workerId: string) => void;
   onJobKill?: (jobId: string) => Promise<BashJobsKillResult>;
@@ -235,12 +238,19 @@ export function PillStrip({
 
   const { stopping, runStop } = useStopController();
 
-  // Deep link: focus the item, then open the app.
-  const openItem =
+  // Deep link: focus the item, then open its app.
+  const openAgentsItem =
     onOpenAgents && sessionId
       ? (itemId: string) => {
           requestActivityFocus(sessionId, itemId);
           onOpenAgents();
+        }
+      : undefined;
+  const openJobsItem =
+    onOpenJobs && sessionId
+      ? (itemId: string) => {
+          requestActivityFocus(sessionId, itemId);
+          onOpenJobs();
         }
       : undefined;
 
@@ -288,7 +298,7 @@ export function PillStrip({
                 badge={<KindBadge subagent={s} />}
                 label={subagentLabel(s)}
                 tail={<SubagentTail subagent={s} />}
-                onOpen={openItem ? () => openItem(subagentItemId(s.subagent_id)) : undefined}
+                onOpen={openAgentsItem ? () => openAgentsItem(subagentItemId(s.subagent_id)) : undefined}
                 onStop={
                   onWorkerKill && s.kind === 'worker' && s.worker_id && s.status === 'running'
                     ? () => runStop(s.worker_id!, subagentLabel(s), () => onWorkerKill(s.worker_id!))
@@ -303,7 +313,7 @@ export function PillStrip({
               />
             ))}
           </div>
-          {onOpenAgents ? <OpenAgentsFooter onOpen={onOpenAgents} /> : null}
+          {onOpenAgents ? <OpenAppFooter label="Open Agents" onOpen={onOpenAgents} /> : null}
         </PillPopover>
       )}
       {showTasks && (
@@ -389,7 +399,7 @@ export function PillStrip({
                 label={jobLabel(j)}
                 labelClassName={j.running ? 'font-mono text-foreground' : 'font-mono text-muted-foreground'}
                 tail={<JobTail job={j} />}
-                onOpen={openItem ? () => openItem(jobItemId(j.job_id)) : undefined}
+                onOpen={openJobsItem ? () => openJobsItem(jobItemId(j.job_id)) : undefined}
                 onStop={
                   onJobKill && j.running ? () => runStop(j.job_id, jobLabel(j), () => onJobKill(j.job_id)) : undefined
                 }
@@ -398,7 +408,7 @@ export function PillStrip({
               />
             ))}
           </div>
-          {onOpenAgents ? <OpenAgentsFooter onOpen={onOpenAgents} /> : null}
+          {onOpenJobs ? <OpenAppFooter label="Open Jobs" onOpen={onOpenJobs} /> : null}
         </PillPopover>
       )}
     </div>

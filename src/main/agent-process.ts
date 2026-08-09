@@ -19,8 +19,6 @@ import { initializeMainRpcConnection } from '@/main/omniagents-rpc-handshake';
 import type { IComputeClient } from '@/main/platform-client';
 import { assertServeProtocolSupported } from '@/main/product-runtime';
 import { resolveProfile } from '@/main/profile-resolver';
-import { getSnapshotStore } from '@/main/snapshot-blob-store';
-import { completePendingSnapshotUpload, recordPendingSnapshotUpload } from '@/main/snapshot-upload-ledger';
 import { getOmniCliPath, getOmniConfigDir, isDirectory, pathExists } from '@/main/util';
 import { downloadWorkspace } from '@/main/workspace-sync';
 import type { ManagementAdminMethod } from '@/shared/management-admin';
@@ -571,15 +569,10 @@ export class AgentProcess {
   private computeSessionId: string | null = null;
   private getExtraEnv?: () => Record<string, string> | Promise<Record<string, string>>;
   private readonly processStopTimeoutMs: number;
-  private readonly snapshotRetryDelayMs: number;
   private readonly stopReconcilePollMs: number;
   private readonly stopReconcileTimeoutMs: number;
-  private snapshotRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
-  private snapshotRetryAttempts = new Map<string, number>();
   private agentHostControlToken: string | null = null;
   private agentHostControlClient: AgentHostControlClient | null = null;
-  /** Environment id -> durable Workspace snapshot reference. */
-  private consumerSnapshotRefs = new Map<string, string>();
   /** Desired consumer bindings retained across renderer/control reconnects. */
   private consumerRegistrations = new Map<string, ConsumerRegistration>();
   /**
@@ -609,8 +602,6 @@ export class AgentProcess {
     getExtraEnv?: () => Record<string, string> | Promise<Record<string, string>>;
     /** Test/embedding override for the SIGTERM grace period. */
     processStopTimeoutMs?: number;
-    /** Test/embedding override for snapshot persistence retry backoff. */
-    snapshotRetryDelayMs?: number;
     /** Test/embedding overrides for observing an already-committed stop. */
     stopReconcilePollMs?: number;
     stopReconcileTimeoutMs?: number;
@@ -622,7 +613,6 @@ export class AgentProcess {
     this.computeClient = opts.computeClient ?? null;
     this.getExtraEnv = opts.getExtraEnv;
     this.processStopTimeoutMs = opts.processStopTimeoutMs ?? 30_000;
-    this.snapshotRetryDelayMs = opts.snapshotRetryDelayMs ?? 5_000;
     this.stopReconcilePollMs = opts.stopReconcilePollMs ?? 250;
     this.stopReconcileTimeoutMs = opts.stopReconcileTimeoutMs ?? 2 * 60_000;
     this.status = { type: 'uninitialized', timestamp: Date.now() };
@@ -731,7 +721,6 @@ export class AgentProcess {
       this.agentHostControlClient ??
       (this.agentHostControlClient = new AgentHostControlClient(data.wsUrl, this.agentHostControlToken));
     const snapshotRef = arg.snapshotRef ?? workspaceId;
-    const snapshotDir = path.join(getOmniConfigDir(), 'snapshots');
     let materializedEnvironmentId: string | undefined;
     const resolved = arg.explicitProfilePath
       ? ({ kind: 'file', path: arg.explicitProfilePath } as const)
@@ -794,21 +783,8 @@ export class AgentProcess {
       }
       if (authoritative?.state === 'ready' && authoritative.generation === previous.runtime.environmentGeneration) {
         await this.bindConsumer(control, threadId, previous.runtime, controlContext);
-        this.consumerSnapshotRefs.set(previous.runtime.environmentId, snapshotRef);
         return previous.runtime;
       }
-    }
-
-    // Blob durability follows the Workspace being materialized, not whichever
-    // consumer happened to start this shared AgentHost process first.
-    try {
-      const pulled = await getSnapshotStore().pull(snapshotRef, snapshotDir);
-      if (pulled) {
-        this.log.info(c.cyan(`Restored snapshot from blob for workspace ${snapshotRef}\r\n`));
-      }
-    } catch (error) {
-      // Best-effort: the provisioner can still materialize a fresh workspace.
-      console.error(`[snapshot-blob] pull failed for ${snapshotRef}:`, error);
     }
 
     if (!registeredWorkspace) {
@@ -887,7 +863,6 @@ export class AgentProcess {
       }
       throw error;
     }
-    this.consumerSnapshotRefs.set(runtime.environmentId, snapshotRef);
     this.consumerRegistrations.set(consumerId, {
       consumerId,
       threadId,
@@ -1001,7 +976,6 @@ export class AgentProcess {
   };
 
   private finalizeStoppedConsumer = async (environmentId: string): Promise<AgentProcessStopResult> => {
-    await this.pushConsumerSnapshot(environmentId);
     for (const [consumerId, registration] of this.consumerRegistrations) {
       if (registration.runtime.environmentId === environmentId) {
         this.consumerRegistrations.delete(consumerId);
@@ -1010,27 +984,18 @@ export class AgentProcess {
     return this.stopResult('environment', 'not-applicable');
   };
 
+  /**
+   * Flag the environment's shutdown as terminal. On close, omni serve
+   * destroys the durable state instead of preserving it — for docker that
+   * means stopping and removing the container (the workspace lives in its
+   * writable layer) and deleting the session-state record.
+   */
   discardConsumerSnapshot = async (target: ExecutionTarget): Promise<void> => {
     const data = await this.waitForRunningData();
     if (!data.wsUrl) {
       return;
     }
-    const snapshotRef = this.consumerSnapshotRefs.get(target.environmentId);
-    const result = await oneShotServerCall(
-      data.wsUrl,
-      target,
-      'sandbox.discard_snapshot',
-      {},
-      SERVER_CALL_TIMEOUT_MS,
-      data.authToken
-    );
-    if (result.ok) {
-      this.clearSnapshotRetry(target.environmentId);
-      this.consumerSnapshotRefs.delete(target.environmentId);
-      if (snapshotRef) {
-        completePendingSnapshotUpload(snapshotRef, path.join(getOmniConfigDir(), 'snapshots'));
-      }
-    }
+    await oneShotServerCall(data.wsUrl, target, 'sandbox.discard_snapshot', {}, SERVER_CALL_TIMEOUT_MS, data.authToken);
   };
 
   start = async (arg: AgentProcessStartArg): Promise<void> => {
@@ -1087,12 +1052,11 @@ export class AgentProcess {
       return this.stopResult('compute', 'graceful');
     }
 
-    // Serve mode — omni serve handles its own teardown on SIGTERM, so we
-    // just kill the child and let it run the session.stop()/aclose() and
-    // service cleanup in its own finally block.
+    // Serve mode — omni serve detaches from durable container sessions on
+    // SIGTERM (docker containers keep running for reattach), so we just kill
+    // the child and let it run its own teardown in its finally block.
     if (!this.childProcess) {
       this.closeAgentHostControl();
-      await this.pushAllConsumerSnapshots();
       this.consumerRegistrations.clear();
       return this.stopResult('host', 'not-applicable');
     }
@@ -1100,23 +1064,6 @@ export class AgentProcess {
     this.updateStatus({ type: 'stopping' });
     this.closeAgentHostControl();
     const shutdown = await this.killProcess(this.processStopTimeoutMs);
-    if (shutdown === 'graceful') {
-      // omni serve has completed its snapshot writers. Verify every expected
-      // tar before asking the durability backend to accept it.
-      await this.pushAllConsumerSnapshots();
-    } else {
-      const snapshotDir = path.join(getOmniConfigDir(), 'snapshots');
-      for (const snapshotRef of this.pendingSnapshotRefs()) {
-        if (!recordPendingSnapshotUpload(snapshotRef, snapshotDir, 'forced-uncertain')) {
-          console.error(`[snapshot-blob] could not durably record forced uncertainty for ${snapshotRef}`);
-        }
-      }
-      console.error(
-        `[agent-process] AgentHost required SIGKILL; snapshot persistence is uncertain for: ${
-          this.pendingSnapshotRefs().join(', ') || '(no registered snapshots)'
-        }`
-      );
-    }
     this.consumerRegistrations.clear();
     this.updateStatus({ type: 'exited' });
     return this.stopResult('host', shutdown);
@@ -1152,32 +1099,6 @@ export class AgentProcess {
    */
   unpause = async (target?: ExecutionTarget): Promise<SandboxPauseResult> => {
     return this.callSandboxLifecycle(target, 'sandbox.unpause');
-  };
-
-  /**
-   * Fire-and-forget presence ping. Resets the sandbox's idle timer so it
-   * doesn't pause while the user is actively interacting with a client
-   * surface. Throttling is the renderer's responsibility — we just relay.
-   */
-  notifyActivity = (target?: ExecutionTarget): void => {
-    if (this.status.type !== 'running' && this.status.type !== 'connecting') {
-      return;
-    }
-    const data = (this.status as Extract<AgentProcessStatus, { type: 'running' | 'connecting' }>).data;
-    if (!data.wsUrl || !target) {
-      return;
-    }
-    void oneShotServerCall(
-      data.wsUrl,
-      target,
-      'sandbox.notify_activity',
-      {},
-      SERVER_CALL_TIMEOUT_MS,
-      data.authToken
-    ).catch(() => {
-      // Best-effort. A dropped ping costs us ~60s of headroom (the
-      // renderer's throttle window) before the next one tries.
-    });
   };
 
   private callSandboxLifecycle = async (
@@ -1343,30 +1264,13 @@ export class AgentProcess {
             this.childProcess = null;
           }
           // Don't touch status: stop()/exit() already set it to 'exited' or
-          // the caller transitioned to 'starting' for the replacement. The
-          // lifecycle caller pushes every consumer snapshot after shutdown.
+          // the caller transitioned to 'starting' for the replacement.
           return;
         }
         this.closeAgentHostControl();
         this.childProcess = null;
-        // An unexpected host exit shuts down every environment. Persist all
-        // Workspace snapshots; there is no distinguished "startup session".
-        const forcedShutdown = signal === 'SIGKILL';
-        if (forcedShutdown) {
-          const snapshotDir = path.join(getOmniConfigDir(), 'snapshots');
-          for (const snapshotRef of this.pendingSnapshotRefs()) {
-            if (!recordPendingSnapshotUpload(snapshotRef, snapshotDir, 'forced-uncertain')) {
-              console.error(`[snapshot-blob] could not durably record forced uncertainty for ${snapshotRef}`);
-            }
-          }
-          console.error(
-            `[agent-process] AgentHost exited via SIGKILL; snapshot persistence is uncertain for: ${
-              this.pendingSnapshotRefs().join(', ') || '(no registered snapshots)'
-            }`
-          );
-        } else {
-          void this.pushAllConsumerSnapshots();
-        }
+        // An unexpected host exit orphans this process's registrations; the
+        // durable container sessions stay reattachable on the next start.
         this.consumerRegistrations.clear();
         if (this.status.type === 'exiting' || this.status.type === 'stopping') {
           this.updateStatus({ type: 'exited' });
@@ -1387,21 +1291,7 @@ export class AgentProcess {
           : tail
             ? `omni serve exited (${reason})\n\n${tail}`
             : `omni serve exited (${reason})`;
-        this.updateStatus({
-          type: 'error',
-          error: {
-            message,
-            ...(forcedShutdown
-              ? {
-                  context: {
-                    shutdown: 'forced',
-                    snapshotPersistence: 'uncertain',
-                    pendingSnapshotRefs: this.pendingSnapshotRefs(),
-                  },
-                }
-              : {}),
-          },
-        });
+        this.updateStatus({ type: 'error', error: { message } });
       });
     } catch (error) {
       this.childProcess = null;
@@ -1554,89 +1444,13 @@ export class AgentProcess {
     this.agentHostControlToken = null;
   };
 
-  private pendingSnapshotRefs = (): string[] => [...new Set(this.consumerSnapshotRefs.values())].sort();
-
   private stopResult = (
     scope: AgentProcessStopResult['scope'],
     shutdown: AgentProcessStopResult['shutdown']
   ): AgentProcessStopResult => ({
     scope,
     shutdown,
-    snapshotPersistence: this.consumerSnapshotRefs.size === 0 ? 'complete' : 'uncertain',
-    pendingSnapshotRefs: this.pendingSnapshotRefs(),
   });
-
-  private scheduleSnapshotRetry = (environmentId: string): void => {
-    if (!this.consumerSnapshotRefs.has(environmentId) || this.snapshotRetryTimers.has(environmentId)) {
-      return;
-    }
-    const attempt = Math.min((this.snapshotRetryAttempts.get(environmentId) ?? 0) + 1, 32);
-    this.snapshotRetryAttempts.set(environmentId, attempt);
-    const delay = Math.min(this.snapshotRetryDelayMs * 2 ** Math.min(attempt - 1, 4), 60_000);
-    const timer = setTimeout(() => {
-      this.snapshotRetryTimers.delete(environmentId);
-      void this.pushConsumerSnapshot(environmentId);
-    }, delay);
-    timer.unref?.();
-    this.snapshotRetryTimers.set(environmentId, timer);
-  };
-
-  private clearSnapshotRetry = (environmentId: string): void => {
-    const timer = this.snapshotRetryTimers.get(environmentId);
-    if (timer) {
-      clearTimeout(timer);
-      this.snapshotRetryTimers.delete(environmentId);
-    }
-    this.snapshotRetryAttempts.delete(environmentId);
-  };
-
-  private pushConsumerSnapshot = async (environmentId: string): Promise<boolean> => {
-    const snapshotRef = this.consumerSnapshotRefs.get(environmentId);
-    if (!snapshotRef) {
-      return true;
-    }
-    const snapshotDir = path.join(getOmniConfigDir(), 'snapshots');
-    try {
-      const store = getSnapshotStore();
-      if (!(await store.verify(snapshotRef, snapshotDir))) {
-        console.error(`[snapshot-blob] snapshot file is missing or invalid for ${snapshotRef}; retaining retry state`);
-        if (!recordPendingSnapshotUpload(snapshotRef, snapshotDir, 'retryable')) {
-          console.error(`[snapshot-blob] could not durably record retry state for ${snapshotRef}`);
-        }
-        this.scheduleSnapshotRetry(environmentId);
-        return false;
-      }
-      if (!(await store.push(snapshotRef, snapshotDir))) {
-        console.error(`[snapshot-blob] push did not persist ${snapshotRef}; retaining retry state`);
-        if (!recordPendingSnapshotUpload(snapshotRef, snapshotDir, 'retryable')) {
-          console.error(`[snapshot-blob] could not durably record retry state for ${snapshotRef}`);
-        }
-        this.scheduleSnapshotRetry(environmentId);
-        return false;
-      }
-      this.clearSnapshotRetry(environmentId);
-      this.consumerSnapshotRefs.delete(environmentId);
-      if (!completePendingSnapshotUpload(snapshotRef, snapshotDir)) {
-        console.error(`[snapshot-blob] persisted ${snapshotRef}, but could not clear its durable retry record`);
-      }
-      return true;
-    } catch (error) {
-      console.error(`[snapshot-blob] push failed for ${snapshotRef}:`, error);
-      if (!recordPendingSnapshotUpload(snapshotRef, snapshotDir, 'retryable')) {
-        console.error(`[snapshot-blob] could not durably record retry state for ${snapshotRef}`);
-      }
-      this.scheduleSnapshotRetry(environmentId);
-      return false;
-    }
-  };
-
-  private pushAllConsumerSnapshots = async (): Promise<boolean> => {
-    const environmentIds = [...this.consumerSnapshotRefs.keys()];
-    const persisted = await Promise.all(
-      environmentIds.map((environmentId) => this.pushConsumerSnapshot(environmentId))
-    );
-    return persisted.every(Boolean);
-  };
 
   /** Patch fields on the embedded ``AgentProcessData`` without changing the
    *  status state. No-op unless we're in a state that carries data

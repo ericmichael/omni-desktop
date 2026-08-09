@@ -17,6 +17,7 @@ import { initBootLanding } from '@/renderer/app/boot-landing';
 import { ErrorBoundaryFallback } from '@/renderer/app/ErrorBoundaryFallback';
 import { MainContent } from '@/renderer/app/MainContent';
 import { StatusAnnouncer } from '@/renderer/app/StatusAnnouncer';
+import { ViewportDebug } from '@/renderer/common/ViewportDebug';
 import { syncTheme } from '@/renderer/constants';
 import { SystemInfoLoadingGate, SystemInfoProvider } from '@/renderer/contexts/SystemInfoContext';
 import { TooltipProvider } from '@/renderer/ds/ui/tooltip';
@@ -85,6 +86,7 @@ export const App = () => {
                     <QuickCapture />
                     <VoiceHotkeys />
                     <CommandPalette />
+                    <ViewportDebug />
                     <SyncBar />
                     <StatusAnnouncer />
                   </ProductManagementProvider>

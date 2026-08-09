@@ -12,11 +12,6 @@ const hoisted = vi.hoisted(() => ({
   controlFailureMethod: null as string | null,
   resourceSnapshot: null as Record<string, unknown> | null,
   resourceSnapshotQueue: [] as Record<string, unknown>[],
-  snapshotPull: vi.fn(async () => false),
-  snapshotVerify: vi.fn(async () => true),
-  snapshotPush: vi.fn(async () => true),
-  ledgerRecord: vi.fn(() => true),
-  ledgerComplete: vi.fn(() => true),
 }));
 
 vi.mock('node:child_process', async () => {
@@ -119,18 +114,6 @@ vi.mock('@/main/workspace-sync', () => ({
   uploadWorkspace: vi.fn(async () => {}),
   downloadWorkspace: vi.fn(async () => {}),
 }));
-vi.mock('@/main/snapshot-blob-store', () => ({
-  getSnapshotStore: () => ({
-    pull: hoisted.snapshotPull,
-    verify: hoisted.snapshotVerify,
-    push: hoisted.snapshotPush,
-    remove: vi.fn(async () => {}),
-  }),
-}));
-vi.mock('@/main/snapshot-upload-ledger', () => ({
-  recordPendingSnapshotUpload: hoisted.ledgerRecord,
-  completePendingSnapshotUpload: hoisted.ledgerComplete,
-}));
 vi.mock('@/lib/simple-logger', () => ({
   SimpleLogger: class {
     constructor(_handler: unknown) {}
@@ -209,7 +192,6 @@ type Harness = {
 const makeHarness = (
   opts: {
     processStopTimeoutMs?: number;
-    snapshotRetryDelayMs?: number;
     stopReconcilePollMs?: number;
     stopReconcileTimeoutMs?: number;
   } = {}
@@ -229,7 +211,6 @@ const makeHarness = (
     onStatusChange: (s) => statuses.push(s),
     fetchFn: fetchFn as unknown as typeof globalThis.fetch,
     ...(opts.processStopTimeoutMs !== undefined ? { processStopTimeoutMs: opts.processStopTimeoutMs } : {}),
-    ...(opts.snapshotRetryDelayMs !== undefined ? { snapshotRetryDelayMs: opts.snapshotRetryDelayMs } : {}),
     ...(opts.stopReconcilePollMs !== undefined ? { stopReconcilePollMs: opts.stopReconcilePollMs } : {}),
     ...(opts.stopReconcileTimeoutMs !== undefined ? { stopReconcileTimeoutMs: opts.stopReconcileTimeoutMs } : {}),
   });
@@ -260,14 +241,6 @@ describe('AgentProcess (serve mode)', () => {
     hoisted.controlFailureMethod = null;
     hoisted.resourceSnapshot = null;
     hoisted.resourceSnapshotQueue.length = 0;
-    hoisted.snapshotPull.mockClear();
-    hoisted.snapshotVerify.mockReset();
-    hoisted.snapshotVerify.mockResolvedValue(true);
-    hoisted.snapshotPush.mockClear();
-    hoisted.snapshotPush.mockReset();
-    hoisted.snapshotPush.mockResolvedValue(true);
-    hoisted.ledgerRecord.mockClear();
-    hoisted.ledgerComplete.mockClear();
   });
 
   afterEach(() => {
@@ -419,7 +392,6 @@ describe('AgentProcess (serve mode)', () => {
       'agent_host_list_resources',
       'agent_host_bind_thread',
     ]);
-    expect(hoisted.snapshotPull).toHaveBeenCalledTimes(1);
   });
 
   it('fails closed when reconciliation reaches a different AgentHost', async () => {
@@ -478,7 +450,7 @@ describe('AgentProcess (serve mode)', () => {
     expect(hoisted.controlCalls.filter((call) => call.method === 'agent_host_stop_environment')).toHaveLength(0);
   });
 
-  it('reconciles a lost stop response before persisting the snapshot', async () => {
+  it('reconciles a lost stop response instead of retrying blindly', async () => {
     const h = makeHarness();
     await h.proc.start({ profileName: 'host', sources: [localSource('/ws')] });
     const mutable = h.proc as unknown as { status: WithTimestamp<AgentProcessStatus> };
@@ -496,12 +468,10 @@ describe('AgentProcess (serve mode)', () => {
 
     await expect(h.proc.stopConsumerEnvironment(runtime)).resolves.toMatchObject({
       scope: 'environment',
-      snapshotPersistence: 'complete',
     });
     expect(
       hoisted.controlCalls.filter((call) => call.method === 'agent_host_list_resources').length
     ).toBeGreaterThanOrEqual(3);
-    expect(hoisted.snapshotPush).toHaveBeenCalledWith('snapshot-reconcile', path.join('/fake/config', 'snapshots'));
   });
 
   it('waits for an already-committed stopping environment instead of retrying the mutation', async () => {
@@ -535,12 +505,11 @@ describe('AgentProcess (serve mode)', () => {
     const stopCallsBefore = hoisted.controlCalls.filter((call) => call.method === 'agent_host_stop_environment').length;
 
     await expect(h.proc.stopConsumerEnvironment(runtime)).resolves.toMatchObject({
-      snapshotPersistence: 'complete',
+      scope: 'environment',
     });
     expect(hoisted.controlCalls.filter((call) => call.method === 'agent_host_stop_environment')).toHaveLength(
       stopCallsBefore
     );
-    expect(hoisted.snapshotPush).toHaveBeenCalledWith('snapshot-stopping', path.join('/fake/config', 'snapshots'));
   });
 
   it('binds the conversation session rather than the launcher consumer', async () => {
@@ -566,121 +535,7 @@ describe('AgentProcess (serve mode)', () => {
     });
   });
 
-  it('restores and persists snapshots for each consumer Workspace', async () => {
-    const h = makeHarness();
-    await h.proc.start({ profileName: 'host', sources: [localSource('/ws')] });
-    const mutable = h.proc as unknown as { status: WithTimestamp<AgentProcessStatus> };
-    mutable.status = {
-      type: 'running',
-      timestamp: Date.now(),
-      data: { uiUrl: 'http://127.0.0.1:9000', wsUrl: 'ws://127.0.0.1:9000/ws' },
-    };
-
-    const runtime = await h.proc.configureConsumer('thread-2', 'workspace-2', {
-      profileName: 'host',
-      sources: [localSource('/repos/second', 'second')],
-      sessionId: 'conversation-thread-2',
-      snapshotRef: 'snapshot-thread-2',
-    });
-
-    expect(hoisted.snapshotPull).toHaveBeenCalledWith('snapshot-thread-2', path.join('/fake/config', 'snapshots'));
-    expect(hoisted.snapshotPush).not.toHaveBeenCalled();
-    await h.proc.stopConsumerEnvironment(runtime.environmentId);
-    expect(hoisted.snapshotPush).toHaveBeenCalledWith('snapshot-thread-2', path.join('/fake/config', 'snapshots'));
-  });
-
-  it('persists every active consumer snapshot when its AgentHost stops', async () => {
-    const h = makeHarness();
-    await h.proc.start({ profileName: 'host', sources: [localSource('/ws')] });
-    const mutable = h.proc as unknown as { status: WithTimestamp<AgentProcessStatus> };
-    mutable.status = {
-      type: 'running',
-      timestamp: Date.now(),
-      data: { uiUrl: 'http://127.0.0.1:9000', wsUrl: 'ws://127.0.0.1:9000/ws' },
-    };
-    await h.proc.configureConsumer('thread-1', 'workspace-1', {
-      profileName: 'host',
-      sources: [localSource('/ws')],
-      sessionId: 'conversation-thread-1',
-      snapshotRef: 'snapshot-thread-1',
-    });
-
-    const result = await h.proc.stop();
-
-    expect(result).toEqual({
-      scope: 'host',
-      shutdown: 'graceful',
-      snapshotPersistence: 'complete',
-      pendingSnapshotRefs: [],
-    });
-    expect(hoisted.snapshotVerify).toHaveBeenCalledWith('snapshot-thread-1', path.join('/fake/config', 'snapshots'));
-    expect(hoisted.snapshotPush).toHaveBeenCalledWith('snapshot-thread-1', path.join('/fake/config', 'snapshots'));
-  });
-
-  it('retains snapshot retry bookkeeping until a committed stop is durably uploaded', async () => {
-    const h = makeHarness({ snapshotRetryDelayMs: 1 });
-    await h.proc.start({ profileName: 'host', sources: [localSource('/ws')] });
-    const mutable = h.proc as unknown as { status: WithTimestamp<AgentProcessStatus> };
-    mutable.status = {
-      type: 'running',
-      timestamp: Date.now(),
-      data: { uiUrl: 'http://127.0.0.1:9000', wsUrl: 'ws://127.0.0.1:9000/ws' },
-    };
-    const runtime = await h.proc.configureConsumer('thread-retry', 'workspace-retry', {
-      profileName: 'host',
-      sources: [localSource('/ws')],
-      snapshotRef: 'snapshot-retry',
-    });
-    hoisted.snapshotPush.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
-
-    await expect(h.proc.stopConsumerEnvironment(runtime)).resolves.toEqual({
-      scope: 'environment',
-      shutdown: 'not-applicable',
-      snapshotPersistence: 'uncertain',
-      pendingSnapshotRefs: ['snapshot-retry'],
-    });
-    expect(hoisted.ledgerRecord).toHaveBeenCalledWith(
-      'snapshot-retry',
-      path.join('/fake/config', 'snapshots'),
-      'retryable'
-    );
-    await vi.waitFor(() => expect(hoisted.snapshotPush).toHaveBeenCalledTimes(2));
-    expect(hoisted.ledgerComplete).toHaveBeenCalledWith('snapshot-retry', path.join('/fake/config', 'snapshots'));
-    await expect(h.proc.stopConsumerEnvironment(runtime)).resolves.toEqual({
-      scope: 'environment',
-      shutdown: 'not-applicable',
-      snapshotPersistence: 'complete',
-      pendingSnapshotRefs: [],
-    });
-    expect(hoisted.snapshotPush).toHaveBeenCalledTimes(2);
-  });
-
-  it('reports uncertain persistence when a graceful pooled-host teardown leaves no valid snapshot', async () => {
-    const h = makeHarness();
-    await h.proc.start({ profileName: 'host', sources: [localSource('/ws')] });
-    const mutable = h.proc as unknown as { status: WithTimestamp<AgentProcessStatus> };
-    mutable.status = {
-      type: 'running',
-      timestamp: Date.now(),
-      data: { uiUrl: 'http://127.0.0.1:9000', wsUrl: 'ws://127.0.0.1:9000/ws' },
-    };
-    await h.proc.configureConsumer('thread-invalid', 'workspace-invalid', {
-      profileName: 'host',
-      sources: [localSource('/ws')],
-      snapshotRef: 'snapshot-invalid',
-    });
-    hoisted.snapshotVerify.mockResolvedValue(false);
-
-    await expect(h.proc.stop()).resolves.toEqual({
-      scope: 'host',
-      shutdown: 'graceful',
-      snapshotPersistence: 'uncertain',
-      pendingSnapshotRefs: ['snapshot-invalid'],
-    });
-    expect(hoisted.snapshotPush).not.toHaveBeenCalled();
-  });
-
-  it('reports forced shutdown and never uploads a possibly partial snapshot after SIGKILL', async () => {
+  it('reports forced shutdown after SIGKILL', async () => {
     const h = makeHarness({ processStopTimeoutMs: 1 });
     h.child.kill.mockImplementation((signal?: string) => {
       if (signal === 'SIGKILL') {
@@ -705,17 +560,8 @@ describe('AgentProcess (serve mode)', () => {
     await expect(h.proc.stop()).resolves.toEqual({
       scope: 'host',
       shutdown: 'forced',
-      snapshotPersistence: 'uncertain',
-      pendingSnapshotRefs: ['snapshot-forced'],
     });
     expect(h.child.kill.mock.calls.map(([signal]) => signal)).toEqual(['SIGTERM', 'SIGKILL']);
-    expect(hoisted.ledgerRecord).toHaveBeenCalledWith(
-      'snapshot-forced',
-      path.join('/fake/config', 'snapshots'),
-      'forced-uncertain'
-    );
-    expect(hoisted.snapshotVerify).not.toHaveBeenCalled();
-    expect(hoisted.snapshotPush).not.toHaveBeenCalled();
   });
 
   it('stops a newly materialized environment when thread binding fails', async () => {

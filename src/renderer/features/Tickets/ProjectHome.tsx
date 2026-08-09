@@ -165,7 +165,6 @@ export const ProjectHome = memo(({ projectId }: { projectId: ProjectId }) => {
   const handleAskOmni = useCallback(async () => {
     const tab = await codeApi.addTab();
     await codeApi.setTabProject(tab.id, projectId);
-    codeApi.setLayoutMode('focus');
     await persistedStoreApi.setKey('layoutMode', 'chat');
   }, [projectId]);
 

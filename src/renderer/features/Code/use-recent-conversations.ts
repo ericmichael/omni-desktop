@@ -78,6 +78,13 @@ export function useRecentConversations(tabs: CodeTab[]): {
       if (isResidentSessionId(s.id)) {
         continue;
       }
+      // Server-archived sessions are not recents: worker threads are
+      // archived at birth (readable via the Agents app, not conversation
+      // history), and user-archived threads live behind the Archived
+      // dialog.
+      if (s.archived) {
+        continue;
+      }
       if (s.message_count > 0) {
         bySession.set(s.id, {
           sessionId: s.id,

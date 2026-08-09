@@ -7,7 +7,7 @@
  * controlled). Mirrors the workspace switcher pattern: change the choice
  * before launching, no persistence beyond this session.
  *
- * Profiles are grouped into "Cloud" (host/devbox/aci/platform) and "My
+ * Profiles are grouped into "Cloud" (host/devbox/platform) and "My
  * computers" (one entry per registered Electron). Each local entry shows
  * an online/offline indicator pulled from `$machines`.
  */
@@ -35,8 +35,6 @@ const COMPACT_PROFILE_LABELS: Record<string, string> = {
   host: 'Host',
   devbox: 'Devbox',
   platform: 'Platform',
-  aci: 'Cloud',
-  'aci-desktop': 'Desktop',
 };
 
 const getCompactProfileLabel = (name: string): string =>

@@ -115,7 +115,7 @@ describe('code tab sandbox profile resolution', () => {
   it('falls back to a safe available profile when inherited choice is unavailable', async () => {
     resetStore({
       defaultProfileName: 'platform',
-      availableSandboxProfiles: ['aci'],
+      availableSandboxProfiles: ['remote'],
       projects: [project('project-1', 'devbox')],
       codeTabs: [tab()],
     });
@@ -123,13 +123,13 @@ describe('code tab sandbox profile resolution', () => {
 
     await codeApi.setTabProject('tab-1', 'project-1');
 
-    expect(store.codeTabs[0]).toMatchObject({ projectId: 'project-1', profileName: 'aci' });
+    expect(store.codeTabs[0]).toMatchObject({ projectId: 'project-1', profileName: 'remote' });
   });
 
   it('falls back to a safe available profile when one-off choice is unavailable', async () => {
     resetStore({
       defaultProfileName: 'host',
-      availableSandboxProfiles: ['aci'],
+      availableSandboxProfiles: ['remote'],
       projects: [project('project-1', 'devbox')],
       codeTabs: [tab({ profileName: 'platform', profileNameExplicit: true })],
     });
@@ -137,7 +137,11 @@ describe('code tab sandbox profile resolution', () => {
 
     await codeApi.setTabProject('tab-1', 'project-1');
 
-    expect(store.codeTabs[0]).toMatchObject({ projectId: 'project-1', profileName: 'aci', profileNameExplicit: true });
+    expect(store.codeTabs[0]).toMatchObject({
+      projectId: 'project-1',
+      profileName: 'remote',
+      profileNameExplicit: true,
+    });
   });
 
   it('sets created projects on the setup tab without replacing a one-off sandbox', async () => {

@@ -209,7 +209,10 @@ function Sidebar({
       <div
         data-slot="sidebar-container"
         className={cn(
-          'fixed inset-y-0 z-10 flex h-svh w-(--sidebar-width) transition-[left,right,width] duration-200 ease-linear',
+          // Height must share the shell's basis (tailwind.css .app-shell):
+          // h-svh painted short of the real viewport on iPad whenever
+          // svh < dvh, leaving a wrong-colored band under the sidebar.
+          'fixed inset-y-0 z-10 flex h-[var(--app-height,100dvh)] w-(--sidebar-width) transition-[left,right,width] duration-200 ease-linear',
           side === 'left'
             ? 'left-0 group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)]'
             : 'right-0 group-data-[collapsible=offcanvas]:right-[calc(var(--sidebar-width)*-1)]',
@@ -224,7 +227,7 @@ function Sidebar({
         <div
           data-sidebar="sidebar"
           data-slot="sidebar-inner"
-          className="flex h-full w-full flex-col bg-sidebar group-data-[variant=floating]:rounded-lg group-data-[variant=floating]:border group-data-[variant=floating]:border-sidebar-border group-data-[variant=floating]:shadow-sm"
+          className="flex h-full w-full flex-col bg-sidebar pb-[var(--safe-area-bottom,env(safe-area-inset-bottom,0px))] group-data-[variant=floating]:rounded-lg group-data-[variant=floating]:border group-data-[variant=floating]:border-sidebar-border group-data-[variant=floating]:shadow-sm"
         >
           {children}
         </div>
@@ -651,6 +654,7 @@ function SidebarMenuSubButton({
 
 export {
   Sidebar,
+  SIDEBAR_WIDTH,
   SidebarContent,
   SidebarFooter,
   SidebarGroup,

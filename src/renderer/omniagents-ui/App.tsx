@@ -29,6 +29,7 @@ import {
 import { persistedStoreApi } from '@/renderer/services/store';
 import { forwardEvent, registerColumnActor } from '@/renderer/services/supervisor-bridge';
 import { VoiceScopeContext } from '@/renderer/services/voice-recording';
+import type { RunDiffItem } from '@/shared/chat-types';
 import type { ExecutionTarget, TicketId } from '@/shared/types';
 
 import {
@@ -39,7 +40,6 @@ import {
   mergeWorkersSnapshot,
   normalizeSubagentSnapshot,
   publishBashJobs,
-  publishSubagentEvent,
   publishSubagentsSnapshot,
   registerActivityActions,
   type WorkersKillResult,
@@ -69,6 +69,7 @@ import { useConversationManagement } from './hooks/use-conversation-management';
 import { loadCanonicalSessionList } from './rpc/canonical-session-list';
 import type { ElicitationRequest, ElicitationResponse } from './rpc/elicitation';
 import { useRPCClient, useRPCConnected } from './rpc-context';
+import { publishRunDiff } from './run-diff-store';
 import { useUiConfig } from './ui-config';
 
 type UIState = 'connecting' | 'resume' | 'chat' | 'error';
@@ -106,6 +107,7 @@ export function App({
   routineId,
   workspaceDir,
   onOpenApp,
+  readOnly,
 }: {
   sessionId?: string;
   /** Explicit execution identity. Never inferred from the conversation id. */
@@ -142,6 +144,10 @@ export function App({
    *  deck column, e.g. Residents — pills that would deep-link fall back to
    *  a popover. */
   onOpenApp?: (appId: string) => void;
+  /** Transcript-viewer mode: no composer or pill row — used when this app
+   *  is embedded to READ another session (e.g. a subagent's transcript in
+   *  the Agents sidecar detail page). */
+  readOnly?: boolean;
 }) {
   const environmentId = executionTarget?.environmentId;
   const uiConfig = useUiConfig();
@@ -303,7 +309,9 @@ export function App({
     chatSession: machine,
     sessionId: initialBootSessionId,
     executionTarget,
-    wsRealtimeUrl: uiConfig.wsRealtimeUrl,
+    // A read-only transcript viewer needs no voice channel — and every
+    // avoided socket matters when several viewers share the sandbox origin.
+    wsRealtimeUrl: readOnly ? undefined : uiConfig.wsRealtimeUrl,
     token: uiConfig.token,
   });
 
@@ -321,7 +329,7 @@ export function App({
     setThreadPinned,
     archiveThread,
     restoreThread,
-  } = useConversationManagement(client, connected);
+  } = useConversationManagement(client, connected && !readOnly);
 
   const [elicitations, setElicitations] = useState<ElicitationRequest[]>([]);
   useEffect(() => {
@@ -546,21 +554,10 @@ export function App({
         return;
       }
       if (fn === 'ui.subagent.event') {
-        // One narrative event from a subagent's run (tool_called /
-        // tool_result / message_output / run_*). Feeds the Agents
-        // surface's live activity view via the shared store.
+        // Relay beats are no longer consumed — the Agents detail mounts the
+        // subagent session's real transcript instead. Ack so the server
+        // doesn't retry the broadcast.
         const request_id = String(p?.request_id ?? '');
-        const eventSessionId = typeof p?.session_id === 'string' ? p.session_id : undefined;
-        const currentSessionId = actor.getSnapshot().context.sessionId;
-        const args = (p?.args || {}) as Record<string, unknown>;
-        const sid = eventSessionId ?? currentSessionId;
-        const subagentId = typeof args.subagent_id === 'string' ? args.subagent_id : '';
-        if (sid && subagentId && (!eventSessionId || !currentSessionId || eventSessionId === currentSessionId)) {
-          publishSubagentEvent(sid, subagentId, {
-            method: String(args.method ?? ''),
-            params: (args.params ?? {}) as Record<string, unknown>,
-          });
-        }
         if (request_id) {
           client.clientResponse(request_id, true, { ack: true }).catch(() => {});
         }
@@ -924,7 +921,7 @@ export function App({
   // React tree; they stop/tail through the per-session action registry
   // instead of props.
   useEffect(() => {
-    if (!sessionId) {
+    if (!sessionId || readOnly) {
       return;
     }
     registerActivityActions(sessionId, {
@@ -933,7 +930,31 @@ export function App({
       tailJob: handleBashTail,
     });
     return () => registerActivityActions(sessionId, null);
-  }, [sessionId, handleWorkerKill, handleBashKill, handleBashTail]);
+  }, [sessionId, readOnly, handleWorkerKill, handleBashKill, handleBashTail]);
+
+  // Keep the Review sidecar's "This turn" scope current: the newest
+  // run_diff transcript item is the session's turn record.
+  useEffect(() => {
+    if (!sessionId) {
+      return;
+    }
+    const last = items.findLast((item) => item.type === 'run_diff');
+    if (last) {
+      publishRunDiff(sessionId, last as RunDiffItem);
+    }
+  }, [items, sessionId]);
+
+  // Review on a specific card pins that run's record (an older card
+  // reviews its own turn, not the latest) before opening the app.
+  const handleOpenReview = useCallback(
+    (item: RunDiffItem) => {
+      if (sessionId) {
+        publishRunDiff(sessionId, item);
+      }
+      onOpenApp?.('review');
+    },
+    [sessionId, onOpenApp]
+  );
 
   // Once per session with a running job, poke ``bash_jobs.list`` so the
   // server-side sweeper captures a service handle and starts pushing
@@ -941,7 +962,7 @@ export function App({
   // BashJobs panel fired this on mount.)
   const bashWarmupSessionRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!sessionId || bashWarmupSessionRef.current === sessionId) {
+    if (!sessionId || readOnly || bashWarmupSessionRef.current === sessionId) {
       return;
     }
     if (!allBashJobs.some((j) => j.running)) {
@@ -951,7 +972,7 @@ export function App({
     handleBashWarmup().catch(() => {
       bashWarmupSessionRef.current = null;
     });
-  }, [sessionId, allBashJobs, handleBashWarmup]);
+  }, [sessionId, readOnly, allBashJobs, handleBashWarmup]);
 
   const handleBashDismiss = useCallback((job_id: string) => {
     setDismissedJobIds((prev) => {
@@ -2106,6 +2127,7 @@ export function App({
                         void handleSubmit(text);
                       }}
                       onStageContext={stageContext}
+                      onOpenReview={onOpenApp ? handleOpenReview : undefined}
                     />
                   </ArtifactPortalProvider>
                   <AnimatePresence>
@@ -2184,55 +2206,60 @@ export function App({
                     ))}
                   </div>
                 )}
-                <PillStrip
-                  sessionId={sessionId}
-                  subagents={visibleSubagents}
-                  tasks={tasks}
-                  jobs={bashJobs}
-                  onOpenAgents={onOpenApp ? () => onOpenApp('agents') : undefined}
-                  onWorkerKill={handleWorkerKill}
-                  onWorkerDismiss={handleWorkerDismiss}
-                  onJobKill={handleBashKill}
-                  onJobDismiss={handleBashDismiss}
-                >
-                  {sessionId && connected && bootState.ready ? (
-                    <ModelSessionControls
+                {!readOnly && (
+                  <>
+                    <PillStrip
                       sessionId={sessionId}
-                      transport={client}
-                      disabled={runActive}
-                      approvalsSupported={client.supportsExperimentalFeature('approvalReviewer')}
-                      onSetApprovalsReviewer={(reviewer) => client.setSessionApprovals(sessionId!, reviewer)}
+                      subagents={visibleSubagents}
+                      tasks={tasks}
+                      jobs={bashJobs}
+                      onOpenAgents={onOpenApp ? () => onOpenApp('agents') : undefined}
+                      onOpenJobs={onOpenApp ? () => onOpenApp('jobs') : undefined}
+                      onWorkerKill={handleWorkerKill}
+                      onWorkerDismiss={handleWorkerDismiss}
+                      onJobKill={handleBashKill}
+                      onJobDismiss={handleBashDismiss}
+                    >
+                      {sessionId && connected && bootState.ready ? (
+                        <ModelSessionControls
+                          sessionId={sessionId}
+                          transport={client}
+                          disabled={runActive}
+                          approvalsSupported={client.supportsExperimentalFeature('approvalReviewer')}
+                          onSetApprovalsReviewer={(reviewer) => client.setSessionApprovals(sessionId!, reviewer)}
+                        />
+                      ) : null}
+                    </PillStrip>
+                    <Input
+                      disabled={!connected || !bootState.ready}
+                      thinking={thinking}
+                      onStop={handleStop}
+                      onSubmit={(text, files) => {
+                        void handleSubmit(text, files);
+                      }}
+                      onVoiceSubmit={handleVoiceSubmit}
+                      voiceEnabled={voiceEnabled}
+                      speakRepliesEnabled={!!voiceVariables && speakRepliesEnabled}
+                      onSpeakRepliesChange={setSpeakRepliesEnabled}
+                      workspacePath={workspaceSupported ? workspacePath : undefined}
+                      sandboxLabel={sandboxLabel}
+                      sandboxOptions={sandboxOptions}
+                      currentSandboxProfile={currentSandboxProfile}
+                      onSandboxChange={handleSandboxChange}
+                      composerExtras={composerExtras}
+                      sandboxLoading={!connected}
+                      sessionId={sessionId}
+                      onVoiceSessionCreated={(id: string) => setSessionId(id)}
+                      onVoiceClose={() => {
+                        const sid = actor.getSnapshot().context.sessionId;
+                        if (sid) {
+                          handleSelectSession(sid);
+                        }
+                        refreshSessions();
+                      }}
                     />
-                  ) : null}
-                </PillStrip>
-                <Input
-                  disabled={!connected || !bootState.ready}
-                  thinking={thinking}
-                  onStop={handleStop}
-                  onSubmit={(text, files) => {
-                    void handleSubmit(text, files);
-                  }}
-                  onVoiceSubmit={handleVoiceSubmit}
-                  voiceEnabled={voiceEnabled}
-                  speakRepliesEnabled={!!voiceVariables && speakRepliesEnabled}
-                  onSpeakRepliesChange={setSpeakRepliesEnabled}
-                  workspacePath={workspaceSupported ? workspacePath : undefined}
-                  sandboxLabel={sandboxLabel}
-                  sandboxOptions={sandboxOptions}
-                  currentSandboxProfile={currentSandboxProfile}
-                  onSandboxChange={handleSandboxChange}
-                  composerExtras={composerExtras}
-                  sandboxLoading={!connected}
-                  sessionId={sessionId}
-                  onVoiceSessionCreated={(id: string) => setSessionId(id)}
-                  onVoiceClose={() => {
-                    const sid = actor.getSnapshot().context.sessionId;
-                    if (sid) {
-                      handleSelectSession(sid);
-                    }
-                    refreshSessions();
-                  }}
-                />
+                  </>
+                )}
               </div>
             </ResizablePanel>
             {isLargeScreen && artifactsPanelOpen && hasArtifacts && (

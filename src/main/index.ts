@@ -65,6 +65,7 @@ import {
   defaultSandboxInventoryDeps,
   processOwnersFromState,
   registerSandboxInventoryHandlers,
+  suspendedSessionOwners,
 } from '@/main/sandbox-inventory';
 import { registerScheduledTaskHandlers, ScheduledTaskManager } from '@/main/scheduled-task-manager';
 import { LocalSecretStore } from '@/main/secret-store';
@@ -74,7 +75,6 @@ import {
   protectedSnapshotsFromTabs,
   registerSnapshotHandlers,
 } from '@/main/snapshot-manager';
-import { reconcilePendingSnapshotUploads } from '@/main/snapshot-upload-ledger';
 import { getStore } from '@/main/store';
 import { wireTunnelReverseHandlers } from '@/main/tunnel-handler';
 import {
@@ -440,37 +440,32 @@ registerProfileCatalogHandlers(main.ipc, {
 });
 registerSandboxInventoryHandlers(main.ipc, {
   ...defaultSandboxInventoryDeps(),
-  getProcessOwners: () =>
-    processOwnersFromState(
+  getProcessOwners: () => [
+    ...processOwnersFromState(
       processManager.getContainerOwners(),
       store.get('codeTabs') ?? [],
       residentAgentManager.getDurableSnapshot().residentAgents
     ),
+    ...suspendedSessionOwners(store.get('codeTabs') ?? []),
+  ],
 });
 
-// Startup snapshot upload recovery + GC. Code tabs cascade-delete on remove; this sweep
-// catches stale conversation snapshots older than 14 days (and any tar
+// Startup environment GC. Code tabs cascade-delete on remove; this sweep
+// catches stale conversation workspaces older than 14 days (and anything
 // orphaned by a crashed cascade). Protected set = every code tab's
-// snapshotRef. Best-effort; failures
-// don't block boot.
+// snapshotRef plus every resident's durable workspace (residents park for
+// arbitrarily long stretches; their delete path retires the workspace
+// explicitly). Best-effort; failures don't block boot.
 void (async () => {
-  try {
-    const recovery = await reconcilePendingSnapshotUploads(join(OMNI_CONFIG_DIR, 'snapshots'), { force: true });
-    if (recovery.persisted.length > 0) {
-      console.log(`[snapshot-upload] recovered ${recovery.persisted.length} pending snapshot upload(s)`);
-    }
-    if (recovery.forcedUncertain.length > 0) {
-      console.warn(`[snapshot-upload] ${recovery.forcedUncertain.length} forced-shutdown snapshot(s) remain uncertain`);
-    }
-  } catch (err) {
-    console.error('[snapshot-upload] startup reconciliation failed:', err);
-  }
   try {
     const keep = new Set<string>();
     for (const tab of store.get('codeTabs') ?? []) {
       if (tab.snapshotRef) {
         keep.add(tab.snapshotRef);
       }
+    }
+    for (const resident of residentAgentManager.getDurableSnapshot().residentAgents) {
+      keep.add(`resident-${resident.id}`);
     }
     const deleted = await gcStaleSnapshots({ keep, ttlMs: DEFAULT_CHAT_SNAPSHOT_TTL_MS });
     if (deleted.length > 0) {
@@ -835,11 +830,13 @@ app.on('ready', () => {
 
   void (async () => {
     const { cleanupOrphanedContainers, pruneDockerResources } = await import('@/main/docker-orphan-cleanup');
+    const { sandboxStateContainerIds } = await import('@/main/sandbox-state');
     const cleaned = await cleanupOrphanedContainers({
       // Environments already materialized by this launcher may overlap the
       // startup sweep, so resolve the live protected set immediately before
-      // each removal pass.
-      getProtectedContainerIds: () => processManager.getAllContainerIds(),
+      // each removal pass. Durable container sessions (state records) are
+      // NOT orphans — they're reattached on the session's next open.
+      getProtectedContainerIds: () => [...processManager.getAllContainerIds(), ...sandboxStateContainerIds()],
     });
     if (cleaned && cleaned.length > 0) {
       main.sendToWindow('toast:show', {

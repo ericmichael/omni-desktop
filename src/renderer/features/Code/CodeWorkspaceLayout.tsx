@@ -1,10 +1,9 @@
 import { useStore } from '@nanostores/react';
 import { memo, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
 
 import { dispatchOpenFileIntent, WorkspaceFilesPortal } from '@/renderer/features/Files';
 import { WorkspaceGitPortal } from '@/renderer/features/Git';
-import { usePortalTarget } from '@/renderer/hooks/use-portal-target';
+import { WorkspaceReviewPortal } from '@/renderer/features/Review';
 import { OmniAgentsApp } from '@/renderer/omniagents-ui';
 import type { ClientToolCallHandler } from '@/renderer/omniagents-ui/App';
 import type { PendingMessage } from '@/renderer/omniagents-ui/ChatShell';
@@ -43,7 +42,6 @@ type CodeWorkspaceLayoutProps = {
   onClientToolCall?: ClientToolCallHandler;
   pendingPlan?: import('@/shared/chat-types').PlanItem | null;
   onPlanDecision?: (approved: boolean) => void;
-  dockTargetId?: string;
   /** Chat mode: time-of-day greeting shown on the empty conversation. */
   greeting?: string;
   /** One-tap example tasks shown on the empty conversation. */
@@ -75,6 +73,8 @@ type CodeWorkspaceLayoutProps = {
   filesHost: HTMLDivElement;
   /** Stable portal host for the Git surface owned by this session column. */
   gitHost: HTMLDivElement;
+  /** Stable portal host for the Review surface owned by this session column. */
+  reviewHost: HTMLDivElement;
   /** Execution environment whose workspace the Files and Git RPC surfaces address. */
   executionTarget?: ExecutionTarget;
   /** Ticket bound to this column — enables the supervisor bridge actor. */
@@ -105,7 +105,6 @@ export const CodeWorkspaceLayout = memo(
     onClientToolCall,
     pendingPlan,
     onPlanDecision,
-    dockTargetId,
     greeting,
     suggestions,
     pendingMessages,
@@ -114,6 +113,7 @@ export const CodeWorkspaceLayout = memo(
     agentWorkspaceDir,
     filesHost,
     gitHost,
+    reviewHost,
     executionTarget,
     ticketId,
     routineId,
@@ -162,15 +162,18 @@ export const CodeWorkspaceLayout = memo(
 
     const sandboxUrls = useMemo(() => ({ codeServerUrl: codeServerSrc, noVncUrl: vncSrc }), [codeServerSrc, vncSrc]);
 
-    const dockTarget = usePortalTarget(dockTargetId);
     const [filesActivated, setFilesActivated] = useState(activeApp === 'files');
     const [gitActivated, setGitActivated] = useState(activeApp === 'git');
+    const [reviewActivated, setReviewActivated] = useState(activeApp === 'review');
     useEffect(() => {
       if (activeApp === 'files') {
         setFilesActivated(true);
       }
       if (activeApp === 'git') {
         setGitActivated(true);
+      }
+      if (activeApp === 'review') {
+        setReviewActivated(true);
       }
     }, [activeApp]);
     const handleGitOpenFile = useCallback(
@@ -247,7 +250,7 @@ export const CodeWorkspaceLayout = memo(
               workspaceDir={agentWorkspaceDir}
               onOpenApp={tabId ? handleOpenApp : undefined}
               providerChildren={
-                executionTarget && (filesActivated || gitActivated) ? (
+                executionTarget && (filesActivated || gitActivated || reviewActivated) ? (
                   <>
                     {filesActivated && (
                       <WorkspaceFilesPortal
@@ -268,26 +271,28 @@ export const CodeWorkspaceLayout = memo(
                         onOpenFile={handleGitOpenFile}
                       />
                     )}
+                    {reviewActivated && (
+                      <WorkspaceReviewPortal
+                        host={reviewHost}
+                        active={activeApp === 'review'}
+                        executionTarget={executionTarget}
+                        sessionId={sessionId}
+                        workspaceRoot={agentWorkspaceDir}
+                        onOpenFile={handleGitOpenFile}
+                      />
+                    )}
                   </>
                 ) : undefined
               }
             />
           </div>
         </div>
-        {(() => {
-          const dock = (
-            <EnvironmentDock
-              apps={dockApps}
-              activeAppId={activeApp}
-              onSelect={handleDockSelect}
-              sandboxUrls={sandboxUrls}
-            />
-          );
-          if (dockTargetId && dockTarget) {
-            return createPortal(dock, dockTarget);
-          }
-          return dock;
-        })()}
+        <EnvironmentDock
+          apps={dockApps}
+          activeAppId={activeApp}
+          onSelect={handleDockSelect}
+          sandboxUrls={sandboxUrls}
+        />
       </div>
     );
   }

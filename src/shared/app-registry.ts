@@ -7,7 +7,9 @@ export type AppKind =
   | 'builtin-browser'
   | 'builtin-files'
   | 'builtin-git'
+  | 'builtin-review'
   | 'builtin-agents'
+  | 'builtin-jobs'
   | 'builtin-terminal'
   | 'webview';
 
@@ -111,6 +113,19 @@ export const BUILTIN_APPS: AppDescriptor[] = [
     columnScoped: true,
   },
   {
+    id: 'review',
+    label: 'Review',
+    icon: 'FileDiff',
+    kind: 'builtin-review',
+    // Read-only change review (turn record + working tree). Rides the
+    // session's RPC connection like Git — same `scope: 'always'` +
+    // empty-state approach.
+    scope: 'always',
+    builtin: true,
+    order: 38,
+    columnScoped: true,
+  },
+  {
     id: 'agents',
     label: 'Agents',
     icon: 'Bot',
@@ -121,6 +136,18 @@ export const BUILTIN_APPS: AppDescriptor[] = [
     scope: 'always',
     builtin: true,
     order: 39,
+    columnScoped: true,
+  },
+  {
+    id: 'jobs',
+    label: 'Jobs',
+    icon: 'Activity',
+    kind: 'builtin-jobs',
+    // Background bash jobs. Same RPC-riding, empty-state-until-sandbox
+    // approach as Agents above.
+    scope: 'always',
+    builtin: true,
+    order: 40,
     columnScoped: true,
   },
   {
@@ -135,7 +162,7 @@ export const BUILTIN_APPS: AppDescriptor[] = [
     // visible communicates that the feature exists).
     scope: 'always',
     builtin: true,
-    order: 40,
+    order: 41,
     columnScoped: true,
   },
 ];

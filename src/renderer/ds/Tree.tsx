@@ -129,8 +129,14 @@ export const TreeItemLayout = ({
       onClick={handleClick}
       {...props}
     >
-      {item.branch && (
+      {item.branch ? (
         <ChevronRightIcon className={cn('size-3.5 shrink-0 transition-transform', item.open && 'rotate-90')} />
+      ) : (
+        // Leaves reserve the chevron's slot so their content aligns with
+        // sibling branches' icons — without this, a nesting level's ml-4
+        // is narrower than chevron+gap and children appear to out-dent
+        // their parents.
+        <span className="size-3.5 shrink-0" aria-hidden />
       )}
       {iconBefore}
       <span data-slot="tree-item-main" className="min-w-0 flex-1 truncate">

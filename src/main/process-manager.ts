@@ -154,10 +154,9 @@ export class ProcessManager {
    *  private-remote auth (tokens never reach this class except through here). */
   private resolveGitToken?: (credentialId: string) => Promise<string | undefined>;
   /**
-   * When set, every launch uses this profile regardless of the per-project
-   * override or user default. Cloud deployments set it to the ACI profiles so
-   * host/devbox can't be selected — but the user can still choose among the
-   * allowed cloud profiles (e.g. `aci` fast vs `aci-desktop`).
+   * When set, every launch is restricted to these profiles regardless of the
+   * per-project override or user default — a deployment-level allowlist the
+   * user picks within.
    */
   private allowedProfileNames?: string[];
 
@@ -1208,8 +1207,6 @@ export class ProcessManager {
   private emptyStopResult = (): AgentProcessStopResult => ({
     scope: 'none',
     shutdown: 'not-applicable',
-    snapshotPersistence: 'complete',
-    pendingSnapshotRefs: [],
   });
 
   private stopConsumer = async (processId: string, opts?: AgentProcessStopOptions): Promise<AgentProcessStopResult> => {
@@ -1501,10 +1498,6 @@ export class ProcessManager {
     }
   };
 
-  notifyActivity = (processId: string): void => {
-    this.processes.get(processId)?.notifyActivity(this.consumerRuntimes.get(processId));
-  };
-
   /**
    * Look up a running process's WebSocket URL for a code tab linked to the given ticketId.
    * Used by ProjectManager to reuse an existing sandbox instead of creating a duplicate.
@@ -1704,7 +1697,6 @@ export function registerProcessHandlers(ipc: IIpcListener, resolve: (event: unkn
   h('management-runtime:mutate', (pm, request) => pm.mutateManagement(request));
   h('agent-process:pause', (pm, processId) => pm.pause(processId));
   h('agent-process:unpause', (pm, processId) => pm.unpause(processId));
-  h('agent-process:notify-activity', (pm, processId) => pm.notifyActivity(processId));
   h('agent-process:switch-sandbox', (pm, processId, profileName) => pm.switchSandbox(processId, profileName));
 
   return channels;

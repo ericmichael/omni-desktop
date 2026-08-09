@@ -16,6 +16,7 @@ import {
   type DockerExecFn,
   OMNI_CONTAINER_LABEL,
 } from '@/main/docker-orphan-cleanup';
+import { listSandboxStates } from '@/main/sandbox-state';
 import type { IIpcListener } from '@/shared/ipc-listener';
 import type {
   CodeTab,
@@ -71,6 +72,21 @@ export const processOwnersFromState = (
     const resident = residentId ? residents.find((r) => r.id === residentId) : undefined;
     return { containerId, label: resident?.name ?? processId };
   });
+
+/**
+ * Ownership claims from persisted container-session records
+ * (`<config>/sandbox-state/*.json`): durable sessions the user can reopen
+ * whose serve process isn't running right now. These containers are NOT
+ * orphans — the sweep must skip them and Remove must refuse. Labeled with
+ * the owning tab's title when a codeTab still references the snapshotRef.
+ */
+export const suspendedSessionOwners = (codeTabs: CodeTab[]): ContainerOwner[] =>
+  listSandboxStates()
+    .filter((record): record is { snapshotRef: string; containerId: string } => !!record.containerId)
+    .map((record) => {
+      const tab = codeTabs.find((t) => t.snapshotRef === record.snapshotRef);
+      return { containerId: record.containerId, label: tab ? codeTabLabel(tab) : record.snapshotRef };
+    });
 
 // ---------------------------------------------------------------------------
 // Inventory
@@ -134,13 +150,14 @@ export const listContainers = async (deps: SandboxInventoryDeps): Promise<Sandbo
 
 /**
  * Force-remove a container. Throws (with the owner label) when the id is
- * still claimed by a live consumer environment — the UI surfaces the reason
- * instead of a disabled mystery button.
+ * still claimed — by a live consumer environment or by a suspended session's
+ * state record — the UI surfaces the reason instead of a disabled mystery
+ * button. Close/archive the owning session to release the claim.
  */
 export const removeContainer = async (deps: SandboxInventoryDeps, id: string): Promise<void> => {
   const { ownerKind, ownerLabel } = findOwner(id, deps);
   if (ownerKind !== 'orphan') {
-    throw new Error(`Container is in use by a running session: ${ownerLabel ?? id}`);
+    throw new Error(`Container belongs to a session: ${ownerLabel ?? id}`);
   }
   const opts = { ...EXEC_OPTS_BASE, timeout: 15_000, env: deps.getEnv() };
   await deps.execFileFn('docker', ['rm', '-f', id], opts);

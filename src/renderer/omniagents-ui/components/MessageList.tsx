@@ -111,6 +111,7 @@ export function MessageList({
   toolStatusText,
   onSubmitMessage,
   onStageContext,
+  onOpenReview,
 }: {
   items: MessageItem[];
   greeting?: string;
@@ -129,6 +130,8 @@ export function MessageList({
   toolStatusText?: string;
   onSubmitMessage?: (text: string) => void | Promise<void>;
   onStageContext?: (source: string, text: string) => void;
+  /** Opens the Review sidecar app on this card's run diff. */
+  onOpenReview?: (item: RunDiffItem) => void;
 }) {
   const [fallbackGreeting] = useState(getGreeting);
   const greeting = greetingProp ?? fallbackGreeting;
@@ -309,7 +312,13 @@ export function MessageList({
               return <PlanCard key={(m as PlanItem).id} item={m as PlanItem} />;
             }
             if (m.type === 'run_diff') {
-              return <RunDiffCard key={(m as RunDiffItem).canonical.item_id} item={m as RunDiffItem} />;
+              return (
+                <RunDiffCard
+                  key={(m as RunDiffItem).canonical.item_id}
+                  item={m as RunDiffItem}
+                  onReview={onOpenReview}
+                />
+              );
             }
             if (m.type === 'structured') {
               return (

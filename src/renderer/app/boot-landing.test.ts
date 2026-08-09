@@ -33,16 +33,13 @@ describe('boot landing', () => {
     mocks.store.layoutMode = 'work';
   });
 
-  it('opens a fresh chat in Focus regardless of the persisted deck view', async () => {
+  it('opens a fresh chat and preserves the chosen layout mode', async () => {
     const { initBootLanding } = await import('./boot-landing');
 
     initBootLanding();
 
     expect(mocks.setKey).toHaveBeenCalledWith('layoutMode', 'chat');
-    expect(mocks.setLayoutMode).toHaveBeenCalledWith('focus');
     expect(mocks.openFreshChat).toHaveBeenCalledOnce();
-    expect(mocks.setLayoutMode.mock.invocationCallOrder[0]!).toBeLessThan(
-      mocks.openFreshChat.mock.invocationCallOrder[0]!
-    );
+    expect(mocks.setLayoutMode).not.toHaveBeenCalled();
   });
 });

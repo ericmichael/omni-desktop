@@ -119,7 +119,7 @@ describe('removeContainer', () => {
     const { deps, calls } = makeDeps();
     deps.getProcessOwners = () => [{ containerId: FULL_ID, label: 'Fix the login bug' }];
     await expect(removeContainer(deps, '0af06484b591')).rejects.toThrow(
-      'Container is in use by a running session: Fix the login bug'
+      'Container belongs to a session: Fix the login bug'
     );
     expect(calls).toHaveLength(0);
   });

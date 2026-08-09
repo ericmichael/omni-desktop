@@ -573,9 +573,9 @@ describe('SupervisorOrchestrator integration', () => {
         source: { kind: 'local', workspaceDir: '/tmp/fake' },
         tickets: [{ id: 't1' }],
       });
-      await orch(ctx.pm).ensureColumn('t1' as TicketId, 'aci-desktop');
+      await orch(ctx.pm).ensureColumn('t1' as TicketId, 'devbox');
       expect(ctx.bridge.ensureColumn).toHaveBeenCalledWith(
-        expect.objectContaining({ ticketId: 't1', profileName: 'aci-desktop' })
+        expect.objectContaining({ ticketId: 't1', profileName: 'devbox' })
       );
     });
   });

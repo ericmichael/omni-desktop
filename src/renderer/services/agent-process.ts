@@ -23,41 +23,15 @@ export const $agentXTerms = map<Record<string, Terminal>>({});
 
 const xtermSubscriptions = new Map<string, Set<() => void>>();
 
-const SAFE_SNAPSHOT_IDENTIFIER = /^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,63})$/;
-
-const snapshotSummary = (refs: string[]): string => {
-  const unique = [...new Set(refs)];
-  const safe = unique.filter((ref) => SAFE_SNAPSHOT_IDENTIFIER.test(ref) && !ref.includes('..')).slice(0, 3);
-  const noun = unique.length === 1 ? 'workspace snapshot' : 'workspace snapshots';
-  if (safe.length === 0) {
-    return `${unique.length} ${noun}`;
-  }
-  const omitted = unique.length - safe.length;
-  return `${unique.length} ${noun} (${safe.join(', ')}${omitted > 0 ? `, +${omitted} more` : ''})`;
-};
-
 export const warnForUncertainStop = (result: AgentProcessStopResult | null | undefined): void => {
-  if (!result || (result.shutdown !== 'forced' && result.snapshotPersistence !== 'uncertain')) {
+  if (!result || result.shutdown !== 'forced') {
     return;
   }
-  const pending = result.pendingSnapshotRefs.length > 0 ? snapshotSummary(result.pendingSnapshotRefs) : null;
-  if (result.shutdown === 'forced') {
-    toast.warning(
-      'Sandbox force-closed',
-      pending
-        ? `The agent host could not finish a graceful shutdown. ${pending} may not have been saved.`
-        : 'The agent host could not finish a graceful shutdown. No pending workspace snapshots were reported.',
-      { durationMs: 12_000 }
-    );
-    return;
-  }
-  toast.warning(
-    'Workspace snapshot may not be saved',
-    pending
-      ? `${pending} could not be verified or persisted. Omni Desktop will keep retrying while it remains open.`
-      : 'Snapshot persistence could not be verified. Omni Desktop will keep retrying while it remains open.',
-    { durationMs: 12_000 }
-  );
+  // Workspaces live in the container's writable layer and survive a forced
+  // host kill — the warning is about the host process, not data loss.
+  toast.warning('Sandbox host force-closed', 'The agent host could not finish a graceful shutdown.', {
+    durationMs: 12_000,
+  });
 };
 
 export const initializeTerminal = (processId: string): Terminal => {
@@ -135,10 +109,6 @@ export const agentProcessApi = {
 
   switchSandbox: (processId: string, profileName: string): Promise<SandboxSwitchResult> => {
     return emitter.invoke('agent-process:switch-sandbox', processId, profileName);
-  },
-
-  notifyActivity: (processId: string): void => {
-    void emitter.invoke('agent-process:notify-activity', processId);
   },
 
   getStatus: (processId: string): WithTimestamp<AgentProcessStatus> => {

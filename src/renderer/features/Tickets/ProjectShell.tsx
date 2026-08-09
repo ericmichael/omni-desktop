@@ -47,7 +47,6 @@ export const ProjectShell = memo(({ projectId, activeTab, children }: ProjectShe
   const handleAskOmni = useCallback(async () => {
     const tab = await codeApi.addTab();
     await codeApi.setTabProject(tab.id, projectId);
-    codeApi.setLayoutMode('focus');
     await persistedStoreApi.setKey('layoutMode', 'chat');
   }, [projectId]);
 

@@ -12,11 +12,7 @@ import { atom, map } from 'nanostores';
  * it back, so they cannot disagree. Keyed by sessionId because deck columns
  * and sidecar bodies identify a conversation by session, not by React
  * ancestry.
- *
- * Snapshots (``$activityBySession``) and the per-subagent event feeds
- * (``$activityEventsBySession``) are separate maps on purpose: events
- * arrive per tool call, and only the Agents surface renders them —
- * splitting the maps keeps that firehose from re-rendering the chat column.
+
  */
 
 /** Mirror of the server's unified subagent snapshot entry
@@ -40,12 +36,6 @@ export type SubagentSummary = {
   started_at: number | null;
   finished_at: number | null;
   wall_time_ms: number | null;
-};
-
-/** One relayed subagent transcript event (``ui.subagent.event`` args.params). */
-export type SubagentEvent = {
-  method: string;
-  params: Record<string, unknown>;
 };
 
 /** Mirror of a ``bash_jobs.*`` snapshot entry (omni-code background bash). */
@@ -93,14 +83,7 @@ export type SessionActivity = {
 
 const EMPTY: SessionActivity = { subagents: [], jobs: [] };
 
-// Matches the ink TUI's per-subagent buffer cap: enough for a long run's
-// narrative, bounded against a chatty worker.
-const EVENT_CAP = 200;
-
 export const $activityBySession = map<Record<string, SessionActivity>>({});
-
-/** Ring-capped activity feed per subagent_id, keyed by session. */
-export const $activityEventsBySession = map<Record<string, Record<string, SubagentEvent[]>>>({});
 
 /** Legacy ``ui.workers.update`` entries (pinned older servers) carry no
  *  ``subagent_id``/``kind``; the unified bus always sets both. */
@@ -122,20 +105,6 @@ export function normalizeSubagentSnapshot(snapshot: unknown[]): SubagentSummary[
 export function publishSubagentsSnapshot(sessionId: string, subagents: SubagentSummary[]): void {
   const prev = $activityBySession.get()[sessionId] ?? EMPTY;
   $activityBySession.setKey(sessionId, { ...prev, subagents });
-  // Drop feed buffers for subagents that left the snapshot (workers persist
-  // until session end server-side, so this is the ended-agent-tool tail
-  // aging out — their transcript went with them).
-  const live = new Set(subagents.map((s) => s.subagent_id));
-  const prevEvents = $activityEventsBySession.get()[sessionId];
-  if (prevEvents && Object.keys(prevEvents).some((id) => !live.has(id))) {
-    const events: Record<string, SubagentEvent[]> = {};
-    for (const [id, buf] of Object.entries(prevEvents)) {
-      if (live.has(id)) {
-        events[id] = buf;
-      }
-    }
-    $activityEventsBySession.setKey(sessionId, events);
-  }
 }
 
 /** Fold a workers-only snapshot (``workers.kill`` response) into the
@@ -144,13 +113,6 @@ export function publishSubagentsSnapshot(sessionId: string, subagents: SubagentS
 export function mergeWorkersSnapshot(sessionId: string, workers: SubagentSummary[]): void {
   const prev = $activityBySession.get()[sessionId] ?? EMPTY;
   publishSubagentsSnapshot(sessionId, [...prev.subagents.filter((s) => s.kind === 'agent_tool'), ...workers]);
-}
-
-export function publishSubagentEvent(sessionId: string, subagentId: string, event: SubagentEvent): void {
-  const prev = $activityEventsBySession.get()[sessionId] ?? {};
-  const buf = prev[subagentId] ?? [];
-  const next = buf.length >= EVENT_CAP ? [...buf.slice(buf.length - EVENT_CAP + 1), event] : [...buf, event];
-  $activityEventsBySession.setKey(sessionId, { ...prev, [subagentId]: next });
 }
 
 export function publishBashJobs(sessionId: string, jobs: BashJobSummary[]): void {

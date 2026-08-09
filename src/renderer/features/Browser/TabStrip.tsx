@@ -1,10 +1,11 @@
 import { DndContext, type DragEndEvent, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { arrayMove, horizontalListSortingStrategy, SortableContext, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { Globe, Pin, PinOff, Plus, X } from 'lucide-react';
-import { memo, useCallback, useMemo } from 'react';
+import { Globe, Pin, PinOff, Plus } from 'lucide-react';
+import { memo, useCallback, useMemo, useRef } from 'react';
 
 import { fallbackTitle } from '@/lib/url';
+import { ClosableTabChip } from '@/renderer/ds/ClosableTabs';
 import { cn } from '@/renderer/ds/cn';
 import { Button } from '@/renderer/ds/ui/button';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/renderer/ds/ui/context-menu';
@@ -25,78 +26,34 @@ const TabItem = memo(({ tab, active, onSelect, onClose, onPinToggle, onDuplicate
   const style = { transform: CSS.Transform.toString(transform), transition };
 
   const title = tab.title ?? fallbackTitle(tab.url);
-
-  const handleMouseDown = useCallback(
-    (e: React.MouseEvent) => {
-      // Middle-click closes — handled in mouseDown because the browser's
-      // default middle-click (autoscroll) fires on mouseup.
-      if (e.button === 1) {
-        e.preventDefault();
-        onClose(tab.id);
-      }
-    },
-    [onClose, tab.id]
-  );
-
-  const handleClose = useCallback(
-    (e: React.MouseEvent) => {
-      e.stopPropagation();
-      onClose(tab.id);
-    },
-    [onClose, tab.id]
-  );
-
-  // Stop pointer events from the close button (and other interactive
-  // children) from reaching dnd-kit's sortable listeners on the parent
-  // tab div. Without this, mouse jitter on click can activate the drag
-  // sensor and swallow the synthetic click event.
-  const stopPointer = useCallback((e: React.PointerEvent | React.MouseEvent) => {
-    e.stopPropagation();
-  }, []);
+  const handleClose = useCallback(() => onClose(tab.id), [onClose, tab.id]);
 
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
-        <div
+        {/* Behavior (drag reorder, pinning, context menu) lives here; the
+            chip owns the look, middle-click close, and the close button's
+            pointer isolation from dnd-kit's sortable listeners. */}
+        <ClosableTabChip
           ref={setNodeRef}
           style={style}
-          className={cn(
-            'flex items-center gap-1.5 pl-2.5 pr-1.5 mt-1 min-w-30 max-w-55 h-6.5 rounded-lg border-0 cursor-pointer select-none select-none text-muted-foreground bg-transparent transition-colors duration-100 hover:bg-accent hover:text-foreground',
-            active && 'bg-background text-foreground border border-border border-b-transparent',
-            tab.pinned && 'min-w-9.5 max-w-9.5 pl-2 pr-2',
-            isDragging && 'opacity-60'
-          )}
+          active={active}
+          label={title}
+          icon={
+            tab.favicon ? (
+              <img src={tab.favicon} alt="" className="size-3.5 shrink-0" />
+            ) : (
+              <Globe className="size-3.5 shrink-0" />
+            )
+          }
+          iconOnly={tab.pinned}
+          onClose={handleClose}
+          className={cn(tab.pinned && 'w-9.5', isDragging && 'opacity-60')}
           {...attributes}
           {...listeners}
+          tabIndex={active ? 0 : -1}
           onClick={() => onSelect(tab.id)}
-          onMouseDown={handleMouseDown}
-          role="tab"
-          aria-selected={active}
-          title={title}
-        >
-          {tab.favicon ? (
-            <img src={tab.favicon} alt="" className="size-3.5 shrink-0" />
-          ) : (
-            <Globe className="size-3.5 shrink-0" />
-          )}
-          {!tab.pinned && (
-            <span className="flex-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-xs">{title}</span>
-          )}
-          {!tab.pinned && (
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              className="inline-flex size-6 items-center justify-center rounded-md border-0 bg-transparent text-muted-foreground cursor-pointer shrink-0 hover:bg-accent hover:text-foreground"
-              onClick={handleClose}
-              onPointerDown={stopPointer}
-              onMouseDown={stopPointer}
-              aria-label={`Close ${title}`}
-            >
-              <X />
-            </Button>
-          )}
-        </div>
+        />
       </ContextMenuTrigger>
       <ContextMenuContent>
         <ContextMenuItem onSelect={() => onDuplicate(tab.id)}>Duplicate tab</ContextMenuItem>
@@ -113,6 +70,34 @@ TabItem.displayName = 'TabItem';
 
 export const TabStrip = memo(({ tabset, onNewTab }: { tabset: BrowserTabset; onNewTab: () => void }) => {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
+  const stripRef = useRef<HTMLDivElement>(null);
+
+  // Roving-tabindex tablist: Tab lands on the active tab; arrows move
+  // focus between tabs, Enter/Space (handled by the chip) activates.
+  const handleStripKeyDown = useCallback((event: React.KeyboardEvent) => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
+      return;
+    }
+    const tabs = stripRef.current ? [...stripRef.current.querySelectorAll<HTMLElement>('[role="tab"]')] : [];
+    if (tabs.length === 0) {
+      return;
+    }
+    const current = tabs.indexOf(document.activeElement as HTMLElement);
+    const next =
+      event.key === 'Home'
+        ? 0
+        : event.key === 'End'
+          ? tabs.length - 1
+          : event.key === 'ArrowLeft'
+            ? current <= 0
+              ? tabs.length - 1
+              : current - 1
+            : current < 0 || current === tabs.length - 1
+              ? 0
+              : current + 1;
+    event.preventDefault();
+    tabs[next]?.focus();
+  }, []);
 
   // Pinned tabs render first, in their own stable order. Drag reorder
   // operates across the whole list but we sort so pinned stay leftmost.
@@ -170,8 +155,10 @@ export const TabStrip = memo(({ tabset, onNewTab }: { tabset: BrowserTabset; onN
 
   return (
     <div
-      className="flex items-stretch min-h-8.5 pl-1 pr-1 gap-0.5 border-b border-border bg-card overflow-x-auto overflow-y-hidden scrollbar-thin"
+      ref={stripRef}
+      className="flex items-center min-h-9 pl-2 pr-2 gap-1.5 bg-card overflow-x-auto overflow-y-hidden scrollbar-thin"
       role="tablist"
+      onKeyDown={handleStripKeyDown}
     >
       <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
         <SortableContext items={orderedTabs.map((t) => t.id)} strategy={horizontalListSortingStrategy}>
@@ -192,7 +179,7 @@ export const TabStrip = memo(({ tabset, onNewTab }: { tabset: BrowserTabset; onN
         type="button"
         variant="ghost"
         size="icon-xs"
-        className="mt-1 ml-1 size-6.5 shrink-0"
+        className="ml-1 size-6.5 shrink-0"
         aria-label="New tab"
         onClick={onNewTab}
       >

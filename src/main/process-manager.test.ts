@@ -1204,11 +1204,6 @@ describe('ProcessManager', () => {
 
       await expect(pm.unpause('tab-a')).resolves.toMatchObject({ ok: true, paused: false });
       expect(host.unpause).toHaveBeenCalledWith(expect.objectContaining({ environmentId, environmentGeneration: 3 }));
-      pm.notifyActivity('tab-a');
-      expect(host.notifyActivity).toHaveBeenCalledWith(
-        expect.objectContaining({ environmentId, environmentGeneration: 3 })
-      );
-
       await pm.stop('tab-a', { discardSnapshot: true });
       expect(host.discardConsumerSnapshot).toHaveBeenCalledWith(
         expect.objectContaining({ environmentId, environmentGeneration: 3 })

@@ -120,9 +120,9 @@ describe('listProfiles', () => {
 
   it('filters to availableSandboxProfiles when set — host only if listed', () => {
     writeBundled('devbox', DEVBOX_YAML);
-    writeUser('aci', 'client:\n  type: aci\n');
-    const restricted = listProfiles({ ...deps, getAvailableProfileNames: () => ['aci'] });
-    expect(restricted.map((p) => p.name)).toEqual(['aci']);
+    writeUser('remote', 'client:\n  type: docker\n');
+    const restricted = listProfiles({ ...deps, getAvailableProfileNames: () => ['remote'] });
+    expect(restricted.map((p) => p.name)).toEqual(['remote']);
     const withHost = listProfiles({ ...deps, getAvailableProfileNames: () => ['host', 'devbox'] });
     expect(withHost.map((p) => p.name)).toEqual(['host', 'devbox']);
   });
