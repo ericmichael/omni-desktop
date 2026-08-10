@@ -446,6 +446,48 @@ export class FsClient {
     }
   }
 
+  async delete(target: ExecutionTargetInput, path: string, options: { recursive?: boolean } = {}): Promise<void> {
+    const requestedPath = validateFsPath(path);
+    const result = record(
+      await this.rpc.request('fs_delete', {
+        ...executionParams(target),
+        path: requestedPath,
+        recursive: options.recursive === true,
+      }),
+      'fs_delete result'
+    );
+    if (booleanField(result, 'deleted', 'fs_delete result') !== true) {
+      throw new FsProtocolError('fs_delete result must confirm the deletion');
+    }
+  }
+
+  async rename(target: ExecutionTargetInput, path: string, to: string): Promise<void> {
+    const requestedPath = validateFsPath(path);
+    const destination = validateFsPath(to);
+    const result = record(
+      await this.rpc.request('fs_rename', {
+        ...executionParams(target),
+        path: requestedPath,
+        to: destination,
+      }),
+      'fs_rename result'
+    );
+    if (booleanField(result, 'renamed', 'fs_rename result') !== true) {
+      throw new FsProtocolError('fs_rename result must confirm the move');
+    }
+  }
+
+  async mkdir(target: ExecutionTargetInput, path: string): Promise<void> {
+    const requestedPath = validateFsPath(path);
+    const result = record(
+      await this.rpc.request('fs_mkdir', { ...executionParams(target), path: requestedPath }),
+      'fs_mkdir result'
+    );
+    if (booleanField(result, 'created', 'fs_mkdir result') !== true) {
+      throw new FsProtocolError('fs_mkdir result must confirm the directory');
+    }
+  }
+
   async downloadBytes(
     target: ExecutionTargetInput,
     path: string,

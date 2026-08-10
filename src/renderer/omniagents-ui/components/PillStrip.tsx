@@ -8,6 +8,7 @@ import {
   jobLabel,
   JobTail,
   KindBadge,
+  PlanTaskRow,
   StatusDot,
   subagentDotClass,
   subagentLabel,
@@ -186,13 +187,6 @@ function PillPopover({ pill, children }: { pill: React.ReactNode; children: Reac
   );
 }
 
-const TASK_DOT: Record<TaskSummary['status'], string> = {
-  pending: 'bg-muted-foreground/50',
-  in_progress: 'bg-primary animate-pulse',
-  completed: 'bg-success',
-  blocked: 'bg-warning',
-};
-
 // ---------------------------------------------------------------------------
 
 export function PillStrip({
@@ -232,6 +226,9 @@ export function PillStrip({
   const tasksBlocked = tasks.filter((t) => t.status === 'blocked').length;
   const tasksPending = tasks.filter((t) => t.status === 'pending').length;
   const tasksDone = tasks.filter((t) => t.status === 'completed').length;
+  // Completions the reviewer accepted without transcript evidence — a trust
+  // signal, not an error (amber/muted, never destructive).
+  const tasksUnverified = tasks.filter((t) => t.status === 'completed' && t.verified === false).length;
   const jobsRunning = jobs.filter((j) => j.running).length;
   const jobsFailed = jobs.filter((j) => !j.running && j.exit_code !== 0).length;
   const jobsDone = jobs.length - jobsRunning - jobsFailed;
@@ -334,6 +331,7 @@ export function PillStrip({
               [tasksPending, 'pending'],
               [tasksBlocked, 'blocked'],
               [tasksDone, 'done'],
+              [tasksUnverified, 'unverified'],
             ])}
           />
           {tasksActive[0] ? (
@@ -345,26 +343,9 @@ export function PillStrip({
             </p>
           ) : null}
           <div className="max-h-72 overflow-y-auto p-1">
-            {tasks.map((t) => {
-              const blockers = t.blockedBy ?? [];
-              return (
-                <div key={t.id} className="flex items-center gap-2 px-2 py-1.5">
-                  <StatusDot className={TASK_DOT[t.status]} />
-                  <span className="shrink-0 font-mono text-muted-foreground">#{t.id}</span>
-                  <span
-                    className={`min-w-0 flex-1 truncate ${
-                      t.status === 'completed' ? 'text-muted-foreground line-through' : 'text-foreground'
-                    }`}
-                    title={t.subject}
-                  >
-                    {t.subject}
-                  </span>
-                  {blockers.length > 0 ? (
-                    <span className="shrink-0 whitespace-nowrap text-warning">blocked by #{blockers.join(', #')}</span>
-                  ) : null}
-                </div>
-              );
-            })}
+            {tasks.map((t) => (
+              <PlanTaskRow key={t.id} task={t} />
+            ))}
           </div>
         </PillPopover>
       )}

@@ -376,6 +376,7 @@ describe('omni-projects MCP tools (async IProjectsRepo, SQLite)', () => {
       pr_review: null,
       pr_merged_at: null,
       assignee: null,
+      last_plan_snapshot: null,
       created_at: ts,
       updated_at: ts,
     });

@@ -44,7 +44,7 @@ import {
   registerActivityActions,
   type WorkersKillResult,
 } from './activity-store';
-import { negotiatedPlanTasks, type TaskSummary } from './canonical-plan-tasks';
+import { negotiatedPlanTasks, planUpdateForBridge, rpcPlanTasks, type TaskSummary } from './canonical-plan-tasks';
 import type { PendingMessage } from './ChatShell';
 import { type ArtifactItem, ArtifactsPanel } from './components/ArtifactsPanel';
 import { ElicitationCard } from './components/ElicitationCard';
@@ -68,6 +68,7 @@ import { useChatSession } from './hooks/use-chat-session';
 import { useConversationManagement } from './hooks/use-conversation-management';
 import { loadCanonicalSessionList } from './rpc/canonical-session-list';
 import type { ElicitationRequest, ElicitationResponse } from './rpc/elicitation';
+import { parsePlanResult } from './rpc/plans-and-diffs';
 import { useRPCClient, useRPCConnected } from './rpc-context';
 import { publishRunDiff } from './run-diff-store';
 import { useUiConfig } from './ui-config';
@@ -260,7 +261,7 @@ export function App({
   }, [uiConfig.runtimeBaseUrl]);
 
   // Chat session state machine — manages items, sessionId, runId, thinking,
-  // status, preamble, tool status, and approval state.
+  // status, tool status, and approval state.
   const machine = useChatSession(client);
   const {
     actor,
@@ -269,7 +270,6 @@ export function App({
     status,
     statusSpinner,
     statusItalic,
-    preamble,
     toolStatus,
     runId,
     sessionId,
@@ -795,6 +795,26 @@ export function App({
     return { rawTasks: lastTasks, tasks: filteredTasks, derivedBashJobs: lastJobs };
   }, [client, connected, items, runActive, dismissedTaskIds]);
 
+  // Forward the unfiltered plan projection to main's SupervisorOrchestrator,
+  // which persists it as `ticket.lastPlanSnapshot` (workflow-enforcement §F).
+  // Ticket-bound columns only — same guard as the goal-update forward. The
+  // raw (pre-dismissal) list is forwarded because the snapshot must retain
+  // completed steps the panel hides when idle. Serialized-compare so bursty
+  // item updates don't spam IPC; main debounces the write on its side.
+  const lastPlanForwardRef = useRef<string | null>(null);
+  useEffect(() => {
+    const event = planUpdateForBridge(ticketId, rawTasks);
+    if (!event) {
+      return;
+    }
+    const serialized = JSON.stringify(event.snapshot);
+    if (serialized === lastPlanForwardRef.current) {
+      return;
+    }
+    lastPlanForwardRef.current = serialized;
+    void forwardEvent(event);
+  }, [ticketId, rawTasks]);
+
   // Live override (from ui.bash_jobs.update broadcasts and bash_jobs.* server
   // calls) takes precedence over history-derived state when present. Mirror
   // the Tasks behavior: while a run is active keep everything visible (minus
@@ -905,6 +925,18 @@ export function App({
     [client, executionTarget, sessionId]
   );
 
+  const handleWorkerPlan = useCallback(
+    async (workerSessionId: string): Promise<TaskSummary[] | null> => {
+      // Workers run their own sessions on the same `omni serve`; `get_plan`
+      // is thread-addressed, so this session's connection can read a
+      // worker's main plan with no new protocol (worker plans stay private
+      // to the worker — this is read-only observability).
+      const result = parsePlanResult(await client.request('get_plan', { thread_id: workerSessionId, scope: 'main' }));
+      return rpcPlanTasks(result.plan);
+    },
+    [client]
+  );
+
   const handleBashWarmup = useCallback(async () => {
     if (!environmentId) {
       throw new Error('Execution environment unavailable');
@@ -928,9 +960,10 @@ export function App({
       killWorker: handleWorkerKill,
       killJob: handleBashKill,
       tailJob: handleBashTail,
+      getWorkerPlan: handleWorkerPlan,
     });
     return () => registerActivityActions(sessionId, null);
-  }, [sessionId, readOnly, handleWorkerKill, handleBashKill, handleBashTail]);
+  }, [sessionId, readOnly, handleWorkerKill, handleBashKill, handleBashTail, handleWorkerPlan]);
 
   // Keep the Review sidecar's "This turn" scope current: the newest
   // run_diff transcript item is the session's turn record.
@@ -2114,7 +2147,6 @@ export function App({
                       statusText={status}
                       thinking={thinking}
                       statusSpinner={statusSpinner}
-                      preambleText={preamble}
                       welcomeText={welcomeText}
                       onApprovalDecision={handleApprovalDecision}
                       pendingPlan={pendingPlan}
@@ -2227,6 +2259,8 @@ export function App({
                           disabled={runActive}
                           approvalsSupported={client.supportsExperimentalFeature('approvalReviewer')}
                           onSetApprovalsReviewer={(reviewer) => client.setSessionApprovals(sessionId!, reviewer)}
+                          workflowSupported={client.supportsExperimentalFeature('workflowReviewer')}
+                          onSetWorkflowReviewer={(reviewer) => client.setSessionWorkflow(sessionId!, reviewer)}
                         />
                       ) : null}
                     </PillStrip>

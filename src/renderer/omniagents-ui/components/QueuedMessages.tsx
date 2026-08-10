@@ -27,7 +27,7 @@ export function QueuedMessages({ items, onCancel }: Props) {
   }
   return (
     <div className="px-3 pt-2">
-      <Card className="gap-0 rounded-md border-accent bg-accent/60 p-2.5 shadow-none">
+      <Card className="gap-0 rounded-md border-accent bg-accent/60 p-3 shadow-none">
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <span className="font-medium text-foreground">Up next</span>
           <span aria-hidden>·</span>
@@ -35,7 +35,7 @@ export function QueuedMessages({ items, onCancel }: Props) {
             <span className="text-primary">{items.length}</span> queued
           </span>
         </div>
-        <ul className="mt-1.5 space-y-1">
+        <ul className="mt-2 space-y-1">
           {items.map((item, idx) => (
             <li key={item.id} className="flex items-start gap-2 text-xs leading-5">
               <span className="mt-0.5 w-5 shrink-0 text-right tabular-nums text-muted-foreground">{idx + 1}</span>

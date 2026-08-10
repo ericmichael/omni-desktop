@@ -31,7 +31,10 @@ const TIMEOUT_MS = 30_000;
 // Matches the uid used for workspace-owned container files.
 const EXEC_USER = '1000:1000';
 
-const mountPath = (mountName: string): string => `${WORKSPACE_ROOT}/${mountName}`;
+// A root mount ('.') IS the workspace root — solo folders (chat scratch
+// dirs) seed there so no wrapper directory exists.
+const mountPath = (mountName: string): string =>
+  mountName === '.' ? WORKSPACE_ROOT : `${WORKSPACE_ROOT}/${mountName}`;
 
 /** Files to copy (added/modified) and remove (deleted) on the host. */
 export interface ContainerChangeSet {

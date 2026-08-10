@@ -32,7 +32,12 @@ const ShimmerComponent = ({ children, as: Component = 'p', className, duration =
   return (
     <MotionComponent
       animate={{ backgroundPosition: '0% center' }}
-      className={cn('text-shimmer relative inline-block bg-clip-text text-transparent', className)}
+      // `text-shimmer` must stay OUTSIDE the cn() merge: tailwind-merge
+      // classifies it as a text-color utility, so `text-transparent` (or any
+      // caller-supplied text color) would delete it and the label paints
+      // invisibly — transparent text with no gradient to clip. The class
+      // itself already sets bg-clip-text + color:transparent.
+      className={`text-shimmer ${cn('relative inline-block', className)}`}
       initial={{ backgroundPosition: '100% center' }}
       transition={{
         duration,

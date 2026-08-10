@@ -101,7 +101,6 @@ describe('chatSessionMachine', () => {
       expect(c.sessionId).toBeUndefined();
       expect(c.runId).toBeUndefined();
       expect(c.items).toEqual([]);
-      expect(c.preambleBuffer).toEqual([]);
       expect(c.pendingApprovals.size).toBe(0);
       expect(c.status).toBeUndefined();
     });
@@ -266,7 +265,23 @@ describe('chatSessionMachine', () => {
           type: 'chat',
           role: 'assistant',
           content: '[worker] otto status=completed',
+          // Stamped from the EVENT's run_id (context.runId is still the
+          // prior run's at append time) so grouping can fold the wakeup
+          // into its run's chain, matching the canonical agent_message
+          // the recorder writes for the prompt.
+          runId: 'wake-1',
         });
+      });
+
+      it('does not stamp a runId on user-role prompts', () => {
+        const snap = next(idleSnap('sess-1'), {
+          type: 'RUN_STARTED',
+          run_id: 'queued-1',
+          session_id: 'sess-1',
+          prompt: 'do the thing',
+        });
+        const items = ctx(snap).items as MessageItem[];
+        expect((items[0] as { runId?: string }).runId).toBeUndefined();
       });
 
       it('defaults to user when prompt_role is unknown', () => {
@@ -308,15 +323,13 @@ describe('chatSessionMachine', () => {
       expect(phase(snap)).toBe('idle');
     });
 
-    it('flushes non-superseded preamble to items on run_end', () => {
-      // Buffer a preamble, then end run
+    it('produces no message items of its own — narration is already in the transcript', () => {
+      // MESSAGE_OUTPUT appended immediately; RUN_END adds nothing.
       let snap = runningSnap();
       snap = next(snap, { type: 'MESSAGE_OUTPUT', content: 'thinking out loud', session_id: 'sess-1' });
-      expect(ctx(snap).preambleBuffer).toHaveLength(1);
+      expect(ctx(snap).items).toHaveLength(2);
 
       snap = next(snap, { type: 'RUN_END', session_id: 'sess-1' });
-      expect(ctx(snap).preambleBuffer).toEqual([]);
-      // User message + flushed preamble
       expect(ctx(snap).items).toHaveLength(2);
       expect(ctx(snap).items[1]).toMatchObject({
         type: 'chat',
@@ -325,22 +338,17 @@ describe('chatSessionMachine', () => {
       });
     });
 
-    it('does not flush superseded preamble', () => {
+    it('keeps the runId stamp on live assistant messages after the run ends', () => {
       let snap = runningSnap();
-      snap = next(snap, { type: 'MESSAGE_OUTPUT', content: 'will be superseded', session_id: 'sess-1' });
-      // Tool call supersedes the preamble
-      snap = next(snap, {
-        type: 'TOOL_CALLED',
-        call_id: 'c1',
-        tool: 'bash',
-        input: 'ls',
-        session_id: 'sess-1',
-      });
+      snap = next(snap, { type: 'MESSAGE_OUTPUT', content: 'Checking the config next.', session_id: 'sess-1' });
+      snap = next(snap, { type: 'MESSAGE_OUTPUT', content: 'All done.', session_id: 'sess-1' });
       snap = next(snap, { type: 'RUN_END', session_id: 'sess-1' });
-      // Only user message + tool item, no flushed preamble
-      expect(ctx(snap).items).toHaveLength(2);
-      expect(ctx(snap).items[0]!.type).toBe('chat');
-      expect(ctx(snap).items[1]!.type).toBe('tool');
+      const items = ctx(snap).items as MessageItem[];
+      expect(items).toHaveLength(3);
+      expect(items[1]).toMatchObject({ type: 'chat', role: 'assistant', runId: 'run-1' });
+      expect(items[2]).toMatchObject({ type: 'chat', role: 'assistant', runId: 'run-1' });
+      // The run is over — but the stamp survives on the transcript items.
+      expect(ctx(snap).runId).toBeUndefined();
     });
 
     it('clears run state', () => {
@@ -359,30 +367,70 @@ describe('chatSessionMachine', () => {
   });
 
   // -----------------------------------------------------------------------
-  // MESSAGE_OUTPUT (preamble buffering)
+  // MESSAGE_OUTPUT (live assistant messages)
   // -----------------------------------------------------------------------
 
   describe('MESSAGE_OUTPUT', () => {
-    it('buffers preamble in running state', () => {
+    it('appends the assistant message immediately, stamped with the run id', () => {
       const snap = next(runningSnap(), {
         type: 'MESSAGE_OUTPUT',
         content: 'chunk 1',
         session_id: 'sess-1',
       });
-      expect(ctx(snap).preambleBuffer).toHaveLength(1);
-      expect(ctx(snap).preamble).toBe('chunk 1');
+      // User message + narration — in the transcript before any tool call
+      // or RUN_END, so mid-run narration is never dropped.
+      expect(ctx(snap).items).toHaveLength(2);
+      expect(ctx(snap).items[1]).toMatchObject({
+        type: 'chat',
+        role: 'assistant',
+        content: 'chunk 1',
+        runId: 'run-1',
+      });
     });
 
-    it('buffers preamble in starting state', () => {
+    it('appends in starting state (no runId yet)', () => {
       const snap = next(startingSnap(), {
         type: 'MESSAGE_OUTPUT',
         content: 'early',
         session_id: 'sess-1',
       });
-      expect(ctx(snap).preambleBuffer).toHaveLength(1);
+      expect(ctx(snap).items).toHaveLength(2);
+      expect(ctx(snap).items[1]).toMatchObject({ type: 'chat', role: 'assistant', content: 'early' });
+      expect((ctx(snap).items[1] as { runId?: string }).runId).toBeUndefined();
     });
 
-    it('clears status when preamble arrives', () => {
+    it('skips duplicate delivery of the same content in the same run (resync replay)', () => {
+      let snap = runningSnap();
+      snap = next(snap, { type: 'MESSAGE_OUTPUT', content: 'once', session_id: 'sess-1' });
+      snap = next(snap, { type: 'MESSAGE_OUTPUT', content: 'once', session_id: 'sess-1' });
+      const assistants = ctx(snap).items.filter((it) => it.type === 'chat' && it.role === 'assistant');
+      expect(assistants).toHaveLength(1);
+    });
+
+    it('appends distinct content twice', () => {
+      let snap = runningSnap();
+      snap = next(snap, { type: 'MESSAGE_OUTPUT', content: 'first', session_id: 'sess-1' });
+      snap = next(snap, { type: 'MESSAGE_OUTPUT', content: 'second', session_id: 'sess-1' });
+      const assistants = ctx(snap).items.filter((it) => it.type === 'chat' && it.role === 'assistant');
+      expect(assistants).toHaveLength(2);
+    });
+
+    it('re-appends identical content when it belongs to a different run', () => {
+      // Dedupe is (runId, content) — "ok" from run-1 and "ok" from run-2
+      // are two distinct transcript entries.
+      let snap = runningSnap();
+      snap = next(snap, { type: 'MESSAGE_OUTPUT', content: 'ok', session_id: 'sess-1' });
+      snap = next(snap, { type: 'RUN_END', session_id: 'sess-1' });
+      snap = next(snap, { type: 'RUN_STARTED', run_id: 'run-2', session_id: 'sess-1', prompt: 'again' });
+      snap = next(snap, { type: 'MESSAGE_OUTPUT', content: 'ok', session_id: 'sess-1' });
+      const assistants = ctx(snap).items.filter(
+        (it) => it.type === 'chat' && it.role === 'assistant' && it.content === 'ok'
+      );
+      expect(assistants).toHaveLength(2);
+      expect((assistants[1] as { runId?: string }).runId).toBe('run-2');
+    });
+
+    it('clears status when narration arrives', () => {
       let snap = runningSnap();
       snap = next(snap, { type: 'RUN_STATUS', text: 'Working...', session_id: 'sess-1' });
       expect(ctx(snap).status).toBe('Working...');
@@ -396,7 +444,8 @@ describe('chatSessionMachine', () => {
         content: 'nope',
         session_id: 'sess-other',
       });
-      expect(ctx(snap).preambleBuffer).toEqual([]);
+      // Only the user's own message — the foreign narration is dropped.
+      expect(ctx(snap).items).toHaveLength(1);
     });
   });
 
@@ -405,7 +454,7 @@ describe('chatSessionMachine', () => {
   // -----------------------------------------------------------------------
 
   describe('TOOL_CALLED', () => {
-    it('appends tool item and supersedes preamble', () => {
+    it('appends tool item after prior narration, which stays in the transcript', () => {
       let snap = runningSnap();
       snap = next(snap, { type: 'MESSAGE_OUTPUT', content: 'thinking', session_id: 'sess-1' });
       snap = next(snap, {
@@ -415,11 +464,11 @@ describe('chatSessionMachine', () => {
         input: 'ls',
         session_id: 'sess-1',
       });
-      // Preamble superseded
-      expect(ctx(snap).preambleBuffer[0]!.superseded).toBe(true);
-      // Tool item added
-      const tool = ctx(snap).items.find((it) => it.type === 'tool') as any;
-      expect(tool).toBeDefined();
+      // user msg, narration, tool — the tool call no longer erases narration.
+      expect(ctx(snap).items).toHaveLength(3);
+      expect(ctx(snap).items[1]).toMatchObject({ type: 'chat', role: 'assistant', content: 'thinking' });
+      const tool = ctx(snap).items[2] as any;
+      expect(tool.type).toBe('tool');
       expect(tool.tool).toBe('bash');
       expect(tool.status).toBe('called');
     });
@@ -626,11 +675,12 @@ describe('chatSessionMachine', () => {
       expect(phase(stoppingSnap())).toBe('stopping');
     });
 
-    it('supersedes preamble on stop', () => {
+    it('keeps already-appended narration through STOP and RUN_END', () => {
       let snap = runningSnap();
       snap = next(snap, { type: 'MESSAGE_OUTPUT', content: 'pending', session_id: 'sess-1' });
       snap = next(snap, { type: 'STOP' });
-      expect(ctx(snap).preambleBuffer[0]!.superseded).toBe(true);
+      snap = next(snap, { type: 'RUN_END', session_id: 'sess-1' });
+      expect(ctx(snap).items[1]).toMatchObject({ type: 'chat', role: 'assistant', content: 'pending' });
     });
 
     it('transitions stopping → idle on RUN_END', () => {
@@ -746,7 +796,7 @@ describe('chatSessionMachine', () => {
         content: 'legacy',
         // No session_id
       });
-      expect(ctx(snap).preambleBuffer).toHaveLength(1);
+      expect(ctx(snap).items[1]).toMatchObject({ type: 'chat', role: 'assistant', content: 'legacy' });
     });
 
     it('rejects loose events with mismatched session', () => {
@@ -1011,16 +1061,16 @@ describe('chatSessionMachine', () => {
         session_id: sid,
       });
 
-      // Message output (preamble)
+      // Message output — appended to the transcript immediately.
       actor.send({ type: 'MESSAGE_OUTPUT', content: 'Done!', session_id: sid });
-      expect(actor.getSnapshot().context.preamble).toBe('Done!');
+      expect(actor.getSnapshot().context.items).toHaveLength(3);
 
-      // Run end — should flush preamble
+      // Run end — adds nothing.
       actor.send({ type: 'RUN_END', session_id: sid });
       expect(phase(actor.getSnapshot())).toBe('idle');
 
       const items = actor.getSnapshot().context.items;
-      expect(items).toHaveLength(3); // user msg + tool + flushed assistant msg
+      expect(items).toHaveLength(3); // user msg + tool + assistant msg
       expect(items[0]).toMatchObject({ type: 'chat', role: 'user' });
       expect(items[1]).toMatchObject({ type: 'tool', status: 'result' });
       expect(items[2]).toMatchObject({ type: 'chat', role: 'assistant', content: 'Done!' });
@@ -1067,5 +1117,59 @@ describe('GUARDIAN_REVIEWED', () => {
     expect(snap.context.items.some((it) => it.type === 'guardian_review')).toBe(true);
     // The pending human approval card is untouched.
     expect(snap.context.pendingApprovals.has('req-1')).toBe(true);
+  });
+});
+
+describe('WORKFLOW_REVIEWED', () => {
+  const reviewed = (overrides: Record<string, unknown> = {}) => ({
+    type: 'WORKFLOW_REVIEWED' as const,
+    task_id: '3',
+    subject: 'run tests',
+    outcome: 'reject' as const,
+    reviewer: 'guardian',
+    rationale: 'No test run in the transcript.',
+    session_id: 'sess-1',
+    ...overrides,
+  });
+
+  it('appends a workflow_review transcript item while running', () => {
+    const snap = next(runningSnap(), reviewed());
+    const items = snap.context.items.filter((it) => it.type === 'workflow_review');
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      task_id: '3',
+      subject: 'run tests',
+      outcome: 'reject',
+      reviewer: 'guardian',
+      rationale: 'No test run in the transcript.',
+    });
+  });
+
+  it('re-delivery of an identical record replaces rather than duplicates', () => {
+    const first = next(runningSnap(), reviewed());
+    const second = next(first, reviewed());
+    expect(second.context.items.filter((it) => it.type === 'workflow_review')).toHaveLength(1);
+  });
+
+  it('keeps distinct reviews of the same step on record', () => {
+    const first = next(runningSnap(), reviewed());
+    const second = next(
+      first,
+      reviewed({ outcome: 'escalated', rationale: 'accepted after repeated disagreement: still no test run' })
+    );
+    const items = second.context.items.filter((it) => it.type === 'workflow_review');
+    expect(items).toHaveLength(2);
+    expect(items.map((it) => (it as { outcome: string }).outcome)).toEqual(['reject', 'escalated']);
+  });
+
+  it('is accepted while awaiting an approval, leaving the pending card untouched', () => {
+    const snap = next(awaitingApprovalSnap(), reviewed({ outcome: 'accept_unverified' }));
+    expect(snap.context.items.some((it) => it.type === 'workflow_review')).toBe(true);
+    expect(snap.context.pendingApprovals.has('req-1')).toBe(true);
+  });
+
+  it('drops events for a different session (strict filter)', () => {
+    const snap = next(runningSnap(), reviewed({ session_id: 'sess-other' }));
+    expect(snap.context.items.some((it) => it.type === 'workflow_review')).toBe(false);
   });
 });

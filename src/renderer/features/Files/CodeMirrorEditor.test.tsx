@@ -1,3 +1,4 @@
+import { language } from '@codemirror/language';
 import { EditorView } from '@codemirror/view';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -71,6 +72,30 @@ describe('CodeMirrorEditor', () => {
 
     expect(onSave).toHaveBeenCalledOnce();
     expect(event.defaultPrevented).toBe(true);
+  });
+
+  it('loads syntax support for known filenames', async () => {
+    act(() =>
+      root.render(
+        <CodeMirrorEditor
+          ariaLabel="Editor for src/app.ts"
+          onChange={() => {}}
+          onSave={() => {}}
+          path="src/app.ts"
+          value="const a = 1;"
+        />
+      )
+    );
+    const content = container.querySelector<HTMLElement>('[aria-label="Editor for src/app.ts"]')!;
+    const view = EditorView.findFromDOM(content)!;
+
+    // The language package loads via dynamic import; poll briefly.
+    for (let attempt = 0; attempt < 40 && view.state.facet(language) === null; attempt += 1) {
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      });
+    }
+    expect(view.state.facet(language)?.name).toBeTruthy();
   });
 
   it('reveals and selects a requested one-based source range', () => {

@@ -55,6 +55,15 @@ export type ChatMessage = {
    * something was attached.
    */
   staged_context?: ReadonlyArray<{ source: string; text: string }>;
+  /**
+   * The run this assistant message belongs to, stamped by the chat-session
+   * machine on live-appended messages. Live items carry no canonical
+   * envelope, so without this stamp activity grouping cannot place a
+   * narration message in its run's chain until a reload rebuilds the
+   * transcript from canonical items (whose ``turn_id`` serves the same
+   * role). User messages are never stamped — they always break the chain.
+   */
+  runId?: string;
   canonical?: CanonicalItemEnvelope;
 };
 
@@ -118,6 +127,25 @@ export type GuardianReviewItem = {
   canonical?: CanonicalItemEnvelope;
 };
 
+/**
+ * A plan-step completion review outcome broadcast by the workflow layer
+ * (omniagents ``plan_completion_reviewed``). Emitted only for the three
+ * outcomes that need transcript visibility — rejections, unverified accepts,
+ * and breaker escalations; clean verifications stay silent. Rendered as a
+ * compact chip so a denied completion doesn't read as an unexplained retry.
+ */
+export type WorkflowReviewItem = {
+  type: 'workflow_review';
+  task_id: string;
+  subject: string;
+  outcome: 'reject' | 'accept_unverified' | 'escalated' | 'accept_verified';
+  /** 'guardian' | 'human' | 'none' (open set — render verbatim fallback). */
+  reviewer: string;
+  rationale?: string;
+  session_id?: string;
+  canonical?: CanonicalItemEnvelope;
+};
+
 export type ChatItemMetadata = {
   hidden?: boolean;
   summary?: string;
@@ -134,6 +162,12 @@ export type PlanStep = {
   status?: 'pending' | 'in_progress' | 'completed' | 'blocked';
   owner?: string;
   blockedBy?: string[];
+  /** Checkable definition-of-done. Absent/empty = no semantic review. */
+  exitCriteria?: string;
+  /** Completion review: true verified, false unverified, null/absent unreviewed. */
+  verified?: boolean | null;
+  /** True when the criteria were edited while the step was in progress (ratchet stamp). */
+  criteriaEdited?: boolean;
 };
 
 export type PlanItem = {
@@ -248,18 +282,10 @@ export type MessageItem =
   | ToolItem
   | ApprovalItem
   | GuardianReviewItem
+  | WorkflowReviewItem
   | ArtifactItem
   | ReasoningItem
   | PlanItem
   | RunDiffItem
   | StructuredItem;
 
-// ---------------------------------------------------------------------------
-// Preamble buffer
-// ---------------------------------------------------------------------------
-
-export type PreambleChunk = {
-  content: string;
-  timestamp: number;
-  superseded: boolean;
-};

@@ -1,5 +1,7 @@
 import { atom, map } from 'nanostores';
 
+import type { TaskSummary } from './canonical-plan-tasks';
+
 /**
  * Per-session background-activity state: everything a session spawned that
  * runs outside the visible turn — subagents (background workers, agent-tool
@@ -131,6 +133,10 @@ export type ActivityActions = {
   killWorker: (workerId: string) => Promise<WorkersKillResult>;
   killJob: (jobId: string) => Promise<BashJobsKillResult>;
   tailJob: (jobId: string, lines?: number) => Promise<BashJobsTailResult>;
+  /** Read another session's main plan (a worker's own plan, by the worker's
+   *  session id) over this session's RPC connection, projected into the
+   *  Tasks popover's row shape. Null when the worker has no plan. */
+  getWorkerPlan: (workerSessionId: string) => Promise<TaskSummary[] | null>;
 };
 
 export const $activityActionsBySession = map<Record<string, ActivityActions | undefined>>({});

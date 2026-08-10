@@ -192,6 +192,20 @@ const capField = (s: string | undefined, key: string, truncated: Record<string, 
   return s;
 };
 
+/** Plan-step completion reviews surface as system-message text, mirroring
+ *  guardian reviews: the record, not a card. */
+const workflowReviewText = (it: Extract<MessageItem, { type: 'workflow_review' }>): string => {
+  const outcome =
+    it.outcome === 'reject'
+      ? 'rejected'
+      : it.outcome === 'accept_verified'
+        ? 'verified'
+        : it.outcome === 'accept_unverified'
+          ? 'accepted (unverified)'
+          : 'accepted after repeated disagreement';
+  return `Step #${it.task_id} '${it.subject}' completion ${outcome} by ${it.reviewer}${it.rationale ? `: ${it.rationale}` : ''}`;
+};
+
 const mapEntry = (it: MessageItem, cursor: Cursor, index: number): TranscriptEntry => {
   const t: Record<string, number> = {};
   let entry: TranscriptEntry;
@@ -229,6 +243,15 @@ const mapEntry = (it: MessageItem, cursor: Cursor, index: number): TranscriptEnt
         kind: 'message',
         role: 'system',
         text: `Tool ${it.tool} ${it.outcome === 'deny' ? 'denied' : 'approved'} by ${it.reviewer}${it.rationale ? `: ${it.rationale}` : ''}`,
+      };
+      break;
+    case 'workflow_review':
+      entry = {
+        cursor,
+        index,
+        kind: 'message',
+        role: 'system',
+        text: capField(workflowReviewText(it), 'text', t) ?? '',
       };
       break;
     case 'artifact':
@@ -322,6 +345,8 @@ export function fullEntry(items: readonly MessageItem[], cursors: readonly Curso
         role: 'system',
         text: `Tool ${it.tool} ${it.outcome === 'deny' ? 'denied' : 'approved'} by ${it.reviewer}${it.rationale ? `: ${it.rationale}` : ''}`,
       };
+    case 'workflow_review':
+      return { cursor, index, total, kind: 'message', role: 'system', text: workflowReviewText(it) };
     case 'artifact':
       return { cursor, index, total, kind: 'artifact', title: it.title, content: it.content };
     case 'reasoning':

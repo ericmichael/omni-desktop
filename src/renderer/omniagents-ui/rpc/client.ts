@@ -98,6 +98,9 @@ export const EXPERIMENTAL_FEATURE_MANIFESTS = {
     'fs_upload_chunk',
     'fs_upload_commit',
     'fs_upload_abort',
+    'fs_delete',
+    'fs_rename',
+    'fs_mkdir',
     'fs_events',
     'fs_rescan_required',
     'fs_transfer_progress',
@@ -120,6 +123,9 @@ export const EXPERIMENTAL_FEATURE_MANIFESTS = {
     'git_pull',
     'git_push',
     'git_operation_progress',
+    'git_status_watch',
+    'git_status_unwatch',
+    'git_status_changed',
   ],
   mcpOperations: ['mcp_read_resource', 'mcp_call_tool', 'mcp_get_prompt'],
   // Renderer management is read-only. validate/write remain behind the
@@ -141,6 +147,11 @@ export const EXPERIMENTAL_FEATURE_MANIFESTS = {
   // journaled reviewed-decision record are one feature — a toggle without
   // the transcript record would hide what the guardian did.
   approvalReviewer: ['set_session_approvals', 'tool_approval_reviewed'],
+  // Workflow completion reviewer (plan-step exit criteria): the session
+  // toggle and the journaled review-outcome record are one feature, mirroring
+  // approvalReviewer — a toggle without the transcript chip would hide why a
+  // completion was rejected.
+  workflowReviewer: ['set_session_workflow', 'plan_completion_reviewed'],
 } as const;
 
 export type ExperimentalFeature = keyof typeof EXPERIMENTAL_FEATURE_MANIFESTS;
@@ -158,6 +169,7 @@ export const WORKSPACE_EXPERIMENTAL_OPERATIONS = [
   ...EXPERIMENTAL_FEATURE_MANIFESTS.conversationOrganization,
   ...EXPERIMENTAL_FEATURE_MANIFESTS.plansAndDiffs,
   ...EXPERIMENTAL_FEATURE_MANIFESTS.approvalReviewer,
+  ...EXPERIMENTAL_FEATURE_MANIFESTS.workflowReviewer,
 ] as const;
 
 const requestedCapabilities = (experimentalOperations: readonly string[]): Capabilities => ({
@@ -1041,6 +1053,21 @@ export class RPCClient {
   /** Set the session's approval reviewer ("user" | "auto"). */
   async setSessionApprovals(sessionId: string, reviewer: 'user' | 'auto'): Promise<Record<string, unknown>> {
     return this.call('set_session_approvals', { session_id: sessionId, reviewer });
+  }
+
+  /**
+   * Set the session's workflow completion reviewer ("off" | "guardian" |
+   * "user") — the per-session override of `workflow.completion_reviewer`.
+   * `set_session_workflow` ships in the omniagents contract alongside the
+   * `plan_completion_reviewed` broadcast; the generated gui-v1 method map
+   * predates it, hence the local widening until the schema is regenerated.
+   */
+  async setSessionWorkflow(sessionId: string, reviewer: 'off' | 'guardian' | 'user'): Promise<Record<string, unknown>> {
+    const call = this.call.bind(this) as unknown as (
+      method: string,
+      params: Record<string, unknown>
+    ) => Promise<Record<string, unknown>>;
+    return call('set_session_workflow', { session_id: sessionId, reviewer });
   }
 
   async stopRun(runId: string): Promise<void> {

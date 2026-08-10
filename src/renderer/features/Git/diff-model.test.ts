@@ -1,14 +1,18 @@
 import { describe, expect, it } from 'vitest';
 
+import type { GitStatusEntry, GitStatusResult } from '@/renderer/omniagents-ui/rpc/git';
+
 import {
   buildFileTree,
   firstAddedLine,
   languageForPath,
   linesFromHunks,
+  mergeUntracked,
   numberUnified,
   splitUnifiedDiff,
+  statusBadge,
   treeDirPaths,
-} from './review-model';
+} from './diff-model';
 
 const DIFF = [
   'diff --git a/src/a.ts b/src/a.ts',
@@ -132,6 +136,49 @@ describe('languageForPath', () => {
     expect(languageForPath('LICENSE')).toBeNull();
     expect(languageForPath('assets/logo.xyzabc')).toBeNull();
     expect(languageForPath('.env')).toBeNull();
+  });
+});
+
+function entry(overrides: Partial<GitStatusEntry>): GitStatusEntry {
+  return {
+    path: 'src/index.ts',
+    orig_path: null,
+    xy: '.M',
+    index_status: 'unmodified',
+    worktree_status: 'modified',
+    staged: false,
+    unstaged: true,
+    submodule: false,
+    similarity: null,
+    unmerged: null,
+    ...overrides,
+  };
+}
+
+describe('statusBadge', () => {
+  it('renders porcelain codes with human titles by staging state', () => {
+    expect(statusBadge(entry({}), false)).toEqual({ text: '·M', className: 'text-primary', title: 'Modified' });
+    expect(statusBadge(entry({ xy: 'M.', staged: true, unstaged: false }), false)).toMatchObject({
+      text: 'M·',
+      title: 'Staged',
+    });
+    expect(statusBadge(entry({ xy: 'MM', staged: true, unstaged: true }), false)).toMatchObject({
+      title: 'Staged, with unstaged edits',
+    });
+    expect(statusBadge(entry({ xy: '??' }), false)).toMatchObject({ title: 'Untracked' });
+    expect(statusBadge(entry({}), true)).toMatchObject({ className: 'text-destructive', title: 'Conflict' });
+  });
+});
+
+describe('mergeUntracked', () => {
+  it('appends synthesized entries for untracked paths not already listed', () => {
+    const status = {
+      entries: [entry({})],
+      untracked: ['src/index.ts', 'notes.md'],
+    } as unknown as GitStatusResult;
+    const merged = mergeUntracked(status);
+    expect(merged.map((item) => item.path)).toEqual(['src/index.ts', 'notes.md']);
+    expect(merged[1]).toMatchObject({ xy: '??', worktree_status: 'added', staged: false, unstaged: true });
   });
 });
 

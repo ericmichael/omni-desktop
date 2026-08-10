@@ -1,6 +1,6 @@
 import { useStore } from '@nanostores/react';
 import { BotIcon } from 'lucide-react';
-import { Fragment, memo, useEffect, useMemo } from 'react';
+import { Fragment, memo, useEffect, useMemo, useState } from 'react';
 
 import { formatTimestamp } from '@/lib/format-time';
 import { Alert, AlertDescription, AlertTitle } from '@/renderer/ds/ui/alert';
@@ -16,6 +16,7 @@ import {
   ActivityStopButton,
   groupSubagents,
   KindBadge,
+  PlanTaskRow,
   StatusDot,
   type StopController,
   subagentDotClass,
@@ -32,6 +33,7 @@ import {
   subagentItemId,
   type SubagentSummary,
 } from '@/renderer/omniagents-ui/activity-store';
+import type { TaskSummary } from '@/renderer/omniagents-ui/canonical-plan-tasks';
 import { serverOrigin } from '@/renderer/services/ipc';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { AgentRuntimeConnection, ExecutionTarget } from '@/shared/types';
@@ -76,6 +78,36 @@ const SubagentDetail = memo(
     onBack: () => void;
   }) => {
     const stoppable = actions && subagent.kind === 'worker' && subagent.worker_id && subagent.status === 'running';
+
+    // Worker-plan drill-down: the worker's own plan, read by its session id
+    // over the parent session's plan-read RPC. Fetched lazily — only while
+    // this detail page is open (never polled from the list), re-fetched when
+    // the worker's status transitions and on re-open (the page remounts per
+    // navigation). Read-only observability: errors and absent plans render
+    // no section at all.
+    const [planTasks, setPlanTasks] = useState<TaskSummary[] | null>(null);
+    const getWorkerPlan = actions?.getWorkerPlan;
+    const planSessionId = subagent.kind === 'worker' ? subagent.session_id : '';
+    useEffect(() => {
+      if (!planSessionId || !getWorkerPlan) {
+        return;
+      }
+      let cancelled = false;
+      getWorkerPlan(planSessionId).then(
+        (tasks) => {
+          if (!cancelled) {
+            setPlanTasks(tasks);
+          }
+        },
+        () => {
+          // Unreadable plan (runtime gone, older server) — stay sectionless.
+        }
+      );
+      return () => {
+        cancelled = true;
+      };
+    }, [getWorkerPlan, planSessionId, subagent.status]);
+
     return (
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <header className="flex min-h-9 shrink-0 items-center gap-2 border-b border-border px-2">
@@ -120,6 +152,16 @@ const SubagentDetail = memo(
                 <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-xs">{subagent.error}</pre>
               </AlertDescription>
             </Alert>
+          ) : null}
+          {planTasks && planTasks.length > 0 ? (
+            <section data-testid="worker-plan">
+              <ActivityDetailLabel>Plan</ActivityDetailLabel>
+              <div className="max-h-56 overflow-y-auto rounded-md border border-border p-1 text-xs">
+                {planTasks.map((t) => (
+                  <PlanTaskRow key={t.id} task={t} />
+                ))}
+              </div>
+            </section>
           ) : null}
           <section className="flex min-h-0 flex-1 flex-col">
             <ActivityDetailLabel>Transcript</ActivityDetailLabel>

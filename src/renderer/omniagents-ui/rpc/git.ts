@@ -223,6 +223,21 @@ export type GitConflictsResult = {
   content_truncated: boolean;
 };
 
+export type GitStatusWatchResult = {
+  environment_id: string;
+  repo: WorkspaceRepo;
+  watch_id: string;
+  poll_interval_ms: number;
+  digest: string;
+};
+
+export type GitStatusChangedEvent = {
+  environment_id: string;
+  repo: WorkspaceRepo;
+  watch_id: string;
+  digest: string;
+};
+
 export type GitHunkRef = { path: string; hunk_id: string };
 export type GitFileSelection = {
   paths?: string[];
@@ -685,6 +700,53 @@ export class GitClient {
         ...(item.detail === undefined ? {} : { detail: record(item.detail, 'progress.detail') }),
       });
     });
+  }
+
+  /** Server-pushed repository-status change events for this environment. */
+  onStatusChanged(handler: (event: GitStatusChangedEvent) => void): () => void {
+    return this.#rpc.on('git_status_changed', (payload) => {
+      const item = record(payload, 'git status changed');
+      if (string(item.environment_id, 'status_changed.environment_id') !== this.#environment) {
+        return;
+      }
+      handler({
+        environment_id: this.#environment,
+        repo: workspaceRepo(string(item.repo, 'status_changed.repo')),
+        watch_id: string(item.watch_id, 'status_changed.watch_id'),
+        digest: string(item.digest, 'status_changed.digest'),
+      });
+    });
+  }
+
+  /** Subscribe to server-side status polling for one repository. */
+  async statusWatch(repo: WorkspaceRepo, opts: { pollIntervalMs?: number } = {}): Promise<GitStatusWatchResult> {
+    workspaceRepo(repo);
+    const raw = await this.#request('git_status_watch', {
+      environment_id: this.#environment,
+      repo,
+      ...(opts.pollIntervalMs === undefined ? {} : { poll_interval_ms: opts.pollIntervalMs }),
+    });
+    const item = record(raw, 'git_status_watch result');
+    if (string(item.environment_id, 'status_watch.environment_id') !== this.#environment) {
+      throw new TypeError('Status watch result has the wrong environment');
+    }
+    return {
+      environment_id: this.#environment,
+      repo: workspaceRepo(string(item.repo, 'status_watch.repo')),
+      watch_id: string(item.watch_id, 'status_watch.watch_id'),
+      poll_interval_ms: number(item.poll_interval_ms, 'status_watch.poll_interval_ms'),
+      digest: string(item.digest, 'status_watch.digest'),
+    };
+  }
+
+  async statusUnwatch(watchId: string): Promise<void> {
+    const removed = await this.#request('git_status_unwatch', {
+      environment_id: this.#environment,
+      watch_id: watchId,
+    });
+    if (removed !== true) {
+      throw new TypeError('git_status_unwatch result must be true');
+    }
   }
 
   async listRepositories(opts: { path?: string; maxDepth?: number } = {}): Promise<GitListRepositoriesResult> {

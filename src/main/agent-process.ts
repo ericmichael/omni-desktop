@@ -32,6 +32,7 @@ import type {
   ManagementMutationCapabilities,
   SandboxPauseResult,
   WithTimestamp,
+  WorkspaceMountDescriptor,
 } from '@/shared/types';
 
 // ---------------------------------------------------------------------------
@@ -179,9 +180,35 @@ export type AgentProcessStartArg = {
 export type AgentHostConsumerRuntime = ExecutionTarget & {
   workspaceRoot: string;
   defaultCwd?: string;
+  /** Authoritative mount table from materialization (see AgentProcessData). */
+  mounts?: WorkspaceMountDescriptor[];
   services: Record<string, string>;
   containerId?: string;
   paused?: boolean;
+};
+
+/** Defensive parse of the materialization payload's ``mounts`` array. */
+const parseWorkspaceMounts = (value: unknown): WorkspaceMountDescriptor[] | undefined => {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const mounts: WorkspaceMountDescriptor[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== 'object') {
+      continue;
+    }
+    const record = item as Record<string, unknown>;
+    if (typeof record.name !== 'string' || !record.name || typeof record.path !== 'string' || !record.path) {
+      continue;
+    }
+    mounts.push({
+      name: record.name,
+      path: record.path,
+      writable: record.writable !== false,
+      ...(typeof record.kind === 'string' && record.kind ? { kind: record.kind } : {}),
+    });
+  }
+  return mounts;
 };
 
 export type FetchFn = typeof globalThis.fetch;
@@ -832,6 +859,7 @@ export class AgentProcess {
     if (!workspaceRoot) {
       throw new Error('AgentHost materialization returned no workspace_root');
     }
+    const parsedMounts = parseWorkspaceMounts(materialized['mounts']);
     const runtime: AgentHostConsumerRuntime = {
       workspaceId,
       environmentId,
@@ -840,6 +868,7 @@ export class AgentProcess {
       ...(typeof materialized['default_cwd'] === 'string' && materialized['default_cwd'].trim()
         ? { defaultCwd: materialized['default_cwd'].trim() }
         : {}),
+      ...(parsedMounts ? { mounts: parsedMounts } : {}),
       services:
         materialized['services'] && typeof materialized['services'] === 'object'
           ? (materialized['services'] as Record<string, string>)

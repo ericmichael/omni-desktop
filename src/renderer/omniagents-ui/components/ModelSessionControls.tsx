@@ -1,4 +1,4 @@
-import { BrainIcon, ChevronDownIcon, ShieldCheckIcon, SparklesIcon } from 'lucide-react';
+import { BrainIcon, ChevronDownIcon, ListChecksIcon, ShieldCheckIcon, SparklesIcon } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 
 import { Button } from '@/renderer/ds/ui/button';
@@ -8,6 +8,7 @@ import {
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/renderer/ds/ui/dropdown-menu';
 import {
@@ -18,6 +19,19 @@ import {
 } from '@/renderer/omniagents-ui/rpc/model-catalog';
 
 const REASONING_EFFORTS = new Set<ReasoningEffort>(['low', 'medium', 'high', 'xhigh']);
+
+// Completion reviews are always the guardian's job (or off) — there is
+// no human route until a dedicated process prompt exists server-side.
+type WorkflowReviewer = 'off' | 'guardian';
+
+const WORKFLOW_REVIEWER_LABELS: Record<WorkflowReviewer, string> = {
+  off: 'Checks off',
+  guardian: 'Task checks on',
+};
+
+function isWorkflowReviewer(value: unknown): value is WorkflowReviewer {
+  return value === 'off' || value === 'guardian';
+}
 
 function isReasoningEffort(value: string): value is ReasoningEffort {
   return REASONING_EFFORTS.has(value as ReasoningEffort);
@@ -39,6 +53,8 @@ export function ModelSessionControls({
   disabled = false,
   approvalsSupported = false,
   onSetApprovalsReviewer,
+  workflowSupported = false,
+  onSetWorkflowReviewer,
 }: {
   sessionId: string;
   transport: ModelCatalogRpcTransport;
@@ -46,12 +62,18 @@ export function ModelSessionControls({
   /** True only when the runtime negotiated the approvalReviewer feature. */
   approvalsSupported?: boolean;
   onSetApprovalsReviewer?: (reviewer: 'user' | 'auto') => Promise<unknown>;
+  /** True only when the runtime negotiated the workflowReviewer feature. */
+  workflowSupported?: boolean;
+  onSetWorkflowReviewer?: (reviewer: WorkflowReviewer) => Promise<unknown>;
 }) {
   const catalog = useMemo(() => new ModelCatalogClient(transport), [transport]);
   const [models, setModels] = useState<ModelDescriptor[]>([]);
   const [activeModel, setActiveModel] = useState<string | null>(null);
   const [reasoningEffort, setReasoningEffort] = useState<string | null>(null);
   const [approvalsReviewer, setApprovalsReviewer] = useState<'user' | 'auto'>('user');
+  // 'guardian' is the config default (workflow.completion_reviewer); a null
+  // session attribute means no override, so the control shows the default.
+  const [workflowReviewer, setWorkflowReviewer] = useState<WorkflowReviewer>('guardian');
   const [loading, setLoading] = useState(true);
   const [mutating, setMutating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -72,6 +94,8 @@ export function ModelSessionControls({
         setActiveModel(result.session?.active_model ?? result.default_model);
         setReasoningEffort(result.session?.reasoning_effort ?? null);
         setApprovalsReviewer(result.session?.approvals_reviewer === 'auto' ? 'auto' : 'user');
+        const sessionWorkflowReviewer = result.session?.workflow_reviewer;
+        setWorkflowReviewer(isWorkflowReviewer(sessionWorkflowReviewer) ? sessionWorkflowReviewer : 'guardian');
       })
       .catch((cause: unknown) => {
         if (current) {
@@ -146,6 +170,22 @@ export function ModelSessionControls({
     try {
       await onSetApprovalsReviewer(reviewer);
       setApprovalsReviewer(reviewer);
+    } catch (cause: unknown) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setMutating(false);
+    }
+  };
+
+  const chooseWorkflowReviewer = async (value: string) => {
+    if (!isWorkflowReviewer(value) || value === workflowReviewer || locked || !onSetWorkflowReviewer) {
+      return;
+    }
+    setMutating(true);
+    setError(null);
+    try {
+      await onSetWorkflowReviewer(value);
+      setWorkflowReviewer(value);
     } catch (cause: unknown) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -228,7 +268,11 @@ export function ModelSessionControls({
         </DropdownMenu>
       ) : null}
 
-      {approvalsSupported && onSetApprovalsReviewer ? (
+      {(approvalsSupported && onSetApprovalsReviewer) || (workflowSupported && onSetWorkflowReviewer) ? (
+        // One pill for both review knobs: the label tracks tool approvals
+        // (the security-relevant state); step completion reviews live in
+        // the same menu instead of spending a second pill on a setting
+        // that rarely changes.
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button
@@ -237,22 +281,47 @@ export function ModelSessionControls({
               size="sm"
               disabled={locked}
               className="h-7 gap-1.5 px-2 text-xs font-normal"
-              title="Who reviews tool approvals in this conversation"
+              title="Approvals and task checks for this conversation"
               data-testid="approvals-reviewer-control"
             >
               <ShieldCheckIcon
                 className={`size-3.5 ${approvalsReviewer === 'auto' ? 'text-primary' : 'text-muted-foreground'}`}
               />
-              {approvalsReviewer === 'auto' ? 'Approve for me' : 'Ask me'}
+              {approvalsSupported && onSetApprovalsReviewer
+                ? approvalsReviewer === 'auto'
+                  ? 'Approve for me'
+                  : 'Ask me'
+                : WORKFLOW_REVIEWER_LABELS[workflowReviewer]}
               <ChevronDownIcon className="size-3" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent side="top" align="start">
-            <DropdownMenuLabel>Tool approvals</DropdownMenuLabel>
-            <DropdownMenuRadioGroup value={approvalsReviewer} onValueChange={(value) => void chooseReviewer(value)}>
-              <DropdownMenuRadioItem value="user">Ask me</DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="auto">Approve for me</DropdownMenuRadioItem>
-            </DropdownMenuRadioGroup>
+            {approvalsSupported && onSetApprovalsReviewer ? (
+              <>
+                <DropdownMenuLabel>When the agent needs permission</DropdownMenuLabel>
+                <DropdownMenuRadioGroup value={approvalsReviewer} onValueChange={(value) => void chooseReviewer(value)}>
+                  <DropdownMenuRadioItem value="user">Ask me first</DropdownMenuRadioItem>
+                  <DropdownMenuRadioItem value="auto">Approve for me</DropdownMenuRadioItem>
+                </DropdownMenuRadioGroup>
+              </>
+            ) : null}
+            {workflowSupported && onSetWorkflowReviewer ? (
+              <>
+                {approvalsSupported && onSetApprovalsReviewer ? <DropdownMenuSeparator /> : null}
+                <DropdownMenuLabel className="flex items-center gap-1.5">
+                  <ListChecksIcon className="size-3.5 text-muted-foreground" aria-hidden />
+                  Double-check completed tasks
+                </DropdownMenuLabel>
+                <DropdownMenuRadioGroup
+                  value={workflowReviewer}
+                  onValueChange={(value) => void chooseWorkflowReviewer(value)}
+                  data-testid="workflow-reviewer-group"
+                >
+                  <DropdownMenuRadioItem value="guardian">On</DropdownMenuRadioItem>
+                  <DropdownMenuRadioItem value="off">Off</DropdownMenuRadioItem>
+                </DropdownMenuRadioGroup>
+              </>
+            ) : null}
           </DropdownMenuContent>
         </DropdownMenu>
       ) : null}

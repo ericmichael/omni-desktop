@@ -846,6 +846,32 @@
       "type": "object",
       "x-omni-stability": "experimental"
     },
+    "fs_delete": {
+      "additionalProperties": false,
+      "properties": {
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "recursive": {
+          "type": "boolean"
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "environment_id",
+        "path"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
     "fs_download_close": {
       "additionalProperties": false,
       "properties": {
@@ -977,6 +1003,56 @@
       "required": [
         "environment_id",
         "path"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "fs_mkdir": {
+      "additionalProperties": false,
+      "properties": {
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "environment_id",
+        "path"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "fs_rename": {
+      "additionalProperties": false,
+      "properties": {
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "environment_id",
+        "path",
+        "to"
       ],
       "type": "object",
       "x-omni-stability": "experimental"
@@ -1910,6 +1986,92 @@
       "type": "object",
       "x-omni-stability": "experimental"
     },
+    "git_status_changed": {
+      "additionalProperties": false,
+      "properties": {
+        "digest": {
+          "type": "string"
+        },
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
+          "type": "string"
+        },
+        "repo": {
+          "type": "string"
+        },
+        "seq": {
+          "type": "integer"
+        },
+        "stream_id": {
+          "type": "string"
+        },
+        "watch_id": {
+          "type": "string"
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "environment_id",
+        "repo",
+        "watch_id",
+        "digest"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "git_status_unwatch": {
+      "additionalProperties": false,
+      "properties": {
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
+          "type": "string"
+        },
+        "watch_id": {
+          "type": "string"
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "environment_id",
+        "watch_id"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "git_status_watch": {
+      "additionalProperties": false,
+      "properties": {
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
+          "type": "string"
+        },
+        "poll_interval_ms": {
+          "type": "integer"
+        },
+        "repo": {
+          "type": "string"
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "environment_id",
+        "repo"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
     "git_unstage": {
       "additionalProperties": false,
       "properties": {
@@ -2624,6 +2786,45 @@
       "type": "object",
       "x-omni-stability": "stable"
     },
+    "plan_completion_reviewed": {
+      "additionalProperties": false,
+      "properties": {
+        "outcome": {
+          "type": "string"
+        },
+        "rationale": {
+          "type": "string"
+        },
+        "reviewer": {
+          "type": "string"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "seq": {
+          "type": "integer"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "stream_id": {
+          "type": "string"
+        },
+        "subject": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "task_id",
+        "outcome",
+        "reviewer"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
     "platform": {
       "additionalProperties": false,
       "properties": {
@@ -3084,6 +3285,23 @@
       ],
       "type": "object",
       "x-omni-stability": "stable"
+    },
+    "set_session_workflow": {
+      "additionalProperties": false,
+      "properties": {
+        "reviewer": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "reviewer"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
     },
     "set_voice_model": {
       "additionalProperties": false,
@@ -3717,6 +3935,9 @@
       "$ref": "#/$defs/set_session_approvals"
     },
     {
+      "$ref": "#/$defs/set_session_workflow"
+    },
+    {
       "$ref": "#/$defs/agent_host_register_workspace"
     },
     {
@@ -3816,6 +4037,15 @@
       "$ref": "#/$defs/fs_upload_abort"
     },
     {
+      "$ref": "#/$defs/fs_delete"
+    },
+    {
+      "$ref": "#/$defs/fs_rename"
+    },
+    {
+      "$ref": "#/$defs/fs_mkdir"
+    },
+    {
       "$ref": "#/$defs/git_list_repositories"
     },
     {
@@ -3862,6 +4092,12 @@
     },
     {
       "$ref": "#/$defs/git_push"
+    },
+    {
+      "$ref": "#/$defs/git_status_watch"
+    },
+    {
+      "$ref": "#/$defs/git_status_unwatch"
     },
     {
       "$ref": "#/$defs/list_threads"
@@ -3948,6 +4184,9 @@
       "$ref": "#/$defs/tool_approval_reviewed"
     },
     {
+      "$ref": "#/$defs/plan_completion_reviewed"
+    },
+    {
       "$ref": "#/$defs/session_forked"
     },
     {
@@ -3964,6 +4203,9 @@
     },
     {
       "$ref": "#/$defs/git_operation_progress"
+    },
+    {
+      "$ref": "#/$defs/git_status_changed"
     },
     {
       "$ref": "#/$defs/thread_updated"

@@ -1,37 +1,37 @@
-import './ReviewSurface.css';
-
 import { useStore } from '@nanostores/react';
-import {
-  ChevronRightIcon,
-  Folder,
-  FolderOpen,
-  PanelLeftIcon,
-  RefreshCwIcon,
-  SquareArrowOutUpRightIcon,
-} from 'lucide-react';
+import { Folder, FolderOpen, PanelLeftIcon, RefreshCwIcon } from 'lucide-react';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import type { ThemedToken } from 'shiki';
 
 import { cn } from '@/renderer/ds/cn';
 import { Tree, TreeItem, TreeItemLayout, type TreeItemOpenChangeData } from '@/renderer/ds/Tree';
 import { Alert, AlertDescription } from '@/renderer/ds/ui/alert';
-import { Badge } from '@/renderer/ds/ui/badge';
 import { Button } from '@/renderer/ds/ui/button';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/renderer/ds/ui/collapsible';
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/renderer/ds/ui/empty';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/renderer/ds/ui/resizable';
 import { ScrollArea } from '@/renderer/ds/ui/scroll-area';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/renderer/ds/ui/select';
 import { Spinner } from '@/renderer/ds/ui/spinner';
 import { Toggle } from '@/renderer/ds/ui/toggle';
-import { highlightCode, type TokenizedCode, TokenSpan } from '@/renderer/omniagents-ui/components/ai/code-block';
+import {
+  buildFileTree,
+  type ChangeBadge,
+  type DiffLine,
+  type FileTreeNode,
+  firstAddedLine,
+  linesFromHunks,
+  mergeUntracked,
+  numberUnified,
+  repositoryLabel,
+  splitUnifiedDiff,
+  statusBadge,
+  treeDirPaths,
+} from '@/renderer/features/Git/diff-model';
+import { DiffLines, DiffSection, useDiffTokens } from '@/renderer/features/Git/DiffView';
 import {
   GitClient,
   type GitDiffResult,
   type GitListRepositoriesResult,
-  type GitRepository,
-  type GitStatusEntry,
   type GitStatusResult,
   type WorkspaceRepo,
 } from '@/renderer/omniagents-ui/rpc/git';
@@ -39,18 +39,6 @@ import { useRPCClient, useRPCConnected } from '@/renderer/omniagents-ui/rpc-cont
 import { $runDiffBySession } from '@/renderer/omniagents-ui/run-diff-store';
 import type { RunDiffFile, RunDiffItem } from '@/shared/chat-types';
 import type { ExecutionTarget } from '@/shared/types';
-
-import {
-  buildFileTree,
-  firstAddedLine,
-  languageForPath,
-  linesFromHunks,
-  numberUnified,
-  type ReviewDiffLine,
-  type ReviewTreeNode,
-  splitUnifiedDiff,
-  treeDirPaths,
-} from './review-model';
 
 /**
  * The Review sidecar app: a read-only, review-oriented pass over what
@@ -68,6 +56,9 @@ export type ReviewSurfaceProps = {
   executionTarget: ExecutionTarget;
   sessionId?: string;
   workspaceRoot?: string;
+  /** Single-mount scope: displayed turn-diff paths drop this wrapper and
+   *  the mount's repository is the default working-tree selection. */
+  rootPrefix?: string;
   /** Whether this persistent surface is currently visible in the dock. */
   active?: boolean;
   onOpenFile?: (path: string, line?: number) => void;
@@ -95,13 +86,17 @@ const CHANGE_CLASS: Record<RunDiffFile['changeType'], string> = {
 
 /** One row of either scope, projected into the shared display grammar. */
 type ReviewEntry = {
+  /** Displayed path (root prefix stripped in single-mount environments). */
   path: string;
-  badge: { text: string; className: string; title: string };
+  /** Path handed to onOpenFile — workspace-relative for turn entries,
+   *  repo-relative for working entries (the caller re-adds the repo). */
+  openPath: string;
+  badge: ChangeBadge;
   additions: number | null;
   deletions: number | null;
   /** Capture caveats rendered as header chips ("opaque", "no baseline"). */
   notes: string[];
-  lines: ReviewDiffLine[];
+  lines: DiffLine[];
   /** Shown in place of lines when there are none. */
   emptyNote: string;
   canOpen: boolean;
@@ -111,18 +106,14 @@ function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback;
 }
 
-function repositoryLabel(repository: GitRepository): string {
-  const branch = repository.branch ?? (repository.detached ? 'detached' : 'new repository');
-  return `${repository.repo} — ${branch}`;
-}
-
-function turnEntries(item: RunDiffItem): ReviewEntry[] {
+function turnEntries(item: RunDiffItem, stripPrefix: (path: string) => string): ReviewEntry[] {
   const byPath = splitUnifiedDiff(item.diff);
   return item.files.map((file) => {
     const raw = byPath.get(file.path);
     const lines = raw ? numberUnified(raw) : [];
     return {
-      path: file.path,
+      path: stripPrefix(file.path),
+      openPath: file.path,
       badge: {
         text: CHANGE_GLYPH[file.changeType],
         className: CHANGE_CLASS[file.changeType],
@@ -140,50 +131,14 @@ function turnEntries(item: RunDiffItem): ReviewEntry[] {
   });
 }
 
-/** The two-character porcelain badge, colored by staging state — the same
- *  reading the Ink review sidebar gives (staged, mixed, conflict, …). */
-function workingBadge(entry: GitStatusEntry, conflicted: boolean): ReviewEntry['badge'] {
-  const text = entry.xy.replace(/ /g, '·');
-  if (conflicted || entry.index_status === 'unmerged' || entry.worktree_status === 'unmerged') {
-    return { text, className: 'text-destructive', title: 'Conflict' };
-  }
-  if (entry.xy === '??') {
-    return { text, className: 'text-muted-foreground', title: 'Untracked' };
-  }
-  if (entry.staged && !entry.unstaged) {
-    return { text, className: 'text-success', title: 'Staged' };
-  }
-  if (entry.staged && entry.unstaged) {
-    return { text, className: 'text-warning', title: 'Staged, with unstaged edits' };
-  }
-  return { text, className: 'text-primary', title: 'Unstaged' };
-}
-
 function workingEntries(status: GitStatusResult, diff: GitDiffResult): ReviewEntry[] {
-  const entries = [...status.entries];
-  const known = new Set(entries.map((entry) => entry.path));
-  for (const path of status.untracked) {
-    if (!known.has(path)) {
-      entries.push({
-        path,
-        orig_path: null,
-        xy: '??',
-        index_status: 'unmodified',
-        worktree_status: 'added',
-        staged: false,
-        unstaged: true,
-        submodule: false,
-        similarity: null,
-        unmerged: null,
-      });
-    }
-  }
-  return entries.map((entry) => {
+  return mergeUntracked(status).map((entry) => {
     const file = diff.files.find((candidate) => candidate.path === entry.path);
     const lines = file && !file.binary && !file.submodule ? linesFromHunks(file.hunks) : [];
     return {
       path: entry.path,
-      badge: workingBadge(entry, status.conflicted.includes(entry.path)),
+      openPath: entry.path,
+      badge: statusBadge(entry, status.conflicted.includes(entry.path)),
       additions: file?.added_lines ?? null,
       deletions: file?.deleted_lines ?? null,
       notes: [],
@@ -207,7 +162,7 @@ function ReviewTreeNodes({
   selectedPath,
   onSelect,
 }: {
-  nodes: ReviewTreeNode[];
+  nodes: FileTreeNode[];
   entriesByPath: Map<string, ReviewEntry>;
   openDirs: ReadonlySet<string>;
   selectedPath: string | null;
@@ -281,98 +236,8 @@ function ReviewTreeNodes({
   );
 }
 
-function Counts({ additions, deletions }: { additions: number | null; deletions: number | null }) {
-  if (additions === null && deletions === null) {
-    return null;
-  }
-  return (
-    <span className="shrink-0 whitespace-nowrap font-mono text-xs">
-      {additions !== null && <span className="text-success">+{additions}</span>}{' '}
-      {deletions !== null && <span className="text-destructive">−{deletions}</span>}
-    </span>
-  );
-}
-
-function isContentLine(line: ReviewDiffLine): boolean {
-  return line.kind === 'add' || line.kind === 'delete' || line.kind === 'context';
-}
-
-/**
- * Shiki tokens for a file section's content lines, or null while pending /
- * for unhighlightable files. Content lines (adds, deletes, context) are
- * joined in order and tokenized as one block so multi-line constructs
- * highlight correctly, then mapped back one-to-one by line index.
- */
-function useDiffTokens(entry: ReviewEntry, enabled: boolean): ThemedToken[][] | null {
-  const language = useMemo(() => languageForPath(entry.path), [entry.path]);
-  const code = useMemo(
-    () =>
-      entry.lines
-        .filter(isContentLine)
-        .map((line) => line.content)
-        .join('\n'),
-    [entry.lines]
-  );
-  const [tokenized, setTokenized] = useState<TokenizedCode | null>(null);
-  useEffect(() => {
-    if (!enabled || !language || code === '') {
-      setTokenized(null);
-      return;
-    }
-    let alive = true;
-    const immediate = highlightCode(code, language, (result) => {
-      if (alive) {
-        setTokenized(result);
-      }
-    });
-    setTokenized(immediate);
-    return () => {
-      alive = false;
-    };
-  }, [enabled, language, code]);
-  return tokenized?.tokens ?? null;
-}
-
-function ReviewDiffLines({ lines, tokens }: { lines: ReviewDiffLine[]; tokens: ThemedToken[][] | null }) {
-  // nth content line ↔ nth tokenized line; separators/notes carry no code.
-  const tokenIndexByLine = useMemo(() => {
-    let next = 0;
-    return lines.map((line) => (isContentLine(line) ? next++ : null));
-  }, [lines]);
-  return (
-    <pre className="m-0 font-mono text-xs" aria-label="Diff lines">
-      {lines.map((line, index) => {
-        const tokenIndex = tokenIndexByLine[index];
-        const lineTokens = tokenIndex !== null && tokenIndex !== undefined ? tokens?.[tokenIndex] : undefined;
-        return (
-          <span
-            key={index}
-            className={cn(
-              'grid grid-cols-[3.5rem_1rem_minmax(max-content,1fr)] whitespace-pre',
-              line.kind === 'add' && 'bg-success/10',
-              line.kind === 'delete' && 'bg-destructive/10',
-              (line.kind === 'separator' || line.kind === 'note') && 'text-muted-foreground'
-            )}
-          >
-            <span className="pr-2 text-right text-muted-foreground" aria-hidden="true">
-              {line.newLineno ?? (line.kind === 'separator' ? '⋯' : '')}
-            </span>
-            <span aria-hidden="true">{line.kind === 'add' ? '+' : line.kind === 'delete' ? '-' : ' '}</span>
-            <span>
-              {lineTokens && lineTokens.length > 0
-                ? lineTokens.map((token, tokenIdx) => <TokenSpan key={tokenIdx} token={token} />)
-                : line.content}
-            </span>
-          </span>
-        );
-      })}
-    </pre>
-  );
-}
-
-/** One file in the stream: a sticky, clickable header (chevron, change
- *  badge, path, counts, caveat chips, open-file action) over a
- *  collapsible numbered diff. */
+/** One file in the stream: the shared sticky section over a collapsible
+ *  numbered diff (or the entry's empty note). */
 function FileSection({
   entry,
   open,
@@ -386,69 +251,37 @@ function FileSection({
 }) {
   // Tokenize only while expanded — a collapsed section costs nothing, and
   // the token cache makes re-expanding instant.
-  const tokens = useDiffTokens(entry, open);
+  const tokens = useDiffTokens(entry.path, entry.lines, open);
+  const openFile = useCallback(
+    () => onOpenFile?.(entry.openPath, firstAddedLine(entry.lines)),
+    [entry.lines, entry.openPath, onOpenFile]
+  );
   return (
-    <Collapsible
+    <DiffSection
+      path={entry.path}
+      badge={entry.badge}
+      additions={entry.additions}
+      deletions={entry.deletions}
+      notes={entry.notes}
       open={open}
       onOpenChange={onOpenChange}
-      className="group/file border-b border-border"
-      data-review-file={entry.path}
+      onOpenFile={onOpenFile && entry.canOpen ? openFile : undefined}
     >
-      <div className="sticky top-0 z-10 flex items-center gap-1 bg-card px-2 py-1">
-        <CollapsibleTrigger asChild>
-          <button
-            type="button"
-            className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-1 py-0.5 text-left hover:bg-accent/50"
-            aria-label={`${open ? 'Collapse' : 'Expand'} diff for ${entry.path}`}
-          >
-            <ChevronRightIcon
-              className="size-3.5 shrink-0 text-muted-foreground transition-transform group-data-[state=open]/file:rotate-90"
-              aria-hidden
-            />
-            <span
-              className={cn('shrink-0 font-mono text-xs font-semibold', entry.badge.className)}
-              title={entry.badge.title}
-            >
-              {entry.badge.text}
-            </span>
-            <span className="min-w-0 truncate font-mono text-xs font-medium text-foreground" title={entry.path}>
-              {entry.path}
-            </span>
-            <Counts additions={entry.additions} deletions={entry.deletions} />
-            {entry.notes.map((note) => (
-              <Badge key={note} variant="outline" className="shrink-0 px-1 py-0 text-[10px] font-normal text-warning">
-                {note}
-              </Badge>
-            ))}
-          </button>
-        </CollapsibleTrigger>
-        {onOpenFile && entry.canOpen ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-xs"
-            className="shrink-0 text-muted-foreground"
-            title={`Open ${entry.path}`}
-            aria-label={`Open ${entry.path}`}
-            onClick={() => onOpenFile(entry.path, firstAddedLine(entry.lines))}
-          >
-            <SquareArrowOutUpRightIcon className="size-3.5" />
-          </Button>
-        ) : null}
-      </div>
-      <CollapsibleContent>
-        {entry.lines.length > 0 ? (
-          <ReviewDiffLines lines={entry.lines} tokens={tokens} />
-        ) : (
-          <p className="px-9 pb-2 text-xs text-muted-foreground">{entry.emptyNote}</p>
-        )}
-      </CollapsibleContent>
-    </Collapsible>
+      {entry.lines.length > 0 ? (
+        <DiffLines lines={entry.lines} tokens={tokens} />
+      ) : (
+        <p className="px-9 pb-2 text-xs text-muted-foreground">{entry.emptyNote}</p>
+      )}
+    </DiffSection>
   );
 }
 
 export const ReviewSurface = memo((props: ReviewSurfaceProps) => {
-  const { executionTarget, sessionId, workspaceRoot, active = true, onOpenFile } = props;
+  const { executionTarget, sessionId, workspaceRoot, rootPrefix, active = true, onOpenFile } = props;
+  const stripPrefix = useCallback(
+    (path: string) => (rootPrefix && path.startsWith(`${rootPrefix}/`) ? path.slice(rootPrefix.length + 1) : path),
+    [rootPrefix]
+  );
   const rpc = useRPCClient();
   const connected = useRPCConnected();
   const gitClient = useMemo(() => new GitClient(rpc, executionTarget), [executionTarget, rpc]);
@@ -530,6 +363,7 @@ export const ReviewSurface = memo((props: ReviewSurfaceProps) => {
         }
         const target =
           (repo && repoList.repositories.some((candidate) => candidate.repo === repo) ? repo : null) ??
+          repoList.repositories.find((candidate) => candidate.repo === rootPrefix)?.repo ??
           repoList.repositories.find((candidate) => candidate.repo === '.')?.repo ??
           repoList.repositories[0]?.repo ??
           null;
@@ -568,7 +402,7 @@ export const ReviewSurface = memo((props: ReviewSurfaceProps) => {
     // discovery happens once per identity, and `repo` changes re-enter
     // through chooseRepository's state updates below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scope, active, connected, identityKey, readSupported, gitClient, refreshRevision]);
+  }, [scope, active, connected, identityKey, readSupported, gitClient, refreshRevision, rootPrefix]);
 
   const refresh = useCallback(() => setRefreshRevision((revision) => revision + 1), []);
   const chooseScope = useCallback((value: ReviewScope) => {
@@ -609,7 +443,7 @@ export const ReviewSurface = memo((props: ReviewSurfaceProps) => {
       next.delete(path);
       return next;
     });
-    bodyRef.current?.querySelector(`[data-review-file="${CSS.escape(path)}"]`)?.scrollIntoView({ block: 'start' });
+    bodyRef.current?.querySelector(`[data-diff-file="${CSS.escape(path)}"]`)?.scrollIntoView({ block: 'start' });
   }, []);
   const setSectionOpen = useCallback((path: string, open: boolean) => {
     setCollapsedPaths((prev) => {
@@ -625,10 +459,10 @@ export const ReviewSurface = memo((props: ReviewSurfaceProps) => {
 
   const entries = useMemo(() => {
     if (scope === 'turn') {
-      return runDiff && runDiff.files.length > 0 ? turnEntries(runDiff) : [];
+      return runDiff && runDiff.files.length > 0 ? turnEntries(runDiff, stripPrefix) : [];
     }
     return workingData ? workingEntries(workingData.status, workingData.diff) : [];
-  }, [scope, runDiff, workingData]);
+  }, [scope, runDiff, stripPrefix, workingData]);
 
   const tree = useMemo(() => buildFileTree(entries.map((entry) => entry.path)), [entries]);
   const entriesByPath = useMemo(() => new Map(entries.map((entry) => [entry.path, entry])), [entries]);
@@ -771,7 +605,7 @@ export const ReviewSurface = memo((props: ReviewSurfaceProps) => {
           </>
         )}
         <ResizablePanel id="review-diff" minSize={240}>
-          <div className="omni-review-diff h-full overflow-auto">
+          <div className="h-full overflow-auto">
             {truncationNote ? (
               <p className="border-b border-border px-3 py-1.5 text-xs text-warning" role="note">
                 {truncationNote}

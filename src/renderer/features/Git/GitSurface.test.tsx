@@ -24,7 +24,18 @@ const mocks = vi.hoisted(() => ({
     unstage: vi.fn(),
     discard: vi.fn(),
     confirmDiscard: vi.fn(),
+    commit: vi.fn(),
+    fetch: vi.fn(),
+    pull: vi.fn(),
+    push: vi.fn(),
+    log: vi.fn(),
+    branches: vi.fn(),
+    worktrees: vi.fn(),
+    conflicts: vi.fn(),
     onOperationProgress: vi.fn(() => () => {}),
+    statusWatch: vi.fn(),
+    statusUnwatch: vi.fn(),
+    onStatusChanged: vi.fn(),
   },
 }));
 
@@ -44,16 +55,21 @@ vi.mock('@/renderer/omniagents-ui/rpc/git', async (importOriginal) => {
   return { ...original, GitClient: vi.fn(() => mocks.git) };
 });
 
-vi.mock('@/renderer/ds', async () => {
-  const { createElement } = await import('react');
-  return {
-    Button: ({ children, ...props }: any) => createElement('button', props, children),
-    Select: ({ children, ...props }: any) => createElement('select', props, children),
-    Spinner: () => createElement('span', { 'aria-hidden': true }, 'loading'),
-  };
-});
+// Shiki loads WASM grammars; the surface tests only care that raw diff text
+// renders while tokens are pending.
+vi.mock('@/renderer/omniagents-ui/components/ai/code-block', () => ({
+  highlightCode: () => null,
+  TokenSpan: () => null,
+}));
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+class ResizeObserverStub {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+(globalThis as { ResizeObserver?: unknown }).ResizeObserver ??= ResizeObserverStub;
 
 const repo = workspaceRepo('.');
 const status: GitStatusResult = {
@@ -70,6 +86,18 @@ const status: GitStatusResult = {
       worktree_status: 'modified',
       staged: false,
       unstaged: true,
+      submodule: false,
+      similarity: null,
+      unmerged: null,
+    },
+    {
+      path: 'src/staged.ts',
+      orig_path: null,
+      xy: 'M.',
+      index_status: 'modified',
+      worktree_status: 'unmodified',
+      staged: true,
+      unstaged: false,
       submodule: false,
       similarity: null,
       unmerged: null,
@@ -146,6 +174,13 @@ function button(label: string): HTMLButtonElement {
   return result;
 }
 
+function inputValue(element: HTMLInputElement | HTMLTextAreaElement, value: string) {
+  const prototype = element instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+  const setter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
+  setter?.call(element, value);
+  element.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
 beforeEach(() => {
   mocks.connected = true;
   mocks.store = { codeTabs: [], projects: [], defaultProfileName: 'host' };
@@ -190,8 +225,21 @@ beforeEach(() => {
     unstaged_paths: ['src/index.ts'],
     unstaged_hunks: [],
   });
+  mocks.git.commit.mockResolvedValue({
+    kind: 'completed',
+    result: { environment_id: 'environment-1', repo, oid: 'new', amended: false },
+  });
   mocks.git.discard.mockReset();
   mocks.git.confirmDiscard.mockReset();
+  mocks.git.statusWatch.mockResolvedValue({
+    environment_id: 'environment-1',
+    repo,
+    watch_id: 'watch-1',
+    poll_interval_ms: 2000,
+    digest: 'digest-1',
+  });
+  mocks.git.statusUnwatch.mockResolvedValue(undefined);
+  mocks.git.onStatusChanged.mockReturnValue(() => {});
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -209,7 +257,8 @@ describe('GitSurface', () => {
     environmentId: 'environment-1',
     environmentGeneration: 3,
   };
-  it('discovers the session repository, filters a selected diff, and opens the first changed line', async () => {
+
+  it('discovers the session repository, streams the full diff, and opens the first changed line', async () => {
     const onOpenFile = vi.fn();
     await act(async () =>
       root.render(
@@ -227,24 +276,23 @@ describe('GitSurface', () => {
     expect(mocks.rpc.serverCall).not.toHaveBeenCalledWith('session.ensure', expect.anything());
     expect(vi.mocked(GitClient)).toHaveBeenCalledWith(mocks.rpc, executionTarget);
     expect(container.querySelector('section[aria-label="Source control"]')).not.toBeNull();
-    expect(container.querySelector('select[aria-label="Repository"]')?.getAttribute('value')).toBeNull();
-
-    await act(async () => button('src/index.ts').click());
-    await settle();
-    expect(mocks.git.diff).toHaveBeenLastCalledWith(repo, { mode: 'worktree', paths: ['src/index.ts'] });
+    // The working-tree stream is complete: untracked content rides along.
+    expect(mocks.git.diff).toHaveBeenLastCalledWith(repo, { mode: 'worktree', includeUntracked: true });
+    // Diff lines render even before Shiki tokens arrive.
+    expect(container.textContent).toContain('new');
 
     act(() => button('Open src/index.ts').click());
     expect(onOpenFile).toHaveBeenCalledWith('src/index.ts', 2);
   });
 
-  it('stages and unstages the exact file selection through explicit view buttons', async () => {
+  it('stages and unstages the exact file selection through the stream section actions', async () => {
     await act(async () =>
       root.render(<GitSurface executionTarget={executionTarget} sessionId="session-1" workspaceRoot="/workspace" />)
     );
     await settle();
     await settle();
 
-    await act(async () => button('Stage file').click());
+    await act(async () => button('Stage src/index.ts').click());
     await settle();
     expect(mocks.git.stage).toHaveBeenCalledWith(repo, {
       paths: ['src/index.ts'],
@@ -255,9 +303,41 @@ describe('GitSurface', () => {
     await act(async () => button('Staged').click());
     await settle();
     expect(mocks.git.diff).toHaveBeenLastCalledWith(repo, { mode: 'staged' });
-    await act(async () => button('Unstage file').click());
+    await act(async () => button('Unstage src/index.ts').click());
     await settle();
     expect(mocks.git.unstage).toHaveBeenCalledWith(repo, { paths: ['src/index.ts'], contextLines: 3 });
+  });
+
+  it('commits staged changes from the sidebar commit box', async () => {
+    await act(async () =>
+      root.render(<GitSurface executionTarget={executionTarget} sessionId="session-1" workspaceRoot="/workspace" />)
+    );
+    await settle();
+    await settle();
+
+    const textarea = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Commit message"]')!;
+    act(() => inputValue(textarea, 'Ship it'));
+    await act(async () => button('Commit').click());
+    await settle();
+    expect(mocks.git.commit).toHaveBeenCalledWith(repo, 'Ship it', {});
+    expect(textarea.value).toBe('');
+    expect(container.textContent).toContain('Changes committed.');
+  });
+
+  it('stages the whole working set from the sidebar group action', async () => {
+    await act(async () =>
+      root.render(<GitSurface executionTarget={executionTarget} sessionId="session-1" workspaceRoot="/workspace" />)
+    );
+    await settle();
+    await settle();
+
+    await act(async () => button('Stage all').click());
+    await settle();
+    expect(mocks.git.stage).toHaveBeenCalledWith(repo, {
+      paths: ['src/index.ts'],
+      contextLines: 3,
+      mode: 'worktree',
+    });
   });
 
   it('requires and redeems the server confirmation before discarding an exact file selection', async () => {
@@ -273,10 +353,10 @@ describe('GitSurface', () => {
     await settle();
     await settle();
 
-    await act(async () => button('Discard file').click());
+    await act(async () => button('Discard src/index.ts').click());
     await settle();
     expect(mocks.git.confirmDiscard).not.toHaveBeenCalled();
-    expect(document.querySelector('[role="alertdialog"]')?.textContent).toContain('dirty paths: src/index.ts');
+    expect(document.querySelector('[role="alertdialog"]')?.textContent).toContain('Dirty paths: src/index.ts');
 
     await act(async () => button('Discard changes').click());
     await settle();
@@ -366,6 +446,73 @@ describe('GitSurface', () => {
     expect(mocks.git.diff.mock.calls.length).toBeGreaterThan(diffCalls);
   });
 
+  it('prefers the single-mount repository over the workspace root when scoped', async () => {
+    const discovered = await mocks.git.listRepositories();
+    mocks.git.listRepositories.mockResolvedValue({
+      ...discovered,
+      repositories: [
+        discovered.repositories[0],
+        {
+          ...discovered.repositories[0],
+          repo: workspaceRepo('f74a9eba'),
+          root: 'f74a9eba',
+          absolute_root: '/workspace/f74a9eba',
+        },
+      ],
+    });
+    await act(async () =>
+      root.render(
+        <GitSurface
+          executionTarget={executionTarget}
+          sessionId="session-1"
+          workspaceRoot="/workspace"
+          rootPrefix="f74a9eba"
+        />
+      )
+    );
+    await settle();
+    await settle();
+
+    expect(mocks.git.status).toHaveBeenCalledWith('f74a9eba');
+  });
+
+  it('watches repository status server-side and refreshes quietly on change events', async () => {
+    let pushChange:
+      | ((event: { environment_id: string; repo: WorkspaceRepo; watch_id: string; digest: string }) => void)
+      | undefined;
+    mocks.git.onStatusChanged.mockImplementation(
+      (handler: (event: { environment_id: string; repo: WorkspaceRepo; watch_id: string; digest: string }) => void) => {
+        pushChange = handler;
+        return () => {};
+      }
+    );
+    await act(async () =>
+      root.render(
+        <GitSurface active executionTarget={executionTarget} sessionId="session-1" workspaceRoot="/workspace" />
+      )
+    );
+    await settle();
+    await settle();
+
+    expect(mocks.git.statusWatch).toHaveBeenCalledWith(repo);
+    const statusCalls = mocks.git.status.mock.calls.length;
+
+    act(() => pushChange!({ environment_id: 'environment-1', repo, watch_id: 'watch-1', digest: 'digest-2' }));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 350));
+    });
+    await settle();
+    expect(mocks.git.status.mock.calls.length).toBeGreaterThan(statusCalls);
+
+    act(() =>
+      root.render(
+        <GitSurface active={false} executionTarget={executionTarget} sessionId="session-1" workspaceRoot="/workspace" />
+      )
+    );
+    await settle();
+    expect(mocks.git.statusUnwatch).toHaveBeenCalledWith('watch-1');
+  });
+
   it('explains when configured repository sources are outside the session workspace', async () => {
     const discovered = await mocks.git.listRepositories();
     mocks.git.listRepositories.mockResolvedValue({
@@ -415,7 +562,6 @@ describe('GitSurface', () => {
       mode: 'range',
       fromRev: 'refs/tags/omni/seed',
     });
-    expect(container.textContent).toContain('Session changes');
 
     act(() => button('Apply to local folder').click());
     expect(mocks.invoke).not.toHaveBeenCalled();

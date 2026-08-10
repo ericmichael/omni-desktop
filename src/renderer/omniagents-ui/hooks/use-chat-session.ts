@@ -357,6 +357,33 @@ export function useChatSession(client: RPCClient) {
         });
       }),
 
+      // Plan-step completion reviews (workflow enforcement). The server
+      // broadcasts every reviewed outcome — reject / accept_unverified /
+      // escalated / accept_verified; only waived completions stay silent.
+      // Older runtimes never emit this; parse defensively.
+      client.on('plan_completion_reviewed', (p: any) => {
+        const task_id = String(p?.task_id ?? '');
+        const outcome =
+          p?.outcome === 'reject' ||
+          p?.outcome === 'accept_unverified' ||
+          p?.outcome === 'escalated' ||
+          p?.outcome === 'accept_verified'
+            ? p.outcome
+            : null;
+        if (!task_id || !outcome) {
+          return;
+        }
+        actor.send({
+          type: 'WORKFLOW_REVIEWED',
+          task_id,
+          subject: String(p?.subject ?? ''),
+          outcome,
+          reviewer: String(p?.reviewer ?? 'reviewer'),
+          rationale: typeof p?.rationale === 'string' ? p.rationale : undefined,
+          session_id: typeof p?.session_id === 'string' ? p.session_id : undefined,
+        });
+      }),
+
       // Hosted-MCP approval flow (omniagents 0.16+). Parallel to the
       // function-tool path but keyed by ``request_id`` (the model's
       // ``McpApprovalRequest.id``) and identifies the MCP server via
@@ -425,7 +452,6 @@ export function useChatSession(client: RPCClient) {
   const sessionId = useSelector(actor, (s) => s.context.sessionId);
   const runId = useSelector(actor, (s) => s.context.runId);
   const items = useSelector(actor, (s) => s.context.items);
-  const preamble = useSelector(actor, (s) => s.context.preamble);
   const status = useSelector(actor, (s) => s.context.status);
   const statusSpinner = useSelector(actor, (s) => s.context.statusSpinner);
   const statusItalic = useSelector(actor, (s) => s.context.statusItalic);
@@ -641,7 +667,6 @@ export function useChatSession(client: RPCClient) {
     sessionId,
     runId,
     items,
-    preamble,
     status,
     statusSpinner,
     statusItalic,

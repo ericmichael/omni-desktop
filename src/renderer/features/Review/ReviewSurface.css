@@ -1,6 +1,0 @@
-/* Shiki dual-theme tokens carry their dark palette as inline CSS
-   variables; consume them when the app runs dark. Scoped to the review
-   diff so the transcript CodeBlock's existing behavior is untouched. */
-.dark .omni-review-diff [style*='--shiki-dark'] {
-  color: var(--shiki-dark) !important;
-}

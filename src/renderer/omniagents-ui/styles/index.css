@@ -151,31 +151,3 @@ body.resizing {
   color: transparent;
   animation: shimmer-text 3s ease-in-out infinite;
 }
-
-/* Force prose content to inherit wrapper color (for orange preamble) */
-.prose-warning {
-  color: var(--color-warning);
-}
-.prose-warning {
-  --tw-prose-body: currentColor;
-  --tw-prose-headings: currentColor;
-  --tw-prose-lead: currentColor;
-  --tw-prose-links: currentColor;
-  --tw-prose-bold: currentColor;
-  --tw-prose-counters: currentColor;
-  --tw-prose-bullets: currentColor;
-  --tw-prose-hr: currentColor;
-  --tw-prose-quotes: currentColor;
-  --tw-prose-quote-borders: currentColor;
-  --tw-prose-captions: currentColor;
-  --tw-prose-code: currentColor;
-  --tw-prose-pre-code: currentColor;
-  --tw-prose-th-borders: currentColor;
-  --tw-prose-td-borders: currentColor;
-}
-.prose-warning :where(p, li, h1, h2, h3, h4, h5, h6, strong, em, code, a, blockquote, pre, th, td) {
-  color: inherit !important;
-}
-.prose-warning :where(ol > li::marker, ul > li::marker) {
-  color: inherit !important;
-}

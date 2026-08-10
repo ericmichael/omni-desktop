@@ -422,6 +422,8 @@ export class ProjectManager {
       bridge: this.bridge,
       processManager: this.processManager,
       appControlManager: this.appControlManager,
+      // Human-gate plan steps surface as "agent is waiting on you" inbox items.
+      inbox: this.inbox,
     });
 
     this.whenReady = this.init();
@@ -1581,6 +1583,9 @@ export class ProjectManager {
 
     // Reconciliation: stop supervisor and clean up workspace when ticket moves to a terminal column
     if (this.isTerminalColumn(ticket.projectId, columnId)) {
+      // Settlement clears the carried plan snapshot (and its human-gate
+      // inbox items) — a Done ticket has no plan to reseed.
+      this.supervisors.settlePlanSnapshot(ticketId);
       const entry = this.supervisors.machines.get(ticketId);
       if (entry) {
         console.log(

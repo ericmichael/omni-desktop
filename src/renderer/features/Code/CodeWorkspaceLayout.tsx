@@ -16,7 +16,7 @@ import {
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { AppId } from '@/shared/app-registry';
 import { buildAppRegistry } from '@/shared/app-registry';
-import type { AgentRuntimeConnection, ExecutionTarget, TicketId } from '@/shared/types';
+import type { AgentRuntimeConnection, ExecutionTarget, TicketId, WorkspaceMountDescriptor } from '@/shared/types';
 
 import { EnvironmentDock } from './EnvironmentDock';
 import { codeApi } from './state';
@@ -69,6 +69,15 @@ type CodeWorkspaceLayoutProps = {
    * cwd.
    */
   agentWorkspaceDir?: string;
+  /**
+   * Single-mount scope for the workspace sidecar surfaces: when the
+   * environment root wraps exactly one mount (chat scratch sessions,
+   * one-source projects), Files/Git/Review root themselves inside it so
+   * paths don't carry the redundant `<mountName>/` wrapper.
+   */
+  workspaceRootPrefix?: string;
+  /** Authoritative mount table for the environment (labels multi-mount roots). */
+  workspaceMounts?: WorkspaceMountDescriptor[];
   /** Stable portal host for the Files surface owned by this session column. */
   filesHost: HTMLDivElement;
   /** Stable portal host for the Git surface owned by this session column. */
@@ -111,6 +120,8 @@ export const CodeWorkspaceLayout = memo(
     onPendingMessagesFlushed,
     tabId,
     agentWorkspaceDir,
+    workspaceRootPrefix,
+    workspaceMounts,
     filesHost,
     gitHost,
     reviewHost,
@@ -258,6 +269,8 @@ export const CodeWorkspaceLayout = memo(
                         executionTarget={executionTarget}
                         sessionId={sessionId}
                         workspaceRoot={agentWorkspaceDir}
+                        rootPrefix={workspaceRootPrefix}
+                        mounts={workspaceMounts}
                       />
                     )}
                     {gitActivated && (
@@ -268,6 +281,7 @@ export const CodeWorkspaceLayout = memo(
                         executionTarget={executionTarget}
                         sessionId={sessionId}
                         workspaceRoot={agentWorkspaceDir}
+                        rootPrefix={workspaceRootPrefix}
                         onOpenFile={handleGitOpenFile}
                       />
                     )}
@@ -278,6 +292,7 @@ export const CodeWorkspaceLayout = memo(
                         executionTarget={executionTarget}
                         sessionId={sessionId}
                         workspaceRoot={agentWorkspaceDir}
+                        rootPrefix={workspaceRootPrefix}
                         onOpenFile={handleGitOpenFile}
                       />
                     )}

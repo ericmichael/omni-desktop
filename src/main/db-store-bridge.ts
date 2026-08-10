@@ -42,6 +42,7 @@ import type {
   Page,
   PageId,
   Pipeline,
+  PlanSnapshotEntry,
   Project,
   ProjectId,
   ProjectSource,
@@ -267,6 +268,13 @@ export function rowToTicket(row: TicketRow, comments?: CommentRow[]): Ticket {
     ticket.assignee = row.assignee;
   }
 
+  if (row.last_plan_snapshot) {
+    const snapshot = parseJsonOr<PlanSnapshotEntry[]>(row.last_plan_snapshot, []);
+    if (Array.isArray(snapshot) && snapshot.length > 0) {
+      ticket.lastPlanSnapshot = snapshot;
+    }
+  }
+
   if (comments && comments.length > 0) {
     ticket.comments = comments.map(rowToComment);
   }
@@ -452,6 +460,7 @@ export function ticketToRow(t: Ticket): TicketRow {
     pr_review: t.pullRequests && t.pullRequests.length > 0 ? JSON.stringify(t.pullRequests) : null,
     pr_merged_at: t.prMergedAt && Object.keys(t.prMergedAt).length > 0 ? JSON.stringify(t.prMergedAt) : null,
     assignee: t.assignee ?? null,
+    last_plan_snapshot: t.lastPlanSnapshot && t.lastPlanSnapshot.length > 0 ? JSON.stringify(t.lastPlanSnapshot) : null,
     created_at: toIso(t.createdAt),
     updated_at: toIso(t.updatedAt),
   };

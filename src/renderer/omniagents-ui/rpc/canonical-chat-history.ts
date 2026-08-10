@@ -39,6 +39,44 @@ function planStepStatus(value: unknown): PlanStep['status'] {
     : undefined;
 }
 
+/**
+ * Completion-review verification for a canonical plan step. Newer runtimes
+ * ship a compact ``verified`` boolean-or-null (mirroring ``to_summaries()``);
+ * canonical content may instead carry the persisted ``review`` dict, whose
+ * ``verified``/``unverified`` outcomes map to the compact form (``waived`` and
+ * malformed values stay undefined — no review to badge).
+ */
+function planStepVerified(step: Record<string, unknown>): boolean | null | undefined {
+  if (typeof step.verified === 'boolean' || step.verified === null) {
+    return step.verified;
+  }
+  const review = step.review;
+  if (review && typeof review === 'object' && !Array.isArray(review)) {
+    const outcome = (review as Record<string, unknown>).outcome;
+    if (outcome === 'verified') {
+      return true;
+    }
+    if (outcome === 'unverified') {
+      return false;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Mid-step criteria-edit ratchet stamp. Newer runtimes ship a compact
+ * ``criteriaEdited`` boolean in summaries; persisted canonical steps carry
+ * ``criteria_edited`` alongside the stamped ``original_exit_criteria``. A
+ * present non-empty stamp implies an edit even if the flag is missing;
+ * anything else stays undefined (no annotation to render).
+ */
+function planStepCriteriaEdited(step: Record<string, unknown>): boolean | undefined {
+  if (step.criteria_edited === true || step.criteriaEdited === true) {
+    return true;
+  }
+  return stringValue(step.original_exit_criteria) ? true : undefined;
+}
+
 function runDiffChangeType(value: unknown): RunDiffFile['changeType'] | undefined {
   return value === 'added' || value === 'modified' || value === 'deleted' ? value : undefined;
 }
@@ -152,6 +190,49 @@ export function adaptCanonicalConversationItem(item: ConversationItem): MessageI
       // approvals remain visible as structured history instead of re-opening
       // an actionable approval card.
       if (item.status !== 'started' || !requestId) {
+        // Reviewer-resolved approvals (newer runtimes stamp {reviewer,
+        // outcome, rationale, risk_level} onto the content at resolution)
+        // render as the same guardian shield step the live
+        // ``tool_approval_reviewed`` event produces — not as a generic
+        // approval card. Human-decided approvals on older runtimes carry
+        // no reviewer metadata and keep the structured mapping.
+        const reviewer = stringValue(content.reviewer);
+        const reviewOutcome = content.outcome === 'allow' || content.outcome === 'deny' ? content.outcome : undefined;
+        if (requestId && reviewer && reviewOutcome) {
+          return {
+            type: 'guardian_review',
+            request_id: requestId,
+            tool: stringValue(content.tool) ?? 'tool',
+            reviewer,
+            outcome: reviewOutcome,
+            rationale: stringValue(content.rationale),
+            risk_level: stringValue(content.risk_level),
+            kind: approvalKind === 'mcp' ? 'mcp' : 'tool',
+            server_label: stringValue(content.server_label),
+            session_id: item.thread_id,
+            canonical,
+          };
+        }
+        // Human-decided approvals carry only ``decision`` ("approve" /
+        // "reject", stamped by record_approval_decision). Fold them into
+        // the run's chain as a review step attributed to "you" — the same
+        // compact shape as guardian resolutions — instead of a standalone
+        // "Approval" card the live session never shows.
+        const decision = stringValue(content.decision);
+        if (requestId && (decision === 'approve' || decision === 'reject')) {
+          return {
+            type: 'guardian_review',
+            request_id: requestId,
+            tool: stringValue(content.tool) ?? 'tool',
+            reviewer: 'you',
+            outcome: decision === 'approve' ? 'allow' : 'deny',
+            rationale: stringValue(content.rejection_message),
+            kind: approvalKind === 'mcp' ? 'mcp' : 'tool',
+            server_label: stringValue(content.server_label),
+            session_id: item.thread_id,
+            canonical,
+          };
+        }
         return structured(item, 'Approval', stringify(content.decision ?? content.reason));
       }
       return {
@@ -198,6 +279,12 @@ export function adaptCanonicalConversationItem(item: ConversationItem): MessageI
                 blockedBy: Array.isArray(step.blocked_by)
                   ? step.blocked_by.filter((value): value is string => typeof value === 'string')
                   : undefined,
+                // Persisted snake_case with a camelCase wire fallback,
+                // matching the activeForm/active_form precedent. Empty
+                // criteria mean "no semantic review" — normalize to unset.
+                exitCriteria: (stringValue(step.exit_criteria) ?? stringValue(step.exitCriteria)) || undefined,
+                verified: planStepVerified(step),
+                criteriaEdited: planStepCriteriaEdited(step),
               },
             ]
           : [];
@@ -255,6 +342,35 @@ export function adaptCanonicalConversationItem(item: ConversationItem): MessageI
         truncated: content.truncated === true,
         filesTruncated: content.files_truncated === true,
         status: item.status,
+        canonical,
+      };
+    }
+    case 'workflow_review': {
+      // Plan-step completion reviews (newer runtimes record these; the live
+      // twin is the ``plan_completion_reviewed`` event). Defensive on the
+      // outcome: only the four known values map to the workflow chip — an
+      // unknown outcome falls back to the structured presentation rather
+      // than rendering a chip whose summary line would lie.
+      const taskId =
+        stringValue(content.task_id) ?? (typeof content.task_id === 'number' ? String(content.task_id) : undefined);
+      const outcome =
+        content.outcome === 'reject' ||
+        content.outcome === 'accept_unverified' ||
+        content.outcome === 'escalated' ||
+        content.outcome === 'accept_verified'
+          ? content.outcome
+          : undefined;
+      if (!taskId || !outcome) {
+        return structured(item, 'Workflow review', stringValue(content.subject));
+      }
+      return {
+        type: 'workflow_review',
+        task_id: taskId,
+        subject: stringValue(content.subject) ?? '',
+        outcome,
+        reviewer: stringValue(content.reviewer) ?? 'reviewer',
+        rationale: stringValue(content.rationale),
+        session_id: item.thread_id,
         canonical,
       };
     }

@@ -27,7 +27,7 @@ import { persistedStoreApi } from '@/renderer/services/store';
 import { isLocalVoiceCapable } from '@/renderer/services/voice-client';
 import { $hoveredVoiceScope, VoiceScopeContext } from '@/renderer/services/voice-recording';
 import type { AppId } from '@/shared/app-registry';
-import type { CodeTab, CodeTabId, ExecutionTarget, TicketId } from '@/shared/types';
+import type { CodeTab, CodeTabId, ExecutionTarget, TicketId, WorkspaceMountDescriptor } from '@/shared/types';
 import { firstSource, isChatColumn } from '@/shared/types';
 import { getActivePersona } from '@/shared/voice-personas';
 
@@ -36,6 +36,7 @@ import { CodeWorkspaceLayout } from './CodeWorkspaceLayout';
 import { CHAT_SUGGESTIONS, COLUMN_SUGGESTIONS } from './empty-suggestions';
 import { $codeTabErrors, $codeTabStatuses, codeApi } from './state';
 import { useCodeAutoLaunch } from './use-code-auto-launch';
+import { workspaceScopeFromMounts } from './workspace-mounts';
 
 const CodeErrorView = memo(({ tabId, retry }: { tabId: CodeTabId; retry: () => void }) => {
   const allErrors = useStore($codeTabErrors);
@@ -76,6 +77,8 @@ const CodeRunningView = memo(
     onClientToolCall,
     tabId,
     agentWorkspaceDir,
+    workspaceRootPrefix,
+    workspaceMounts,
     filesHost,
     gitHost,
     reviewHost,
@@ -107,6 +110,10 @@ const CodeRunningView = memo(
     onClientToolCall?: ClientToolCallHandler;
     tabId?: string;
     agentWorkspaceDir?: string;
+    /** Single-mount scope for the workspace sidecar surfaces. */
+    workspaceRootPrefix?: string;
+    /** Authoritative mount table for the environment. */
+    workspaceMounts?: WorkspaceMountDescriptor[];
     filesHost: HTMLDivElement;
     gitHost: HTMLDivElement;
     reviewHost: HTMLDivElement;
@@ -168,6 +175,8 @@ const CodeRunningView = memo(
             onPlanDecision={resolvePlanApproval}
             tabId={tabId}
             agentWorkspaceDir={agentWorkspaceDir}
+            workspaceRootPrefix={workspaceRootPrefix}
+            workspaceMounts={workspaceMounts}
             filesHost={filesHost}
             gitHost={gitHost}
             reviewHost={reviewHost}
@@ -425,6 +434,14 @@ export const CodeTabContent = memo(
     // source of Host/Devbox drift whenever source layouts differed.
     const agentWorkspaceDir = sandboxUrls?.workspaceRoot;
 
+    // Scope the Files/Git/Review surfaces from the environment's
+    // authoritative mount table: a single mount that landed under the root
+    // (container `/workspace/<mountName>`; the chat wrapper named by the
+    // session id) collapses so paths read `index.html`, not
+    // `<session-id>/index.html`. Multi-mount environments keep the
+    // composite root — there the mount level is real information.
+    const workspaceRootPrefix = useMemo(() => workspaceScopeFromMounts(sandboxUrls?.mounts), [sandboxUrls?.mounts]);
+
     const handleSessionChange = useCallback(
       (sessionId: string | undefined) => {
         codeApi.setTabSessionId(tab.id, sessionId);
@@ -539,6 +556,8 @@ export const CodeTabContent = memo(
               onClientToolCall={handleClientToolCall}
               tabId={tab.id}
               agentWorkspaceDir={agentWorkspaceDir}
+              workspaceRootPrefix={workspaceRootPrefix}
+              workspaceMounts={sandboxUrls?.mounts}
               filesHost={filesHost}
               gitHost={gitHost}
               reviewHost={reviewHost}

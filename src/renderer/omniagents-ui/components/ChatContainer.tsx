@@ -20,7 +20,12 @@ export function ChatContainerRoot({ className, children, ...rest }: Conversation
 export function ChatContainerContent({ className, children, ...rest }: ConversationContentProps) {
   return (
     <ConversationContent
-      className={cn('flex w-full min-w-0 max-w-full flex-col overflow-x-hidden', className)}
+      // `gap-0 p-0` neutralize the vendored ConversationContent defaults
+      // (`gap-8 p-4`): the flex gap would otherwise STACK with the
+      // transcript's own `space-y-*` margins (two spacing systems, ~44px
+      // between every item), and the padding would fight the caller's by
+      // stylesheet order. Callers own both via className.
+      className={cn('flex w-full min-w-0 max-w-full flex-col gap-0 overflow-x-hidden p-0', className)}
       {...rest}
     >
       {children}

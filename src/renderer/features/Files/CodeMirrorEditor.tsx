@@ -1,4 +1,7 @@
+import { LanguageDescription } from '@codemirror/language';
+import { languages } from '@codemirror/language-data';
 import { Compartment, EditorState, Prec } from '@codemirror/state';
+import { oneDark } from '@codemirror/theme-one-dark';
 import { EditorView, keymap } from '@codemirror/view';
 import { basicSetup } from 'codemirror';
 import { useEffect, useRef } from 'react';
@@ -18,11 +21,17 @@ export type CodeMirrorEditorProps = {
   ariaLabel?: string;
   autoFocus?: boolean;
   revealRequest?: CodeMirrorRevealRequest;
+  /** Workspace path; selects the syntax-highlighting language by filename. */
+  path?: string;
+  /** Follow the app's dark theme (One Dark) instead of the light default. */
+  dark?: boolean;
 };
 
 /**
  * Controlled CodeMirror 6 wrapper for source files. Saving is deliberately
  * explicit: Mod-S delegates to the owner and no edit is written on a timer.
+ * Language support loads lazily from `@codemirror/language-data` by
+ * filename; unknown files stay plain text.
  */
 export function CodeMirrorEditor({
   value,
@@ -32,6 +41,8 @@ export function CodeMirrorEditor({
   ariaLabel = 'Source editor',
   autoFocus = false,
   revealRequest,
+  path,
+  dark = false,
 }: CodeMirrorEditorProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -39,6 +50,8 @@ export function CodeMirrorEditor({
   const onSaveRef = useRef(onSave);
   const syncingRef = useRef(false);
   const editableCompartmentRef = useRef(new Compartment());
+  const languageCompartmentRef = useRef(new Compartment());
+  const themeCompartmentRef = useRef(new Compartment());
 
   onChangeRef.current = onChange;
   onSaveRef.current = onSave;
@@ -58,6 +71,8 @@ export function CodeMirrorEditor({
           basicSetup,
           EditorState.tabSize.of(2),
           editable.of([EditorState.readOnly.of(readOnly), EditorView.editable.of(!readOnly)]),
+          languageCompartmentRef.current.of([]),
+          themeCompartmentRef.current.of([]),
           EditorView.contentAttributes.of({
             'aria-label': ariaLabel,
             'aria-readonly': String(readOnly),
@@ -129,6 +144,38 @@ export function CodeMirrorEditor({
 
   useEffect(() => {
     const view = viewRef.current;
+    if (!view) {
+      return;
+    }
+    const filename = path?.split('/').pop() ?? '';
+    const description = filename ? LanguageDescription.matchFilename(languages, filename) : null;
+    if (!description) {
+      view.dispatch({ effects: languageCompartmentRef.current.reconfigure([]) });
+      return;
+    }
+    let alive = true;
+    description
+      .load()
+      .then((support) => {
+        const target = viewRef.current;
+        if (alive && target) {
+          target.dispatch({ effects: languageCompartmentRef.current.reconfigure(support) });
+        }
+      })
+      .catch(() => {
+        // Language bundle failed to load — the file stays plain text.
+      });
+    return () => {
+      alive = false;
+    };
+  }, [path]);
+
+  useEffect(() => {
+    viewRef.current?.dispatch({ effects: themeCompartmentRef.current.reconfigure(dark ? oneDark : []) });
+  }, [dark]);
+
+  useEffect(() => {
+    const view = viewRef.current;
     if (!view || !revealRequest) {
       return;
     }
@@ -149,7 +196,13 @@ export function CodeMirrorEditor({
   return (
     <div
       ref={hostRef}
-      className="h-full min-h-0 min-w-0 overflow-hidden bg-background [&_.cm-activeLine,_&_.cm-activeLineGutter]:bg-transparent [&_.cm-cursor]:border-l-foreground [&_.cm-editor]:h-full [&_.cm-editor]:bg-background [&_.cm-editor]:text-foreground [&_.cm-focused]:outline-2 [&_.cm-gutters]:border-r-border [&_.cm-gutters]:bg-card [&_.cm-gutters]:text-muted-foreground [&_.cm-scroller]:overflow-auto [&_.cm-scroller]:font-mono [&_.cm-scroller]:text-sm [&_.cm-scroller]:leading-relaxed [&_.cm-selectionBackground,_&_.cm-content_::selection]:!bg-primary/10 -outline-offset-2 outline-ring"
+      className={`${'h-full min-h-0 min-w-0 overflow-hidden bg-background [&_.cm-activeLine,_&_.cm-activeLineGutter]:bg-transparent [&_.cm-editor]:h-full [&_.cm-focused]:outline-2 [&_.cm-scroller]:overflow-auto [&_.cm-scroller]:font-mono [&_.cm-scroller]:text-sm [&_.cm-scroller]:leading-relaxed -outline-offset-2 outline-ring'} ${
+        // In dark mode One Dark owns the palette; in light mode align the
+        // default theme's chrome with the app's semantic colors.
+        dark
+          ? ''
+          : '[&_.cm-cursor]:border-l-foreground [&_.cm-editor]:bg-background [&_.cm-editor]:text-foreground [&_.cm-gutters]:border-r-border [&_.cm-gutters]:bg-card [&_.cm-gutters]:text-muted-foreground [&_.cm-selectionBackground,_&_.cm-content_::selection]:!bg-primary/10'
+      }`}
       data-testid="source-editor"
     />
   );

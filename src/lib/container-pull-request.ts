@@ -32,7 +32,10 @@ const TIMEOUT_MS = 15_000;
 const EXEC_USER = '1000:1000';
 
 /** Resolve a per-source mount path inside the container. */
-const mountPath = (mountName: string): string => `${WORKSPACE_ROOT}/${mountName}`;
+// A root mount ('.') IS the workspace root — solo folders (chat scratch
+// dirs) seed there so no wrapper directory exists.
+const mountPath = (mountName: string): string =>
+  mountName === '.' ? WORKSPACE_ROOT : `${WORKSPACE_ROOT}/${mountName}`;
 
 /**
  * Run an arbitrary command inside one source's mounted subdirectory and return

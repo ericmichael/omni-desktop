@@ -655,6 +655,24 @@ describe('ProcessManager', () => {
       expect(arg.sources[0]!.workspaceDir).not.toBe(declaredDir);
     });
 
+    it('mounts a synthesized solo folder at the workspace root', async () => {
+      // No project sources → the bare workspaceDir (chat scratch dir,
+      // managed project dir) IS the workspace: mountName '.' seeds the
+      // sandbox root directly, so no wrapper directory (for chat, the
+      // session id) ever appears in any path.
+      const soloDir = mkdtempSync(path.join(tmpdir(), 'omni-solo-'));
+      const { pm } = makePm();
+
+      await pm.start('tab-solo', { workspaceDir: soloDir });
+
+      const arg = hoisted.agentProcessInstances[0]!.start.mock.calls[0]![0] as {
+        sources: Array<{ mountName: string; kind: string; workspaceDir?: string }>;
+      };
+      expect(arg.sources).toEqual([
+        expect.objectContaining({ mountName: '.', kind: 'local', workspaceDir: soloDir, writable: true }),
+      ]);
+    });
+
     it('publishes external Git metadata for a synthesized local worktree source', async () => {
       const primary = mkdtempSync(path.join(tmpdir(), 'omni-synth-primary-'));
       const checkout = `${primary}-checkout`;

@@ -2,6 +2,7 @@
 // Adapted from ai-elements, decoupled from Vercel AI SDK
 
 export * from './artifact';
+export * from './chain-of-thought';
 export * from './checkpoint';
 export * from './code-block';
 export * from './confirmation';

@@ -1,16 +1,16 @@
 import type { BundledLanguage } from 'shiki';
 
-import type { GitDiffHunk } from '@/renderer/omniagents-ui/rpc/git';
+import type { GitDiffHunk, GitRepository, GitStatusEntry, GitStatusResult } from '@/renderer/omniagents-ui/rpc/git';
 
 /**
- * Presentation logic for the Review surface: both scopes feed one display
+ * Presentation logic shared by the Git and Review sidecar apps: one display
  * grammar — numbered diff lines where the number is the line's position in
  * the file AS IT EXISTS NOW (deleted lines carry no number; they are
  * events between lines, marked only by `-`). Pure and unit-testable (the
  * launcher port of the Ink TUI's ``review-model``).
  */
 
-export type ReviewDiffLine = {
+export type DiffLine = {
   kind: 'add' | 'delete' | 'context' | 'note' | 'separator';
   newLineno: number | null;
   content: string;
@@ -51,8 +51,8 @@ const HUNK_HEADER = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@ ?(.*)$/;
  * with header variants — treating "n" as context is how a bare `new file`
  * once rendered as the mystery line `0 ew file`.
  */
-export function numberUnified(rawLines: string[]): ReviewDiffLine[] {
-  const out: ReviewDiffLine[] = [];
+export function numberUnified(rawLines: string[]): DiffLine[] {
+  const out: DiffLine[] = [];
   let newNo = 0;
   let inHunk = false;
   for (const line of rawLines) {
@@ -87,38 +87,109 @@ export function numberUnified(rawLines: string[]): ReviewDiffLine[] {
  * Structured hunks (the git RPC's working-tree diff) → the same numbered
  * display lines, so both scopes render through one component.
  */
-export function linesFromHunks(hunks: GitDiffHunk[]): ReviewDiffLine[] {
-  const out: ReviewDiffLine[] = [];
+export function linesFromHunks(hunks: GitDiffHunk[]): DiffLine[] {
+  const out: DiffLine[] = [];
   for (const hunk of hunks) {
     out.push({ kind: 'separator', newLineno: null, content: hunk.section_heading ?? '' });
-    for (const line of hunk.lines) {
-      switch (line.origin) {
-        case 'add':
-          out.push({ kind: 'add', newLineno: line.new_lineno, content: line.content });
-          break;
-        case 'delete':
-          out.push({ kind: 'delete', newLineno: null, content: line.content });
-          break;
-        case 'no_newline':
-          out.push({ kind: 'note', newLineno: null, content: '\\ No newline at end of file' });
-          break;
-        default:
-          out.push({ kind: 'context', newLineno: line.new_lineno, content: line.content });
-      }
+    out.push(...linesFromHunk(hunk));
+  }
+  return out;
+}
+
+/** One hunk's display lines without the leading separator — for renderers
+ *  that draw their own hunk header row (the Git app's hunk blocks). */
+export function linesFromHunk(hunk: GitDiffHunk): DiffLine[] {
+  const out: DiffLine[] = [];
+  for (const line of hunk.lines) {
+    switch (line.origin) {
+      case 'add':
+        out.push({ kind: 'add', newLineno: line.new_lineno, content: line.content });
+        break;
+      case 'delete':
+        out.push({ kind: 'delete', newLineno: null, content: line.content });
+        break;
+      case 'no_newline':
+        out.push({ kind: 'note', newLineno: null, content: '\\ No newline at end of file' });
+        break;
+      default:
+        out.push({ kind: 'context', newLineno: line.new_lineno, content: line.content });
     }
   }
   return out;
 }
 
-export function firstAddedLine(lines: ReviewDiffLine[]): number | undefined {
+export function firstAddedLine(lines: DiffLine[]): number | undefined {
   return lines.find((line) => line.kind === 'add' && line.newLineno !== null)?.newLineno ?? undefined;
+}
+
+// ----- status presentation --------------------------------------------------
+
+/** How a changed file renders in file lists and section headers. */
+export type ChangeBadge = { text: string; className: string; title: string };
+
+/**
+ * The two-character porcelain badge, colored by staging state — the same
+ * reading the Ink review sidebar gives (staged, mixed, conflict, …).
+ */
+export function statusBadge(entry: GitStatusEntry, conflicted: boolean): ChangeBadge {
+  const text = entry.xy.replace(/[ .]/g, '·');
+  if (conflicted || entry.index_status === 'unmerged' || entry.worktree_status === 'unmerged') {
+    return { text, className: 'text-destructive', title: 'Conflict' };
+  }
+  if (entry.xy === '??') {
+    return { text, className: 'text-muted-foreground', title: 'Untracked' };
+  }
+  if (entry.staged && !entry.unstaged) {
+    return { text, className: 'text-success', title: 'Staged' };
+  }
+  if (entry.staged && entry.unstaged) {
+    return { text, className: 'text-warning', title: 'Staged, with unstaged edits' };
+  }
+  return { text, className: 'text-primary', title: humanFileStatus(entry.worktree_status) };
+}
+
+/** `worktree_status`/`index_status` → sentence-case human label. */
+export function humanFileStatus(status: GitStatusEntry['worktree_status']): string {
+  const text = status.replaceAll('_', ' ');
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+/**
+ * Status entries plus synthesized entries for untracked paths the porcelain
+ * listing does not already carry — the complete "what changed" list.
+ */
+export function mergeUntracked(status: GitStatusResult): GitStatusEntry[] {
+  const entries = [...status.entries];
+  const known = new Set(entries.map((entry) => entry.path));
+  for (const path of status.untracked) {
+    if (!known.has(path)) {
+      entries.push({
+        path,
+        orig_path: null,
+        xy: '??',
+        index_status: 'unmodified',
+        worktree_status: 'added',
+        staged: false,
+        unstaged: true,
+        submodule: false,
+        similarity: null,
+        unmerged: null,
+      });
+    }
+  }
+  return entries;
+}
+
+export function repositoryLabel(repository: GitRepository): string {
+  const branch = repository.branch ?? (repository.detached ? 'detached' : 'new repository');
+  return `${repository.repo} — ${branch}`;
 }
 
 // ----- sidebar file tree ----------------------------------------------------
 
-export type ReviewTreeDir = { kind: 'dir'; name: string; path: string; children: ReviewTreeNode[] };
-export type ReviewTreeFile = { kind: 'file'; name: string; path: string };
-export type ReviewTreeNode = ReviewTreeDir | ReviewTreeFile;
+export type FileTreeDir = { kind: 'dir'; name: string; path: string; children: FileTreeNode[] };
+export type FileTreeFile = { kind: 'file'; name: string; path: string };
+export type FileTreeNode = FileTreeDir | FileTreeFile;
 
 type MutableDir = { name: string; path: string; dirs: Map<string, MutableDir>; files: string[] };
 
@@ -131,7 +202,7 @@ function compare(a: string, b: string): number {
  * directory chains compress into one node ("src/renderer/features"), the
  * VS Code compact-folders reading; directories sort before files.
  */
-export function buildFileTree(paths: string[]): ReviewTreeNode[] {
+export function buildFileTree(paths: string[]): FileTreeNode[] {
   const root: MutableDir = { name: '', path: '', dirs: new Map(), files: [] };
   for (const path of paths) {
     const parts = path.split('/');
@@ -146,8 +217,8 @@ export function buildFileTree(paths: string[]): ReviewTreeNode[] {
     }
     node.files.push(path);
   }
-  const toNodes = (dir: MutableDir): ReviewTreeNode[] => {
-    const dirs: ReviewTreeDir[] = [...dir.dirs.values()].map((child) => {
+  const toNodes = (dir: MutableDir): FileTreeNode[] => {
+    const dirs: FileTreeDir[] = [...dir.dirs.values()].map((child) => {
       let compact = child;
       let name = child.name;
       while (compact.files.length === 0 && compact.dirs.size === 1) {
@@ -156,7 +227,7 @@ export function buildFileTree(paths: string[]): ReviewTreeNode[] {
       }
       return { kind: 'dir', name, path: compact.path, children: toNodes(compact) };
     });
-    const files: ReviewTreeFile[] = dir.files.map((path) => ({
+    const files: FileTreeFile[] = dir.files.map((path) => ({
       kind: 'file',
       name: path.split('/').pop() ?? path,
       path,
@@ -169,9 +240,9 @@ export function buildFileTree(paths: string[]): ReviewTreeNode[] {
 }
 
 /** Every directory path in the tree — the default-expanded set. */
-export function treeDirPaths(nodes: ReviewTreeNode[]): string[] {
+export function treeDirPaths(nodes: FileTreeNode[]): string[] {
   const out: string[] = [];
-  const walk = (list: ReviewTreeNode[]): void => {
+  const walk = (list: FileTreeNode[]): void => {
     for (const node of list) {
       if (node.kind === 'dir') {
         out.push(node.path);

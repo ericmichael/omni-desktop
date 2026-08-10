@@ -440,6 +440,7 @@ export class ProcessManager {
         environmentGeneration: runtime.environmentGeneration,
         workspaceRoot: runtime.workspaceRoot,
         ...(runtime.defaultCwd ? { defaultCwd: runtime.defaultCwd } : {}),
+        ...(runtime.mounts ? { mounts: runtime.mounts } : {}),
         services: runtime.services,
         containerId: runtime.containerId,
         ...(runtime.paused !== undefined ? { paused: runtime.paused } : {}),
@@ -593,17 +594,20 @@ export class ProcessManager {
       }
     }
     // No attached sources (chat scratch dir / managed project dir / Personal
-    // root): synthesize one source from the workspaceDir we were given,
-    // defaulting mountName to the basename.
+    // root): synthesize one source from the workspaceDir we were given.
+    // A solo folder mounts AT the workspace root (mountName '.'), so every
+    // profile agrees on the layout: root == the folder, cwd == root, and no
+    // surface ever shows a wrapper directory. Before this, containers
+    // mounted it at `/workspace/<basename>` — for chat scratch dirs that
+    // basename is the session id, which leaked into every path display.
     if (!workspaceDir) {
       return [];
     }
     this.ensureWorkspaceDir(workspaceDir);
-    const mountName = path.basename(workspaceDir) || 'workspace';
     const kind = this.directoryHasGit(workspaceDir) ? 'local-git' : 'local';
     return [
       {
-        mountName,
+        mountName: '.',
         kind,
         workspaceDir,
         writable: true,

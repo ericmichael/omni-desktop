@@ -1,9 +1,10 @@
 import { useStore } from '@nanostores/react';
-import { TriangleAlert } from 'lucide-react';
-import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { PanelLeftIcon, RefreshCwIcon, TriangleAlert } from 'lucide-react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { profileRunsOnHost } from '@/lib/artifacts';
+import { cn } from '@/renderer/ds/cn';
 import { Alert, AlertDescription, AlertTitle } from '@/renderer/ds/ui/alert';
 import {
   AlertDialog,
@@ -17,17 +18,16 @@ import {
 } from '@/renderer/ds/ui/alert-dialog';
 import { Button } from '@/renderer/ds/ui/button';
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/renderer/ds/ui/empty';
-import { NativeSelect as Select } from '@/renderer/ds/ui/native-select';
+import { NativeSelect } from '@/renderer/ds/ui/native-select';
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/renderer/ds/ui/resizable';
 import { Spinner } from '@/renderer/ds/ui/spinner';
+import { Toggle } from '@/renderer/ds/ui/toggle';
 import { ToggleGroup, ToggleGroupItem } from '@/renderer/ds/ui/toggle-group';
 import {
   GitClient,
-  type GitConfirmation,
   type GitDiffResult,
-  type GitFileSelection,
   type GitListRepositoriesResult,
   type GitRepository,
-  type GitSelection,
   type GitStatusResult,
   type WorkspaceRepo,
 } from '@/renderer/omniagents-ui/rpc/git';
@@ -36,57 +36,45 @@ import { emitter } from '@/renderer/services/ipc';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { CodeTabId, ExecutionTarget, ProjectSource } from '@/shared/types';
 
-import { GitRepositoryActions, type GitRepositoryCapabilities } from './GitRepositoryActions';
-import { GitStatusDiffView } from './GitStatusDiffView';
+import { mergeUntracked, repositoryLabel } from './diff-model';
+import { GitDiffStream, type GitStreamMode } from './GitDiffStream';
+import { GitSidebar } from './GitSidebar';
+import { type GitRepositoryCapabilities, type GitSyncOptions, GitToolsPanel } from './GitToolsPanel';
+import { describeConfirmation, useGitMutations } from './use-git-mutations';
 
 export type GitSurfaceProps = {
   tabId?: CodeTabId;
   executionTarget: ExecutionTarget;
   sessionId?: string;
   workspaceRoot?: string;
+  /** Single-mount scope: prefer the repository at this mount by default. */
+  rootPrefix?: string;
   /** Whether this persistent surface is currently visible in the dock. */
   active?: boolean;
   onOpenFile?: (path: string, line?: number) => void;
 };
 
-type GitViewMode = 'session' | 'worktree' | 'staged';
 type IdentitySelection<T> = { identityKey: string; value: T };
 type RepositoryData = {
   key: string;
   status: GitStatusResult;
   diff: GitDiffResult;
 };
-type PendingDiscard = {
-  repo: WorkspaceRepo;
-  selection: GitFileSelection;
-  confirmation: GitConfirmation;
-};
 type ApplyTarget = { source: Extract<ProjectSource, { kind: 'local' }>; localPath: string };
 
 const GIT_READ_OPERATIONS = ['git_list_repositories', 'git_status', 'git_diff'] as const;
 const SESSION_BASE_REF = 'refs/tags/omni/seed';
 
+/** Below this surface width the sidebar defaults to hidden (the toggle
+ *  still overrides) — sidecar columns are usually this narrow. */
+const SIDEBAR_AUTO_HIDE_WIDTH = 576;
+
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback;
 }
 
-function repositoryLabel(repository: GitRepository): string {
-  const branch = repository.branch ?? (repository.detached ? 'detached' : 'new repository');
-  return `${repository.repo} — ${branch}`;
-}
-
-function impactDescription(confirmation: GitConfirmation): string {
-  const details = Object.entries(confirmation.impact)
-    .map(([label, value]) => {
-      const rendered = Array.isArray(value) ? value.join(', ') : String(value);
-      return `${label.replaceAll('_', ' ')}: ${rendered}`;
-    })
-    .join('. ');
-  return `Discarding changes cannot be undone.${details ? ` ${details}.` : ''}`;
-}
-
-function dataKey(identityKey: string, repo: WorkspaceRepo, mode: GitViewMode, path: string | null): string {
-  return JSON.stringify([identityKey, repo, mode, path]);
+function dataKey(identityKey: string, repo: WorkspaceRepo, mode: GitStreamMode): string {
+  return JSON.stringify([identityKey, repo, mode]);
 }
 
 function normalizeFsPath(value: string): string {
@@ -98,7 +86,7 @@ export function sourceForRepository(sources: ProjectSource[], repository: GitRep
   const absoluteRoot = normalizeFsPath(repository.absolute_root);
   const repo = repository.repo;
   const exact = sources.find((source) => {
-    const containerRoot = `/workspace/${source.mountName}`;
+    const containerRoot = source.mountName === '.' ? '/workspace' : `/workspace/${source.mountName}`;
     const hostRoot = source.kind === 'local' ? normalizeFsPath(source.workspaceDir) : null;
     return (
       absoluteRoot === containerRoot ||
@@ -116,7 +104,7 @@ export function sourceForRepository(sources: ProjectSource[], repository: GitRep
 }
 
 export const GitSurface = memo((props: GitSurfaceProps) => {
-  const { tabId, executionTarget, sessionId, workspaceRoot, active = true, onOpenFile } = props;
+  const { tabId, executionTarget, sessionId, workspaceRoot, rootPrefix, active = true, onOpenFile } = props;
   const store = useStore(persistedStoreApi.$atom);
   const rpc = useRPCClient();
   const connected = useRPCConnected();
@@ -125,27 +113,27 @@ export const GitSurface = memo((props: GitSurfaceProps) => {
   const [preparedKey, setPreparedKey] = useState<string | null>(null);
   const [repositories, setRepositories] = useState<IdentitySelection<GitListRepositoriesResult> | null>(null);
   const [selectedRepository, setSelectedRepository] = useState<IdentitySelection<WorkspaceRepo> | null>(null);
-  const [diffMode, setDiffMode] = useState<IdentitySelection<GitViewMode> | null>(null);
-  const [selectedPath, setSelectedPath] = useState<(IdentitySelection<string> & { repo: WorkspaceRepo }) | null>(null);
+  const [diffMode, setDiffMode] = useState<IdentitySelection<GitStreamMode> | null>(null);
   const [repositoryData, setRepositoryData] = useState<RepositoryData | null>(null);
   const [discovering, setDiscovering] = useState(false);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [operationError, setOperationError] = useState<string | null>(null);
-  const [mutationPending, setMutationPending] = useState(false);
-  const [pendingDiscard, setPendingDiscard] = useState<PendingDiscard | null>(null);
+  const [collapsedPaths, setCollapsedPaths] = useState<ReadonlySet<string>>(new Set());
+  const [toolsOpen, setToolsOpen] = useState(false);
+  const [syncOptionsState, setSyncOptionsState] = useState<GitSyncOptions | null>(null);
   const [pendingApply, setPendingApply] = useState<ApplyTarget | null>(null);
   const [applyPending, setApplyPending] = useState(false);
   const [applyStatus, setApplyStatus] = useState<string | null>(null);
   const [applyError, setApplyError] = useState<string | null>(null);
   const [discoveryRevision, setDiscoveryRevision] = useState(0);
   const [refreshRevision, setRefreshRevision] = useState(0);
+  const [detailsRevision, setDetailsRevision] = useState(0);
 
   const readSupported = GIT_READ_OPERATIONS.every((operation) => rpc.supportsExperimentalOperation(operation));
   const stageSupported = rpc.supportsExperimentalOperation('git_stage');
   const unstageSupported = rpc.supportsExperimentalOperation('git_unstage');
   const discardSupported = rpc.supportsExperimentalOperation('git_discard');
-  const repositoryCapabilities: GitRepositoryCapabilities = {
+  const capabilities: GitRepositoryCapabilities = {
     commit: rpc.supportsExperimentalOperation('git_commit'),
     log: rpc.supportsExperimentalOperation('git_log'),
     branches: rpc.supportsExperimentalOperation('git_list_branches'),
@@ -176,15 +164,44 @@ export const GitSurface = memo((props: GitSurfaceProps) => {
       ? { source: activeSource, localPath: activeSource.workspaceDir }
       : null;
   const hasApplyTarget = currentApplyTarget !== null;
-  const currentPath =
-    selectedPath?.identityKey === identityKey && selectedPath.repo === currentRepo ? selectedPath.value : null;
-  const expectedDataKey =
-    identityKey && currentRepo ? dataKey(identityKey, currentRepo, currentMode, currentPath) : null;
+  const expectedDataKey = identityKey && currentRepo ? dataKey(identityKey, currentRepo, currentMode) : null;
   const currentData = repositoryData?.key === expectedDataKey ? repositoryData : null;
+
+  const refresh = useCallback(() => setRefreshRevision((revision) => revision + 1), []);
+  const retryDiscovery = useCallback(() => setDiscoveryRevision((revision) => revision + 1), []);
+  const handleChanged = useCallback(() => {
+    refresh();
+    setDetailsRevision((revision) => revision + 1);
+  }, [refresh]);
+
+  const mutations = useGitMutations({
+    client: gitClient,
+    repo: currentRepo,
+    subscribeProgress: capabilities.progress,
+    onChanged: handleChanged,
+  });
+
+  // Sidebar visibility: explicit toggle wins; before the user chooses, it
+  // follows the surface width (hidden in narrow sidecar columns).
+  const rootRef = useRef<HTMLElement>(null);
+  const [wide, setWide] = useState(true);
+  const [sidebarPref, setSidebarPref] = useState<boolean | null>(null);
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') {
+      return;
+    }
+    const observer = new ResizeObserver((observations) => {
+      const width = observations[0]?.contentRect.width ?? 0;
+      setWide(width >= SIDEBAR_AUTO_HIDE_WIDTH);
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+  const sidebarVisible = sidebarPref ?? wide;
 
   useEffect(() => {
     if (currentMode === 'session' && !hasApplyTarget) {
-      setSelectedPath(null);
       setDiffMode(identityKey ? { identityKey, value: 'worktree' } : null);
     }
   }, [currentMode, hasApplyTarget, identityKey]);
@@ -215,6 +232,9 @@ export const GitSurface = memo((props: GitSurfaceProps) => {
           const previousRepo = previous?.identityKey === identityKey ? previous.value : null;
           const available = previousRepo && result.repositories.some((candidate) => candidate.repo === previousRepo);
           const fallback =
+            // A single-mount environment's own repository beats the
+            // workspace-root fallback (the root is rarely a repo there).
+            result.repositories.find((candidate) => candidate.repo === rootPrefix)?.repo ??
             result.repositories.find((candidate) => candidate.repo === '.')?.repo ??
             result.repositories[0]?.repo ??
             null;
@@ -242,7 +262,18 @@ export const GitSurface = memo((props: GitSurfaceProps) => {
     return () => {
       alive = false;
     };
-  }, [active, connected, discoveryRevision, gitClient, identityKey, readSupported, rpc, sessionId, workspaceRoot]);
+  }, [
+    active,
+    connected,
+    discoveryRevision,
+    gitClient,
+    identityKey,
+    readSupported,
+    rootPrefix,
+    rpc,
+    sessionId,
+    workspaceRoot,
+  ]);
 
   useEffect(() => {
     let alive = true;
@@ -251,15 +282,19 @@ export const GitSurface = memo((props: GitSurfaceProps) => {
         alive = false;
       };
     }
-    const key = dataKey(identityKey, currentRepo, currentMode, currentPath);
+    const key = dataKey(identityKey, currentRepo, currentMode);
     setLoading(true);
     setLoadError(null);
     void Promise.all([
       gitClient.status(currentRepo),
-      gitClient.diff(currentRepo, {
-        ...(currentMode === 'session' ? { mode: 'range' as const, fromRev: SESSION_BASE_REF } : { mode: currentMode }),
-        ...(currentPath ? { paths: [currentPath] } : {}),
-      }),
+      gitClient.diff(
+        currentRepo,
+        currentMode === 'session'
+          ? { mode: 'range', fromRev: SESSION_BASE_REF }
+          : currentMode === 'staged'
+            ? { mode: 'staged' }
+            : { mode: 'worktree', includeUntracked: true }
+      ),
     ])
       .then(([status, diff]) => {
         if (alive) {
@@ -279,10 +314,59 @@ export const GitSurface = memo((props: GitSurfaceProps) => {
     return () => {
       alive = false;
     };
-  }, [active, connected, currentMode, currentPath, currentRepo, gitClient, identityKey, preparedKey, refreshRevision]);
+  }, [active, connected, currentMode, currentRepo, gitClient, identityKey, preparedKey, refreshRevision]);
 
-  const refresh = useCallback(() => setRefreshRevision((revision) => revision + 1), []);
-  const retryDiscovery = useCallback(() => setDiscoveryRevision((revision) => revision + 1), []);
+  // Live refresh: the server polls porcelain status (git applies ignore
+  // rules, so this stays bounded) and pushes a digest event; the surface
+  // refetches quietly. Manual Refresh stays as the fallback for older
+  // runtimes that lack the watch operations.
+  const statusWatchSupported =
+    rpc.supportsExperimentalOperation('git_status_watch') && rpc.supportsExperimentalOperation('git_status_unwatch');
+  useEffect(() => {
+    if (!active || !connected || !currentRepo || preparedKey !== identityKey || !statusWatchSupported) {
+      return;
+    }
+    let alive = true;
+    let watchId: string | null = null;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const unsubscribe = gitClient.onStatusChanged((event) => {
+      if (!alive || event.repo !== currentRepo) {
+        return;
+      }
+      // Coalesce bursts (an agent mid-edit) into one refetch.
+      if (timer !== null) {
+        clearTimeout(timer);
+      }
+      timer = setTimeout(() => {
+        timer = null;
+        refresh();
+      }, 300);
+    });
+    void gitClient
+      .statusWatch(currentRepo)
+      .then((result) => {
+        if (!alive) {
+          void gitClient.statusUnwatch(result.watch_id).catch(() => {});
+          return;
+        }
+        watchId = result.watch_id;
+      })
+      .catch(() => {
+        // Watch budget exhausted or a race with teardown — the manual
+        // Refresh button still works.
+      });
+    return () => {
+      alive = false;
+      unsubscribe();
+      if (timer !== null) {
+        clearTimeout(timer);
+      }
+      if (watchId !== null) {
+        void gitClient.statusUnwatch(watchId).catch(() => {});
+      }
+    };
+  }, [active, connected, currentRepo, gitClient, identityKey, preparedKey, refresh, statusWatchSupported]);
+
   const openRepositoryFile = useCallback(
     (path: string, line?: number) => {
       if (!onOpenFile) {
@@ -298,116 +382,50 @@ export const GitSurface = memo((props: GitSurfaceProps) => {
       if (!identityKey) {
         return;
       }
-      setPendingDiscard(null);
       setPendingApply(null);
       setApplyStatus(null);
       setApplyError(null);
-      setSelectedPath(null);
+      setCollapsedPaths(new Set());
+      setSyncOptionsState(null);
       setSelectedRepository({ identityKey, value: repo });
     },
     [identityKey]
   );
   const chooseMode = useCallback(
-    (mode: GitViewMode) => {
+    (mode: GitStreamMode) => {
       if (!identityKey) {
         return;
       }
-      setPendingDiscard(null);
-      setSelectedPath(null);
+      setCollapsedPaths(new Set());
       setDiffMode({ identityKey, value: mode });
     },
     [identityKey]
   );
-  const choosePath = useCallback(
-    (path: string) => {
-      if (!identityKey || !currentRepo) {
-        return;
-      }
-      setSelectedPath({ identityKey, repo: currentRepo, value: path });
-    },
-    [currentRepo, identityKey]
-  );
-
-  const stage = useCallback(
-    async (selection: GitSelection) => {
-      if (!gitClient || !currentRepo) {
-        return;
-      }
-      setMutationPending(true);
-      setOperationError(null);
-      try {
-        await gitClient.stage(currentRepo, selection);
-        refresh();
-      } catch (error: unknown) {
-        setOperationError(errorMessage(error, 'Could not stage the selected changes.'));
-      } finally {
-        setMutationPending(false);
-      }
-    },
-    [currentRepo, gitClient, refresh]
-  );
-  const unstage = useCallback(
-    async (selection: GitFileSelection) => {
-      if (!gitClient || !currentRepo) {
-        return;
-      }
-      setMutationPending(true);
-      setOperationError(null);
-      try {
-        await gitClient.unstage(currentRepo, selection);
-        refresh();
-      } catch (error: unknown) {
-        setOperationError(errorMessage(error, 'Could not unstage the selected changes.'));
-      } finally {
-        setMutationPending(false);
-      }
-    },
-    [currentRepo, gitClient, refresh]
-  );
-  const requestDiscard = useCallback(
-    async (selection: GitFileSelection) => {
-      if (!gitClient || !currentRepo) {
-        return;
-      }
-      setMutationPending(true);
-      setOperationError(null);
-      try {
-        const outcome = await gitClient.discard(currentRepo, selection);
-        if (outcome.kind === 'confirmation_required') {
-          setPendingDiscard({ repo: currentRepo, selection, confirmation: outcome.confirmation });
-        } else {
-          refresh();
-        }
-      } catch (error: unknown) {
-        setOperationError(errorMessage(error, 'Could not prepare the discard operation.'));
-      } finally {
-        setMutationPending(false);
-      }
-    },
-    [currentRepo, gitClient, refresh]
-  );
-  const confirmDiscard = useCallback(async () => {
-    const pending = pendingDiscard;
-    if (!gitClient || !pending) {
-      return;
-    }
-    setMutationPending(true);
-    setOperationError(null);
-    try {
-      const outcome = await gitClient.confirmDiscard(pending.repo, pending.selection, pending.confirmation);
-      if (outcome.kind === 'confirmation_required') {
-        setPendingDiscard({ ...pending, confirmation: outcome.confirmation });
+  const setSectionOpen = useCallback((path: string, open: boolean) => {
+    setCollapsedPaths((previous) => {
+      const next = new Set(previous);
+      if (open) {
+        next.delete(path);
       } else {
-        setPendingDiscard(null);
-        refresh();
+        next.add(path);
       }
-    } catch (error: unknown) {
-      setPendingDiscard(null);
-      setOperationError(errorMessage(error, 'Could not discard the selected changes.'));
-    } finally {
-      setMutationPending(false);
-    }
-  }, [gitClient, pendingDiscard, refresh]);
+      return next;
+    });
+  }, []);
+  // Sidebar rows are a table of contents: expand the file's section and
+  // scroll it into view; the stream itself is never filtered.
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const scrollToFile = useCallback((path: string) => {
+    setCollapsedPaths((previous) => {
+      if (!previous.has(path)) {
+        return previous;
+      }
+      const next = new Set(previous);
+      next.delete(path);
+      return next;
+    });
+    bodyRef.current?.querySelector(`[data-diff-file="${CSS.escape(path)}"]`)?.scrollIntoView?.({ block: 'start' });
+  }, []);
 
   const confirmApply = useCallback(async () => {
     const target = pendingApply;
@@ -432,6 +450,39 @@ export const GitSurface = memo((props: GitSurfaceProps) => {
       setApplyPending(false);
     }
   }, [pendingApply, refresh, tabId]);
+
+  const mergedEntries = useMemo(() => (currentData ? mergeUntracked(currentData.status) : []), [currentData]);
+  const entriesByPath = useMemo(() => new Map(mergedEntries.map((entry) => [entry.path, entry])), [mergedEntries]);
+  const actionsDisabled = mutations.busy !== null || !connected;
+  const syncOptions: GitSyncOptions = syncOptionsState ?? {
+    rebase: false,
+    forceWithLease: false,
+    setUpstream: currentData?.status.upstream === null,
+  };
+  const stats = currentData
+    ? {
+        files: currentData.diff.files.length,
+        additions: currentData.diff.files.reduce((sum, file) => sum + (file.added_lines ?? 0), 0),
+        deletions: currentData.diff.files.reduce((sum, file) => sum + (file.deleted_lines ?? 0), 0),
+      }
+    : null;
+  const branch = currentData
+    ? (currentData.status.head.branch ?? (currentData.status.head.unborn ? 'new repository' : 'detached HEAD'))
+    : null;
+  const upstream = currentData?.status.upstream ?? null;
+  const hasTools =
+    capabilities.log ||
+    capabilities.branches ||
+    capabilities.worktrees ||
+    capabilities.conflicts ||
+    capabilities.reset ||
+    capabilities.pull ||
+    capabilities.push;
+
+  const pendingDescription = mutations.pending ? describeConfirmation(mutations.pending) : null;
+  const conflictStatus = currentData?.status;
+  const errorText = mutations.error ?? applyError ?? (currentData ? loadError : null);
+  const noticeText = mutations.notice ?? applyStatus ?? mutations.progress;
 
   let body;
   if (!identityKey) {
@@ -505,109 +556,199 @@ export const GitSurface = memo((props: GitSurfaceProps) => {
     );
   } else {
     body = (
-      <GitStatusDiffView
-        actionsDisabled={mutationPending || !connected}
-        diff={currentData.diff}
-        diffHeading={currentMode === 'session' ? 'Session changes' : undefined}
-        onDiscard={discardSupported ? requestDiscard : undefined}
-        onOpenFile={onOpenFile ? openRepositoryFile : undefined}
-        onSelectFile={choosePath}
-        onStage={stageSupported ? stage : undefined}
-        onUnstage={unstageSupported ? unstage : undefined}
-        selectedPath={currentPath}
-        status={currentData.status}
-      />
+      <ResizablePanelGroup orientation="horizontal" className="h-full">
+        {sidebarVisible && (
+          <>
+            <ResizablePanel id="git-files" defaultSize={240} minSize={180} maxSize={420}>
+              <GitSidebar
+                key={`${identityKey}:${currentRepo}`}
+                status={currentData.status}
+                entries={mergedEntries}
+                contextLines={currentData.diff.context_lines}
+                canCommit={capabilities.commit}
+                canStage={stageSupported}
+                canUnstage={unstageSupported}
+                disabled={!connected}
+                mutations={mutations}
+                onSelectFile={scrollToFile}
+              />
+            </ResizablePanel>
+            <ResizableHandle />
+          </>
+        )}
+        <ResizablePanel id="git-diff" minSize={240}>
+          <div ref={bodyRef} className="h-full overflow-auto">
+            {currentData.diff.context_lines_clamped ? (
+              <p className="border-b border-border px-3 py-1.5 text-xs text-muted-foreground" role="note">
+                Diff context was limited to {currentData.diff.context_lines} lines.
+              </p>
+            ) : null}
+            <GitDiffStream
+              files={currentData.diff.files}
+              entriesByPath={entriesByPath}
+              conflicted={currentData.status.conflicted}
+              mode={currentMode}
+              contextLines={currentData.diff.context_lines}
+              collapsedPaths={collapsedPaths}
+              onSectionOpenChange={setSectionOpen}
+              onOpenFile={onOpenFile ? openRepositoryFile : undefined}
+              onStage={stageSupported ? (selection) => void mutations.stage(selection) : undefined}
+              onUnstage={unstageSupported ? (selection) => void mutations.unstage(selection) : undefined}
+              onDiscard={discardSupported ? (selection) => void mutations.discard(selection) : undefined}
+              actionsDisabled={actionsDisabled}
+            />
+          </div>
+        </ResizablePanel>
+      </ResizablePanelGroup>
     );
   }
 
-  const conflictStatus = currentData?.status;
   return (
     <section
-      className="flex flex-col w-full h-full min-w-0 min-h-0 text-foreground bg-card"
+      ref={rootRef}
+      className="flex h-full w-full min-w-0 min-h-0 flex-col bg-card text-foreground"
       aria-label="Source control"
     >
-      <div className="flex items-center flex-wrap gap-2 min-h-11 px-4 py-1 border-b border-border">
-        <label className="flex items-center min-w-0 gap-1 text-xs text-muted-foreground">
-          Repository
-          <Select
+      <div className="flex min-h-9 shrink-0 flex-wrap items-center gap-1 border-b border-border px-2 py-1">
+        <Toggle
+          size="sm"
+          className="h-7 min-w-7 px-1"
+          pressed={sidebarVisible}
+          onPressedChange={(pressed) => setSidebarPref(pressed)}
+          title={sidebarVisible ? 'Hide changes list' : 'Show changes list'}
+          aria-label={sidebarVisible ? 'Hide changes list' : 'Show changes list'}
+        >
+          <PanelLeftIcon className="size-4" />
+        </Toggle>
+        {currentRepositories && currentRepositories.repositories.length > 1 ? (
+          <NativeSelect
             aria-label="Repository"
-            className="min-w-48 max-w-96"
-            disabled={!connected || !currentRepositories?.repositories.length}
+            className="h-7 w-auto max-w-56 border-0 bg-transparent text-xs shadow-none"
+            disabled={!connected}
             onChange={(event) => chooseRepository(event.target.value as WorkspaceRepo)}
             value={currentRepo ?? ''}
           >
             {!currentRepo && <option value="">No repository</option>}
-            {currentRepositories?.repositories.map((repository) => (
+            {currentRepositories.repositories.map((repository) => (
               <option key={repository.repo} value={repository.repo}>
                 {repositoryLabel(repository)}
               </option>
             ))}
-          </Select>
-        </label>
+          </NativeSelect>
+        ) : null}
         <ToggleGroup
           type="single"
-          variant="outline"
           spacing={0}
           value={currentMode}
-          onValueChange={(value) => value && chooseMode(value as GitViewMode)}
-          className="flex items-center gap-0.5"
+          onValueChange={(value) => value && chooseMode(value as GitStreamMode)}
+          className="flex items-center"
           aria-label="Diff view"
         >
-          {currentApplyTarget && <ToggleGroupItem value="session">Session changes</ToggleGroupItem>}
-          <ToggleGroupItem value="worktree">Working tree</ToggleGroupItem>
-          <ToggleGroupItem value="staged">Staged</ToggleGroupItem>
+          <ToggleGroupItem value="worktree" className="h-7 px-2 text-xs">
+            Working tree
+          </ToggleGroupItem>
+          <ToggleGroupItem value="staged" className="h-7 px-2 text-xs">
+            Staged
+          </ToggleGroupItem>
+          {hasApplyTarget && (
+            <ToggleGroupItem value="session" className="h-7 px-2 text-xs">
+              Session changes
+            </ToggleGroupItem>
+          )}
         </ToggleGroup>
-        {currentPath && (
-          <Button size="sm" variant="ghost" onClick={() => setSelectedPath(null)}>
-            All changes
-          </Button>
-        )}
         <span className="flex-auto" />
+        {mutations.busy ? <span className="text-xs text-muted-foreground">{mutations.busy}…</span> : null}
+        {stats && branch ? (
+          <span className="whitespace-nowrap text-xs text-muted-foreground">
+            {branch} · {stats.files} {stats.files === 1 ? 'file' : 'files'}{' '}
+            <span className="text-success">+{stats.additions}</span>{' '}
+            <span className="text-destructive">−{stats.deletions}</span>
+            {upstream ? (
+              <span title={`${upstream.ahead} ahead, ${upstream.behind} behind ${upstream.name}`}>
+                {' '}
+                ↑{upstream.ahead} ↓{upstream.behind}
+              </span>
+            ) : null}
+          </span>
+        ) : null}
+        {currentRepo && capabilities.fetch ? (
+          <Button
+            variant="ghost"
+            size="xs"
+            className="h-7"
+            disabled={actionsDisabled}
+            onClick={() => void mutations.fetchRemote()}
+          >
+            Fetch
+          </Button>
+        ) : null}
+        {currentRepo && capabilities.pull ? (
+          <Button
+            variant="ghost"
+            size="xs"
+            className="h-7"
+            disabled={actionsDisabled}
+            onClick={() => void mutations.pull({ rebase: syncOptions.rebase })}
+          >
+            Pull
+          </Button>
+        ) : null}
+        {currentRepo && capabilities.push ? (
+          <Button
+            variant="ghost"
+            size="xs"
+            className="h-7"
+            disabled={actionsDisabled}
+            onClick={() =>
+              void mutations.push({
+                ...(syncOptions.forceWithLease ? { forceWithLease: true } : {}),
+                ...(syncOptions.setUpstream ? { setUpstream: true } : {}),
+              })
+            }
+          >
+            Push
+          </Button>
+        ) : null}
+        {currentRepo && hasTools ? (
+          <Toggle
+            size="sm"
+            className="h-7 px-2 text-xs"
+            pressed={toolsOpen}
+            onPressedChange={setToolsOpen}
+            aria-label="Repository tools"
+          >
+            Tools
+          </Toggle>
+        ) : null}
         {currentApplyTarget && (
           <Button
             disabled={!connected || applyPending}
             onClick={() => setPendingApply(currentApplyTarget)}
             size="sm"
-            variant="default"
+            className="h-7"
           >
             {applyPending ? 'Applying…' : 'Apply to local folder'}
           </Button>
         )}
-        <Button aria-label="Refresh source control" disabled={!connected || loading} onClick={refresh} size="sm">
-          Refresh
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          className="size-7"
+          aria-label="Refresh source control"
+          disabled={!connected || loading}
+          onClick={refresh}
+        >
+          <RefreshCwIcon className={cn('size-4', (loading || discovering) && 'animate-spin')} />
         </Button>
       </div>
-      {currentRepo && currentData ? (
-        <GitRepositoryActions
-          key={`${identityKey}:${currentRepo}`}
-          client={gitClient}
-          repo={currentRepo}
-          status={currentData.status}
-          capabilities={repositoryCapabilities}
-          disabled={mutationPending || !connected}
-          onChanged={refresh}
-          onMutationPendingChange={setMutationPending}
-          onOpenFile={onOpenFile ? openRepositoryFile : undefined}
-        />
-      ) : null}
       {!connected && (
-        <Alert className="rounded-none border-x-0 border-t-0" role="status">
+        <Alert className="shrink-0 rounded-none border-x-0 border-t-0" role="status">
           <AlertDescription>Reconnecting to source control… The selected repository is preserved.</AlertDescription>
-        </Alert>
-      )}
-      {connected && discovering && currentRepositories && (
-        <Alert className="rounded-none border-x-0 border-t-0" role="status">
-          <AlertDescription>Refreshing repositories…</AlertDescription>
-        </Alert>
-      )}
-      {connected && loading && currentData && (
-        <Alert className="rounded-none border-x-0 border-t-0" role="status">
-          <AlertDescription>Refreshing source control…</AlertDescription>
         </Alert>
       )}
       {currentRepositories && currentRepositories.unreachable_sources.length > 0 && (
         <Alert
-          className="rounded-none border-x-0 border-t-0 border-warning bg-warning text-warning-foreground"
+          className="shrink-0 rounded-none border-x-0 border-t-0 border-warning bg-warning text-warning-foreground"
           role="note"
         >
           <TriangleAlert />
@@ -623,14 +764,14 @@ export const GitSurface = memo((props: GitSurfaceProps) => {
         </Alert>
       )}
       {currentRepositories?.truncated && (
-        <Alert className="rounded-none border-x-0 border-t-0" role="note">
+        <Alert className="shrink-0 rounded-none border-x-0 border-t-0" role="note">
           <AlertDescription>
             Repository discovery reached its limit. Some nested repositories may not be shown.
           </AlertDescription>
         </Alert>
       )}
       {conflictStatus && (conflictStatus.state !== 'clean' || conflictStatus.conflicted.length > 0) && (
-        <Alert className="rounded-none border-x-0 border-t-0 border-warning bg-warning text-warning-foreground">
+        <Alert className="shrink-0 rounded-none border-x-0 border-t-0 border-warning bg-warning text-warning-foreground">
           <TriangleAlert />
           <AlertTitle>Repository needs attention</AlertTitle>
           <AlertDescription className="text-warning-foreground">
@@ -641,34 +782,44 @@ export const GitSurface = memo((props: GitSurfaceProps) => {
           </AlertDescription>
         </Alert>
       )}
-      {(operationError || (loadError && currentData)) && (
-        <Alert className="rounded-none border-x-0 border-t-0" variant="destructive">
-          <AlertDescription>{operationError ?? loadError}</AlertDescription>
+      {errorText && (
+        <Alert className="shrink-0 rounded-none border-x-0 border-t-0" variant="destructive">
+          <AlertDescription>{errorText}</AlertDescription>
         </Alert>
       )}
-      {applyError && (
-        <Alert className="rounded-none border-x-0 border-t-0" variant="destructive">
-          <AlertDescription>{applyError}</AlertDescription>
+      {noticeText && !errorText && (
+        <Alert className="shrink-0 rounded-none border-x-0 border-t-0" role="status">
+          <AlertDescription>{noticeText}</AlertDescription>
         </Alert>
       )}
-      {applyStatus && (
-        <Alert className="rounded-none border-x-0 border-t-0" role="status">
-          <AlertDescription>{applyStatus}</AlertDescription>
-        </Alert>
-      )}
-      <div className="flex-auto min-w-0 min-h-0 overflow-hidden">{body}</div>
-      <AlertDialog open={pendingDiscard !== null} onOpenChange={(open) => !open && setPendingDiscard(null)}>
+      {toolsOpen && currentRepo && currentData ? (
+        <GitToolsPanel
+          client={gitClient}
+          repo={currentRepo}
+          capabilities={capabilities}
+          disabled={!connected}
+          mutations={mutations}
+          revision={detailsRevision}
+          syncOptions={syncOptions}
+          onSyncOptionsChange={setSyncOptionsState}
+          onOpenFile={onOpenFile ? openRepositoryFile : undefined}
+        />
+      ) : null}
+      <div className="min-h-0 min-w-0 flex-auto overflow-hidden">{body}</div>
+
+      <AlertDialog open={mutations.pending !== null} onOpenChange={(open) => !open && mutations.dismissPending()}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Discard selected changes?</AlertDialogTitle>
-            <AlertDialogDescription>
-              {pendingDiscard ? impactDescription(pendingDiscard.confirmation) : ''}
-            </AlertDialogDescription>
+            <AlertDialogTitle>{pendingDescription?.title ?? ''}</AlertDialogTitle>
+            <AlertDialogDescription>{pendingDescription?.body ?? ''}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" onClick={() => void confirmDiscard()}>
-              Discard changes
+            <AlertDialogAction
+              variant={pendingDescription?.destructive ? 'destructive' : undefined}
+              onClick={mutations.confirm}
+            >
+              {pendingDescription?.action ?? 'Confirm'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -703,6 +854,7 @@ export function WorkspaceGitPortal({
   executionTarget,
   sessionId,
   workspaceRoot,
+  rootPrefix,
   onOpenFile,
 }: GitSurfaceProps & { host: HTMLDivElement }) {
   return createPortal(
@@ -712,9 +864,9 @@ export function WorkspaceGitPortal({
       executionTarget={executionTarget}
       sessionId={sessionId}
       workspaceRoot={workspaceRoot}
+      rootPrefix={rootPrefix}
       onOpenFile={onOpenFile}
     />,
-
     host
   );
 }

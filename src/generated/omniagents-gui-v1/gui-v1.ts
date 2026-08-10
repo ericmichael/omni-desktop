@@ -226,6 +226,10 @@ export interface SetSessionApprovalsParams {
   session_id: string;
   reviewer: string;
 }
+export interface SetSessionWorkflowParams {
+  session_id: string;
+  reviewer: string;
+}
 export interface AgentHostRegisterWorkspaceParams {
   workspace_id: string;
   materialization_path: string;
@@ -395,6 +399,26 @@ export interface FsUploadAbortParams {
   workspace_id?: string;
   environment_generation?: number;
 }
+export interface FsDeleteParams {
+  environment_id: string;
+  path: string;
+  recursive?: boolean;
+  workspace_id?: string;
+  environment_generation?: number;
+}
+export interface FsRenameParams {
+  environment_id: string;
+  path: string;
+  to: string;
+  workspace_id?: string;
+  environment_generation?: number;
+}
+export interface FsMkdirParams {
+  environment_id: string;
+  path: string;
+  workspace_id?: string;
+  environment_generation?: number;
+}
 export interface GitListRepositoriesParams {
   environment_id: string;
   path?: string;
@@ -542,6 +566,19 @@ export interface GitPushParams {
   force_with_lease?: boolean;
   set_upstream?: boolean;
   confirmation_token?: string;
+  workspace_id?: string;
+  environment_generation?: number;
+}
+export interface GitStatusWatchParams {
+  environment_id: string;
+  repo: string;
+  poll_interval_ms?: number;
+  workspace_id?: string;
+  environment_generation?: number;
+}
+export interface GitStatusUnwatchParams {
+  environment_id: string;
+  watch_id: string;
   workspace_id?: string;
   environment_generation?: number;
 }
@@ -801,6 +838,17 @@ export interface ToolApprovalReviewedParams {
   seq?: number;
   stream_id?: string;
 }
+export interface PlanCompletionReviewedParams {
+  task_id: string;
+  outcome: string;
+  reviewer: string;
+  session_id?: string;
+  subject?: string;
+  rationale?: string;
+  run_id?: string;
+  seq?: number;
+  stream_id?: string;
+}
 export interface SessionForkedParams {
   session_id: string;
   new_session_id: string;
@@ -851,6 +899,16 @@ export interface GitOperationProgressParams {
   operation: string;
   phase: string;
   detail?: Record<string, unknown>;
+  workspace_id?: string;
+  environment_generation?: number;
+  seq?: number;
+  stream_id?: string;
+}
+export interface GitStatusChangedParams {
+  environment_id: string;
+  repo: string;
+  watch_id: string;
+  digest: string;
   workspace_id?: string;
   environment_generation?: number;
   seq?: number;
@@ -929,6 +987,7 @@ export interface RpcMethodMap {
   "list_items": { params: ListItemsParams; result: Record<string, unknown> };
   "get_item": { params: GetItemParams; result: Record<string, unknown> };
   "set_session_approvals": { params: SetSessionApprovalsParams; result: Record<string, unknown> };
+  "set_session_workflow": { params: SetSessionWorkflowParams; result: Record<string, unknown> };
   "agent_host_register_workspace": { params: AgentHostRegisterWorkspaceParams; result: Record<string, unknown> };
   "agent_host_register_profile": { params: AgentHostRegisterProfileParams; result: Record<string, unknown> };
   "agent_host_bind_thread": { params: AgentHostBindThreadParams; result: Record<string, unknown> };
@@ -962,6 +1021,9 @@ export interface RpcMethodMap {
   "fs_upload_chunk": { params: FsUploadChunkParams; result: Record<string, unknown> };
   "fs_upload_commit": { params: FsUploadCommitParams; result: Record<string, unknown> };
   "fs_upload_abort": { params: FsUploadAbortParams; result: boolean };
+  "fs_delete": { params: FsDeleteParams; result: Record<string, unknown> };
+  "fs_rename": { params: FsRenameParams; result: Record<string, unknown> };
+  "fs_mkdir": { params: FsMkdirParams; result: Record<string, unknown> };
   "git_list_repositories": { params: GitListRepositoriesParams; result: Record<string, unknown> };
   "git_status": { params: GitStatusParams; result: Record<string, unknown> };
   "git_diff": { params: GitDiffParams; result: Record<string, unknown> };
@@ -978,6 +1040,8 @@ export interface RpcMethodMap {
   "git_fetch": { params: GitFetchParams; result: Record<string, unknown> };
   "git_pull": { params: GitPullParams; result: Record<string, unknown> };
   "git_push": { params: GitPushParams; result: Record<string, unknown> };
+  "git_status_watch": { params: GitStatusWatchParams; result: Record<string, unknown> };
+  "git_status_unwatch": { params: GitStatusUnwatchParams; result: boolean };
   "list_threads": { params: ListThreadsParams; result: Record<string, unknown> };
   "search_threads": { params: SearchThreadsParams; result: Record<string, unknown> };
   "update_thread": { params: UpdateThreadParams; result: Record<string, unknown> };
@@ -1007,12 +1071,14 @@ export interface RpcNotificationMap {
   "elicitation_resolved": ElicitationResolvedParams;
   "mcp_server_status_changed": McpServerStatusChangedParams;
   "tool_approval_reviewed": ToolApprovalReviewedParams;
+  "plan_completion_reviewed": PlanCompletionReviewedParams;
   "session_forked": SessionForkedParams;
   "session_variables_changed": SessionVariablesChangedParams;
   "fs_events": FsEventsParams;
   "fs_rescan_required": FsRescanRequiredParams;
   "fs_transfer_progress": FsTransferProgressParams;
   "git_operation_progress": GitOperationProgressParams;
+  "git_status_changed": GitStatusChangedParams;
   "thread_updated": ThreadUpdatedParams;
   "item_updated": ItemUpdatedParams;
 }

@@ -4351,6 +4351,61 @@
           "$ref": "#/components/errors/InitializationRequired"
         }
       ],
+      "name": "set_session_workflow",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "session_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/set_session_workflow/properties/session_id"
+          }
+        },
+        {
+          "name": "reviewer",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/set_session_workflow/properties/reviewer"
+          }
+        }
+      ],
+      "result": {
+        "name": "set_session_workflow_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation set_session_workflow",
+      "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [],
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/set_session_workflow"
+      },
+      "x-omni-resource-scope": "thread",
+      "x-omni-stability": "experimental"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        }
+      ],
       "name": "agent_host_register_workspace",
       "paramStructure": "by-name",
       "params": [
@@ -6684,6 +6739,278 @@
           "$ref": "#/components/errors/InitializationRequired"
         },
         {
+          "$ref": "#/components/errors/FsPathInvalid"
+        },
+        {
+          "$ref": "#/components/errors/FsNotFound"
+        },
+        {
+          "$ref": "#/components/errors/FsTransferInvalid"
+        },
+        {
+          "$ref": "#/components/errors/FsWatchInvalid"
+        },
+        {
+          "$ref": "#/components/errors/FsReadOnly"
+        }
+      ],
+      "name": "fs_delete",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "environment_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_delete/properties/environment_id"
+          }
+        },
+        {
+          "name": "path",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_delete/properties/path"
+          }
+        },
+        {
+          "name": "recursive",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_delete/properties/recursive"
+          }
+        },
+        {
+          "name": "workspace_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_delete/properties/workspace_id"
+          }
+        },
+        {
+          "name": "environment_generation",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_delete/properties/environment_generation"
+          }
+        }
+      ],
+      "result": {
+        "name": "fs_delete_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation fs_delete",
+      "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [
+        "workspace_write"
+      ],
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_delete"
+      },
+      "x-omni-resource-scope": "workspace",
+      "x-omni-stability": "experimental"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        },
+        {
+          "$ref": "#/components/errors/FsPathInvalid"
+        },
+        {
+          "$ref": "#/components/errors/FsNotFound"
+        },
+        {
+          "$ref": "#/components/errors/FsTransferInvalid"
+        },
+        {
+          "$ref": "#/components/errors/FsWatchInvalid"
+        },
+        {
+          "$ref": "#/components/errors/FsReadOnly"
+        }
+      ],
+      "name": "fs_rename",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "environment_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_rename/properties/environment_id"
+          }
+        },
+        {
+          "name": "path",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_rename/properties/path"
+          }
+        },
+        {
+          "name": "to",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_rename/properties/to"
+          }
+        },
+        {
+          "name": "workspace_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_rename/properties/workspace_id"
+          }
+        },
+        {
+          "name": "environment_generation",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_rename/properties/environment_generation"
+          }
+        }
+      ],
+      "result": {
+        "name": "fs_rename_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation fs_rename",
+      "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [
+        "workspace_write"
+      ],
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_rename"
+      },
+      "x-omni-resource-scope": "workspace",
+      "x-omni-stability": "experimental"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        },
+        {
+          "$ref": "#/components/errors/FsPathInvalid"
+        },
+        {
+          "$ref": "#/components/errors/FsNotFound"
+        },
+        {
+          "$ref": "#/components/errors/FsTransferInvalid"
+        },
+        {
+          "$ref": "#/components/errors/FsWatchInvalid"
+        },
+        {
+          "$ref": "#/components/errors/FsReadOnly"
+        }
+      ],
+      "name": "fs_mkdir",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "environment_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_mkdir/properties/environment_id"
+          }
+        },
+        {
+          "name": "path",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_mkdir/properties/path"
+          }
+        },
+        {
+          "name": "workspace_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_mkdir/properties/workspace_id"
+          }
+        },
+        {
+          "name": "environment_generation",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_mkdir/properties/environment_generation"
+          }
+        }
+      ],
+      "result": {
+        "name": "fs_mkdir_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation fs_mkdir",
+      "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [
+        "workspace_write"
+      ],
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/fs_mkdir"
+      },
+      "x-omni-resource-scope": "workspace",
+      "x-omni-stability": "experimental"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        },
+        {
           "$ref": "#/components/errors/GitRepositoryNotFound"
         },
         {
@@ -8480,6 +8807,193 @@
       "x-omni-kind": "request",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/git_push"
+      },
+      "x-omni-resource-scope": "workspace",
+      "x-omni-stability": "experimental"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        },
+        {
+          "$ref": "#/components/errors/GitRepositoryNotFound"
+        },
+        {
+          "$ref": "#/components/errors/GitPathInvalid"
+        },
+        {
+          "$ref": "#/components/errors/GitOperationFailed"
+        },
+        {
+          "$ref": "#/components/errors/GitConfirmationRequired"
+        },
+        {
+          "$ref": "#/components/errors/GitStateInvalid"
+        },
+        {
+          "$ref": "#/components/errors/GitCapabilityUnavailable"
+        }
+      ],
+      "name": "git_status_watch",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "environment_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_status_watch/properties/environment_id"
+          }
+        },
+        {
+          "name": "repo",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_status_watch/properties/repo"
+          }
+        },
+        {
+          "name": "poll_interval_ms",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_status_watch/properties/poll_interval_ms"
+          }
+        },
+        {
+          "name": "workspace_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_status_watch/properties/workspace_id"
+          }
+        },
+        {
+          "name": "environment_generation",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_status_watch/properties/environment_generation"
+          }
+        }
+      ],
+      "result": {
+        "name": "git_status_watch_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation git_status_watch",
+      "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [
+        "workspace_read",
+        "process"
+      ],
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/git_status_watch"
+      },
+      "x-omni-resource-scope": "workspace",
+      "x-omni-stability": "experimental"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/InvalidParams"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        },
+        {
+          "$ref": "#/components/errors/TransportOverloaded"
+        },
+        {
+          "$ref": "#/components/errors/InitializationRequired"
+        },
+        {
+          "$ref": "#/components/errors/GitRepositoryNotFound"
+        },
+        {
+          "$ref": "#/components/errors/GitPathInvalid"
+        },
+        {
+          "$ref": "#/components/errors/GitOperationFailed"
+        },
+        {
+          "$ref": "#/components/errors/GitConfirmationRequired"
+        },
+        {
+          "$ref": "#/components/errors/GitStateInvalid"
+        },
+        {
+          "$ref": "#/components/errors/GitCapabilityUnavailable"
+        }
+      ],
+      "name": "git_status_unwatch",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "environment_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_status_unwatch/properties/environment_id"
+          }
+        },
+        {
+          "name": "watch_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_status_unwatch/properties/watch_id"
+          }
+        },
+        {
+          "name": "workspace_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_status_unwatch/properties/workspace_id"
+          }
+        },
+        {
+          "name": "environment_generation",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_status_unwatch/properties/environment_generation"
+          }
+        }
+      ],
+      "result": {
+        "name": "git_status_unwatch_result",
+        "schema": {
+          "$ref": "./schemas/gui-v1.schema.json#/$defs/result"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation git_status_unwatch",
+      "x-omni-direction": "client_to_server",
+      "x-omni-execution-requirements": [
+        "workspace_read",
+        "process"
+      ],
+      "x-omni-kind": "request",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/git_status_unwatch"
       },
       "x-omni-resource-scope": "workspace",
       "x-omni-stability": "experimental"
@@ -10673,6 +11187,90 @@
       "x-omni-stability": "experimental"
     },
     {
+      "name": "plan_completion_reviewed",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "task_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/plan_completion_reviewed/properties/task_id"
+          }
+        },
+        {
+          "name": "outcome",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/plan_completion_reviewed/properties/outcome"
+          }
+        },
+        {
+          "name": "reviewer",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/plan_completion_reviewed/properties/reviewer"
+          }
+        },
+        {
+          "name": "session_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/plan_completion_reviewed/properties/session_id"
+          }
+        },
+        {
+          "name": "subject",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/plan_completion_reviewed/properties/subject"
+          }
+        },
+        {
+          "name": "rationale",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/plan_completion_reviewed/properties/rationale"
+          }
+        },
+        {
+          "name": "run_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/plan_completion_reviewed/properties/run_id"
+          }
+        },
+        {
+          "name": "seq",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/plan_completion_reviewed/properties/seq"
+          }
+        },
+        {
+          "name": "stream_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/plan_completion_reviewed/properties/stream_id"
+          }
+        }
+      ],
+      "result": {
+        "name": "plan_completion_reviewed_result",
+        "schema": {
+          "type": "null"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation plan_completion_reviewed",
+      "x-omni-direction": "server_to_client",
+      "x-omni-execution-requirements": [],
+      "x-omni-kind": "notification",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/plan_completion_reviewed"
+      },
+      "x-omni-resource-scope": "run",
+      "x-omni-stability": "experimental"
+    },
+    {
       "name": "session_forked",
       "paramStructure": "by-name",
       "params": [
@@ -11095,6 +11693,83 @@
       "x-omni-kind": "notification",
       "x-omni-params-schema": {
         "$ref": "./schemas/gui-v1.schema.json#/$defs/git_operation_progress"
+      },
+      "x-omni-resource-scope": "workspace",
+      "x-omni-stability": "experimental"
+    },
+    {
+      "name": "git_status_changed",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "environment_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_status_changed/properties/environment_id"
+          }
+        },
+        {
+          "name": "repo",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_status_changed/properties/repo"
+          }
+        },
+        {
+          "name": "watch_id",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_status_changed/properties/watch_id"
+          }
+        },
+        {
+          "name": "digest",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_status_changed/properties/digest"
+          }
+        },
+        {
+          "name": "workspace_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_status_changed/properties/workspace_id"
+          }
+        },
+        {
+          "name": "environment_generation",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_status_changed/properties/environment_generation"
+          }
+        },
+        {
+          "name": "seq",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_status_changed/properties/seq"
+          }
+        },
+        {
+          "name": "stream_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/git_status_changed/properties/stream_id"
+          }
+        }
+      ],
+      "result": {
+        "name": "git_status_changed_result",
+        "schema": {
+          "type": "null"
+        }
+      },
+      "summary": "OmniAgents GUI protocol operation git_status_changed",
+      "x-omni-direction": "server_to_client",
+      "x-omni-execution-requirements": [],
+      "x-omni-kind": "notification",
+      "x-omni-params-schema": {
+        "$ref": "./schemas/gui-v1.schema.json#/$defs/git_status_changed"
       },
       "x-omni-resource-scope": "workspace",
       "x-omni-stability": "experimental"

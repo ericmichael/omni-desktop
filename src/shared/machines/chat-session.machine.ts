@@ -1,8 +1,8 @@
 /**
  * XState v5 machine for chat session state.
  *
- * Manages: session identity, run lifecycle, message items, preamble buffering,
- * tool approval flow, and session-based event filtering.
+ * Manages: session identity, run lifecycle, message items, tool approval
+ * flow, and session-based event filtering.
  *
  * Pure definition — no React, no IPC, no DOM imports.
  * Session filtering reuses the pure guards from `@/lib/session-filter`.
@@ -18,8 +18,8 @@ import type {
   ChatMessage,
   GuardianReviewItem,
   MessageItem,
-  PreambleChunk,
   ToolItem,
+  WorkflowReviewItem,
 } from '@/shared/chat-types';
 
 // ---------------------------------------------------------------------------
@@ -62,8 +62,6 @@ export type ChatSessionContext = {
   sessionId: string | undefined;
   runId: string | undefined;
   items: MessageItem[];
-  preamble: string | undefined;
-  preambleBuffer: PreambleChunk[];
   pendingApprovals: Map<string, ApprovalItem>;
   status: string | undefined;
   statusSpinner: boolean;
@@ -150,6 +148,15 @@ export type ChatSessionEvent =
       server_label?: string;
       session_id?: string;
     }
+  | {
+      type: 'WORKFLOW_REVIEWED';
+      task_id: string;
+      subject: string;
+      outcome: 'reject' | 'accept_unverified' | 'escalated';
+      reviewer: string;
+      rationale?: string;
+      session_id?: string;
+    }
   | { type: 'SET_STATUS'; text?: string; showSpinner?: boolean; session_id?: string }
   // History loading
   | { type: 'HISTORY_LOADED'; items: MessageItem[] }
@@ -185,16 +192,10 @@ function sessionId(event: { session_id?: string }): string | undefined {
   return event.session_id;
 }
 
-function supersede(buffer: PreambleChunk[]): PreambleChunk[] {
-  return buffer.map((m) => (m.superseded ? m : { ...m, superseded: true }));
-}
-
 const INITIAL_CONTEXT: ChatSessionContext = {
   sessionId: undefined,
   runId: undefined,
   items: [],
-  preamble: undefined,
-  preambleBuffer: [],
   pendingApprovals: new Map(),
   status: undefined,
   statusSpinner: false,
@@ -260,8 +261,6 @@ export const chatSessionMachine = setup({
         }
         return [...context.items, msg];
       },
-      preambleBuffer: [],
-      preamble: undefined,
       status: undefined,
       statusSpinner: false,
       statusItalic: false,
@@ -273,8 +272,6 @@ export const chatSessionMachine = setup({
       return {
         runId: e.run_id,
         sessionId: e.session_id ?? context.sessionId,
-        preambleBuffer: [],
-        preamble: undefined,
         status: undefined,
         statusSpinner: false,
         statusItalic: false,
@@ -309,14 +306,35 @@ export const chatSessionMachine = setup({
         return { items: context.items };
       }
       const msg: ChatMessage = { type: 'chat', role, content: text };
+      if (role === 'assistant') {
+        // Assistant-role wakeup prompts are recorded canonically as
+        // agent_message items with a turn_id, so after reload they fold
+        // into the run's activity chain. Stamp the same run identity live.
+        // The event's run_id is authoritative here: setRunStarted runs
+        // AFTER this action, so context.runId still holds the prior run.
+        msg.runId = e.run_id;
+      }
       return { items: [...context.items, msg] };
     }),
 
-    bufferPreamble: assign(({ context, event }) => {
+    // Live narration lands in the transcript IMMEDIATELY as a normal
+    // assistant message, stamped with the run identity. Live items carry no
+    // canonical envelope, so the runId stamp is what lets activity grouping
+    // fold the narration into the run's chain the moment later machinery
+    // from the same run arrives — matching what a reload rebuilds from
+    // canonical history (agent_message items with a turn_id).
+    appendAssistantMessage: assign(({ context, event }) => {
       const e = event as Extract<ChatSessionEvent, { type: 'MESSAGE_OUTPUT' }>;
+      // Dedupe on (runId, content): resync replay / reconnect can deliver
+      // the same message_output twice — the message has no call_id, so
+      // identity is the run plus the exact text (the spirit of
+      // appendToolItem's call_id upsert).
+      const dup = context.items.some(
+        (it) => it.type === 'chat' && it.role === 'assistant' && it.runId === context.runId && it.content === e.content
+      );
+      const msg: ChatMessage = { type: 'chat', role: 'assistant', content: e.content, runId: context.runId };
       return {
-        preambleBuffer: [...context.preambleBuffer, { content: e.content, timestamp: Date.now(), superseded: false }],
-        preamble: e.content,
+        items: dup ? context.items : [...context.items, msg],
         status: undefined,
         statusItalic: false,
       };
@@ -343,10 +361,7 @@ export const chatSessionMachine = setup({
       if (idx >= 0) {
         items[idx] = { ...(items[idx] as ToolItem), ...item };
       }
-      return {
-        items,
-        preambleBuffer: supersede(context.preambleBuffer),
-      };
+      return { items };
     }),
 
     updateToolResult: assign(({ context, event }) => {
@@ -375,28 +390,7 @@ export const chatSessionMachine = setup({
           runId: context.runId,
         } as ToolItem);
       }
-      return {
-        items: next,
-        preambleBuffer: supersede(context.preambleBuffer),
-      };
-    }),
-
-    flushPreamble: assign(({ context }) => {
-      const nonSuperseded = context.preambleBuffer.filter((m) => !m.superseded);
-      const flushed = nonSuperseded.length
-        ? [
-            ...context.items,
-            ...nonSuperseded.map((m): ChatMessage => ({ type: 'chat', role: 'assistant', content: m.content })),
-          ]
-        : context.items;
-      return {
-        items: flushed,
-        preambleBuffer: [],
-        preamble: undefined,
-        toolStatus: undefined,
-        statusSpinner: false,
-        statusItalic: false,
-      };
+      return { items: next };
     }),
 
     updateRunStatus: assign(({ event }) => {
@@ -457,6 +451,32 @@ export const chatSessionMachine = setup({
       return { items: [...filtered, item] };
     }),
 
+    appendWorkflowReview: assign(({ context, event }) => {
+      const e = event as Extract<ChatSessionEvent, { type: 'WORKFLOW_REVIEWED' }>;
+      const item: WorkflowReviewItem = {
+        type: 'workflow_review',
+        task_id: e.task_id,
+        subject: e.subject,
+        outcome: e.outcome,
+        reviewer: e.reviewer,
+        rationale: e.rationale,
+        session_id: e.session_id,
+      };
+      // Completion reviews carry no request id; replay convergence dedupes on
+      // the full record (task, outcome, rationale) so re-delivery replaces
+      // while genuinely distinct reviews of the same step all stay on record.
+      const filtered = context.items.filter(
+        (it) =>
+          !(
+            it.type === 'workflow_review' &&
+            (it as WorkflowReviewItem).task_id === e.task_id &&
+            (it as WorkflowReviewItem).outcome === e.outcome &&
+            (it as WorkflowReviewItem).rationale === e.rationale
+          )
+      );
+      return { items: [...filtered, item] };
+    }),
+
     removeApproval: assign(({ context, event }) => {
       const e = event as Extract<ChatSessionEvent, { type: 'APPROVAL_DECIDED' | 'APPROVAL_RESOLVED' }>;
       const newPending = new Map(context.pendingApprovals);
@@ -475,8 +495,6 @@ export const chatSessionMachine = setup({
       return {
         sessionId: sid,
         items: [],
-        preamble: undefined,
-        preambleBuffer: [],
         status: undefined,
         statusSpinner: false,
         statusItalic: false,
@@ -493,8 +511,6 @@ export const chatSessionMachine = setup({
       statusSpinner: false,
       statusItalic: false,
       toolStatus: undefined,
-      preamble: undefined,
-      preambleBuffer: [],
     }),
 
     setHistoryItems: assign({
@@ -518,6 +534,17 @@ export const chatSessionMachine = setup({
         if (!incoming) {
           return context.items;
         }
+        // No live-item dedupe by request_id / task_id here on purpose:
+        // mid-session CANONICAL_ITEM_UPDATED can only carry plan / run_diff
+        // items. Server-side, omniagents pushes item_updated exclusively
+        // from finalize_plans, settle_run_diff, and the run-diff observer
+        // (recorder _append/_update/_revise never notify — see
+        // notify_item_updated in core/agents/service.py), and our own
+        // item_updated handler in use-chat-session.ts filters to those two
+        // kinds besides. Canonical approval / guardian / workflow items
+        // arrive only via HISTORY_LOADED, which replaces items wholesale —
+        // so a canonical twin can never sit next to its live-appended
+        // counterpart.
         const next = context.items.slice();
         const index = next.findIndex((item) => item.canonical?.item_id === incoming.item_id);
         if (index >= 0) {
@@ -556,11 +583,9 @@ export const chatSessionMachine = setup({
       };
     }),
 
-    markStopping: assign(({ context }) => ({
-      preambleBuffer: supersede(context.preambleBuffer),
-      preamble: undefined,
-    })),
-
+    // Deliberately NOT runId-stamped: APPEND_RESPONSE carries out-of-band
+    // content (slash-command results), not model output of a run — stamping
+    // it would fold external text into the agent's activity chain.
     appendResponse: assign({
       items: ({ context, event }) => {
         const e = event as Extract<ChatSessionEvent, { type: 'APPEND_RESPONSE' }>;
@@ -697,7 +722,7 @@ export const chatSessionMachine = setup({
               actions: ['appendUserMessageFromRunStarted', 'setRunStarted'],
             },
             // Late-arriving events from a previous run (session-filtered)
-            MESSAGE_OUTPUT: { guard: 'acceptStrict', actions: 'bufferPreamble' },
+            MESSAGE_OUTPUT: { guard: 'acceptStrict', actions: 'appendAssistantMessage' },
             // A client that attached MID-run (the read-only worker
             // transcript viewer, a reconnect whose replay was superseded
             // by the authoritative transcript) never saw RUN_STARTED —
@@ -720,11 +745,10 @@ export const chatSessionMachine = setup({
             RUN_END: {
               guard: 'acceptLoose',
               target: 'idle',
-              actions: 'flushPreamble',
             },
             MESSAGE_OUTPUT: {
               guard: 'acceptStrictOrStarting',
-              actions: 'bufferPreamble',
+              actions: 'appendAssistantMessage',
             },
             TOOL_CALLED: {
               guard: 'acceptStrictOrStarting',
@@ -740,9 +764,10 @@ export const chatSessionMachine = setup({
 
         running: {
           on: {
-            MESSAGE_OUTPUT: { guard: 'acceptStrict', actions: 'bufferPreamble' },
+            MESSAGE_OUTPUT: { guard: 'acceptStrict', actions: 'appendAssistantMessage' },
             TOOL_CALLED: { guard: 'acceptStrict', actions: 'appendToolItem' },
             GUARDIAN_REVIEWED: { guard: 'acceptStrict', actions: 'appendGuardianReview' },
+            WORKFLOW_REVIEWED: { guard: 'acceptStrict', actions: 'appendWorkflowReview' },
             TOOL_RESULT: { guard: 'acceptStrict', actions: 'updateToolResult' },
             RUN_STATUS: { guard: 'acceptLoose', actions: 'updateRunStatus' },
             TOKEN: { guard: 'acceptLoose' },
@@ -755,9 +780,9 @@ export const chatSessionMachine = setup({
             RUN_END: {
               guard: 'acceptLoose',
               target: 'idle',
-              actions: ['flushPreamble', 'clearRunState'],
+              actions: ['clearRunState'],
             },
-            STOP: { target: 'stopping', actions: 'markStopping' },
+            STOP: { target: 'stopping' },
           },
         },
 
@@ -771,14 +796,15 @@ export const chatSessionMachine = setup({
             RUN_END: {
               guard: 'acceptLoose',
               target: 'idle',
-              actions: ['flushPreamble', 'clearRunState'],
+              actions: ['clearRunState'],
             },
             // Additional approvals can arrive while one is pending
             REQUEST_APPROVAL: { guard: 'acceptStrict', actions: 'addApproval' },
             // Events can still flow while awaiting approval
-            MESSAGE_OUTPUT: { guard: 'acceptStrict', actions: 'bufferPreamble' },
+            MESSAGE_OUTPUT: { guard: 'acceptStrict', actions: 'appendAssistantMessage' },
             TOOL_CALLED: { guard: 'acceptStrict', actions: 'appendToolItem' },
             GUARDIAN_REVIEWED: { guard: 'acceptStrict', actions: 'appendGuardianReview' },
+            WORKFLOW_REVIEWED: { guard: 'acceptStrict', actions: 'appendWorkflowReview' },
             TOOL_RESULT: { guard: 'acceptStrict', actions: 'updateToolResult' },
             RUN_STATUS: { guard: 'acceptLoose', actions: 'updateRunStatus' },
             SET_STATUS: { guard: 'acceptLoose', actions: 'setStatusFromServer' },
@@ -790,12 +816,13 @@ export const chatSessionMachine = setup({
             RUN_END: {
               guard: 'acceptLoose',
               target: 'idle',
-              actions: ['flushPreamble', 'clearRunState'],
+              actions: ['clearRunState'],
             },
             // Events can still arrive while stopping
-            MESSAGE_OUTPUT: { guard: 'acceptStrict', actions: 'bufferPreamble' },
+            MESSAGE_OUTPUT: { guard: 'acceptStrict', actions: 'appendAssistantMessage' },
             TOOL_CALLED: { guard: 'acceptStrict', actions: 'appendToolItem' },
             GUARDIAN_REVIEWED: { guard: 'acceptStrict', actions: 'appendGuardianReview' },
+            WORKFLOW_REVIEWED: { guard: 'acceptStrict', actions: 'appendWorkflowReview' },
             TOOL_RESULT: { guard: 'acceptStrict', actions: 'updateToolResult' },
           },
         },

@@ -1,4 +1,5 @@
-import type { Column, Pipeline, Project, Ticket } from '@/shared/types';
+import { hasIncompleteSteps, isIncompleteStep } from '@/lib/plan-snapshot';
+import type { Column, Pipeline, PlanSnapshotEntry, Project, Ticket } from '@/shared/types';
 import { isRepoSource } from '@/shared/types';
 
 export type SupervisorContext = {
@@ -15,6 +16,54 @@ export type SupervisorContext = {
    * prompt; it must match where the launcher's ArtifactStore reads.
    */
   artifactsDir?: string;
+  /**
+   * The ticket's stored `lastPlanSnapshot` from a previous session. Plans are
+   * thread-scoped, so a relaunched session starts empty — this seeds a
+   * "Prior plan" section instructing the agent to recreate the incomplete
+   * steps (docs/agentic-workflow-enforcement-plan.md §F). Renders nothing
+   * when absent or when every step completed.
+   */
+  priorPlan?: PlanSnapshotEntry[];
+};
+
+/** One "- …" line describing an incomplete prior-plan step. */
+const priorStepLine = (step: PlanSnapshotEntry): string => {
+  const details: string[] = [];
+  if (step.status !== 'pending') {
+    details.push(`was ${step.status}`);
+  }
+  if (step.exitCriteria?.trim()) {
+    details.push(`exit criteria: ${step.exitCriteria.trim()}`);
+  }
+  if (step.blockedBy && step.blockedBy.length > 0) {
+    details.push(`blocked by: ${step.blockedBy.map((id) => `#${id}`).join(', ')}`);
+  }
+  if (step.owner) {
+    details.push(`owner: ${step.owner}`);
+  }
+  return `- #${step.id} ${step.subject}${details.length > 0 ? ` (${details.join('; ')})` : ''}`;
+};
+
+/**
+ * Render the "## Prior plan" section from a previous session's snapshot.
+ * Empty string when there is no snapshot or nothing is left to do.
+ */
+const buildPriorPlanSection = (priorPlan?: PlanSnapshotEntry[]): string => {
+  if (!priorPlan || priorPlan.length === 0 || !hasIncompleteSteps(priorPlan)) {
+    return '';
+  }
+  const completed = priorPlan.filter((s) => !isIncompleteStep(s));
+  const incomplete = priorPlan.filter(isIncompleteStep);
+
+  const parts: string[] = ['\n\n## Prior plan', 'A previous session on this ticket left this plan.'];
+  if (completed.length > 0) {
+    parts.push(`Already completed (context only — do not redo):\n${completed.map((s) => `- ${s.subject}`).join('\n')}`);
+  }
+  parts.push(`Still incomplete:\n${incomplete.map(priorStepLine).join('\n')}`);
+  parts.push(
+    "Before starting work, recreate the incomplete steps with `task_create` (carry each step's exitCriteria) and re-add the blocker edges with `task_update`'s `addBlockedBy`. Adjust the plan if the workspace has drifted since."
+  );
+  return parts.join('\n');
 };
 
 /**
@@ -65,6 +114,8 @@ const buildContextSection = (project: Project, ctx?: SupervisorContext): string 
     const formatted = ctx.recentComments.map((c) => `[${c.author}]: ${c.content}`).join('\n\n');
     parts.push(`\n\n## Recent Comments\n${formatted}`);
   }
+
+  parts.push(buildPriorPlanSection(ctx?.priorPlan));
 
   parts.push(buildOutputSection(project, ctx));
 

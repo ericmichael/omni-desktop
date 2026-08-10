@@ -1,6 +1,6 @@
 import { useDraggable } from '@dnd-kit/core';
 import { useStore } from '@nanostores/react';
-import { ExternalLink, GitFork, GripVertical, Lock, Play, RefreshCw } from 'lucide-react';
+import { ExternalLink, GitFork, GripVertical, ListChecks, Lock, Play, RefreshCw } from 'lucide-react';
 import { memo, useCallback, useMemo } from 'react';
 
 import { isDoneColumn } from '@/lib/pipeline-category';
@@ -46,6 +46,26 @@ export const KanbanCard = memo(({ ticket, isOverlay }: { ticket: Ticket; isOverl
     ticketApi.ensureSupervisorInfra(ticket.id);
     openTicketInCode(ticket.id);
   }, [ticket.id]);
+
+  // Plan progress from the session's persisted `lastPlanSnapshot`
+  // (workflow-enforcement §F/§H): step fraction, live active step, blocked
+  // and unverified indicators. Cards without a snapshot render exactly as
+  // before — the whole row is absent.
+  const planSnapshot = ticket.lastPlanSnapshot;
+  const planProgress = useMemo(() => {
+    if (!planSnapshot || planSnapshot.length === 0) {
+      return null;
+    }
+    const completed = planSnapshot.filter((s) => s.status === 'completed');
+    const active = planSnapshot.find((s) => s.status === 'in_progress');
+    return {
+      completed: completed.length,
+      total: planSnapshot.length,
+      activeLine: active ? active.activeForm || active.subject : undefined,
+      blocked: planSnapshot.some((s) => s.status === 'blocked'),
+      unverified: completed.filter((s) => s.verified === false).length,
+    };
+  }, [planSnapshot]);
 
   const phase = ticket.phase;
   const titleText = ticket.title?.trim() ? ticket.title : 'Untitled';
@@ -147,6 +167,35 @@ export const KanbanCard = memo(({ ticket, isOverlay }: { ticket: Ticket; isOverl
           </div>
         )}
       </div>
+
+      {planProgress && (
+        <div className="mt-1.5 flex min-w-0 items-center gap-1.5" data-testid="plan-progress">
+          <Badge
+            variant="outline"
+            className="text-muted-foreground"
+            aria-label={`Plan: ${planProgress.completed} of ${planProgress.total} steps completed`}
+          >
+            <ListChecks />
+            {planProgress.completed}/{planProgress.total}
+          </Badge>
+          {planProgress.blocked && (
+            <Badge variant="outline" className="border-warning/40 text-warning">
+              <Lock />
+              blocked
+            </Badge>
+          )}
+          {planProgress.unverified > 0 && (
+            <Badge variant="outline" className="border-warning/40 text-warning">
+              {planProgress.unverified} unverified
+            </Badge>
+          )}
+          {planProgress.activeLine && (
+            <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-xs italic text-muted-foreground">
+              {planProgress.activeLine}
+            </span>
+          )}
+        </div>
+      )}
     </div>
   );
 });

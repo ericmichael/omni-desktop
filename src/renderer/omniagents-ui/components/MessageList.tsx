@@ -13,8 +13,6 @@ import {
   Maximize2Icon,
   Minimize2Icon,
   PaperclipIcon,
-  ShieldCheckIcon,
-  ShieldXIcon,
   ThumbsDownIcon,
   ThumbsUpIcon,
 } from 'lucide-react';
@@ -30,7 +28,7 @@ import { useRPCClient } from '@/renderer/omniagents-ui/rpc-context';
 
 import type { ActivityGroupData } from './activity-group';
 import { formatArgsPreview, groupItems } from './activity-group';
-import { ActivityGroup as ActivityGroupComponent } from './ActivityGroup';
+import { ActivityChain } from './ActivityChain';
 import {
   Artifact,
   ArtifactAction,
@@ -42,7 +40,6 @@ import {
 import { CodeBlock } from './ai/code-block';
 import { MessageResponse } from './ai/message';
 import { Plan, PlanContent, PlanDescription, PlanFooter, PlanHeader, PlanTitle } from './ai/plan';
-import { Reasoning, ReasoningContent, ReasoningTrigger } from './ai/reasoning';
 import { Shimmer } from './ai/shimmer';
 import { Tool, ToolContent, ToolHeader, ToolInput, ToolOutput } from './ai/tool';
 import { ChatContainerContent, ChatContainerRoot, ChatContainerScrollAnchor } from './ChatContainer';
@@ -68,10 +65,8 @@ import type {
   ArtifactMcpUi,
   Attachment,
   ChatMessage,
-  GuardianReviewItem as GuardianReviewItemType,
   MessageItem,
   PlanItem,
-  ReasoningItem,
   RunDiffItem,
   StructuredItem,
   ToolItem,
@@ -99,7 +94,6 @@ export function MessageList({
   statusText,
   thinking,
   statusSpinner,
-  preambleText,
   welcomeText,
   suggestions,
   onApprovalDecision,
@@ -118,7 +112,6 @@ export function MessageList({
   statusText?: string;
   thinking?: boolean;
   statusSpinner?: boolean;
-  preambleText?: string;
   welcomeText?: string;
   suggestions?: ReadonlyArray<{ label: string; prompt: string }>;
   onApprovalDecision?: (request_id: string, value: 'yes' | 'always' | 'no', kind?: 'function' | 'mcp') => void;
@@ -187,7 +180,9 @@ export function MessageList({
   const tickerStatus = hasRunningGroup ? toolStatusText : undefined;
   const fallbackStatus = thinking ? (hasRunningGroup ? 'Working…' : 'Thinking…') : '';
   const statusRowText = hasRunningGroup ? undefined : statusText;
-  const renderActivityTool = useCallback((item: ToolItem) => <ToolCard item={item} />, []);
+  // Tool steps expand to the full ToolCard — open it directly so the click
+  // that revealed it also shows results/parameters without a second click.
+  const renderActivityTool = useCallback((item: ToolItem) => <ToolStepDetail item={item} />, []);
   if (items.length === 0) {
     return (
       <div className="flex-1 relative">
@@ -240,14 +235,20 @@ export function MessageList({
             }
           }
           const queueTotal = pendingApprovalIds.length;
+          // For `kind: 'function'` approvals the request_id IS the tool
+          // call_id, so the chain can render the matching in-flight tool
+          // step as "awaiting approval" instead of a lying "Running…".
+          const pendingApprovalSet = new Set(pendingApprovalIds);
           return displayItems.map((m, i) => {
             if (m.type === 'activity_group') {
+              const group = m as ActivityGroupData;
               return (
-                <ActivityGroupComponent
-                  key={`${(m as any).runId}-${i}`}
-                  group={m as any}
+                <ActivityChain
+                  key={`${group.runId ?? 'machinery'}-${i}`}
+                  group={group}
                   statusText={tickerStatus}
                   renderTool={renderActivityTool}
+                  pendingApprovalIds={pendingApprovalSet}
                 />
               );
             }
@@ -267,9 +268,6 @@ export function MessageList({
                   onFeedbackDismiss={handleFeedbackDismiss}
                 />
               );
-            }
-            if (m.type === 'tool') {
-              return <ToolCard key={(m as ToolItem).call_id || i} item={m as ToolItem} />;
             }
             if (m.type === 'artifact') {
               return (
@@ -295,19 +293,6 @@ export function MessageList({
                 />
               );
             }
-            if (m.type === 'guardian_review') {
-              const review = m as GuardianReviewItemType;
-              return <GuardianReviewChip key={`${review.request_id}-review`} item={review} />;
-            }
-            if (m.type === 'reasoning') {
-              const reasoning = m as ReasoningItem;
-              return (
-                <Reasoning key={reasoning.canonical.item_id} defaultOpen={false}>
-                  <ReasoningTrigger />
-                  <ReasoningContent>{reasoning.summary}</ReasoningContent>
-                </Reasoning>
-              );
-            }
             if (m.type === 'plan') {
               return <PlanCard key={(m as PlanItem).id} item={m as PlanItem} />;
             }
@@ -329,7 +314,6 @@ export function MessageList({
           });
         })()}
         {pendingPlan ? <PlanCard key={pendingPlan.id} item={pendingPlan} onDecision={onPlanDecision} /> : null}
-        {preambleText ? <PreambleRow text={preambleText} /> : null}
         {thinking || statusRowText ? (
           <StatusRow
             text={statusRowText || fallbackStatus}
@@ -727,20 +711,6 @@ function AttachmentChip({ attachment }: { attachment: Attachment }) {
       <span className="max-w-45 truncate text-foreground" title={attachment.filename || 'file'}>
         {attachment.filename || 'file'}
       </span>
-    </div>
-  );
-}
-
-function PreambleRow({ text }: { text?: string }) {
-  if (!text) {
-    return null;
-  }
-  return (
-    <div className="flex min-w-0 max-w-full items-start gap-2 overflow-hidden">
-      <span className="mt-0.5 animate-pulse text-warning">✶</span>
-      <div className="prose-sm prose-warning min-w-0 max-w-full overflow-hidden">
-        <MessageResponse>{text}</MessageResponse>
-      </div>
     </div>
   );
 }
@@ -1143,6 +1113,57 @@ function McpUiSurface({
   );
 }
 
+/**
+ * Chain-embedded tool detail: the ToolCard's body without the card chrome.
+ * The chain step's label already names the tool and its state, so expanding
+ * a step reveals only what matters — parameters behind a small disclosure
+ * (they're provenance; errors keep them expanded) and the result body — in
+ * the timeline's quiet register instead of a boxed panel.
+ */
+export function ToolStepDetail({ item }: { item: ToolItem }) {
+  const hasResult = item.status === 'result';
+  const failed = item.metadata?.display_type === 'error';
+  const richBody = useMemo(() => renderMetadata(item.metadata, item.output || ''), [item.metadata, item.output]);
+  const parsedInput = useMemo(() => {
+    if (!item.input) {
+      return undefined;
+    }
+    try {
+      return JSON.parse(item.input);
+    } catch {
+      return undefined;
+    }
+  }, [item.input]);
+  const [paramsOpen, setParamsOpen] = useState(false);
+
+  return (
+    <div data-testid="tool-step-detail" className="min-w-0 max-w-full space-y-2 overflow-hidden">
+      {parsedInput && !failed ? (
+        <Collapsible open={paramsOpen} onOpenChange={setParamsOpen}>
+          <CollapsibleTrigger asChild>
+            <Button type="button" variant="ghost" size="xs" className="h-6 px-1 text-xs text-muted-foreground">
+              {paramsOpen ? <ChevronUpIcon className="size-3" /> : <ChevronDownIcon className="size-3" />}
+              {paramsOpen ? 'Hide parameters' : 'Show parameters'}
+            </Button>
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <ToolInput className="mt-2" input={parsedInput} />
+          </CollapsibleContent>
+        </Collapsible>
+      ) : parsedInput ? (
+        // Failed calls keep parameters visible — what was attempted is the
+        // diagnostic payload.
+        <ToolInput input={parsedInput} />
+      ) : null}
+      {richBody ? (
+        richBody
+      ) : hasResult && item.output ? (
+        <ToolOutput output={item.output} errorText={failed ? item.metadata?.summary || undefined : undefined} />
+      ) : null}
+    </div>
+  );
+}
+
 export function ToolCard({ item, defaultOpen }: { item: ToolItem; defaultOpen?: boolean }) {
   const hasResult = item.status === 'result';
   const toolState = hasResult ? ('output-available' as const) : ('input-available' as const);
@@ -1251,40 +1272,6 @@ const SELF_CONTAINED_DISPLAY_TYPES = new Set([
   'table',
 ]);
 
-/**
- * Compact record of an approval the user never saw: resolved by the guardian
- * reviewer ("Approve for me") or by sandbox policy. Denials expand to show
- * the rationale the model received.
- */
-function GuardianReviewChip({ item }: { item: GuardianReviewItemType }) {
-  const [expanded, setExpanded] = useState(false);
-  const denied = item.outcome === 'deny';
-  const reviewerLabel = item.reviewer === 'sandbox-policy' ? 'sandbox policy' : item.reviewer;
-  const toolLabel = item.server_label ? `${item.server_label} · ${item.tool}` : item.tool;
-  const summary = denied ? `${toolLabel} denied by ${reviewerLabel}` : `${toolLabel} approved by ${reviewerLabel}`;
-  return (
-    <div className="my-1 min-w-0 text-xs text-muted-foreground" data-testid="guardian-review-chip">
-      <button
-        type="button"
-        onClick={() => setExpanded((v) => !v)}
-        className="flex min-w-0 max-w-full items-center gap-1.5 rounded-md px-1 py-0.5 hover:bg-accent/50"
-        title={item.rationale || summary}
-      >
-        {denied ? (
-          <ShieldXIcon className="size-3.5 shrink-0 text-destructive" />
-        ) : (
-          <ShieldCheckIcon className="size-3.5 shrink-0 text-primary/70" />
-        )}
-        <span className="truncate">{summary}</span>
-        {item.risk_level ? <span className="shrink-0 opacity-70">({item.risk_level} risk)</span> : null}
-      </button>
-      {expanded && item.rationale ? (
-        <div className="mt-0.5 whitespace-pre-wrap break-words pl-6 pr-2 text-xs">{item.rationale}</div>
-      ) : null}
-    </div>
-  );
-}
-
 function ApprovalCard({
   item,
   onDecision,
@@ -1346,7 +1333,7 @@ function ApprovalCard({
         {isMcp ? 'Approve MCP call' : `Approve ${item.tool_label || item.tool}`}
         {headerSuffix}
       </div>
-      {summary ? <div className="mt-0.5 break-words text-xs text-muted-foreground">{summary}</div> : null}
+      {summary ? <div className="mt-1 break-words text-xs text-muted-foreground">{summary}</div> : null}
       <div className="mt-2">
         {richBody ? (
           <>

@@ -101,6 +101,21 @@ describe('canonical conversation item adapters', () => {
                 owner: 'agent',
                 blocked_by: [],
               },
+              {
+                id: 'step-2',
+                subject: 'Verify it',
+                status: 'completed',
+                exit_criteria: 'tests pass',
+                review: { outcome: 'unverified' },
+                criteria_edited: true,
+                original_exit_criteria: 'all tests pass',
+              },
+              {
+                id: 'step-3',
+                subject: 'Stamp only',
+                status: 'in_progress',
+                original_exit_criteria: 'stricter bar',
+              },
             ],
           },
         })
@@ -118,7 +133,18 @@ describe('canonical conversation item adapters', () => {
           status: 'in_progress',
           owner: 'agent',
           blockedBy: [],
+          criteriaEdited: undefined,
         },
+        {
+          id: 'step-2',
+          title: 'Verify it',
+          status: 'completed',
+          exitCriteria: 'tests pass',
+          verified: false,
+          criteriaEdited: true,
+        },
+        // The stamp alone implies an edit even when the flag is missing.
+        { id: 'step-3', title: 'Stamp only', criteriaEdited: true },
       ],
     });
     expect(
@@ -140,14 +166,120 @@ describe('canonical conversation item adapters', () => {
     ).toMatchObject({ type: 'approval', request_id: 'req-1', kind: 'mcp', server_label: 'github' });
   });
 
+  it('maps reviewer-resolved approvals to guardian review steps', () => {
+    const reviewed = adaptCanonicalConversationItem(
+      item({
+        kind: 'approval',
+        content: {
+          approval_kind: 'function',
+          call_id: 'call-1',
+          tool: 'bash',
+          reviewer: 'guardian',
+          outcome: 'allow',
+          rationale: 'read-only command',
+          risk_level: 'low',
+          decision: 'approve',
+        },
+      })
+    );
+    expect(reviewed).toMatchObject({
+      type: 'guardian_review',
+      request_id: 'call-1',
+      tool: 'bash',
+      reviewer: 'guardian',
+      outcome: 'allow',
+      rationale: 'read-only command',
+      risk_level: 'low',
+      kind: 'tool',
+      session_id: 'thread-1',
+      canonical: { kind: 'approval' },
+    });
+    // A reviewer verdict outside allow/deny is not a guardian step.
+    const unknownOutcome = adaptCanonicalConversationItem(
+      item({ kind: 'approval', content: { call_id: 'call-1', tool: 'bash', reviewer: 'guardian', outcome: 'shrug' } })
+    );
+    expect(unknownOutcome).toMatchObject({ type: 'structured', kind: 'approval' });
+  });
+
+  it('folds human-decided approvals into the chain as a review by you', () => {
+    const approved = adaptCanonicalConversationItem(
+      item({
+        kind: 'approval',
+        content: { approval_kind: 'function', call_id: 'call-2', tool: 'bash', decision: 'approve' },
+      })
+    );
+    expect(approved).toMatchObject({
+      type: 'guardian_review',
+      request_id: 'call-2',
+      tool: 'bash',
+      reviewer: 'you',
+      outcome: 'allow',
+      kind: 'tool',
+    });
+
+    const rejected = adaptCanonicalConversationItem(
+      item({
+        kind: 'approval',
+        content: {
+          approval_kind: 'mcp',
+          request_id: 'req-9',
+          tool: 'publish',
+          server_label: 'github',
+          decision: 'reject',
+          rejection_message: 'not now',
+        },
+      })
+    );
+    expect(rejected).toMatchObject({
+      type: 'guardian_review',
+      reviewer: 'you',
+      outcome: 'deny',
+      rationale: 'not now',
+      kind: 'mcp',
+      server_label: 'github',
+    });
+  });
+
+  it('maps workflow_review items to workflow steps, skipping unknown outcomes', () => {
+    const reviewed = adaptCanonicalConversationItem(
+      item({
+        kind: 'workflow_review',
+        content: {
+          task_id: '3',
+          subject: 'Verify it',
+          outcome: 'accept_verified',
+          reviewer: 'guardian',
+          rationale: 'tests pass',
+        },
+      })
+    );
+    expect(reviewed).toMatchObject({
+      type: 'workflow_review',
+      task_id: '3',
+      subject: 'Verify it',
+      outcome: 'accept_verified',
+      reviewer: 'guardian',
+      rationale: 'tests pass',
+      session_id: 'thread-1',
+      canonical: { kind: 'workflow_review' },
+    });
+    const unknownOutcome = adaptCanonicalConversationItem(
+      item({ kind: 'workflow_review', content: { task_id: '3', subject: 'Verify it', outcome: 'maybe' } })
+    );
+    expect(unknownOutcome).toMatchObject({ type: 'structured', kind: 'workflow_review' });
+  });
+
   it('keeps resolved approvals and structured/future kinds non-actionable without flattening their content', () => {
+    // A resolved approval with neither reviewer metadata nor a usable
+    // decision (nothing to attribute) stays a structured card — never an
+    // actionable approval, never a fabricated review step.
     const resolved = adaptCanonicalConversationItem(
-      item({ kind: 'approval', content: { call_id: 'call-1', tool: 'rm', decision: 'reject', reason: 'unsafe' } })
+      item({ kind: 'approval', content: { call_id: 'call-1', tool: 'rm', reason: 'unsafe' } })
     );
     expect(resolved).toMatchObject({
       type: 'structured',
       kind: 'approval',
-      canonical: { content: { decision: 'reject', reason: 'unsafe' } },
+      canonical: { content: { reason: 'unsafe' } },
     });
 
     for (const kind of ['elicitation', 'compaction', 'server_feature_v3']) {

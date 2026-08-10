@@ -21,6 +21,7 @@ import { Item, ItemContent, ItemDescription, ItemMedia, ItemTitle } from '@/rend
 import { Spinner } from '@/renderer/ds/ui/spinner';
 
 import { $activityFocus, type BashJobSummary, clearActivityFocus, type SubagentSummary } from './activity-store';
+import type { TaskSummary } from './canonical-plan-tasks';
 
 /**
  * The one presentation vocabulary for background activity — status colors,
@@ -52,6 +53,73 @@ export function jobDotClass(job: BashJobSummary): string {
 
 export function StatusDot({ className }: { className: string }) {
   return <span className={cn('inline-block size-1.5 shrink-0 rounded-full', className)} aria-hidden />;
+}
+
+// --- plan/task rows ----------------------------------------------------------
+
+const TASK_DOT: Record<TaskSummary['status'], string> = {
+  pending: 'bg-muted-foreground/50',
+  in_progress: 'bg-primary animate-pulse',
+  completed: 'bg-success',
+  blocked: 'bg-warning',
+};
+
+/**
+ * One plan step in the Tasks popover's row language — status dot, `#id`,
+ * subject, muted criteria line, verification state. Shared between the
+ * composer's Tasks popover and the Agents sidecar's worker-plan drill-down
+ * so a worker's plan reads exactly like the session's own.
+ */
+export function PlanTaskRow({ task: t }: { task: TaskSummary }) {
+  const blockers = t.blockedBy ?? [];
+  // Completed splits by verification: solid dot + strikethrough for
+  // verified/unreviewed, hollow amber (no strikethrough — the ambiguity is
+  // the point) for unverified. The snapshot carries no rationale, so the
+  // tooltip states only the outcome (plus the mid-step criteria edit, when
+  // stamped — informational, same amber/muted register as unverified).
+  const unverified = t.status === 'completed' && t.verified === false;
+  return (
+    <div
+      className="px-2 py-1.5"
+      data-testid={`task-row-${t.id}`}
+      title={
+        unverified
+          ? t.criteriaEdited
+            ? 'completed (unverified; criteria edited mid-step)'
+            : 'completed (unverified)'
+          : undefined
+      }
+    >
+      <div className="flex items-center gap-2">
+        <StatusDot className={unverified ? 'border border-warning bg-warning/20' : TASK_DOT[t.status]} />
+        <span className="shrink-0 font-mono text-muted-foreground">#{t.id}</span>
+        <span
+          className={`min-w-0 flex-1 truncate ${
+            t.status === 'completed'
+              ? unverified
+                ? 'text-muted-foreground'
+                : 'text-muted-foreground line-through'
+              : 'text-foreground'
+          }`}
+          title={t.subject}
+        >
+          {t.subject}
+        </span>
+        {unverified ? <span className="shrink-0 whitespace-nowrap text-warning/80">unverified</span> : null}
+        {blockers.length > 0 ? (
+          <span className="shrink-0 whitespace-nowrap text-warning">blocked by #{blockers.join(', #')}</span>
+        ) : null}
+      </div>
+      {t.exitCriteria || t.criteriaEdited ? (
+        <p className="mt-0.5 truncate pl-3.5 text-muted-foreground/70" title={t.exitCriteria}>
+          {t.exitCriteria}
+          {t.criteriaEdited ? (
+            <span className="text-warning/70">{t.exitCriteria ? ' · ' : ''}criteria edited mid-step</span>
+          ) : null}
+        </p>
+      ) : null}
+    </div>
+  );
 }
 
 // --- labels -----------------------------------------------------------------

@@ -1611,6 +1611,15 @@ export type AgentProcessStopResult = {
   shutdown: 'graceful' | 'forced' | 'not-applicable';
 };
 
+/** One registered source's landing spot inside a materialized environment. */
+export type WorkspaceMountDescriptor = {
+  name: string;
+  /** Location relative to ``workspaceRoot`` (``'.'`` = the root itself). */
+  path: string;
+  writable: boolean;
+  kind?: string;
+};
+
 // Unified agent process data — emitted by `omni serve` and the platform path.
 export type AgentProcessData = {
   /** Base URL the renderer parses for WS + HTTP endpoints. */
@@ -1633,6 +1642,13 @@ export type AgentProcessData = {
   workspaceRoot?: string;
   /** Environment-selected initial cwd for terminals and agent commands. */
   defaultCwd?: string;
+  /**
+   * Authoritative source mount table reported by materialization: where
+   * every registered source landed relative to ``workspaceRoot``. The
+   * workspace surfaces (Files/Git/Review) derive their scope from this —
+   * never from ``defaultCwd`` or path heuristics.
+   */
+  mounts?: WorkspaceMountDescriptor[];
   /**
    * Bearer token for authenticating WS/HTTP calls against this agent's
    * server. Main-process dials send it as an `Authorization: Bearer`
@@ -2253,6 +2269,30 @@ export type PullRequestLink = {
   lastSeenAt: number;
 };
 
+/**
+ * One step of an omniagents plan snapshot — the `tasks_snapshot` summary
+ * shape (`to_summaries()` in omniagents' plans.py). Persisted per ticket as
+ * `last_plan_snapshot` so a relaunched session can be prompted to recreate
+ * its plan (docs/agentic-workflow-enforcement-plan.md §F). The renderer's
+ * `TaskSummary` (omniagents-ui/canonical-plan-tasks.ts) is the same wire
+ * shape minus the review fields.
+ */
+export type PlanSnapshotEntry = {
+  id: string;
+  subject: string;
+  activeForm?: string;
+  status: 'pending' | 'in_progress' | 'completed' | 'blocked';
+  /** Owning principal ('agent:<id>' for agents; anything else is a human gate). */
+  owner?: string;
+  blockedBy?: string[];
+  /** Checkable definition-of-done. Empty/absent = no semantic review. */
+  exitCriteria?: string;
+  /** Completion review: true verified, false unverified, null/absent unreviewed. */
+  verified?: boolean | null;
+  /** True when the criteria were edited while the step was in progress (ratchet stamp). */
+  criteriaEdited?: boolean;
+};
+
 export type Ticket = {
   id: TicketId;
   projectId: ProjectId;
@@ -2321,6 +2361,13 @@ export type Ticket = {
   assignee?: string;
   /** History of supervisor runs on this ticket. */
   runs?: TicketRun[];
+  /**
+   * Latest plan snapshot from the ticket's agent session (`tasks_snapshot`).
+   * Seeds the supervisor prompt's "Prior plan" section on relaunch and the
+   * kanban card's step fraction; cleared when the ticket settles into a
+   * Done-category column. Absent = no prior plan.
+   */
+  lastPlanSnapshot?: PlanSnapshotEntry[];
   pullRequests?: PullRequestLink[];
   /** Populated by the seed script; tracked in seed-manifest for reset. */
   seedKey?: string;
@@ -3422,6 +3469,19 @@ export type SupervisorBridgeEvent =
       kind: 'goal-update';
       ticketId: TicketId;
       snapshot: GoalSnapshotPayload | null;
+    }
+  | {
+      /**
+       * Forwarded plan (`tasks_snapshot`) update from the column's session.
+       * The orchestrator persists non-empty snapshots to the ticket's
+       * `lastPlanSnapshot`. `null` means the session currently has no
+       * canonical plan — which every fresh session reports before the agent
+       * (re)creates its plan — so it carries no information and is ignored;
+       * clearing happens at ticket settlement instead.
+       */
+      kind: 'plan-update';
+      ticketId: TicketId;
+      snapshot: PlanSnapshotEntry[] | null;
     };
 
 type SupervisorIpcEvents = Namespaced<

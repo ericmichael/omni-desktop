@@ -70,6 +70,8 @@ export type CatalogSessionSelection = Record<string, unknown> & {
   reasoning_effort: string | null;
   /** Session approval reviewer ('user' | 'auto'); null on older runtimes. */
   approvals_reviewer: string | null;
+  /** Session workflow completion reviewer ('off' | 'guardian'); null on older runtimes. */
+  workflow_reviewer: string | null;
 };
 
 export type ListModelsResult = Record<string, unknown> & {
@@ -327,6 +329,10 @@ function decodeSession(value: unknown, label: string): CatalogSessionSelection {
       item.approvals_reviewer === undefined
         ? null
         : nullableString(item.approvals_reviewer, `${label}.approvals_reviewer`),
+    workflow_reviewer:
+      item.workflow_reviewer === undefined
+        ? null
+        : nullableString(item.workflow_reviewer, `${label}.workflow_reviewer`),
   };
 }
 

@@ -33,6 +33,7 @@ import { nanoid } from 'nanoid';
 import path from 'path';
 
 import { columnCategory, isDoneColumn } from '@/lib/pipeline-category';
+import { diffHumanGateItems, humanGateInboxNote, humanGateInboxTitle } from '@/lib/plan-snapshot';
 import type { IWindowSender } from '@/lib/project-manager-deps';
 import { claimsCollide, decideWorktreeAction, resolveWorkspaceClaim } from '@/lib/worktree';
 import type { AppControlManager } from '@/main/app-control-manager';
@@ -52,8 +53,11 @@ import type {
   ActivityEvent,
   CodeTabId,
   ColumnId,
+  InboxItem,
+  InboxItemId,
   Page,
   Pipeline,
+  PlanSnapshotEntry,
   PlatformCredentials,
   Project,
   ProjectId,
@@ -85,6 +89,13 @@ export const MAX_CONTINUATION_TURNS = 10;
 
 /** Auto-dispatch poll interval — check every 30s for eligible tickets. */
 export const AUTO_DISPATCH_INTERVAL_MS = 30_000;
+
+/**
+ * Trailing debounce for persisting forwarded plan snapshots. Plan tool calls
+ * arrive in bursts (every `task_create`/`task_update` re-broadcasts the
+ * snapshot); only the latest state matters, so coalesce writes.
+ */
+export const PLAN_SNAPSHOT_DEBOUNCE_MS = 500;
 
 // ---------------------------------------------------------------------------
 // Shared types
@@ -172,6 +183,16 @@ export interface SupervisorOrchestratorHost {
   getAgentArtifactsDir(ticketId: TicketId): string;
 }
 
+/**
+ * Narrow inbox surface for human-gate plan steps ("agent is waiting on you").
+ * Satisfied by `InboxManager`; optional so older test fakes keep working.
+ */
+export interface SupervisorInboxSurface {
+  getAll(): InboxItem[];
+  add(input: { title: string; note?: string; projectId?: ProjectId | null }): InboxItem;
+  remove(id: InboxItemId): void;
+}
+
 // ---------------------------------------------------------------------------
 // Deps
 // ---------------------------------------------------------------------------
@@ -195,6 +216,12 @@ export interface SupervisorOrchestratorDeps {
    * never global).
    */
   appControlManager?: AppControlManager;
+  /**
+   * Optional inbox surface. When present, blocked human-owned plan steps in
+   * forwarded snapshots create "agent is waiting on you" inbox items,
+   * removed again when the step unblocks or leaves the snapshot.
+   */
+  inbox?: SupervisorInboxSurface;
 }
 
 // ---------------------------------------------------------------------------
@@ -231,6 +258,12 @@ export class SupervisorOrchestrator {
 
   /** Unsubscribe from bridge events on dispose. */
   private offBridge: (() => void) | null = null;
+
+  /** Pending trailing-debounce timers for plan-snapshot persistence. */
+  private readonly planSnapshotTimers = new Map<TicketId, ReturnType<typeof setTimeout>>();
+
+  /** Latest unflushed snapshot per ticket (written when the timer fires). */
+  private readonly pendingPlanSnapshots = new Map<TicketId, PlanSnapshotEntry[]>();
 
   constructor(private readonly deps: SupervisorOrchestratorDeps) {
     this.offBridge = this.deps.bridge.onEvent((event) => this.handleBridgeEvent(event));
@@ -312,6 +345,12 @@ export class SupervisorOrchestrator {
   // -------------------------------------------------------------------------
 
   private handleBridgeEvent(event: SupervisorBridgeEvent): void {
+    if (event.kind === 'plan-update') {
+      // Plan snapshots persist for every ticket-bound column, autopilot or
+      // not — no `machines` entry required.
+      this.handlePlanUpdate(event.ticketId, event.snapshot);
+      return;
+    }
     const entry = this.machines.get(event.ticketId);
     if (!entry) {
       return;
@@ -493,6 +532,119 @@ export class SupervisorOrchestrator {
       state.transition('running' as TicketPhase);
     }
   };
+
+  // -------------------------------------------------------------------------
+  // Plan-snapshot persistence (docs/agentic-workflow-enforcement-plan.md §F)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Handle a forwarded ``tasks_snapshot`` update from the ticket's column.
+   * ``null``/empty means the session has no canonical plan — which every
+   * fresh session reports before the agent (re)creates its plan — so it
+   * carries no information about the stored snapshot and is ignored;
+   * clearing happens at settlement ({@link settlePlanSnapshot}). Non-empty
+   * snapshots persist with a trailing debounce (plan tool calls arrive in
+   * bursts; only the latest state matters).
+   */
+  handlePlanUpdate = (ticketId: TicketId, snapshot: PlanSnapshotEntry[] | null): void => {
+    if (!snapshot || snapshot.length === 0) {
+      return;
+    }
+    this.pendingPlanSnapshots.set(ticketId, snapshot);
+    if (this.planSnapshotTimers.has(ticketId)) {
+      return;
+    }
+    this.planSnapshotTimers.set(
+      ticketId,
+      setTimeout(() => {
+        this.planSnapshotTimers.delete(ticketId);
+        this.flushPlanSnapshot(ticketId);
+      }, PLAN_SNAPSHOT_DEBOUNCE_MS)
+    );
+  };
+
+  /** Write the latest pending snapshot to the ticket and sync gate items. */
+  private flushPlanSnapshot(ticketId: TicketId): void {
+    const snapshot = this.pendingPlanSnapshots.get(ticketId);
+    this.pendingPlanSnapshots.delete(ticketId);
+    if (!snapshot) {
+      return;
+    }
+    const ticket = this.deps.host.getTicketById(ticketId);
+    if (!ticket) {
+      return;
+    }
+    // A settled ticket keeps its cleared column — a trailing update from a
+    // session that is being shut down must not resurrect the snapshot.
+    if (isDoneColumn(this.deps.host.getPipeline(ticket.projectId), ticket.columnId)) {
+      return;
+    }
+    this.deps.host.updateTicket(ticketId, { lastPlanSnapshot: snapshot });
+    this.syncHumanGateInboxItems(ticket, snapshot);
+  }
+
+  /**
+   * Reconcile "agent is waiting on you" inbox items with the snapshot's
+   * blocked human-owned steps: create items for new gates (deduped on a
+   * per-ticket+step marker in the note), remove items whose step unblocked
+   * or left the snapshot.
+   */
+  private syncHumanGateInboxItems(ticket: Ticket, snapshot: readonly PlanSnapshotEntry[]): void {
+    const inbox = this.deps.inbox;
+    if (!inbox) {
+      return;
+    }
+    const { create, removeIds } = diffHumanGateItems(ticket.id, snapshot, inbox.getAll());
+    for (const id of removeIds) {
+      try {
+        inbox.remove(id);
+      } catch {
+        // Already gone (user dismissed it) — the goal state is reached.
+      }
+    }
+    for (const step of create) {
+      inbox.add({
+        title: humanGateInboxTitle(step),
+        note: humanGateInboxNote(ticket.id, step),
+        projectId: ticket.projectId,
+      });
+    }
+  }
+
+  /**
+   * Ticket settlement: drop any pending snapshot write, clear the persisted
+   * `lastPlanSnapshot`, and remove remaining human-gate inbox items. Called
+   * by ProjectManager when the ticket moves into a Done-category column.
+   */
+  settlePlanSnapshot(ticketId: TicketId): void {
+    const timer = this.planSnapshotTimers.get(ticketId);
+    if (timer) {
+      clearTimeout(timer);
+      this.planSnapshotTimers.delete(ticketId);
+    }
+    this.pendingPlanSnapshots.delete(ticketId);
+    this.syncGateItemsForSettledTicket(ticketId);
+    const ticket = this.deps.host.getTicketById(ticketId);
+    if (ticket?.lastPlanSnapshot) {
+      this.deps.host.updateTicket(ticketId, { lastPlanSnapshot: undefined });
+    }
+  }
+
+  /** Remove every gate item for the ticket (diff against an empty snapshot). */
+  private syncGateItemsForSettledTicket(ticketId: TicketId): void {
+    const inbox = this.deps.inbox;
+    if (!inbox) {
+      return;
+    }
+    const { removeIds } = diffHumanGateItems(ticketId, [], inbox.getAll());
+    for (const id of removeIds) {
+      try {
+        inbox.remove(id);
+      } catch {
+        // Already gone — fine.
+      }
+    }
+  }
 
   // -------------------------------------------------------------------------
   // Effective-config accessors.
@@ -1448,17 +1600,28 @@ export class SupervisorOrchestrator {
       }
     }
 
+    // Prior plan from a previous session (docs/agentic-workflow-enforcement-
+    // plan.md §F). The prompt layer renders nothing when every step completed.
+    if (ticket.lastPlanSnapshot && ticket.lastPlanSnapshot.length > 0) {
+      context.priorPlan = ticket.lastPlanSnapshot;
+    }
+
     return {
       goalText: buildAutopilotGoalText(ticket, project, pipeline, context),
       additionalInstructions: buildAutopilotAdditionalInstructions(ticket, project, pipeline, context),
     };
   }
 
-  /** Release bridge subscription on shutdown. */
+  /** Release bridge subscription and pending timers on shutdown. */
   dispose(): void {
     if (this.offBridge) {
       this.offBridge();
       this.offBridge = null;
     }
+    for (const timer of this.planSnapshotTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.planSnapshotTimers.clear();
+    this.pendingPlanSnapshots.clear();
   }
 }
