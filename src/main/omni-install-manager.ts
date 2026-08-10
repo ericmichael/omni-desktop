@@ -530,6 +530,11 @@ export class OmniInstallManager {
       'only-managed',
       '--extra-index-url',
       product.extraIndexUrl,
+      // Revalidate cached index metadata: uv honors the index's HTTP cache
+      // headers, so a version published moments before this install (the
+      // normal pin-bump release flow) would otherwise resolve against a
+      // stale package listing and fail with "no version of X==Y".
+      '--refresh',
       ...(repair ? ['--force-reinstall'] : []),
       ...target,
     ];
@@ -589,6 +594,9 @@ export class OmniInstallManager {
       'only-managed',
       '--extra-index-url',
       getActiveProduct().extraIndexUrl,
+      // Same stale-index guard as installOmniCode: dependency versions
+      // published moments ago must resolve on the first try.
+      '--refresh',
       '--editable',
       `${editablePath}[all]`,
     ];
