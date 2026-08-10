@@ -347,8 +347,8 @@ export class PgProjectsRepo implements IProjectsRepo {
          blocked_by, completed_at, archived_at, column_changed_at,
          use_worktree, worktree_path, worktree_name, supervisor_session_id,
          phase, phase_changed_at, supervisor_task_id, token_usage, runs,
-         pr_review, pr_merged_at, assignee, created_at, updated_at
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27)
+         pr_review, pr_merged_at, assignee, last_plan_snapshot, created_at, updated_at
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28)
        ON CONFLICT (id) DO UPDATE SET
          project_id = EXCLUDED.project_id, milestone_id = EXCLUDED.milestone_id,
          column_id = EXCLUDED.column_id, title = EXCLUDED.title, description = EXCLUDED.description,
@@ -361,6 +361,7 @@ export class PgProjectsRepo implements IProjectsRepo {
          supervisor_task_id = EXCLUDED.supervisor_task_id, token_usage = EXCLUDED.token_usage,
          runs = EXCLUDED.runs, pr_review = EXCLUDED.pr_review, pr_merged_at = EXCLUDED.pr_merged_at,
          assignee = EXCLUDED.assignee,
+         last_plan_snapshot = EXCLUDED.last_plan_snapshot,
          updated_at = EXCLUDED.updated_at`,
       [
         this.tenantId,
@@ -388,10 +389,23 @@ export class PgProjectsRepo implements IProjectsRepo {
         row.pr_review,
         row.pr_merged_at,
         row.assignee,
+        row.last_plan_snapshot,
         row.created_at,
         row.updated_at,
       ]
     );
+  }
+
+  async getTicketPlanSnapshot(id: string): Promise<string | null> {
+    const row = await this.one<{ last_plan_snapshot: string | null }>(
+      'SELECT last_plan_snapshot FROM tickets WHERE id = $1',
+      [id]
+    );
+    return row?.last_plan_snapshot ?? null;
+  }
+
+  async setTicketPlanSnapshot(id: string, snapshotJson: string | null): Promise<void> {
+    await this.tx((c) => c.query('UPDATE tickets SET last_plan_snapshot = $1 WHERE id = $2', [snapshotJson, id]));
   }
 
   async deleteTicket(id: string): Promise<void> {

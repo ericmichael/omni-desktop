@@ -62,6 +62,11 @@ export type TicketRow = {
   pr_merged_at: string | null; // JSON map source id -> epoch ms
   // Teams (SQLite v9 / PG v6) — assigned member's principal id, or null
   assignee: string | null;
+  /**
+   * Latest agent plan snapshot (SQLite/PG v20) — JSON array of
+   * PlanSnapshotEntry (tasks_snapshot summaries). NULL = no prior plan.
+   */
+  last_plan_snapshot: string | null;
   created_at: string;
   updated_at: string;
 };

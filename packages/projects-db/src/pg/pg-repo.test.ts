@@ -123,6 +123,7 @@ describe.skipIf(!URL)('PgProjectsRepo (live Postgres)', () => {
       pr_review: null,
       pr_merged_at: null,
       assignee: null,
+      last_plan_snapshot: null,
       created_at: '2026-01-01 00:00:00.000',
       updated_at: '2026-01-01 00:00:00.000',
     });

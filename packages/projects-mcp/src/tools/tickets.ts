@@ -108,6 +108,7 @@ export function registerTicketTools(server: McpServer, repo: IProjectsRepo): voi
         pr_review: null,
         pr_merged_at: null,
         assignee: assignee || null,
+        last_plan_snapshot: null,
         created_at: now,
         updated_at: now,
       });

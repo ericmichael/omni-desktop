@@ -17,5 +17,8 @@
     "ui": "@/renderer/ds/ui",
     "lib": "@/lib",
     "hooks": "@/renderer/hooks"
+  },
+  "registries": {
+    "@ai-elements": "https://ai-sdk.dev/elements/api/registry/{name}.json"
   }
 }

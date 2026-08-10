@@ -375,9 +375,30 @@ export class ProjectsRepo {
       row.pr_review,
       row.pr_merged_at,
       row.assignee,
+      row.last_plan_snapshot,
       row.created_at,
       row.updated_at
     );
+    this.bumpChangeSeq();
+  }
+
+  /**
+   * Read the `last_plan_snapshot` column for a ticket. Returns the raw JSON
+   * string (array of PlanSnapshotEntry) — caller is responsible for
+   * `JSON.parse` and shape validation. `null` = no prior plan.
+   */
+  getTicketPlanSnapshot(id: string): string | null {
+    const row = this.stmts.getTicketPlanSnapshot.get(id) as { last_plan_snapshot: string | null } | undefined;
+    return row?.last_plan_snapshot ?? null;
+  }
+
+  /**
+   * Write the `last_plan_snapshot` column for a ticket. Pass a
+   * JSON-stringified PlanSnapshotEntry array, or `null` to clear (ticket
+   * settlement). Bumps `_change_seq` so the watcher fires.
+   */
+  setTicketPlanSnapshot(id: string, snapshotJson: string | null): void {
+    this.stmts.setTicketPlanSnapshot.run(snapshotJson, id);
     this.bumpChangeSeq();
   }
 
@@ -427,6 +448,7 @@ export class ProjectsRepo {
           row.pr_review,
           row.pr_merged_at,
           row.assignee,
+          row.last_plan_snapshot,
           row.created_at,
           row.updated_at
         );
@@ -955,9 +977,9 @@ function prepareStatements(db: DatabaseSync) {
         blocked_by, completed_at, archived_at, column_changed_at,
         use_worktree, worktree_path, worktree_name, supervisor_session_id,
         phase, phase_changed_at, supervisor_task_id, token_usage, runs,
-        pr_review, pr_merged_at, assignee,
+        pr_review, pr_merged_at, assignee, last_plan_snapshot,
         created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         project_id = excluded.project_id, milestone_id = excluded.milestone_id,
         column_id = excluded.column_id, title = excluded.title, description = excluded.description,
@@ -971,8 +993,11 @@ function prepareStatements(db: DatabaseSync) {
         runs = excluded.runs,
         pr_review = excluded.pr_review, pr_merged_at = excluded.pr_merged_at,
         assignee = excluded.assignee,
+        last_plan_snapshot = excluded.last_plan_snapshot,
         updated_at = excluded.updated_at
     `),
+    getTicketPlanSnapshot: db.prepare('SELECT last_plan_snapshot FROM tickets WHERE id = ?'),
+    setTicketPlanSnapshot: db.prepare('UPDATE tickets SET last_plan_snapshot = ? WHERE id = ?'),
     deleteTicket: db.prepare('DELETE FROM tickets WHERE id = ?'),
     deleteAllTickets: db.prepare('DELETE FROM tickets'),
     listAllTicketIds: db.prepare('SELECT id FROM tickets'),

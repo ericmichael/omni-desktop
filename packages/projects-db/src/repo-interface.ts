@@ -106,6 +106,10 @@ export interface IProjectsRepo {
   upsertTicket(row: TicketRow): Promise<void>;
   deleteTicket(id: string): Promise<void>;
   replaceAllTickets(rows: TicketRow[]): Promise<void>;
+  /** Raw JSON `last_plan_snapshot` for a ticket. `null` = no prior plan. */
+  getTicketPlanSnapshot(id: string): Promise<string | null>;
+  /** Write (JSON string) or clear (`null`) a ticket's `last_plan_snapshot`. */
+  setTicketPlanSnapshot(id: string, snapshotJson: string | null): Promise<void>;
 
   // ---- Comments ----
   listCommentsByTicket(ticketId: string): Promise<CommentRow[]>;

@@ -180,6 +180,7 @@ export function registerInboxTools(server: McpServer, repo: IProjectsRepo): void
         pr_review: null,
         pr_merged_at: null,
         assignee: null,
+        last_plan_snapshot: null,
         created_at: now,
         updated_at: now,
       });

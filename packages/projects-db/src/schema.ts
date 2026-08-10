@@ -526,4 +526,14 @@ ALTER TABLE tickets RENAME COLUMN resolved_at TO completed_at;
 ALTER TABLE tickets DROP COLUMN resolution;
 `,
   },
+  {
+    version: 20,
+    sql: `
+-- Latest plan snapshot from the ticket's agent session (tasks_snapshot
+-- summaries, JSON array of PlanSnapshotEntry). Written while a session runs;
+-- cleared when the ticket settles into a Done-category column. NULL = no
+-- prior plan — no backfill. docs/agentic-workflow-enforcement-plan.md §F.
+ALTER TABLE tickets ADD COLUMN last_plan_snapshot TEXT;
+`,
+  },
 ];

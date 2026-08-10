@@ -476,4 +476,34 @@ describe('replaceAll* preserves child data', () => {
     repo.upsertTicket({ ...repo.getTicket(id)!, assignee: null });
     expect(repo.getTicket(id)!.assignee).toBeNull();
   });
+
+  it('upsertTicket: last_plan_snapshot round-trips and updates (v20)', () => {
+    const id = seedTicket('backlog', 'tkt_plan');
+    const row = repo.getTicket(id)!;
+    // No backfill — pre-existing rows read NULL (no prior plan).
+    expect(row.last_plan_snapshot).toBeNull();
+
+    const snapshot = JSON.stringify([
+      { id: '1', subject: 'Reproduce the bug', status: 'completed' },
+      { id: '2', subject: 'Fix it', status: 'in_progress', exitCriteria: 'tests pass', blockedBy: ['1'] },
+    ]);
+    repo.upsertTicket({ ...row, last_plan_snapshot: snapshot });
+    expect(repo.getTicket(id)!.last_plan_snapshot).toBe(snapshot);
+
+    repo.upsertTicket({ ...repo.getTicket(id)!, last_plan_snapshot: null });
+    expect(repo.getTicket(id)!.last_plan_snapshot).toBeNull();
+  });
+
+  it('get/setTicketPlanSnapshot: dedicated column access sets, reads, and clears', () => {
+    const id = seedTicket('backlog', 'tkt_plan_col');
+    expect(repo.getTicketPlanSnapshot(id)).toBeNull();
+
+    repo.setTicketPlanSnapshot(id, '[{"id":"1","subject":"Step","status":"pending"}]');
+    expect(repo.getTicketPlanSnapshot(id)).toBe('[{"id":"1","subject":"Step","status":"pending"}]');
+    // Visible on the full row too — same column, no shadow state.
+    expect(repo.getTicket(id)!.last_plan_snapshot).toBe('[{"id":"1","subject":"Step","status":"pending"}]');
+
+    repo.setTicketPlanSnapshot(id, null);
+    expect(repo.getTicketPlanSnapshot(id)).toBeNull();
+  });
 });

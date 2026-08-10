@@ -97,6 +97,12 @@ export class SqliteProjectsRepo implements IProjectsRepo {
   async replaceAllTickets(rows: TicketRow[]): Promise<void> {
     this.sync.replaceAllTickets(rows);
   }
+  async getTicketPlanSnapshot(id: string): Promise<string | null> {
+    return this.sync.getTicketPlanSnapshot(id);
+  }
+  async setTicketPlanSnapshot(id: string, snapshotJson: string | null): Promise<void> {
+    this.sync.setTicketPlanSnapshot(id, snapshotJson);
+  }
 
   // ---- Comments ----
   async listCommentsByTicket(ticketId: string): Promise<CommentRow[]> {

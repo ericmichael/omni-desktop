@@ -730,4 +730,11 @@ ALTER TABLE tickets DROP COLUMN resolution;
 ALTER TABLE tickets ENABLE ROW LEVEL SECURITY;
 `,
   },
+  {
+    version: 20,
+    sql: `
+-- Latest plan snapshot per ticket (mirrors SQLite v20). NULL = no prior plan.
+ALTER TABLE tickets ADD COLUMN last_plan_snapshot TEXT;
+`,
+  },
 ];

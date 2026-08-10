@@ -340,6 +340,8 @@ export function migrateFromJson(repo: ProjectsRepo, db: DatabaseSync, data: Json
         pr_review: t.prReview ? JSON.stringify(t.prReview) : null,
         pr_merged_at: t.prMergedAt !== undefined && t.prMergedAt !== null ? JSON.stringify(t.prMergedAt) : null,
         assignee: t.assignee ?? null,
+        // Plan snapshots (v20) postdate the JSON store; nothing to migrate.
+        last_plan_snapshot: null,
         created_at: toIso(t.createdAt),
         updated_at: toIso(t.updatedAt),
       });
