@@ -64,45 +64,53 @@ init:
   # the source mounts, so it rides the snapshot like the sources but the
   # leading dot keeps it out of the per-source seed/diff loop below. The agent
   # creates it on first write (the workspace is already chowned to uid 1000).
-  # PR baseline: after seeding, snapshot each per-source subdirectory's
-  # state as a tagged commit ``refs/tags/omni/seed`` inside that
-  # source's git repo. The launcher diffs against that tag per source
-  # to compute the agent's PR.
+  # PR baseline: after seeding, snapshot each source's state as a tagged
+  # commit ``refs/tags/omni/seed`` inside that source's git repo. The
+  # launcher diffs against that tag per source to compute the agent's PR
+  # and to mirror container changes back to the host.
   #
-  # Layout assumption (multi-source projects): /workspace/<mountName>/
-  # is one source per subdir. Single-source projects have one subdir;
-  # multi-source projects have several. We loop over all top-level
-  # subdirs of /workspace and run the dance in each.
+  # Two layouts, told apart by the ``.omni-workspace-root`` marker that
+  # ``omni serve`` drops during init when it seeded a root mount:
   #
-  # Per subdir: if .git is already there (e.g. GitRepo entry shipped
+  # * Root mount (solo folder — chat scratch sessions, bare project
+  #   dirs): the workspace root IS the single source. Seed /workspace
+  #   itself and never touch its subdirectories.
+  # * Mounted layout (project sources): /workspace/<mountName>/ is one
+  #   source per subdir; run the dance in each.
+  #
+  # Per repo: if .git is already there (e.g. GitRepo entry shipped
   # one), tag the current HEAD; otherwise git-init and create a
-  # baseline commit. ``safe.directory '*'`` blanket lets git operate
-  # on any of the workspace subdirs regardless of host-uid mismatch.
+  # baseline commit. Nested .git dirs are flattened first — without
+  # that, ``git add -A`` reaches an embedded repo and tries to record
+  # it as a submodule pointer, which fails when the nested repo has no
+  # HEAD. The host filesystem is untouched; only this ephemeral copy is
+  # flattened. ``safe.directory '*'`` blanket lets git operate on any
+  # of the workspace dirs regardless of host-uid mismatch.
   - |
     sudo -u '#1000' bash -lc '
       set -e
       git config --global --add safe.directory "*"
       git config --global user.email omni@local
       git config --global user.name "Omni Seed"
-      for d in /workspace/*/; do
-        cd "$d" || continue
+      seed_repo() {
+        cd "$1" || return 0
         if [ -d .git ]; then
           git tag -f omni/seed HEAD 2>/dev/null || true
         else
           git init -q -b main
-          # Flatten any nested .git dirs inside this source. Without
-          # this, ``git add -A`` reaches an embedded repo (e.g. when
-          # the source is a folder-of-folders containing other git
-          # checkouts) and tries to record it as a submodule pointer
-          # — which fails when the nested repo has no HEAD. The host
-          # filesystem is untouched; only this ephemeral copy is
-          # flattened.
           find . -mindepth 2 -name .git -prune -exec rm -rf {} + 2>/dev/null || true
           git add -A
           git commit -q --allow-empty -m "omni-seed (workspace baseline)"
           git tag -f omni/seed HEAD
         fi
-      done
+      }
+      if [ -f /workspace/.omni-workspace-root ]; then
+        seed_repo /workspace
+      else
+        for d in /workspace/*/; do
+          seed_repo "$d"
+        done
+      fi
     '
 
 services:
