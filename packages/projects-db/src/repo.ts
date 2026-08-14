@@ -871,6 +871,40 @@ export class ProjectsRepo {
     return this.stmts.listResidentMessagesAfter.all(id, limit) as ResidentMessageRow[];
   }
 
+  /**
+   * Keyset page of the log, ascending. `after` pages forward (oldest rows
+   * past the cursor — resume/replay); `before`/neither returns the newest
+   * window (history paging). Dynamic SQL (prepared per call) because the
+   * filter combinations don't merit six statement variants at UI pacing.
+   */
+  listResidentMessagesPage(opts: {
+    channel?: string;
+    after?: number;
+    before?: number;
+    limit: number;
+  }): ResidentMessageRow[] {
+    const where: string[] = [];
+    const params: (string | number)[] = [];
+    if (opts.channel !== undefined) {
+      where.push('channel = ?');
+      params.push(opts.channel);
+    }
+    if (opts.after !== undefined) {
+      where.push('id > ?');
+      params.push(opts.after);
+    }
+    if (opts.before !== undefined) {
+      where.push('id < ?');
+      params.push(opts.before);
+    }
+    const cond = where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';
+    const sql =
+      opts.after !== undefined
+        ? `SELECT * FROM resident_messages ${cond} ORDER BY id LIMIT ?`
+        : `SELECT * FROM (SELECT * FROM resident_messages ${cond} ORDER BY id DESC LIMIT ?) ORDER BY id`;
+    return this.db.prepare(sql).all(...params, opts.limit) as ResidentMessageRow[];
+  }
+
   /** Newest `limit` rows in ascending id order (the snapshot tail). */
   listResidentMessages(limit: number): ResidentMessageRow[] {
     return this.stmts.listResidentMessages.all(limit) as ResidentMessageRow[];

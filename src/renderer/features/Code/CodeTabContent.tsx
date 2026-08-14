@@ -11,7 +11,13 @@ import { cn } from '@/renderer/ds/cn';
 import { Button } from '@/renderer/ds/ui/button';
 import { Spinner } from '@/renderer/ds/ui/spinner';
 import { SessionStatusBanner } from '@/renderer/features/Banner/SessionStatusBanner';
-import { getAvailableProfileNames, getProfileMenuLabel } from '@/renderer/features/SandboxProfile/profile-list';
+import { $sandboxProfiles } from '@/renderer/features/Sandboxes/state';
+import {
+  getAvailableProfileNames,
+  getProfileDescription,
+  getProfileMenuLabel,
+  getProfileTitle,
+} from '@/renderer/features/SandboxProfile/profile-list';
 import { openSettingsTab } from '@/renderer/features/SettingsModal/settings-nav';
 import { buildClientToolHandler } from '@/renderer/features/Tickets/client-tool-handler';
 import { $pendingPlan, resolvePlanApproval } from '@/renderer/features/Tickets/plan-approval-bridge';
@@ -90,7 +96,12 @@ const CodeRunningView = memo(
     pendingMessages,
     onPendingMessagesFlushed,
   }: {
-    sandboxUrls: { uiUrl: string; authToken?: string; services?: Record<string, string> };
+    sandboxUrls: {
+      uiUrl: string;
+      authToken?: string;
+      services?: Record<string, string>;
+      environmentCapabilities?: string[];
+    };
     executionTarget?: ExecutionTarget;
     sessionId?: string;
     onSessionChange?: (sessionId: string | undefined) => void;
@@ -103,7 +114,7 @@ const CodeRunningView = memo(
     headerActionsTargetId?: string;
     headerActionsCompact?: boolean;
     sandboxLabel?: string;
-    sandboxOptions?: { value: string; label: string }[];
+    sandboxOptions?: { value: string; label: string; description?: string }[];
     currentSandboxProfile?: string;
     onSandboxChange?: (value: string) => void;
     composerExtras?: React.ReactNode;
@@ -169,6 +180,7 @@ const CodeRunningView = memo(
             sandboxOptions={sandboxOptions}
             currentSandboxProfile={currentSandboxProfile}
             onSandboxChange={onSandboxChange}
+            environmentCapabilities={sandboxUrls.environmentCapabilities}
             composerExtras={composerExtras}
             onClientToolCall={onClientToolCall}
             pendingPlan={pendingPlan}
@@ -323,13 +335,21 @@ export const CodeTabContent = memo(
     useEffect(() => {
       emitter.invoke('platform:is-enterprise').then(setIsEnterprise);
     }, []);
+    // Subscribe to the discovered catalog so the picker re-renders when the
+    // boot-time `sandbox:list-profiles` fetch lands (bundled + user YAMLs).
+    const discoveredProfiles = useStore($sandboxProfiles);
     const sandboxOptions = useMemo(
       () =>
-        getAvailableProfileNames({ isEnterprise, available: store.availableSandboxProfiles }).map((name) => ({
+        getAvailableProfileNames({
+          isEnterprise,
+          available: store.availableSandboxProfiles,
+          discovered: discoveredProfiles,
+        }).map((name) => ({
           value: name,
-          label: getProfileMenuLabel(name, machines),
+          label: getProfileTitle(name, machines),
+          description: getProfileDescription(name) ?? undefined,
         })),
-      [isEnterprise, store.availableSandboxProfiles, machines]
+      [isEnterprise, store.availableSandboxProfiles, discoveredProfiles, machines]
     );
 
     // Attach-project chip for projectless chats, rendered in the composer chip

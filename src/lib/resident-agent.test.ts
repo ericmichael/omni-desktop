@@ -2,25 +2,38 @@ import { describe, expect, it } from 'vitest';
 
 import {
   advanceThread,
+  channelAudienceIds,
   dayKey,
   daySessionId,
   dmChannelId,
   dmParticipants,
+  humanHandle,
+  isDirectedAtUser,
+  isHumanGradeParticipant,
+  isHumanParticipant,
   isWakeNow,
+  knownHumansFromLog,
   MAX_DIGEST_ROWS_PER_CHANNEL,
   memberChannelIds,
+  MORNING_BEAT_FRESH_MS,
+  morningBeatReady,
   memoryKey,
   mentionsAgent,
   nextThreadDelivery,
+  participantKind,
   renderIdentityInstructions,
   renderReflectPrompt,
   renderWakeupPing,
+  rootAuthors,
   SPEECH_TOOL_NAMES,
   speechClientTools,
+  SYSTEM_CHANNEL,
+  TEAM_CHANNEL,
   THREAD_BASE_DELAY_MS,
   THREAD_RESET_MS,
   type ThreadState,
   unreadRowsFor,
+  USER_PARTICIPANT,
 } from '@/lib/resident-agent';
 import type { ResidentChannelMessage } from '@/shared/types';
 
@@ -55,6 +68,185 @@ describe('channels', () => {
     expect(dmChannelId('user', 'scout')).toBe(dmChannelId('scout', 'user'));
     expect(dmParticipants(dmChannelId('a', 'b'))).toEqual(['a', 'b']);
     expect(dmParticipants('team')).toBeNull();
+  });
+});
+
+describe('channel audience', () => {
+  const roster = ['scout', 'rex', 'ada'];
+  const defs = [
+    { id: 'deploy-log', members: ['scout'], createdAt: 0 },
+    { id: 'open-room', createdAt: 0 },
+  ];
+
+  it('team is all-hands and an unscoped channel is open to everyone', () => {
+    expect(channelAudienceIds(TEAM_CHANNEL, defs, roster)).toEqual(roster);
+    expect(channelAudienceIds('open-room', defs, roster)).toEqual(roster);
+  });
+
+  it('a scoped channel reaches only its members', () => {
+    expect(channelAudienceIds('deploy-log', defs, roster)).toEqual(['scout']);
+  });
+
+  it('a DM reaches the peer, never the user', () => {
+    expect(channelAudienceIds(dmChannelId(USER_PARTICIPANT, 'rex'), defs, roster)).toEqual(['rex']);
+    expect(channelAudienceIds(dmChannelId('scout', 'rex'), defs, roster).sort()).toEqual(['rex', 'scout']);
+  });
+
+  it('drops members who have left the roster, and has no audience for unknown or system channels', () => {
+    expect(channelAudienceIds('deploy-log', defs, ['rex'])).toEqual([]);
+    expect(channelAudienceIds('nope', defs, roster)).toEqual([]);
+    expect(channelAudienceIds(SYSTEM_CHANNEL, defs, roster)).toEqual([]);
+  });
+});
+
+describe('participant grammar', () => {
+  it('classifies every stored from-id form', () => {
+    expect(participantKind('user')).toBe('human');
+    expect(participantKind('human:alice')).toBe('human');
+    expect(participantKind('ext:slack:U7')).toBe('external');
+    expect(participantKind('system')).toBe('system');
+    // Bare roster ids (legacy slugs and opaque res_* ids) stay agents.
+    expect(participantKind('scout')).toBe('agent');
+    expect(participantKind('res_abc123')).toBe('agent');
+  });
+
+  it('human vs human-grade: bridged users count as people for wake purposes', () => {
+    expect(isHumanParticipant('user')).toBe(true);
+    expect(isHumanParticipant('human:alice')).toBe(true);
+    expect(isHumanParticipant('ext:slack:U7')).toBe(false);
+    expect(isHumanGradeParticipant('ext:slack:U7')).toBe(true);
+    expect(isHumanGradeParticipant('scout')).toBe(false);
+  });
+
+  it('DM ids round-trip namespaced participants and keep legacy pairs verbatim', () => {
+    // Legacy vocabulary (colon-free): the historical encoding, unchanged.
+    expect(dmChannelId('user', 'scout')).toBe('dm:scout:user');
+    expect(dmParticipants('dm:scout:user')).toEqual(['scout', 'user']);
+    // Namespaced participants switch to the `~` pair separator.
+    const personal = dmChannelId('human:alice', 'res_1');
+    expect(personal).toBe('dm:human:alice~res_1');
+    expect(dmParticipants(personal)).toEqual(['human:alice', 'res_1']);
+    const bridged = dmChannelId('ext:slack:U7', 'res_1');
+    expect(dmParticipants(bridged)).toEqual(['ext:slack:U7', 'res_1']);
+    // Order-insensitive either way.
+    expect(dmChannelId('res_1', 'human:alice')).toBe(personal);
+  });
+
+  it('humanHandle derives from the display name, else the id tail', () => {
+    expect(humanHandle('human:abc123', 'Alice Vimes')).toBe('alice-vimes');
+    expect(humanHandle('human:abc123')).toBe('abc123');
+    expect(humanHandle('ext:slack:U7')).toBe('u7');
+  });
+
+  it('knownHumansFromLog collects named people with their latest name, never the collective user or agents', () => {
+    const humans = knownHumansFromLog([
+      { from: 'user' },
+      { from: 'scout', fromName: 'Scout' },
+      { from: 'human:alice', fromName: 'Alice' },
+      { from: 'human:alice', fromName: 'Alice V.' },
+      { from: 'ext:slack:U7', fromName: 'Sam' },
+    ]);
+    expect([...humans.entries()]).toEqual([
+      ['human:alice', 'Alice V.'],
+      ['ext:slack:U7', 'Sam'],
+    ]);
+  });
+});
+
+describe('morning beat timing (quiet-start)', () => {
+  const at = (hour: number, minute: number): number => {
+    const d = new Date(2026, 7, 12); // local-time day; the rule is local-clock
+    d.setHours(hour, minute, 0, 0);
+    return d.getTime();
+  };
+
+  it('fires when the hour comes due while the app is running', () => {
+    // Booted 7:00, hour 8, tick at 8:03 → inside the freshness window.
+    expect(morningBeatReady(8, at(8, 3), at(7, 0))).toBe(true);
+  });
+
+  it('never fires before the hour', () => {
+    expect(morningBeatReady(8, at(7, 59), at(7, 0))).toBe(false);
+  });
+
+  it('skips an hour that passed while the app was closed — opening the app wakes nobody', () => {
+    // Booted 11:47, hour 8 → the 8:00 due moment predates boot.
+    expect(morningBeatReady(8, at(11, 47), at(11, 47))).toBe(false);
+  });
+
+  it('skips an hour missed while the machine slept (no tick landed in the window)', () => {
+    // Booted 7:00, asleep 7:50→11:47 — the first tick after resume is far
+    // past the freshness window, so the beat is skipped, not delivered late.
+    expect(morningBeatReady(8, at(11, 47), at(7, 0))).toBe(false);
+  });
+
+  it('the freshness window outlives the 5-minute day tick', () => {
+    expect(MORNING_BEAT_FRESH_MS).toBeGreaterThan(5 * 60_000);
+    expect(morningBeatReady(8, at(8, 0) + MORNING_BEAT_FRESH_MS, at(7, 0))).toBe(true);
+    expect(morningBeatReady(8, at(8, 0) + MORNING_BEAT_FRESH_MS + 1, at(7, 0))).toBe(false);
+  });
+});
+
+describe('directed traffic', () => {
+  const log: ResidentChannelMessage[] = [
+    { id: 1, channel: 'team', from: USER_PARTICIPANT, text: 'question?', at: 0 },
+    { id: 2, channel: 'team', from: 'scout', text: 'answer', at: 0, replyTo: 1 },
+    { id: 3, channel: 'team', from: 'scout', text: 'ambient root', at: 0 },
+    { id: 4, channel: 'team', from: 'rex', text: 'ambient reply', at: 0, replyTo: 3 },
+    { id: 5, channel: dmChannelId(USER_PARTICIPANT, 'rex'), from: 'rex', text: 'dm', at: 0 },
+    { id: 6, channel: dmChannelId('scout', 'rex'), from: 'rex', text: 'their dm', at: 0 },
+    { id: 7, channel: SYSTEM_CHANNEL, from: 'system', text: 'declined an approval', at: 0 },
+  ];
+  const authors = rootAuthors(log);
+  const directed = (id: number): boolean => {
+    const msg = log.find((m) => m.id === id);
+    return msg !== undefined && isDirectedAtUser(msg, (rootId) => authors.get(rootId));
+  };
+
+  it('counts replies under a thread the user rooted', () => {
+    expect(directed(2)).toBe(true);
+  });
+
+  it('does not count ambient agent traffic — including replies between agents', () => {
+    expect(directed(3)).toBe(false);
+    expect(directed(4)).toBe(false);
+  });
+
+  it("counts the user's own DMs but not threads between agents", () => {
+    expect(directed(5)).toBe(true);
+    expect(directed(6)).toBe(false);
+  });
+
+  it('counts system incidents — the attention channel exists to be noticed', () => {
+    expect(directed(7)).toBe(true);
+  });
+
+  it('scopes personal DM threads to their named participant (viewer-aware)', () => {
+    const personal = { channel: dmChannelId('human:alice', 'scout'), from: 'scout' };
+    // Directed at Alice, not at other viewers; the collective thread stays
+    // directed at everyone.
+    expect(isDirectedAtUser(personal, () => undefined, 'human:alice')).toBe(true);
+    expect(isDirectedAtUser(personal, () => undefined, 'human:bob')).toBe(false);
+    expect(isDirectedAtUser(personal, () => undefined)).toBe(false);
+    const collective = { channel: dmChannelId(USER_PARTICIPANT, 'scout'), from: 'scout' };
+    expect(isDirectedAtUser(collective, () => undefined, 'human:bob')).toBe(true);
+  });
+
+  it('treats named humans like the collective user (v1 collective view)', () => {
+    const authorsOf = rootAuthors([
+      { id: 10, from: 'human:alice' },
+      { id: 11, from: 'scout' },
+    ]);
+    const lookup = (rootId: number): string | undefined => authorsOf.get(rootId);
+    // A named human's own post is never directed AT the humans…
+    expect(isDirectedAtUser({ channel: 'team', from: 'human:alice' }, lookup)).toBe(false);
+    // …but an agent answering a thread a named human rooted is.
+    expect(isDirectedAtUser({ channel: 'team', from: 'scout', replyTo: 10 }, lookup)).toBe(true);
+    expect(isDirectedAtUser({ channel: 'team', from: 'scout', replyTo: 11 }, lookup)).toBe(false);
+  });
+
+  it("never counts the user's own posts", () => {
+    expect(directed(1)).toBe(false);
   });
 });
 
@@ -279,7 +471,9 @@ describe('digest cursors', () => {
     expect(dropped).toBe(0);
     expect(rows).toEqual([
       { id: 3, channel: 'team', from: 'Archivist', text: 'indexed', agoMin: 1 },
-      { id: 5, channel: 'dm:scout:user', from: 'user', text: 'for scout', agoMin: 1 },
+      // Human rows with no stored name render as "the user" (chat-v1 stores
+      // no viewer-relative names; the ping names the collective human).
+      { id: 5, channel: 'dm:scout:user', from: 'the user', text: 'for scout', agoMin: 1 },
     ]);
   });
 
@@ -361,22 +555,14 @@ describe('ping extras', () => {
     expect(ping).toContain('unread messages have been waiting');
   });
 
-  it('a late morning beat explains itself; an on-time one stays plain', () => {
-    const late = renderWakeupPing({
+  it('a day_start renders its detail when present, else the plain line', () => {
+    const detailed = renderWakeupPing({
       ...base,
-      events: [
-        {
-          kind: 'day_start',
-          detail:
-            'a new working day begins — late start: your 8:00 morning beat waited for the app to open (it is now 11:42); plan for the shortened day',
-        },
-      ],
+      events: [{ kind: 'day_start', detail: 'a new working day begins — the deploy freeze lifts today' }],
     });
-    expect(late).toContain('late start: your 8:00 morning beat');
-    expect(late).toContain('(it is now 11:42)');
-    const onTime = renderWakeupPing({ ...base, events: [{ kind: 'day_start' }] });
-    expect(onTime).toContain('a new working day begins');
-    expect(onTime).not.toContain('late start');
+    expect(detailed).toContain('the deploy freeze lifts today');
+    const plain = renderWakeupPing({ ...base, events: [{ kind: 'day_start' }] });
+    expect(plain).toContain('a new working day begins');
   });
 
   it('renders upcoming reminders and the alarm event line', () => {

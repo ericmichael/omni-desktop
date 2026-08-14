@@ -1,0 +1,347 @@
+{
+  "openrpc": "1.3.2",
+  "info": {
+    "title": "chat-v1",
+    "version": "1.0.0-experimental",
+    "description": "The participant-facing messaging protocol for resident agents (docs/chat-v1-plan.md). JSON-RPC 2.0 over WebSocket at /ws/chat, authenticated by a signed token from /api/ws-token (?token=) or a raw bridge key (OMNI_CHAT_BRIDGE_KEYS). Source of truth for the signatures is the ChatMethodMap in src/shared/types.ts; a parity test keeps this document's method names aligned. Governance follows gui-v1's rules: additive-only once stable; clients tolerate unknown notification methods and unknown enum values. There is no replay buffer: message ids are monotonic and durable, so clients resume with chat.list_messages({after: lastSeenId}) and dedupe live notifications by id. Message `from` ids follow the participant grammar: `user` (the collective human), `human:<principalId>` (named cloud team member), `ext:<network>:<id>` (bridged external user), `system`, else a bare agent roster id."
+  },
+  "methods": [
+    {
+      "name": "chat.hello",
+      "summary": "Handshake: the caller's stamped participant identity and server capabilities.",
+      "params": [],
+      "result": {
+        "name": "hello",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "protocol": { "const": "chat-v1" },
+            "self": {
+              "type": "object",
+              "properties": { "id": { "type": "string" }, "name": { "type": ["string", "null"] } },
+              "required": ["id", "name"]
+            },
+            "capabilities": { "type": "array", "items": { "type": "string" } }
+          },
+          "required": ["protocol", "self", "capabilities"]
+        }
+      }
+    },
+    {
+      "name": "chat.list_channels",
+      "summary": "Every channel the caller can see: #team, named channels, DM threads, #system.",
+      "params": [],
+      "result": {
+        "name": "channels",
+        "schema": {
+          "type": "object",
+          "properties": { "channels": { "type": "array", "items": { "$ref": "#/components/schemas/Channel" } } },
+          "required": ["channels"]
+        }
+      }
+    },
+    {
+      "name": "chat.list_messages",
+      "summary": "Keyset page of the durable log, ascending id order. `after` pages forward (resume/replay); `before` or neither returns the newest window.",
+      "params": [
+        { "name": "channel", "required": false, "schema": { "type": "string" } },
+        { "name": "after", "required": false, "schema": { "type": "integer" } },
+        { "name": "before", "required": false, "schema": { "type": "integer" } },
+        {
+          "name": "limit",
+          "required": false,
+          "schema": { "type": "integer", "minimum": 1, "maximum": 500, "default": 100 }
+        }
+      ],
+      "result": {
+        "name": "page",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "messages": { "type": "array", "items": { "$ref": "#/components/schemas/Message" } },
+            "hasMore": { "type": "boolean" }
+          },
+          "required": ["messages", "hasMore"]
+        }
+      }
+    },
+    {
+      "name": "chat.post_message",
+      "summary": "Post to a named channel or a human↔agent DM. The ONLY write; the server alone decides which agents wake. Identity comes from authentication — bridge connections must pass asExternal, nobody else may. DM threads come in two shapes: the collective `dm:user:<agent>` thread is every human's; a personal thread (`dm:<human:pid|ext:...>~<agent>`) is team-VISIBLE but single-writer — only its named participant may post into it.",
+      "params": [
+        { "name": "channel", "required": true, "schema": { "type": "string" } },
+        { "name": "text", "required": true, "schema": { "type": "string" } },
+        {
+          "name": "replyTo",
+          "required": false,
+          "schema": { "type": "integer" },
+          "description": "Threads under this message's root (named channels only)."
+        },
+        {
+          "name": "asExternal",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "properties": {
+              "network": { "type": "string" },
+              "id": { "type": "string" },
+              "displayName": { "type": "string" }
+            },
+            "required": ["network", "id", "displayName"]
+          },
+          "description": "Bridge scope only: post as a bridged external user (stamped ext:<network>:<id>)."
+        }
+      ],
+      "result": {
+        "name": "posted",
+        "schema": {
+          "type": "object",
+          "properties": { "message": { "$ref": "#/components/schemas/Message" } },
+          "required": ["message"]
+        }
+      }
+    },
+    {
+      "name": "chat.create_channel",
+      "summary": "Create a named channel; the id slug derives from the name and is fixed at creation.",
+      "params": [
+        { "name": "name", "required": true, "schema": { "type": "string" } },
+        { "name": "description", "required": false, "schema": { "type": "string" } }
+      ],
+      "result": { "name": "created", "schema": { "$ref": "#/components/schemas/ChannelResult" } }
+    },
+    {
+      "name": "chat.update_channel",
+      "summary": "Edit a named channel's description (blank clears it). Built-ins refuse.",
+      "params": [
+        { "name": "channelId", "required": true, "schema": { "type": "string" } },
+        { "name": "description", "required": false, "schema": { "type": "string" } }
+      ],
+      "result": { "name": "updated", "schema": { "$ref": "#/components/schemas/ChannelResult" } }
+    },
+    {
+      "name": "chat.delete_channel",
+      "summary": "Delete a named channel and its message history. Built-ins refuse.",
+      "params": [{ "name": "channelId", "required": true, "schema": { "type": "string" } }],
+      "result": { "name": "deleted", "schema": { "type": "object" } }
+    },
+    {
+      "name": "chat.set_channel_members",
+      "summary": "Replace a named channel's member list (agent roster ids); null restores the open state.",
+      "params": [
+        { "name": "channelId", "required": true, "schema": { "type": "string" } },
+        { "name": "members", "required": true, "schema": { "type": ["array", "null"], "items": { "type": "string" } } }
+      ],
+      "result": { "name": "updated", "schema": { "$ref": "#/components/schemas/ChannelResult" } }
+    },
+    {
+      "name": "chat.list_roster",
+      "summary": "The agent roster, projected for addressing/display (persona/config stay on the admin surface).",
+      "params": [],
+      "result": {
+        "name": "roster",
+        "schema": {
+          "type": "object",
+          "properties": { "agents": { "type": "array", "items": { "$ref": "#/components/schemas/RosterAgent" } } },
+          "required": ["agents"]
+        }
+      }
+    },
+    {
+      "name": "chat.get_presence",
+      "summary": "Live runtime snapshot per agent id (state, read watermark, queued ids). Then rely on chat.presence_changed pushes.",
+      "params": [],
+      "result": {
+        "name": "presence",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "presence": { "type": "object", "additionalProperties": { "$ref": "#/components/schemas/Presence" } }
+          },
+          "required": ["presence"]
+        }
+      }
+    },
+    {
+      "name": "chat.wake_agent",
+      "summary": "Manually wake an agent now (WAKE_NOW, bypasses digests).",
+      "params": [{ "name": "agentId", "required": true, "schema": { "type": "string" } }],
+      "result": { "name": "ok", "schema": { "type": "object" } }
+    },
+    {
+      "name": "chat.attach_agent_session",
+      "summary": "Wake the agent's process if parked and return a gui-v1 connection to its live day session (the rich-client session view).",
+      "params": [{ "name": "agentId", "required": true, "schema": { "type": "string" } }],
+      "result": {
+        "name": "session",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "sessionId": { "type": "string" },
+            "connection": {
+              "type": "object",
+              "properties": { "baseUrl": { "type": "string" }, "authToken": { "type": "string" } },
+              "required": ["baseUrl"]
+            }
+          },
+          "required": ["sessionId", "connection"]
+        }
+      }
+    },
+    {
+      "name": "chat.message_added",
+      "x-omni-kind": "notification",
+      "summary": "Server→client: a message landed in the log (any author — humans, agents, system rows).",
+      "params": [{ "name": "message", "required": true, "schema": { "$ref": "#/components/schemas/Message" } }],
+      "result": { "name": "none", "schema": { "type": "null" } }
+    },
+    {
+      "name": "chat.channel_changed",
+      "x-omni-kind": "notification",
+      "summary": "Server→client: a channel was created/updated (carries the channel) or deleted (carries deletedId; its rows are gone).",
+      "params": [
+        { "name": "channel", "required": false, "schema": { "$ref": "#/components/schemas/Channel" } },
+        { "name": "deletedId", "required": false, "schema": { "type": "string" } }
+      ],
+      "result": { "name": "none", "schema": { "type": "null" } }
+    },
+    {
+      "name": "chat.presence_changed",
+      "x-omni-kind": "notification",
+      "summary": "Server→client: the full presence snapshot (roster scale is small; full-replace is trivial to apply).",
+      "params": [
+        {
+          "name": "presence",
+          "required": true,
+          "schema": { "type": "object", "additionalProperties": { "$ref": "#/components/schemas/Presence" } }
+        }
+      ],
+      "result": { "name": "none", "schema": { "type": "null" } }
+    },
+    {
+      "name": "chat.roster_changed",
+      "x-omni-kind": "notification",
+      "summary": "Server→client: the roster projection changed (create/rename/enable/delete).",
+      "params": [
+        {
+          "name": "agents",
+          "required": true,
+          "schema": { "type": "array", "items": { "$ref": "#/components/schemas/RosterAgent" } }
+        }
+      ],
+      "result": { "name": "none", "schema": { "type": "null" } }
+    },
+    {
+      "name": "chat.attention",
+      "x-omni-kind": "notification",
+      "summary": "Server→client: an agent incident (failed delivery/reflection) — also mirrored as a #system row, so the log stays the full record.",
+      "params": [
+        { "name": "agentId", "required": true, "schema": { "type": "string" } },
+        { "name": "message", "required": true, "schema": { "type": "string" } },
+        { "name": "at", "required": true, "schema": { "type": "integer" } }
+      ],
+      "result": { "name": "none", "schema": { "type": "null" } }
+    }
+  ],
+  "components": {
+    "schemas": {
+      "Channel": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "kind": { "type": "string", "enum": ["team", "named", "dm", "system"] },
+          "description": { "type": "string" },
+          "members": { "type": "array", "items": { "type": "string" } },
+          "dmParticipants": {
+            "type": "array",
+            "items": { "type": "string" },
+            "minItems": 2,
+            "maxItems": 2,
+            "description": "DM channels only. Ids follow the participant grammar; channel ids use `dm:<a>:<b>` for legacy colon-free pairs and `dm:<a>~<b>` when a participant id is namespaced."
+          },
+          "createdAt": { "type": "integer" }
+        },
+        "required": ["id", "kind"]
+      },
+      "ChannelResult": {
+        "type": "object",
+        "properties": { "channel": { "$ref": "#/components/schemas/Channel" } },
+        "required": ["channel"]
+      },
+      "Message": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer", "description": "Monotonic, log-global — the replay cursor." },
+          "channel": { "type": "string" },
+          "from": { "type": "string", "description": "Participant id (see the grammar in info.description)." },
+          "fromName": {
+            "type": "string",
+            "description": "Display name at post time, when one is known. Absent for the collective user — self-rendering is the viewer's judgment."
+          },
+          "text": { "type": "string" },
+          "at": { "type": "integer", "description": "Epoch ms." },
+          "replyTo": {
+            "type": "integer",
+            "description": "Thread ROOT id, pre-normalized on write (threads are one level deep)."
+          }
+        },
+        "required": ["id", "channel", "from", "text", "at"]
+      },
+      "RosterAgent": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "handle": { "type": "string", "description": "@address, derived from the current name." },
+          "name": { "type": "string" },
+          "role": { "type": "string" },
+          "enabled": { "type": "boolean" },
+          "superuser": { "type": "boolean" }
+        },
+        "required": ["id", "handle", "name", "role", "enabled"]
+      },
+      "Presence": {
+        "type": "object",
+        "properties": {
+          "state": { "type": "string", "enum": ["parked", "starting", "idle", "thinking", "reflecting"] },
+          "lastWakeupAt": { "type": ["integer", "null"] },
+          "lastReason": { "type": ["string", "null"] },
+          "day": { "type": ["string", "null"] },
+          "pendingCount": { "type": "integer" },
+          "decisions": { "type": "integer" },
+          "seenMessageId": {
+            "type": "integer",
+            "description": "Read watermark: log ids at or below it have reached the agent's context."
+          },
+          "queuedMessageIds": {
+            "type": "array",
+            "items": { "type": "integer" },
+            "description": "Routed but not yet delivered — will read."
+          }
+        },
+        "required": [
+          "state",
+          "lastWakeupAt",
+          "lastReason",
+          "day",
+          "pendingCount",
+          "decisions",
+          "seenMessageId",
+          "queuedMessageIds"
+        ]
+      }
+    }
+  },
+  "x-omni-errors": {
+    "-32000": {
+      "description": "Application error; data.kind is one of:",
+      "kinds": [
+        "unknown_channel",
+        "unknown_recipient",
+        "reply_not_in_channel",
+        "reserved_channel",
+        "forbidden",
+        "invalid_params"
+      ]
+    }
+  }
+}

@@ -30,11 +30,13 @@ client:
   type: docker
   # NET_ADMIN + seccomp=unconfined are both required for iptables to work
   # inside the container. NET_ADMIN alone isn't enough — Docker's default
-  # seccomp profile blocks the netfilter syscalls iptables-nft needs, so
-  # rules silently fail to install (apply-network-isolation.sh has no
-  # `set -e` and reports success regardless). The non-privileged user
-  # the agent runs as still can't manipulate iptables, since per-task
-  # capability checks block it independent of seccomp.
+  # seccomp profile blocks the netfilter syscalls iptables-nft needs.
+  # omni serve applies the network egress policy (the network.json
+  # allowlist and the sandbox.set_network offline toggle) via root exec
+  # at bring-up — see omniagents' core/sandbox/network_policy.py. The
+  # non-privileged user the agent runs as still can't manipulate
+  # iptables, since per-task capability checks block it independent of
+  # seccomp.
   cap_add: ['NET_ADMIN']
   security_opt: ['seccomp=unconfined']
   # Override the image's default USER. The SDK's own bookkeeping (PTY

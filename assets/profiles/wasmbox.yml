@@ -1,0 +1,50 @@
+version: 1
+
+# Launcher-bundled "wasmbox" profile: the wasm devbox. Both runtimes are
+# WebAssembly artifacts shipped with omniagents — bashkit (bash compiled
+# to wasm, in-process) provides the shell and file tools; pyodide
+# (CPython compiled to wasm, in a Node subprocess) provides `python`.
+# Both mount the SAME host workspace directory, so what the shell writes
+# Python reads, and vice versa.
+#
+# Why pick this over devbox: instant startup, no Docker daemon, and it
+# is a genuine containment boundary — neither runtime has syscalls into
+# the host. The trade: no real binaries, no services (code-server/VNC),
+# no interactive terminal, no pip installs into a system — bashkit's
+# utilities plus git/curl/python builtins are the whole surface.
+#
+# Requires Node on PATH (for the pyodide worker). Network is OFF by
+# default (unlike the docker devbox): the sandbox boots contained and
+# offline — in "Approve for me" sessions that means tool calls run
+# without prompts ("Ask me first" always prompts; the toggle never
+# changes the user's approval choice) — and the session header's
+# network pill can grant egress live when needed. Explicit grants
+# (`allow_all: true` or an allowlist) boot with network on; `network:
+# none` is the hard opt-out with no toggle at all.
+
+client:
+  type: wasm
+  # Host directory backing the /workspace mount. Both runtimes present it
+  # AT /workspace — the host path never appears inside the sandbox (same
+  # namespace shape as the docker devbox). Durable like unix_local — no
+  # snapshots involved.
+  workspace_dir: ${workspace_dir}
+  # dulwich-backed git builtin (clone/commit/log/diff inside the shell).
+  git: true
+  # Network policy — governs BOTH runtimes: the shell's curl/git builtins
+  # and Python's egress (pyodide reaches Node's fetch, so this is a real
+  # boundary, not advisory). Absent = OFF by default: boots offline
+  # (contained; promptless only under "Approve for me") but toggleable
+  # live via sandbox.set_network
+  # (the session header's network pill), which grants unrestricted egress.
+  # When Settings → Network isolation is enabled, omniagents' profile
+  # resolver injects the user's allowlist here as `network: {allow: [...]}`
+  # (host-filtered, enforced in-process instead of via iptables) — an
+  # explicit grant, so it boots with network on. Setting `network` yourself
+  # opts out of that injection; `network: none` is the hard offline opt-out
+  # with no toggle:
+  # network:
+  #   allow: ['api.openai.com']
+
+manifest:
+  root: /workspace

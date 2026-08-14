@@ -182,6 +182,8 @@ export type AgentHostConsumerRuntime = ExecutionTarget & {
   defaultCwd?: string;
   /** Authoritative mount table from materialization (see AgentProcessData). */
   mounts?: WorkspaceMountDescriptor[];
+  /** Capability names from the environment descriptor (see AgentProcessData). */
+  environmentCapabilities?: string[];
   services: Record<string, string>;
   containerId?: string;
   paused?: boolean;
@@ -860,6 +862,9 @@ export class AgentProcess {
       throw new Error('AgentHost materialization returned no workspace_root');
     }
     const parsedMounts = parseWorkspaceMounts(materialized['mounts']);
+    const environmentCapabilities = Array.isArray(materialized['capabilities'])
+      ? (materialized['capabilities'] as unknown[]).filter((c): c is string => typeof c === 'string' && c.length > 0)
+      : undefined;
     const runtime: AgentHostConsumerRuntime = {
       workspaceId,
       environmentId,
@@ -869,6 +874,7 @@ export class AgentProcess {
         ? { defaultCwd: materialized['default_cwd'].trim() }
         : {}),
       ...(parsedMounts ? { mounts: parsedMounts } : {}),
+      ...(environmentCapabilities ? { environmentCapabilities } : {}),
       services:
         materialized['services'] && typeof materialized['services'] === 'object'
           ? (materialized['services'] as Record<string, string>)

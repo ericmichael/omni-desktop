@@ -1,6 +1,7 @@
 import { useStore } from '@nanostores/react';
 import {
   ArrowUpIcon,
+  CheckIcon,
   FolderIcon,
   LockIcon,
   MicIcon,
@@ -24,6 +25,7 @@ import {
 } from '@/renderer/ds/ui/dropdown-menu';
 import { Spinner } from '@/renderer/ds/ui/spinner';
 import { Toggle } from '@/renderer/ds/ui/toggle';
+import { getProfileIcon, isUnsandboxedProfile } from '@/renderer/features/SandboxProfile/profile-icons';
 import { persistedStoreApi } from '@/renderer/services/store';
 import { isLocalVoiceCapable } from '@/renderer/services/voice-client';
 
@@ -83,7 +85,7 @@ export function Input({
   sandboxLabel?: string;
   sandboxLocked?: boolean;
   sandboxLoading?: boolean;
-  sandboxOptions?: { value: string; label: string }[];
+  sandboxOptions?: { value: string; label: string; description?: string }[];
   currentSandboxProfile?: string;
   onSandboxChange?: (value: string) => void;
   /** Extra chips rendered after the sandbox chip (e.g. attach-project). The
@@ -111,6 +113,11 @@ export function Input({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const sandboxInteractive = !!sandboxOptions && sandboxOptions.length > 0 && !!onSandboxChange && !sandboxLocked;
+  // Per-profile pill icon: glanceable "what kind of computer" state, with the
+  // warning tint doing the no-sandbox signaling. Falls back to the generic
+  // monitor when the profile is unknown (e.g. label-only cloud sessions).
+  const SandboxIcon = currentSandboxProfile ? getProfileIcon(currentSandboxProfile) : MonitorIcon;
+  const sandboxUnsandboxed = !!currentSandboxProfile && isUnsandboxedProfile(currentSandboxProfile);
 
   const handleSandboxSelect = useCallback(
     (value: string) => {
@@ -367,8 +374,14 @@ export function Input({
                       className="h-7 min-w-0 gap-1.5 px-2 text-xs font-normal"
                     >
                       {sandboxLoading ? <Spinner className="size-3.5 shrink-0 text-muted-foreground" /> : null}
-                      <MonitorIcon
-                        className={`size-3.5 shrink-0 ${sandboxInteractive ? 'text-primary' : 'text-secondary-foreground'}`}
+                      <SandboxIcon
+                        className={`size-3.5 shrink-0 ${
+                          sandboxUnsandboxed
+                            ? 'text-warning'
+                            : sandboxInteractive
+                              ? 'text-primary'
+                              : 'text-secondary-foreground'
+                        }`}
                       />
                       <span className="max-w-24 truncate sm:max-w-50">{sandboxLabel}</span>
                       {sandboxLocked && <LockIcon className="size-2.5 shrink-0 text-muted-foreground" />}
@@ -376,11 +389,34 @@ export function Input({
                   </DropdownMenuTrigger>
                   <DropdownMenuContent side="top" align="start" className="min-w-45">
                     <DropdownMenuRadioGroup value={currentSandboxProfile} onValueChange={handleSandboxSelect}>
-                      {sandboxOptions?.map((option) => (
-                        <DropdownMenuRadioItem key={option.value} value={option.value} className="text-xs">
-                          {option.label}
-                        </DropdownMenuRadioItem>
-                      ))}
+                      {sandboxOptions?.map((option) => {
+                        const OptionIcon = getProfileIcon(option.value);
+                        return (
+                          <DropdownMenuRadioItem
+                            key={option.value}
+                            value={option.value}
+                            indicator="none"
+                            className="text-xs"
+                          >
+                            <span className="flex min-w-0 flex-1 items-start gap-2">
+                              <OptionIcon
+                                className={`mt-0.5 size-3.5 shrink-0 ${
+                                  isUnsandboxedProfile(option.value) ? 'text-warning' : 'text-muted-foreground'
+                                }`}
+                              />
+                              <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                                <span className="flex items-center gap-2">
+                                  <span className="flex-1">{option.label}</span>
+                                  {option.value === currentSandboxProfile && <CheckIcon className="size-3.5 shrink-0" />}
+                                </span>
+                                {option.description && (
+                                  <span className="max-w-56 text-xs text-muted-foreground">{option.description}</span>
+                                )}
+                              </span>
+                            </span>
+                          </DropdownMenuRadioItem>
+                        );
+                      })}
                     </DropdownMenuRadioGroup>
                   </DropdownMenuContent>
                 </DropdownMenu>

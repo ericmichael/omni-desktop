@@ -14,9 +14,6 @@ const NET: NetworkConfig = {
   enabled: true,
   presets: [],
   allowlist: ['api.openai.com'],
-  denylist: [],
-  allow_private_ips: false,
-  enable_socks5: false,
 };
 
 const models = (): ModelsConfig => ({

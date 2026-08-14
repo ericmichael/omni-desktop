@@ -224,8 +224,8 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
 # pipx installs into PIPX_HOME and drops console-script symlinks in PIPX_BIN_DIR.
 # Both are under /opt/pipx (owned by uid 1000 in the chown step below) and on
 # PATH, so the agent can `pipx install` without write access to the root-owned,
-# security-sensitive /usr/local/bin (which holds the root-run entrypoint +
-# apply-network-isolation.sh — chowning it would be a privilege-escalation hole).
+# security-sensitive /usr/local/bin (which holds the root-run entrypoint —
+# chowning it would be a privilege-escalation hole).
 ENV PIPX_HOME=/opt/pipx
 ENV PIPX_BIN_DIR=/opt/pipx/bin
 ENV PATH="/opt/pipx/bin:${PATH}"
@@ -275,9 +275,6 @@ RUN mkdir -p "${PIPX_HOME}" "${PIPX_BIN_DIR}" \
 
 COPY entrypoint.sh /usr/local/bin/omni-sandbox-entrypoint
 RUN chmod +x /usr/local/bin/omni-sandbox-entrypoint
-
-COPY apply-network-isolation.sh /usr/local/bin/apply-network-isolation.sh
-RUN chmod +x /usr/local/bin/apply-network-isolation.sh
 
 COPY start-vnc.sh /usr/local/bin/start-vnc.sh
 RUN chmod +x /usr/local/bin/start-vnc.sh

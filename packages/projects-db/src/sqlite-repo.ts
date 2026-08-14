@@ -248,6 +248,14 @@ export class SqliteProjectsRepo implements IProjectsRepo {
   async listResidentMessagesAfter(id: number, limit: number): Promise<ResidentMessageRow[]> {
     return this.sync.listResidentMessagesAfter(id, limit);
   }
+  async listResidentMessagesPage(opts: {
+    channel?: string;
+    after?: number;
+    before?: number;
+    limit: number;
+  }): Promise<ResidentMessageRow[]> {
+    return this.sync.listResidentMessagesPage(opts);
+  }
   async listResidentMessages(limit: number): Promise<ResidentMessageRow[]> {
     return this.sync.listResidentMessages(limit);
   }

@@ -179,6 +179,17 @@ export interface IProjectsRepo {
   /** Prune the rows of one channel (DM cleanup on resident delete). */
   deleteResidentMessagesForChannel(channel: string): Promise<void>;
   listResidentMessagesAfter(id: number, limit: number): Promise<ResidentMessageRow[]>;
+  /**
+   * Keyset page, ascending id order. `after` pages forward from the cursor
+   * (resume/replay); `before` or neither returns the newest window (history
+   * paging). Optional `channel` scopes the page.
+   */
+  listResidentMessagesPage(opts: {
+    channel?: string;
+    after?: number;
+    before?: number;
+    limit: number;
+  }): Promise<ResidentMessageRow[]>;
   /** Newest `limit` rows in ascending id order (the snapshot tail). */
   listResidentMessages(limit: number): Promise<ResidentMessageRow[]>;
   /** Log bound: keep the newest `keep` rows (per tenant on Postgres). */

@@ -1,16 +1,15 @@
 // Omni Code Launcher — multi-tenant cloud infrastructure (Path B).
 //
 // Deploys the launcher server (Web App for Containers, the stateless control
-// plane) plus everything the in-app Azure compute client provisions against:
-//   - Container Apps managed environment   → agent sandboxes spawn here
-//   - Azure Container Registry              → agent + launcher images
+// plane) plus its supporting services:
+//   - Azure Container Registry              → launcher images
 //   - Storage account + file share         → per-project workspace (Azure Files)
 //   - PostgreSQL Flexible Server            → pooled multi-tenant data (RLS)
-//   - Log Analytics                         → Container Apps + app logs
-//   - User-assigned managed identity        → AcrPull + create-container-apps + Files
+//   - Log Analytics                         → app logs
+//   - User-assigned managed identity        → AcrPull + Key Vault
 //
 // The outputs are exactly the env vars the app already reads (see
-// src/main/aci-profile.ts and src/server/managers.ts).
+// src/server/managers.ts).
 //
 // Deploy at resource-group scope:
 //   az deployment group create -g <rg> -f main.bicep -p @main.parameters.json
@@ -38,12 +37,6 @@ param acrName string = '${namePrefix}launcheracr'
 
 @description('Launcher server image repo:tag, resolved against the ACR.')
 param launcherImageRepoTag string = 'omni-launcher:latest'
-
-@description('Fast agent sandbox image repo:tag (thin "min" image, fast cold pull) — the default `aci` profile.')
-param agentImageRepoTag string = 'omni-launcher-devbox-min:latest'
-
-@description('Desktop agent sandbox image repo:tag (full devbox: IDE + VNC + toolchains) — the `aci-desktop` profile.')
-param desktopAgentImageRepoTag string = 'omni-launcher-devbox:latest'
 
 @description('TCP port the launcher server listens on inside the container.')
 param launcherPort int = 3001
@@ -99,12 +92,6 @@ param omniSecretKey string
 @description('App Service plan SKU for the launcher web app.')
 param launcherPlanSku string = 'P0v3'
 
-@description('vCPU for each agent sandbox container app (decimal cores).')
-param agentCpu string = '2.0'
-
-@description('Memory for each agent sandbox container app.')
-param agentMemory string = '4Gi'
-
 // ---------------------------------------------------------------------------
 // Names (kept deterministic; uniqueString avoids global-name collisions)
 // ---------------------------------------------------------------------------
@@ -114,7 +101,6 @@ var suffix = uniqueString(resourceGroup().id)
 // namePrefix(<=11) + 'st' + uniqueString(13) can reach 26.
 var storageName = take(toLower('${namePrefix}st${suffix}'), 24)
 var logName = '${namePrefix}-logs'
-var envName = '${namePrefix}-agent-env'
 var pgName = toLower('${namePrefix}-pg-${suffix}')
 var pgDatabaseName = 'omni'
 // Separate logical database on the same flex server for omniagents session
@@ -161,20 +147,17 @@ resource logs 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
 // registry creds; tighten to managed-identity pull later).
 // ---------------------------------------------------------------------------
 
-// ACR stays PUBLICLY reachable (admin-credential-protected). Azure Container
-// Instances cannot pull from a private-endpoint-only ACR — the ACI service
-// performs the image pull outside the container's VNet, so disabling public
-// access yields InaccessibleImage. (AKS supports private ACR pull; ACI does
-// not.) The registry holds only container images — no PHI — so a credentialed
-// public registry is acceptable; the data-bearing resources (PG/KV/Storage)
-// are private. Keep Standard since no private endpoint is used.
+// ACR stays PUBLICLY reachable. The registry holds only container images — no
+// PHI — so a credentialed public registry is acceptable; the data-bearing
+// resources (PG/KV/Storage) are private. Keep Standard since no private
+// endpoint is used.
 resource acr 'Microsoft.ContainerRegistry/registries@2023-07-01' = {
   name: acrName
   location: location
   sku: { name: 'Standard' }
   properties: {
-    // Admin user off — both the launcher (App Service MI) and the sandboxes
-    // (ACI group MI) pull via the managed identity's AcrPull, no shared password.
+    // Admin user off — the launcher (App Service MI) pulls via the managed
+    // identity's AcrPull, no shared password.
     adminUserEnabled: false
     publicNetworkAccess: 'Enabled'
   }
@@ -310,17 +293,13 @@ resource blobPeDns 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2023
 }
 
 // ---------------------------------------------------------------------------
-// Virtual network — keeps ACI sandboxes private. The agent sandbox groups join
-// the delegated `aci` subnet and get *private* IPs (no public surface); their
-// service ports (code-server, VNC) are reachable only inside the VNet. The
-// launcher's App Service joins the `appsvc` subnet via regional VNet
-// integration, so it can reach those private IPs and front them through its own
-// EasyAuth-protected /proxy. RFC1918 traffic routes through the VNet by default,
-// so Postgres (public FQDN) keeps using the normal outbound path.
+// Virtual network. The launcher's App Service joins the `appsvc` subnet via
+// regional VNet integration so it can reach the private endpoints; Postgres
+// gets native VNet integration in its delegated subnet. RFC1918 traffic routes
+// through the VNet by default.
 // ---------------------------------------------------------------------------
 
 var vnetName = '${namePrefix}-vnet'
-var aciSubnetName = 'aci'
 var integrationSubnetName = 'appsvc'
 var pgSubnetName = 'pg'
 var peSubnetName = 'privatelink'
@@ -331,19 +310,6 @@ resource vnet 'Microsoft.Network/virtualNetworks@2023-11-01' = {
   properties: {
     addressSpace: { addressPrefixes: ['10.40.0.0/16'] }
     subnets: [
-      {
-        name: aciSubnetName
-        properties: {
-          addressPrefix: '10.40.1.0/24'
-          networkSecurityGroup: { id: aciNsg.id }
-          delegations: [
-            {
-              name: 'aci-delegation'
-              properties: { serviceName: 'Microsoft.ContainerInstance/containerGroups' }
-            }
-          ]
-        }
-      }
       {
         name: integrationSubnetName
         properties: {
@@ -426,100 +392,12 @@ resource blobDnsLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2020
 }
 // (No ACR private DNS zone — ACR stays public; see the ACR resource note.)
 
-// NSG fencing the untrusted sandbox tier: the launcher may reach the service
-// ports; sandboxes may reach the private endpoints (Storage/ACR) + DNS +
-// internet (package installs, ACI platform), but NOT the database, the
-// launcher, or each other.
-resource aciNsg 'Microsoft.Network/networkSecurityGroups@2023-11-01' = {
-  name: '${namePrefix}-aci-nsg'
-  location: location
-  properties: {
-    securityRules: [
-      {
-        name: 'allow-launcher-to-services'
-        properties: {
-          priority: 100, direction: 'Inbound', access: 'Allow', protocol: 'Tcp'
-          sourceAddressPrefix: '10.40.2.0/24', sourcePortRange: '*'
-          destinationAddressPrefix: '*', destinationPortRanges: ['8080', '6080']
-        }
-      }
-      {
-        name: 'deny-vnet-inbound'
-        properties: {
-          priority: 200, direction: 'Inbound', access: 'Deny', protocol: '*'
-          sourceAddressPrefix: 'VirtualNetwork', sourcePortRange: '*'
-          destinationAddressPrefix: '*', destinationPortRange: '*'
-        }
-      }
-      {
-        name: 'allow-private-endpoints'
-        properties: {
-          priority: 100, direction: 'Outbound', access: 'Allow', protocol: '*'
-          sourceAddressPrefix: '*', sourcePortRange: '*'
-          destinationAddressPrefix: '10.40.4.0/24', destinationPortRange: '*'
-        }
-      }
-      {
-        name: 'allow-azure-dns'
-        properties: {
-          priority: 110, direction: 'Outbound', access: 'Allow', protocol: '*'
-          sourceAddressPrefix: '*', sourcePortRange: '*'
-          destinationAddressPrefix: '168.63.129.16', destinationPortRange: '53'
-        }
-      }
-      {
-        name: 'deny-to-database'
-        properties: {
-          priority: 120, direction: 'Outbound', access: 'Deny', protocol: '*'
-          sourceAddressPrefix: '*', sourcePortRange: '*'
-          destinationAddressPrefix: '10.40.3.0/24', destinationPortRange: '*'
-        }
-      }
-      {
-        name: 'deny-to-launcher'
-        properties: {
-          priority: 130, direction: 'Outbound', access: 'Deny', protocol: '*'
-          sourceAddressPrefix: '*', sourcePortRange: '*'
-          destinationAddressPrefix: '10.40.2.0/24', destinationPortRange: '*'
-        }
-      }
-      {
-        name: 'deny-sandbox-to-sandbox'
-        properties: {
-          priority: 140, direction: 'Outbound', access: 'Deny', protocol: '*'
-          sourceAddressPrefix: '*', sourcePortRange: '*'
-          destinationAddressPrefix: '10.40.1.0/24', destinationPortRange: '*'
-        }
-      }
-    ]
-  }
-}
-
 var pgSubnetId = '${vnet.id}/subnets/${pgSubnetName}'
 var peSubnetId = '${vnet.id}/subnets/${peSubnetName}'
 
-// String-built ids (rather than `existing` refs) so they carry an implicit
+// String-built id (rather than an `existing` ref) so it carries an implicit
 // dependency on the VNet resource above.
-var aciSubnetId = '${vnet.id}/subnets/${aciSubnetName}'
 var integrationSubnetId = '${vnet.id}/subnets/${integrationSubnetName}'
-
-// ---------------------------------------------------------------------------
-// Container Apps managed environment (agent sandboxes spawn into this).
-// ---------------------------------------------------------------------------
-
-resource managedEnv 'Microsoft.App/managedEnvironments@2024-03-01' = {
-  name: envName
-  location: location
-  properties: {
-    appLogsConfiguration: {
-      destination: 'log-analytics'
-      logAnalyticsConfiguration: {
-        customerId: logs.properties.customerId
-        sharedKey: logs.listKeys().primarySharedKey
-      }
-    }
-  }
-}
 
 // ---------------------------------------------------------------------------
 // PostgreSQL Flexible Server (pooled multi-tenant data; RLS-backed).
@@ -602,58 +480,6 @@ resource raAcrPull 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roleAcrPull)
   }
 }
-
-// Least-privilege role for the launcher: manage ACI sandbox container groups
-// (create/delete/exec) and join the sandbox subnet — instead of Contributor on
-// the whole resource group. The launcher provisions sandboxes by PUTting
-// Microsoft.ContainerInstance/containerGroups directly (omniagents sandbox-aci).
-resource roleAciManager 'Microsoft.Authorization/roleDefinitions@2022-04-01' = {
-  name: guid(resourceGroup().id, 'aci-sandbox-manager')
-  properties: {
-    roleName: '${namePrefix}-aci-sandbox-manager-${suffix}'
-    description: 'Manage ACI sandbox container groups + join the sandbox subnet.'
-    assignableScopes: [resourceGroup().id]
-    permissions: [
-      {
-        actions: [
-          'Microsoft.ContainerInstance/containerGroups/read'
-          'Microsoft.ContainerInstance/containerGroups/write'
-          'Microsoft.ContainerInstance/containerGroups/delete'
-          'Microsoft.ContainerInstance/containerGroups/start/action'
-          'Microsoft.ContainerInstance/containerGroups/stop/action'
-          'Microsoft.ContainerInstance/containerGroups/restart/action'
-          'Microsoft.ContainerInstance/containerGroups/containers/exec/action'
-          'Microsoft.ContainerInstance/containerGroups/containers/logs/read'
-          'Microsoft.ContainerInstance/locations/operations/read'
-          'Microsoft.ContainerInstance/operations/read'
-          // ACI attaches the user-assigned MI (omni-launcher-mi) for ACR pull;
-          // assigning a UAMI to a resource needs this action on the MI's scope.
-          'Microsoft.ManagedIdentity/userAssignedIdentities/assign/action'
-          // ACI VNet deployment joins the delegated subnet (+ legacy networkProfile path).
-          'Microsoft.Network/virtualNetworks/read'
-          'Microsoft.Network/virtualNetworks/subnets/read'
-          'Microsoft.Network/virtualNetworks/subnets/join/action'
-          'Microsoft.Network/networkProfiles/read'
-          'Microsoft.Network/networkProfiles/write'
-          'Microsoft.Network/networkProfiles/delete'
-        ]
-      }
-    ]
-  }
-}
-
-resource raAciManager 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(resourceGroup().id, identity.id, 'aci-sandbox-manager')
-  properties: {
-    principalId: identity.properties.principalId
-    principalType: 'ServicePrincipal'
-    roleDefinitionId: roleAciManager.id
-  }
-}
-
-// NOTE: no Storage File SMB role for the identity — ACI mounts the workspace
-// share via the storage account KEY (AzureFileVolume), not SMB RBAC, so the
-// launcher's managed identity needs no Files data-plane role.
 
 // ---------------------------------------------------------------------------
 // Launcher server — Web App for Containers
@@ -841,8 +667,9 @@ resource site 'Microsoft.Web/sites@2023-12-01' = {
     serverFarmId: plan.id
     httpsOnly: true
     keyVaultReferenceIdentity: identity.id
-    // Regional VNet integration — outbound to private (RFC1918) ACI IPs routes
-    // through the `appsvc` subnet so the launcher can reach the sandboxes.
+    // Regional VNet integration — outbound to private (RFC1918) IPs routes
+    // through the `appsvc` subnet so the launcher can reach the private
+    // endpoints (Postgres, Key Vault, Storage).
     virtualNetworkSubnetId: integrationSubnetId
     // Pull the launcher's own container image from the private ACR through the
     // VNet (required once ACR public access is off).
@@ -876,26 +703,10 @@ resource site 'Microsoft.Web/sites@2023-12-01' = {
         // secrets, AES-256-GCM) refuses to construct without it.
         { name: 'OMNI_SECRET_KEY', value: kvRef(kv.properties.vaultUri, 'omni-secret-key') }
         { name: 'OMNI_DATA_API_URL', value: dataApiUrl }
-        { name: 'OMNI_AZURE_SUBSCRIPTION_ID', value: subscription().subscriptionId }
-        { name: 'OMNI_AZURE_RESOURCE_GROUP', value: resourceGroup().name }
-        { name: 'OMNI_AZURE_ENV', value: managedEnv.name }
-        { name: 'OMNI_AZURE_LOCATION', value: location }
-        { name: 'OMNI_AZURE_REGISTRY', value: acr.properties.loginServer }
-        { name: 'OMNI_AZURE_IMAGE', value: '${acr.properties.loginServer}/${agentImageRepoTag}' }
-        // Full devbox image for the `aci-desktop` profile (IDE + VNC).
-        { name: 'OMNI_AZURE_DESKTOP_IMAGE', value: '${acr.properties.loginServer}/${desktopAgentImageRepoTag}' }
-        // Delegated subnet the ACI sandbox groups join → private IPs only.
-        // Surfaced into the aci profile's `client.subnet_id`.
-        { name: 'OMNI_AZURE_SUBNET_ID', value: aciSubnetId }
-        // ACI pulls the devbox image via this managed identity (AcrPull),
-        // surfaced into the aci profile's registry.identity — no admin password.
-        { name: 'OMNI_AZURE_IDENTITY_ID', value: identity.id }
-        { name: 'OMNI_AZURE_CPU', value: agentCpu }
-        { name: 'OMNI_AZURE_MEMORY', value: agentMemory }
         { name: 'AZURE_CLIENT_ID', value: identity.properties.clientId }
         { name: 'AZURE_STORAGE_ACCOUNT_NAME', value: storage.name }
-        // The ACI sandbox mounts the workspace file share via the account key
-        // (AzureFileVolume), so the launcher needs it + the share name.
+        // Azure Files artifact share (managers.ts reads OMNI_AZURE_FILE_SHARE)
+        // is mounted via the account key, so the launcher needs it + the name.
         { name: 'AZURE_STORAGE_ACCOUNT_KEY', value: kvRef(kv.properties.vaultUri, 'storage-account-key') }
         { name: 'OMNI_AZURE_FILE_SHARE', value: workspaceShareName }
         // Blob containers for sandbox snapshots + realtime audio. Launcher's
@@ -955,13 +766,17 @@ resource siteAuth 'Microsoft.Web/sites/config@2023-12-01' = if (!empty(aadClient
       //     headers on the upgrade. The launcher auths /ws via a signed
       //     token minted by /api/ws-token (which IS still behind EasyAuth,
       //     so the principal identity is baked into the token there).
+      //   - /ws/chat — chat-v1's public binding (docs/chat-v1-plan.md);
+      //     same signed-token auth as /ws (plus raw bridge keys), and its
+      //     clients (mobile apps, network bridges) have no EasyAuth cookie
+      //     to present on the upgrade.
       //   - /proxy — reverse-proxy routes to in-sandbox UIs (code-server,
       //     VNC, etc.). EasyAuth-gating breaks iframe loads from cross-
       //     origin Electron clients. The proxy-name suffix is unguessable
       //     (~96 bits of entropy) and the sandbox itself runs on a private
       //     VNet; /proxy/_register additionally enforces its own CIDR
       //     allowlist (see src/server/proxy-rewriter.ts isTrusted).
-      excludedPaths: ['/.well-known/omni-cloud', '/healthz', '/ws', '/proxy/*']
+      excludedPaths: ['/.well-known/omni-cloud', '/healthz', '/ws', '/ws/chat', '/proxy/*']
     }
     identityProviders: {
       azureActiveDirectory: {
@@ -1042,90 +857,6 @@ resource diagFiles 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = 
 }
 
 // ---------------------------------------------------------------------------
-// Out-of-band ACI orphan cleanup — Azure Function on a 30-min TimerTrigger.
-//
-// Why a Function and not an in-process loop in the launcher: the launcher's
-// container has bitten us with crashloops + bad-boot states. An in-launcher
-// sweeper stops running exactly when the launcher is broken — which is also
-// when orphans pile up. Running it as a separately-scheduled Function means
-// cleanup is independent of launcher uptime.
-//
-// Auth: uses the same user-assigned MI as the launcher, granted the same
-// custom `omni-aci-sandbox-manager` role (so it can list + delete ACI
-// groups). Code lives in infra/functions/aci-cleanup/.
-// ---------------------------------------------------------------------------
-
-// Functions plan = the launcher's existing App Service plan. We tried Y1
-// Consumption first but Azure refuses to mix dynamic + non-dynamic Linux
-// SKUs in the same resource group ("LinuxDynamicWorkersNotAllowedInResource
-// Group"), and the launcher needs the P0v3 baseline. Sharing the plan costs
-// nothing extra (same VM) and the 30-min Timer's CPU footprint is negligible
-// next to the launcher's steady load.
-var funcAppName = take('${namePrefix}-acicleanup-${suffix}', 60)
-var funcStorageContainerName = 'aci-cleanup-fn'
-
-// Functions need an AzureWebJobs storage backend (queue + leases). Reuse the
-// existing storage account — KV reference for the key so the Function picks
-// up rotation automatically.
-resource funcApp 'Microsoft.Web/sites@2023-12-01' = {
-  name: funcAppName
-  location: location
-  kind: 'functionapp,linux'
-  identity: {
-    type: 'UserAssigned'
-    userAssignedIdentities: { '${identity.id}': {} }
-  }
-  properties: {
-    serverFarmId: plan.id
-    httpsOnly: true
-    keyVaultReferenceIdentity: identity.id
-    siteConfig: {
-      linuxFxVersion: 'NODE|22'
-      appSettings: [
-        { name: 'FUNCTIONS_EXTENSION_VERSION', value: '~4' }
-        { name: 'FUNCTIONS_WORKER_RUNTIME', value: 'node' }
-        { name: 'WEBSITE_NODE_DEFAULT_VERSION', value: '~22' }
-        // Use run-from-package — the deploy step uploads a zip and points
-        // this at it. Avoids in-place write quirks on Consumption.
-        { name: 'WEBSITE_RUN_FROM_PACKAGE', value: '1' }
-        // AzureWebJobs backing store (uses the workspace storage account; a
-        // separate $functions container Azure creates lazily). Storage key
-        // comes from the same KV secret the launcher uses.
-        {
-          name: 'AzureWebJobsStorage'
-          value: 'DefaultEndpointsProtocol=https;AccountName=${storage.name};AccountKey=${kvRef(kv.properties.vaultUri, 'storage-account-key')};EndpointSuffix=core.windows.net'
-        }
-        // Cleanup script env.
-        { name: 'AZURE_SUBSCRIPTION_ID', value: subscription().subscriptionId }
-        { name: 'AZURE_RESOURCE_GROUP', value: resourceGroup().name }
-        { name: 'OMNI_LAUNCHER_TAG', value: resourceGroup().name }
-        { name: 'MAX_AGE_HOURS', value: '8' }
-        // Selects which user-assigned MI DefaultAzureCredential should use.
-        { name: 'AZURE_CLIENT_ID', value: identity.properties.clientId }
-      ]
-    }
-  }
-  dependsOn: [kvSecretStorageKey, raKvSecretsUser]
-}
-
-// Reuse the launcher's custom `omni-aci-sandbox-manager` role: it already
-// grants exactly the verbs the Function needs (list/get + delete + locations).
-// The same MI is principal for both the launcher and the Function, so the
-// existing raAciManager assignment already covers it — no new role assignment
-// is needed.
-
-// Funnel Function logs into the shared Log Analytics workspace.
-resource diagFunc 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = {
-  scope: funcApp
-  name: 'to-logs'
-  properties: {
-    workspaceId: logs.id
-    logs: [{ categoryGroup: 'allLogs', enabled: true }]
-    metrics: [{ category: 'AllMetrics', enabled: true }]
-  }
-}
-
-// ---------------------------------------------------------------------------
 // Outputs — the values you wire into the app / verify after deploy.
 // ---------------------------------------------------------------------------
 
@@ -1134,7 +865,6 @@ output siteName string = siteName
 output dataApiUrl string = dataApiUrl
 output acrLoginServer string = acr.properties.loginServer
 output acrName string = acr.name
-output containerAppsEnv string = managedEnv.name
 output storageAccountName string = storage.name
 output workspaceShare string = workspaceShareName
 output postgresFqdn string = postgres.properties.fullyQualifiedDomainName
@@ -1142,8 +872,4 @@ output postgresDatabase string = pgDatabaseName
 output postgresSessionsDatabase string = pgSessionsDatabaseName
 output managedIdentityClientId string = identity.properties.clientId
 output managedIdentityPrincipalId string = identity.properties.principalId
-output agentImage string = '${acr.properties.loginServer}/${agentImageRepoTag}'
 output vnetName string = vnet.name
-output aciSubnetId string = aciSubnetId
-output aciCleanupFunctionName string = funcAppName
-output funcStorageContainer string = funcStorageContainerName

@@ -1,6 +1,6 @@
 'use client';
 
-import { CheckIcon, ChevronRightIcon, CircleIcon } from 'lucide-react';
+import { CheckIcon, ChevronRightIcon } from 'lucide-react';
 import { DropdownMenu as DropdownMenuPrimitive } from 'radix-ui';
 import * as React from 'react';
 
@@ -98,23 +98,35 @@ function DropdownMenuRadioGroup({ ...props }: React.ComponentProps<typeof Dropdo
 function DropdownMenuRadioItem({
   className,
   children,
+  indicator = 'check',
   ...props
-}: React.ComponentProps<typeof DropdownMenuPrimitive.RadioItem>) {
+}: React.ComponentProps<typeof DropdownMenuPrimitive.RadioItem> & {
+  /**
+   * 'check' (default): a trailing check on the selected item, macOS-menu
+   * style — no left bullet rail. Every row reserves the trailing slot so
+   * widths don't shift with selection. 'none': no built-in mark, for rich
+   * multi-line items that place their own check on the title row (see
+   * SandboxPicker) — a vertically-centered mark floats awkwardly there.
+   */
+  indicator?: 'check' | 'none';
+}) {
   return (
     <DropdownMenuPrimitive.RadioItem
       data-slot="dropdown-menu-radio-item"
       className={cn(
-        "relative flex cursor-default items-center gap-2 rounded-sm py-1.5 pr-2 pl-8 text-sm outline-hidden select-none focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+        "relative flex cursor-default items-center gap-2 rounded-sm py-1.5 pr-2 pl-2 text-sm outline-hidden select-none focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
         className
       )}
       {...props}
     >
-      <span className="pointer-events-none absolute left-2 flex size-3.5 items-center justify-center">
-        <DropdownMenuPrimitive.ItemIndicator>
-          <CircleIcon className="size-2 fill-current" />
-        </DropdownMenuPrimitive.ItemIndicator>
-      </span>
       {children}
+      {indicator === 'check' && (
+        <span className="pointer-events-none ml-auto flex size-3.5 items-center justify-center">
+          <DropdownMenuPrimitive.ItemIndicator>
+            <CheckIcon className="size-3.5" />
+          </DropdownMenuPrimitive.ItemIndicator>
+        </span>
+      )}
     </DropdownMenuPrimitive.RadioItem>
   );
 }

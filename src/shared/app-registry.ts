@@ -155,11 +155,10 @@ export const BUILTIN_APPS: AppDescriptor[] = [
     label: 'Terminal',
     icon: 'SquareTerminal',
     kind: 'builtin-terminal',
-    // Terminals route through `omni serve`'s `SessionPtyBackend`, so the
-    // shell needs a running agent process. We keep the app `scope: 'always'`
-    // because the renderer shows an actionable "Open a code session"
-    // empty state when no process is attached (the dock icon staying
-    // visible communicates that the feature exists).
+    // Terminals route through `omni serve`'s PTY backends, so a shell
+    // exists only once an environment reporting the `pty` capability is
+    // attached. The column dock enforces that (CodeWorkspaceLayout):
+    // no environment → no icon; wasm sandboxes (no PTY) → no icon.
     scope: 'always',
     builtin: true,
     order: 41,

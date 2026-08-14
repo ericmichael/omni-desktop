@@ -111,10 +111,17 @@ describe('buildCodexConfig', () => {
       voice_default: null,
     });
     const models = config.providers['codex']?.models ?? {};
-    expect(Object.keys(models).sort()).toEqual(['gpt-realtime', 'gpt-realtime-1.5', 'gpt-realtime-mini']);
+    expect(Object.keys(models).sort()).toEqual([
+      'gpt-realtime',
+      'gpt-realtime-1.5',
+      'gpt-realtime-2',
+      'gpt-realtime-2.1',
+      'gpt-realtime-2.1-mini',
+      'gpt-realtime-mini',
+    ]);
     // The flag is what makes the runtime build voice settings at all.
     expect(Object.values(models).every((m) => m.realtime === true)).toBe(true);
-    expect(models['gpt-realtime-1.5']?.model).toBe('gpt-realtime-1.5');
+    expect(models['gpt-realtime-2.1']?.model).toBe('gpt-realtime-2.1');
   });
 
   it('adopts a ChatGPT voice model when the user has nothing else set up', () => {
@@ -123,8 +130,8 @@ describe('buildCodexConfig', () => {
       default: null,
       voice_default: null,
     });
-    expect(config.voice_default).toBe('codex/gpt-realtime-1.5');
-    expect(config.providers['codex']?.models['gpt-realtime-1.5']?.realtime).toBe(true);
+    expect(config.voice_default).toBe('codex/gpt-realtime-2.1');
+    expect(config.providers['codex']?.models['gpt-realtime-2.1']?.realtime).toBe(true);
   });
 
   it('leaves an existing voice choice alone', () => {

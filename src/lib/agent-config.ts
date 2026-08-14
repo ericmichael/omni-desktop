@@ -18,15 +18,12 @@ export function emptyMcpConfig(): McpConfig {
   return { mcpServers: {} };
 }
 
-/** Empty `network.json` (egress disabled, no rules). */
+/** Empty `network.json` (isolation off, no rules). */
 export function emptyNetworkConfig(): NetworkConfig {
   return {
     enabled: false,
     presets: [],
     allowlist: [],
-    denylist: [],
-    allow_private_ips: false,
-    enable_socks5: false,
   };
 }
 

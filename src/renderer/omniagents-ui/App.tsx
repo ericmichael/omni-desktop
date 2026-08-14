@@ -54,7 +54,7 @@ import { Header } from './components/Header';
 import { Input } from './components/Input';
 import { LoopPanel, type LoopTaskSnapshot } from './components/LoopPanel';
 import { ArtifactPortalProvider, type Attachment, MessageList } from './components/MessageList';
-import { ModelSessionControls } from './components/ModelSessionControls';
+import { ModelSessionControls, type SandboxNetworkState } from './components/ModelSessionControls';
 import { type NotificationInfo, Notifications } from './components/Notifications';
 import { PillStrip } from './components/PillStrip';
 import { QueuedMessages } from './components/QueuedMessages';
@@ -126,7 +126,7 @@ export function App({
   /** Called once this chat claims the pre-launch intent queue. */
   onPendingMessagesFlushed?: () => void;
   sandboxLabel?: string;
-  sandboxOptions?: { value: string; label: string }[];
+  sandboxOptions?: { value: string; label: string; description?: string }[];
   currentSandboxProfile?: string;
   onSandboxChange?: (value: string) => void;
   /** Extra composer chips (e.g. attach-project) forwarded to the Input row. */
@@ -2047,9 +2047,12 @@ export function App({
   const hasArtifacts = visibleArtifacts.length > 0;
   const sandboxLabel =
     sandboxLabelProp ??
-    ({ host: undefined, devbox: 'Devbox', platform: 'Cloud' } as Record<string, string | undefined>)[
-      launcherStore.defaultProfileName ?? 'host'
-    ];
+    (
+      { host: undefined, devbox: 'Workstation', wasmbox: 'Mini computer', platform: 'Cloud' } as Record<
+        string,
+        string | undefined
+      >
+    )[launcherStore.defaultProfileName ?? 'host'];
 
   // Confirm before switching INTO ``host`` post-first-message: the SDK's
   // unix_local.hydrate_workspace writes the snapshot back into the user's
@@ -2072,6 +2075,38 @@ export function App({
       onSandboxChange?.(pendingSandboxProfile);
     }
   }, [onSandboxChange, pendingSandboxProfile]);
+  // Live sandbox network toggle (docker iptables block / wasm in-process
+  // gate; other backends report unsupported). Memoized: ModelSessionControls
+  // probes get_network on the callback's identity, so an inline arrow would
+  // re-probe every render. Stable across a session — the pill hides itself
+  // when the probe reports unsupported or rejects.
+  const getSandboxNetwork = useCallback(async () => {
+    const sid = actor.getSnapshot().context.sessionId;
+    if (!sid || !executionTarget) {
+      return { ok: false };
+    }
+    return (await client.serverCall(
+      'sandbox.get_network',
+      {},
+      sid,
+      executionTarget
+    )) as SandboxNetworkState;
+  }, [client, actor, executionTarget]);
+  const setSandboxNetwork = useCallback(
+    async (enabled: boolean) => {
+      const sid = actor.getSnapshot().context.sessionId;
+      if (!sid || !executionTarget) {
+        return { ok: false };
+      }
+      return (await client.serverCall(
+        'sandbox.set_network',
+        { enabled },
+        sid,
+        executionTarget
+      )) as SandboxNetworkState;
+    },
+    [client, actor, executionTarget]
+  );
   const headerActions = {
     showArtifactsButton: hasArtifacts,
     onArtifactsToggle: hasArtifacts ? () => setArtifactsPanelOpen((v) => !v) : undefined,
@@ -2261,6 +2296,8 @@ export function App({
                           onSetApprovalsReviewer={(reviewer) => client.setSessionApprovals(sessionId!, reviewer)}
                           workflowSupported={client.supportsExperimentalFeature('workflowReviewer')}
                           onSetWorkflowReviewer={(reviewer) => client.setSessionWorkflow(sessionId!, reviewer)}
+                          onGetSandboxNetwork={executionTarget ? getSandboxNetwork : undefined}
+                          onSetSandboxNetwork={executionTarget ? setSandboxNetwork : undefined}
                         />
                       ) : null}
                     </PillStrip>

@@ -39,8 +39,9 @@ export type ProfileCatalogDeps = {
  * for names the renderer map doesn't know (user-created profiles).
  */
 const PROFILE_LABELS: Record<string, string> = {
-  host: 'This computer (no sandbox)',
-  devbox: 'Devbox (Docker)',
+  host: 'My computer (no sandbox)',
+  devbox: 'Workstation (desktop + tools)',
+  wasmbox: 'Mini computer (instant, sealed)',
   platform: 'Cloud (managed)',
 };
 

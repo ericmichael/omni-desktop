@@ -216,9 +216,12 @@ export type ResidentAgent = {
   projectIds?: string[];
   /**
    * Local hour (0–23) of the daily morning beat (`day_start` — the planning
-   * wakeup that carries memories + the overnight digest). `null` disables
-   * the beat for this agent. If the app is closed as the hour passes, the
-   * beat catches up (marked late) when the app next opens that day.
+   * wakeup that carries memories + the overnight digest). `null` (the
+   * default) disables the beat: proactivity is opt-in. Quiet-start rule:
+   * a beat fires only when its hour comes due while the app is running —
+   * an hour that passes while the app is closed (or the machine sleeps) is
+   * skipped for the day, never delivered late, so opening the app is never
+   * what starts agents working.
    */
   morningHour: number | null;
   /** Disabled agents receive no events and never wake. */
@@ -314,6 +317,28 @@ export type ResidentAgentRuntime = {
   pendingCount: number;
   /** Wakeups delivered since boot. */
   decisions: number;
+  /**
+   * Highest channel-log message id this agent has ingested — its digest
+   * cursor, advanced when a wakeup is actually DELIVERED. A message at or
+   * below it has reached the agent's context; above it, the agent has not
+   * read it yet. This is the read-receipt watermark.
+   *
+   * Runtime-only, so a fresh boot starts at 0 and every historical message
+   * reads as unseen. That is why receipts render only against the user's
+   * NEWEST message in a thread (see `SeenReceipt`) — a stale "unseen" on
+   * last week's history would be a lie, but "no receipt yet" on a message
+   * posted seconds ago is simply the truth.
+   */
+  seenMessageId: number;
+  /**
+   * Channel-log ids routed to this agent but not yet delivered — sitting in
+   * the delivery-debounce window, or riding as digest until the next
+   * WAKE_NOW event. "Will read", as against `seenMessageId`'s "has read".
+   * The distinction is load-bearing here in a way it is not in an
+   * always-on chat: an ambient channel post may wait hours for a wakeup,
+   * and the user deserves to see that rather than silence.
+   */
+  queuedMessageIds: number[];
 };
 
 export type ResidentAgentInput = {
@@ -323,7 +348,8 @@ export type ResidentAgentInput = {
   profileName?: string;
   /** Project scope — see `ResidentAgent.projectIds`. */
   projectIds?: string[];
-  /** Hour (0–23) of the daily morning beat; `null` = no morning beat. */
+  /** Hour (0–23) of the daily morning beat; `null`/omitted = no morning
+   *  beat (the default — proactivity is opt-in). */
   morningHour?: number | null;
   /** Workspace superuser — see `ResidentAgent.superuser`. */
   superuser?: boolean;
@@ -334,18 +360,154 @@ export type ResidentAgentUpdate = Partial<ResidentAgentInput> & {
   enabled?: boolean;
 };
 
+// #region chat-v1
+// The participant-facing messaging contract (docs/chat-v1-plan.md): one
+// method/notification map, served over two bindings — the internal IPC
+// transport (channel names ARE the wire names) and the public /ws/chat
+// JSON-RPC endpoint. `protocol/chat-v1/openrpc.json` is the published
+// artifact; a parity test keeps it aligned with these names.
+
+export type ChatChannelKind = 'team' | 'named' | 'dm' | 'system';
+
+/** One channel as chat-v1 clients see it. `members` follows the def
+ *  semantics (absent = open to every agent); DM channels carry their
+ *  participant pair instead. */
+export type ChatChannel = {
+  id: string;
+  kind: ChatChannelKind;
+  description?: string;
+  members?: string[];
+  /** DM channels only: the two participant ids (`user` or roster ids). */
+  dmParticipants?: [string, string];
+  createdAt?: number;
+};
+
+/** Roster projection for chat clients — addressing and display only
+ *  (persona/config stay on the `resident:*` admin surface). */
+export type ChatRosterAgent = {
+  id: string;
+  handle: string;
+  name: string;
+  role: string;
+  enabled: boolean;
+  superuser?: boolean;
+};
+
+export type ChatHello = {
+  protocol: 'chat-v1';
+  /** The caller's stamped participant identity — what its posts carry. */
+  self: { id: string; name: string | null };
+  capabilities: string[];
+};
+
+/** Bridge-scope posting identity: stamped as `ext:<network>:<id>`. */
+export type ChatExternalPoster = { network: string; id: string; displayName: string };
+
+export type ChatListMessagesParams = {
+  /** Omitted = all channels (the Activity view / full record). */
+  channel?: string;
+  /** Keyset cursor: rows with id > after, oldest-first (resume/replay). */
+  after?: number;
+  /** Keyset cursor: the newest rows with id < before (history paging). */
+  before?: number;
+  /** Max rows (default 100, cap 500). */
+  limit?: number;
+};
+
+export type ChatPostMessageParams = {
+  channel: string;
+  text: string;
+  /** Threads under this message's root (named channels only). */
+  replyTo?: number;
+  /** Bridge scope only: post as a bridged external user. */
+  asExternal?: ChatExternalPoster;
+};
+
+/**
+ * chat-v1 request methods. Every method takes ONE params object (JSON-RPC
+ * named params; the internal binding passes the same object positionally),
+ * so both bindings share these signatures verbatim.
+ */
+export type ChatMethodMap = {
+  'chat.hello': { params: Record<string, never>; result: ChatHello };
+  'chat.list_channels': { params: Record<string, never>; result: { channels: ChatChannel[] } };
+  'chat.list_messages': {
+    params: ChatListMessagesParams;
+    result: { messages: ResidentChannelMessage[]; hasMore: boolean };
+  };
+  'chat.post_message': { params: ChatPostMessageParams; result: { message: ResidentChannelMessage } };
+  'chat.create_channel': { params: { name: string; description?: string }; result: { channel: ChatChannel } };
+  'chat.update_channel': { params: { channelId: string; description?: string }; result: { channel: ChatChannel } };
+  'chat.delete_channel': { params: { channelId: string }; result: Record<string, never> };
+  'chat.set_channel_members': {
+    params: { channelId: string; members: string[] | null };
+    result: { channel: ChatChannel };
+  };
+  'chat.list_roster': { params: Record<string, never>; result: { agents: ChatRosterAgent[] } };
+  'chat.get_presence': { params: Record<string, never>; result: { presence: Record<string, ResidentAgentRuntime> } };
+  'chat.wake_agent': { params: { agentId: string }; result: Record<string, never> };
+  'chat.attach_agent_session': {
+    params: { agentId: string };
+    result: { sessionId: string; connection: AgentRuntimeConnection };
+  };
+};
+
+export const CHAT_METHOD_NAMES = [
+  'chat.hello',
+  'chat.list_channels',
+  'chat.list_messages',
+  'chat.post_message',
+  'chat.create_channel',
+  'chat.update_channel',
+  'chat.delete_channel',
+  'chat.set_channel_members',
+  'chat.list_roster',
+  'chat.get_presence',
+  'chat.wake_agent',
+  'chat.attach_agent_session',
+] as const satisfies ReadonlyArray<keyof ChatMethodMap>;
+
+/** chat-v1 notifications (server → client). */
+export type ChatNotificationMap = {
+  'chat.message_added': { message: ResidentChannelMessage };
+  'chat.channel_changed': { channel?: ChatChannel; deletedId?: string };
+  'chat.presence_changed': { presence: Record<string, ResidentAgentRuntime> };
+  'chat.roster_changed': { agents: ChatRosterAgent[] };
+  'chat.attention': { agentId: string; message: string; at: number };
+};
+
+export const CHAT_NOTIFICATION_NAMES = [
+  'chat.message_added',
+  'chat.channel_changed',
+  'chat.presence_changed',
+  'chat.roster_changed',
+  'chat.attention',
+] as const satisfies ReadonlyArray<keyof ChatNotificationMap>;
+
+/** One notification as a tagged value — what the manager's chat-event
+ *  subscribers (the /ws/chat fan-out) receive. */
+export type ChatEvent = {
+  [K in keyof ChatNotificationMap]: { method: K; params: ChatNotificationMap[K] };
+}[keyof ChatNotificationMap];
+
+// #endregion chat-v1
+
 export type StoreData = {
   workspaceDir?: string;
   // Resident durable data lives in projects-db (docs/residents-in-projects-db-plan.md).
-  // These five keys are read-only SNAPSHOT MIRRORS assembled from the repo —
-  // never persisted to the host store; writes go through `resident:*` IPC.
+  // roster/memories/alarms are read-only SNAPSHOT MIRRORS assembled from the
+  // repo — never persisted to the host store; writes go through `resident:*`
+  // IPC. Channel data no longer rides the snapshot at all: it moved to the
+  // chat-v1 binding (docs/chat-v1-plan.md) — the two channel keys below are
+  // legacy-store residue kept only so the one-shot store→db migration can
+  // still read a pre-fold store.
   /** Resident-agent roster (docs/resident-agents-plan.md). */
   residentAgents: ResidentAgent[];
   /** Durable memories per roster id — earned facts, editable, `forget`-able. */
   residentMemories: Record<string, ResidentMemoryEntry[]>;
-  /** The `#team` + DM channel log (bounded; oldest rows pruned). */
+  /** Legacy (pre-fold) channel log — migration source only; always empty after. */
   residentChannels: ResidentChannelMessage[];
-  /** User-created named channels (beside the built-in `team`). */
+  /** Legacy (pre-fold) channel defs — migration source only; always empty after. */
   residentChannelDefs: ResidentChannelDef[];
   /** Self-set future wakeups per roster id (survive parks and restarts). */
   residentAlarms: Record<string, ResidentAlarm[]>;
@@ -445,6 +607,9 @@ export type StoreData = {
    */
   wipLimit: number;
   scheduledTasks: ScheduledTask[];
+  /** Event-driven agent rules: when <trigger> fires, wake <resident> with an
+   *  instruction (docs pattern: the resident IS the workflow engine). */
+  automations: Automation[];
   /**
    * Background-actor outcomes for Home's "While you were away" feed,
    * newest-first. Appended by main-process managers via
@@ -683,6 +848,61 @@ export type ActivityEvent = {
   /** Exactly one deep-link target. */
   link: { type: 'ticket'; ticketId: TicketId } | { type: 'routine'; taskId: string };
 };
+
+// #region Automations
+
+/** The pull-request watcher's event vocabulary (see src/lib/pull-request-watch.ts). */
+export type PullRequestEventKind = 'merged' | 'closed' | 'approved' | 'changes_requested' | 'ci_failed' | 'ci_green';
+
+/**
+ * What makes an automation fire. Three sources:
+ *  - `pr_event`: a watched pull request changed. Optional filters: only these
+ *    event kinds; only PRs whose `owner/repo` label contains `repo`.
+ *  - `channel_message`: a HUMAN posted in a chat channel (agent posts never
+ *    trigger — the loop guard), optionally only when the text contains a
+ *    substring. Rate-limited by a per-automation cooldown.
+ *  - `schedule`: the routines schedule vocabulary, reused verbatim.
+ */
+export type AutomationTrigger =
+  | { kind: 'pr_event'; events?: PullRequestEventKind[]; repo?: string }
+  | { kind: 'channel_message'; channel: string; contains?: string }
+  | { kind: 'schedule'; schedule: ScheduledTaskSchedule };
+
+/**
+ * One event-driven rule: when the trigger fires, wake a resident agent with
+ * an instruction. Deliberately NOT a step engine — the woken resident is the
+ * workflow engine, and its day session is the run trace.
+ */
+export type Automation = {
+  id: string;
+  name: string;
+  enabled: boolean;
+  trigger: AutomationTrigger;
+  /** Resident roster id (`res_*`) to wake. */
+  agentId: string;
+  /** What the woken agent is told to do, verbatim in its wakeup ping. */
+  instruction: string;
+  createdAt: number;
+  updatedAt: number;
+  /** Schedule triggers only: next due time (ms), null = never (manual). */
+  nextRunAt?: number | null;
+  lastFiredAt?: number;
+  /** One-line cause of the last firing, for the card. */
+  lastFiredSummary?: string;
+  fireCount?: number;
+};
+
+export type AutomationInput = {
+  name: string;
+  trigger: AutomationTrigger;
+  agentId: string;
+  instruction: string;
+  enabled?: boolean;
+};
+
+export type AutomationUpdate = Partial<AutomationInput>;
+
+// #endregion Automations
 
 export type ScheduledTaskInput = {
   name: string;
@@ -993,6 +1213,11 @@ export const schema: Schema<StoreData> = {
   wipLimit: {
     type: 'number',
     default: 3,
+  },
+  automations: {
+    type: 'array',
+    default: [],
+    items: { type: 'object' },
   },
   scheduledTasks: {
     type: 'array',
@@ -1384,9 +1609,6 @@ export const schema: Schema<StoreData> = {
       enabled: false,
       presets: [],
       allowlist: [],
-      denylist: [],
-      allow_private_ips: false,
-      enable_socks5: false,
     },
   },
   envVars: { type: 'string', default: '' },
@@ -1638,6 +1860,14 @@ export type AgentProcessData = {
   environmentId?: string;
   /** Generation paired with ``environmentId`` by AgentHost materialization. */
   environmentGeneration?: number;
+  /**
+   * Capability names from the materialized environment descriptor
+   * (`pty`, `network`, `contained`, ...). The renderer gates
+   * capability-dependent surfaces on these affirmatively — the Terminal
+   * app renders only when `pty` is present, so no attached environment
+   * (or a wasm sandbox, which has no PTY) shows no Terminal at all.
+   */
+  environmentCapabilities?: string[];
   /** Authoritative root returned by the materialized execution environment. */
   workspaceRoot?: string;
   /** Environment-selected initial cwd for terminals and agent commands. */
@@ -2267,6 +2497,15 @@ export type PullRequestLink = {
   workspaceDir?: string;
   createdAt: number;
   lastSeenAt: number;
+  /** Newest review timestamp already delivered (or covered at first sight) by
+   *  the pull-request watcher — its durable review cursor, so reviews are
+   *  never re-announced across restarts. */
+  reviewWatermarkAt?: number;
+  /** The watcher's CI announce cursor: the last settled check verdict and the
+   *  head commit it was computed from (always persisted together — `failing`
+   *  is meaningless without knowing for which commit). */
+  ciState?: 'failing' | 'green';
+  ciSha?: string;
 };
 
 /**
@@ -2459,6 +2698,16 @@ type StoreIpcEvents = Namespaced<
   }
 >;
 
+/**
+ * chat-v1's internal binding: the wire method names ARE the IPC channel
+ * names, each taking the single params object (docs/chat-v1-plan.md).
+ * Messaging traffic (post, channels, wake, presence) lives here; roster
+ * CRUD and memory/handbook editing stay on `resident:*` (admin surface).
+ */
+type ChatIpcEvents = {
+  [K in keyof ChatMethodMap]: (params: ChatMethodMap[K]['params']) => ChatMethodMap[K]['result'];
+};
+
 type ResidentIpcEvents = Namespaced<
   'resident',
   {
@@ -2466,21 +2715,6 @@ type ResidentIpcEvents = Namespaced<
     create: (input: ResidentAgentInput) => ResidentAgent;
     update: (agentId: string, patch: ResidentAgentUpdate) => ResidentAgent;
     delete: (agentId: string) => void;
-    /** User posts to a channel (`team`, a named channel, or `dm:user:<agentId>`).
-     *  `replyTo` threads the post under that message's root (named channels only). */
-    post: (channel: string, text: string, replyTo?: number) => void;
-    /** Create a named channel; the id slug is derived from the name. */
-    'create-channel': (name: string, description?: string) => ResidentChannelDef;
-    /** Edit a named channel's description (the id slug is fixed at creation).
-     *  An empty/blank description clears it. */
-    'update-channel': (channelId: string, patch: { description?: string }) => ResidentChannelDef;
-    /** Delete a named channel and prune its rows (built-ins refuse). */
-    'delete-channel': (channelId: string) => void;
-    /** Replace a named channel's member list (roster ids); `null` restores
-     *  the open state (every agent, including future ones, is a member). */
-    'set-channel-members': (channelId: string, members: string[] | null) => void;
-    /** Manually wake an agent now (WAKE_NOW, bypasses digests). */
-    wake: (agentId: string) => void;
     /** Live runtime snapshot for every roster member. */
     'get-status': () => Record<string, ResidentAgentRuntime>;
     /**
@@ -2508,6 +2742,18 @@ type ResidentIpcEvents = Namespaced<
      * a `column_done` event.
      */
     'column-done': (agentId: string, tabId: string, reason: string) => void;
+  }
+>;
+
+type AutomationIpcEvents = Namespaced<
+  'automation',
+  {
+    list: () => Automation[];
+    create: (input: AutomationInput) => Automation;
+    update: (automationId: string, patch: AutomationUpdate) => Automation;
+    delete: (automationId: string) => void;
+    /** Manual fire, for testing a rule from the card. */
+    'run-now': (automationId: string) => Automation;
   }
 >;
 
@@ -4065,6 +4311,7 @@ export type IpcEvents = MainProcessIpcEvents &
   TerminalIpcEvents &
   StoreIpcEvents &
   ScheduledTaskIpcEvents &
+  AutomationIpcEvents &
   ConfigIpcEvents &
   CodexIpcEvents &
   CloudIpcEvents &
@@ -4092,6 +4339,7 @@ export type IpcEvents = MainProcessIpcEvents &
   SupervisorIpcEvents &
   RoutineIpcEvents &
   ResidentIpcEvents &
+  ChatIpcEvents &
   SandboxIpcEvents;
 
 /**
@@ -4290,6 +4538,17 @@ type ResidentIpcRendererEvents = Namespaced<
 >;
 
 /**
+ * chat-v1 notifications on the internal binding — only the two the renderer
+ * needs now that chat data left the store snapshot. Presence, attention, and
+ * roster changes keep their `resident:*` / `store:changed` events internally;
+ * the /ws/chat endpoint maps all five from the manager's chat-event stream.
+ */
+type ChatIpcRendererEvents = {
+  'chat.message_added': [ChatNotificationMap['chat.message_added']];
+  'chat.channel_changed': [ChatNotificationMap['chat.channel_changed']];
+};
+
+/**
  * Browser events. Main process emits a full-state snapshot whenever any
  * browser mutation lands — tabs, history, bookmarks, profiles. Renderers
  * simply replace their atom.
@@ -4369,7 +4628,8 @@ export type IpcRendererEvents = TerminalIpcRendererEvents &
   BrowserIpcRendererEvents &
   SupervisorIpcRendererEvents &
   RoutineIpcRendererEvents &
-  ResidentIpcRendererEvents;
+  ResidentIpcRendererEvents &
+  ChatIpcRendererEvents;
 
 // #region Config file types
 
@@ -4452,13 +4712,16 @@ export type McpConfig = {
   mcpServers: Record<string, McpServerEntry>;
 };
 
+/**
+ * Sandbox egress policy (`network.json`). `enabled` turns the iptables
+ * allowlist on; `allowlist` is the host/CIDR list (presets expand into it).
+ * Enforced by omni serve at container bring-up — these two fields are the
+ * entire consumed surface.
+ */
 export type NetworkConfig = {
   enabled: boolean;
   presets: string[];
   allowlist: string[];
-  denylist: string[];
-  allow_private_ips: boolean;
-  enable_socks5: boolean;
 };
 
 // #endregion

@@ -62,27 +62,20 @@ describe('mergeNetworkConfig', () => {
     enabled: true,
     presets: ['pkg'],
     allowlist: ['a.com', 'b.com'],
-    denylist: ['evil.com'],
-    allow_private_ips: false,
-    enable_socks5: false,
   };
-  it('intersects allowlist, unions denylist, ANDs booleans (deployment floor wins restrictive)', () => {
+  it('intersects allowlist and presets (deployment floor wins restrictive)', () => {
     const team: NetworkConfig = {
       enabled: true,
       presets: ['pkg', 'other'],
       allowlist: ['b.com', 'c.com'],
-      denylist: ['bad.com'],
-      allow_private_ips: true, // team wants it, floor forbids → false
-      enable_socks5: true,
     };
     const m = mergeNetworkConfig(floor, team);
     expect(m.allowlist).toEqual(['b.com']); // intersection
-    expect(m.denylist.sort()).toEqual(['bad.com', 'evil.com']); // union
-    expect(m.allow_private_ips).toBe(false); // floor forbids
     expect(m.presets).toEqual(['pkg']);
+    expect(m.enabled).toBe(true);
   });
   it('passes team through when no floor', () => {
-    const team = { ...floor, allow_private_ips: true };
+    const team = { ...floor, allowlist: ['solo.com'] };
     expect(mergeNetworkConfig(undefined, team)).toEqual(team);
   });
 });

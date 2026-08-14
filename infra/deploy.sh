@@ -13,7 +13,7 @@
 #   AUTH_MODE                                      easyauth | none (default: easyauth)
 #   AAD_CLIENT_ID / AAD_CLIENT_SECRET             reuse an existing AAD app (else one is created)
 #   SOURCE_ACR                                     registry to import images FROM (default: omniplatformcr)
-#   LAUNCHER_TAG / DEVBOX_TAG                       image repo:tags (defaults below)
+#   LAUNCHER_TAG                                   image repo:tag (default below)
 #   AUTO_APPROVE=1                                 skip the what-if confirmation prompt
 #
 # `az bicep build` (compile/lint) needs no subscription; this script does.
@@ -38,7 +38,6 @@ ACR_NAME="${ACR_NAME:-omnilauncheracr}"
 AUTH_MODE="${AUTH_MODE:-easyauth}"
 SOURCE_ACR="${SOURCE_ACR:-omniplatformcr}"
 LAUNCHER_TAG="${LAUNCHER_TAG:-omni-launcher:latest}"
-DEVBOX_TAG="${DEVBOX_TAG:-omni-launcher-devbox:latest}"
 
 # hex (URL-safe) — base64's +/ would need encoding in the connection string.
 PG_PASSWORD="${PG_PASSWORD:-$(openssl rand -hex 24)}"
@@ -95,54 +94,12 @@ echo "$outputs"
 if [[ "${IMPORT_IMAGES:-0}" == "1" ]]; then
   echo "== importing images $SOURCE_ACR -> $ACR_NAME =="
   az acr import --name "$ACR_NAME" --source "${SOURCE_ACR}.azurecr.io/${LAUNCHER_TAG}" --image "$LAUNCHER_TAG" --force
-  az acr import --name "$ACR_NAME" --source "${SOURCE_ACR}.azurecr.io/${DEVBOX_TAG}" --image "$DEVBOX_TAG" --force
 else
   echo "== skipping image import (build into $ACR_NAME directly; IMPORT_IMAGES=1 to seed) =="
 fi
 
 echo "== restarting Web App $SITE_NAME =="
 az webapp restart --resource-group "$RG" --name "$SITE_NAME"
-
-# ---------------------------------------------------------------------------
-# Build + deploy the ACI orphan-cleanup Function (TimerTrigger).
-# Skip with SKIP_FUNCTION_DEPLOY=1 if you only want infra reconcile (rare —
-# the bicep created the Function App as an empty shell that won't fire any
-# code until this step uploads the package).
-# ---------------------------------------------------------------------------
-FUNC_APP_NAME=$(echo "$outputs" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("aciCleanupFunctionName",{}).get("value",""))')
-if [[ -n "$FUNC_APP_NAME" && "${SKIP_FUNCTION_DEPLOY:-0}" != "1" ]]; then
-  echo "== building ACI cleanup Function =="
-  FN_DIR="$HERE/functions/aci-cleanup"
-  (
-    cd "$FN_DIR"
-    if [[ ! -d node_modules ]]; then
-      npm install --no-audit --no-fund >/dev/null
-    fi
-    npm run build >/dev/null
-  )
-  # Package: include host.json + dist/ + node_modules (production only).
-  echo "== packaging =="
-  ZIP="/tmp/aci-cleanup-$(date +%s).zip"
-  (
-    cd "$FN_DIR"
-    rm -rf node_modules_prod
-    cp -r node_modules node_modules_prod
-    # Prune devDeps from the copy so the upload stays small.
-    (cd node_modules_prod && npm prune --omit=dev >/dev/null 2>&1 || true)
-    rm -f "$ZIP"
-    # `zip -r` from inside the dir so paths in the archive are relative.
-    mv node_modules node_modules_dev && mv node_modules_prod node_modules
-    zip -qr "$ZIP" host.json package.json dist node_modules
-    mv node_modules node_modules_prod && mv node_modules_dev node_modules
-    rm -rf node_modules_prod
-  )
-  echo "== deploying $ZIP to $FUNC_APP_NAME =="
-  az functionapp deployment source config-zip -g "$RG" -n "$FUNC_APP_NAME" --src "$ZIP" >/dev/null
-  rm -f "$ZIP"
-  echo "ACI cleanup Function deployed (runs every 30 min + on startup)."
-else
-  echo "== skipping ACI cleanup Function deploy =="
-fi
 
 echo
 echo "Done. App: $(echo "$outputs" | python3 -c 'import json,sys; print(json.load(sys.stdin)["launcherUrl"]["value"])')"

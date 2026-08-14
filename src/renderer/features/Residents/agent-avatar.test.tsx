@@ -8,7 +8,7 @@ import type { ResidentAgent, ResidentAgentRuntime, StoreData } from '@/shared/ty
 
 import { AgentAvatar, AgentAvatarGroup, participantPresence, presenceStatus } from './agent-avatar';
 import { DmsSection } from './sidebar-sections';
-import { $residentStatus, $residentsView } from './state';
+import { $chatLog, $residentStatus, $residentsView } from './state';
 
 // `./state` and `services/store` dial IPC at import time; the sidebar section
 // below is mounted for real, so the transport is the only thing stubbed. The
@@ -208,6 +208,8 @@ const runtime = (state: ResidentAgentRuntime['state']): ResidentAgentRuntime => 
   day: null,
   pendingCount: 0,
   decisions: 0,
+  seenMessageId: 0,
+  queuedMessageIds: [],
 });
 
 // ---------------------------------------------------------------------------
@@ -324,12 +326,15 @@ const seed = (statuses: Record<string, ResidentAgentRuntime>): void => {
     ...persistedStoreApi.$atom.get(),
     layoutMode: 'agents',
     residentAgents: [resident('a1', 'Ada Lovelace', 'Engineer'), resident('a2', 'Grace Hopper', 'Compilers')],
-    residentChannels: [
-      { id: 1, channel: 'dm:a1:user', from: 'a1', text: 'hi', at: 2 },
-      { id: 2, channel: 'dm:a2:user', from: 'a2', text: 'yo', at: 1 },
-    ],
   };
   act(() => mocks.ipcHandlers.get('store:changed')?.(next));
+  // The DM rows derive from chat-v1's log atom, not the store snapshot.
+  act(() =>
+    $chatLog.set([
+      { id: 1, channel: 'dm:a1:user', from: 'a1', text: 'hi', at: 2 },
+      { id: 2, channel: 'dm:a2:user', from: 'a2', text: 'yo', at: 1 },
+    ])
+  );
   $residentsView.set({ ...$residentsView.get(), selectedChannel: null });
   $residentStatus.set(statuses);
 };

@@ -16,13 +16,16 @@ import type { ModelEntry, ModelsConfig, ProviderEntry, ProviderProbe, RuntimeMod
  * it, so a voice_default pointing at a text model is silently ignored.
  */
 export const CODEX_REALTIME_MODELS: Record<string, ModelEntry> = {
+  'gpt-realtime-2.1': { model: 'gpt-realtime-2.1', label: 'Realtime 2.1', realtime: true },
+  'gpt-realtime-2.1-mini': { model: 'gpt-realtime-2.1-mini', label: 'Realtime 2.1 Mini', realtime: true },
+  'gpt-realtime-2': { model: 'gpt-realtime-2', label: 'Realtime 2', realtime: true },
   'gpt-realtime': { model: 'gpt-realtime', label: 'Realtime', realtime: true },
   'gpt-realtime-1.5': { model: 'gpt-realtime-1.5', label: 'Realtime 1.5', realtime: true },
   'gpt-realtime-mini': { model: 'gpt-realtime-mini', label: 'Realtime Mini', realtime: true },
 };
 
 /** Voice model a fresh ChatGPT sign-in adopts — the current realtime default. */
-export const CODEX_DEFAULT_VOICE_MODEL = 'codex/gpt-realtime-1.5';
+export const CODEX_DEFAULT_VOICE_MODEL = 'codex/gpt-realtime-2.1';
 
 type ProviderSetupAnswers = {
   kind: 'openai' | 'anthropic' | 'ollama' | 'openai-compatible';

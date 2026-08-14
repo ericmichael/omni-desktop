@@ -13,7 +13,7 @@
  */
 
 import { useStore } from '@nanostores/react';
-import { Box, ChevronDown } from 'lucide-react';
+import { Check, ChevronDown } from 'lucide-react';
 import { memo } from 'react';
 
 import { Button } from '@/renderer/ds/ui/button';
@@ -29,16 +29,17 @@ import {
 import { $sandboxProfiles } from '@/renderer/features/Sandboxes/state';
 import { $machines } from '@/renderer/services/machines';
 
-import { getAvailableProfileNames, getProfileMenuLabel, isLocalProfile, type ProfileListContext } from './profile-list';
+import { getProfileIcon, isUnsandboxedProfile } from './profile-icons';
+import {
+  getAvailableProfileNames,
+  getProfileDescription,
+  getProfileTitle,
+  isLocalProfile,
+  type ProfileListContext,
+} from './profile-list';
 
-const COMPACT_PROFILE_LABELS: Record<string, string> = {
-  host: 'Host',
-  devbox: 'Devbox',
-  platform: 'Platform',
-};
-
-const getCompactProfileLabel = (name: string): string =>
-  COMPACT_PROFILE_LABELS[name] ?? name.replace(/^local:/, 'Local ');
+const profileIconClass = (name: string, extra = ''): string =>
+  `size-3.5 shrink-0 ${isUnsandboxedProfile(name) ? 'text-warning' : 'text-muted-foreground'}${extra ? ` ${extra}` : ''}`;
 
 export type SandboxPickerProps = {
   /** Currently-chosen profile name. */
@@ -64,6 +65,7 @@ export const SandboxPicker = memo(({ value, onChange, context, disabled, compact
   // We keep ordering inside each group as supplied by `getAvailableProfileNames`.
   const cloudNames = names.filter((n) => !isLocalProfile(n));
   const localNames = names.filter(isLocalProfile);
+  const TriggerIcon = getProfileIcon(value);
 
   return (
     <DropdownMenu>
@@ -80,30 +82,48 @@ export const SandboxPicker = memo(({ value, onChange, context, disabled, compact
           }
         >
           <span className="inline-flex min-w-0 items-center gap-1">
-            {!compact && <Box />}
-            <span className="truncate">
-              {compact ? getCompactProfileLabel(value) : getProfileMenuLabel(value, machines)}
-            </span>
+            {!compact && <TriggerIcon className={profileIconClass(value)} />}
+            <span className="truncate">{getProfileTitle(value, machines)}</span>
           </span>
           <ChevronDown className="shrink-0" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent>
         <DropdownMenuRadioGroup value={value} onValueChange={onChange}>
-          {cloudNames.map((name) => (
-            <DropdownMenuRadioItem key={name} value={name}>
-              {getProfileMenuLabel(name, machines)}
-            </DropdownMenuRadioItem>
-          ))}
+          {cloudNames.map((name) => {
+            const description = getProfileDescription(name);
+            const ItemIcon = getProfileIcon(name);
+            return (
+              <DropdownMenuRadioItem key={name} value={name} indicator="none">
+                <span className="flex min-w-0 flex-1 items-start gap-2">
+                  <ItemIcon className={profileIconClass(name, 'mt-0.5')} />
+                  <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                    <span className="flex items-center gap-2">
+                      <span className="flex-1">{getProfileTitle(name, machines)}</span>
+                      {name === value && <Check className="size-3.5 shrink-0" />}
+                    </span>
+                    {description && <span className="max-w-56 text-xs text-muted-foreground">{description}</span>}
+                  </span>
+                </span>
+              </DropdownMenuRadioItem>
+            );
+          })}
           {localNames.length > 0 && (
             <>
               <DropdownMenuSeparator />
               <DropdownMenuLabel>My computers</DropdownMenuLabel>
-              {localNames.map((name) => (
-                <DropdownMenuRadioItem key={name} value={name}>
-                  {getProfileMenuLabel(name, machines)}
-                </DropdownMenuRadioItem>
-              ))}
+              {localNames.map((name) => {
+                const ItemIcon = getProfileIcon(name);
+                return (
+                  <DropdownMenuRadioItem key={name} value={name} indicator="none">
+                    <span className="flex min-w-0 flex-1 items-center gap-2">
+                      <ItemIcon className={profileIconClass(name)} />
+                      <span className="flex-1 truncate">{getProfileTitle(name, machines)}</span>
+                      {name === value && <Check className="size-3.5 shrink-0" />}
+                    </span>
+                  </DropdownMenuRadioItem>
+                );
+              })}
             </>
           )}
         </DropdownMenuRadioGroup>

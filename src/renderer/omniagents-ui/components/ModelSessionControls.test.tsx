@@ -152,3 +152,85 @@ describe('approvals reviewer control', () => {
     expect(container.querySelector('[data-testid="approvals-reviewer-control"]')!.textContent).toContain('Ask me');
   });
 });
+
+describe('sandbox network control', () => {
+  const transport = () =>
+    ({
+      request: vi.fn(async () => ({
+        models: [model('model-1', 'Model One')],
+        default_model: 'model-1',
+        voice_default_model: null,
+        errors: [],
+        reasons: [],
+        session: { session_id: 'session-1', active_model: 'model-1', reasoning_effort: 'medium' },
+      })),
+    }) as unknown as ModelCatalogRpcTransport;
+
+  it('renders the pill from the probe and reflects the offline state', async () => {
+    const getNetwork = vi.fn(async () => ({ ok: true, supported: true, enabled: false }));
+    await act(async () => {
+      root.render(
+        <ModelSessionControls
+          sessionId="session-1"
+          transport={transport()}
+          onGetSandboxNetwork={getNetwork}
+          onSetSandboxNetwork={vi.fn(async () => ({ ok: true }))}
+        />
+      );
+      await Promise.resolve();
+    });
+    const control = container.querySelector('[data-testid="sandbox-network-control"]');
+    expect(getNetwork).toHaveBeenCalledOnce();
+    expect(control).not.toBeNull();
+    expect(control!.textContent).toContain('Offline');
+  });
+
+  it('hides the pill when the probe reports unsupported or rejects', async () => {
+    await act(async () => {
+      root.render(
+        <ModelSessionControls
+          sessionId="session-1"
+          transport={transport()}
+          onGetSandboxNetwork={vi.fn(async () => ({ ok: true, supported: false, enabled: true }))}
+          onSetSandboxNetwork={vi.fn(async () => ({ ok: true }))}
+        />
+      );
+      await Promise.resolve();
+    });
+    expect(container.querySelector('[data-testid="sandbox-network-control"]')).toBeNull();
+
+    await act(async () => {
+      root.render(
+        <ModelSessionControls
+          sessionId="session-1"
+          transport={transport()}
+          onGetSandboxNetwork={vi.fn(async () => {
+            throw new Error('unknown function');
+          })}
+          onSetSandboxNetwork={vi.fn(async () => ({ ok: true }))}
+        />
+      );
+      await Promise.resolve();
+    });
+    expect(container.querySelector('[data-testid="sandbox-network-control"]')).toBeNull();
+  });
+
+  it('stays usable while a run is active — the live toggle is the point', async () => {
+    await act(async () => {
+      root.render(
+        <ModelSessionControls
+          sessionId="session-1"
+          transport={transport()}
+          disabled
+          onGetSandboxNetwork={vi.fn(async () => ({ ok: true, supported: true, enabled: true }))}
+          onSetSandboxNetwork={vi.fn(async () => ({ ok: true }))}
+        />
+      );
+      await Promise.resolve();
+    });
+    const control = container.querySelector<HTMLButtonElement>('[data-testid="sandbox-network-control"]');
+    expect(control).not.toBeNull();
+    expect(control!.textContent).toContain('Internet on');
+    expect(control!.disabled).toBe(false);
+  });
+});

@@ -67,9 +67,6 @@ function emptyConfig(): NetworkConfig {
     enabled: false,
     presets: [],
     allowlist: [],
-    denylist: [],
-    allow_private_ips: false,
-    enable_socks5: true,
   };
 }
 
@@ -87,12 +84,10 @@ function migrateConfig(data: Record<string, unknown>): NetworkConfig {
       ? (data['allowedHosts'] as string[])
       : [];
 
-  // Strip preset hosts so the UI allowlist only shows manual entries
+  // Strip preset hosts so the UI allowlist only shows manual entries.
+  // Dropped legacy fields (denylist, allow_private_ips, enable_socks5) fall
+  // away here — nothing ever enforced them, and saving writes the new shape.
   base.allowlist = rawAllowlist.filter((h) => !ALL_PRESET_HOSTS.has(h));
-
-  base.denylist = Array.isArray(data['denylist']) ? (data['denylist'] as string[]) : [];
-  base.allow_private_ips = typeof data['allow_private_ips'] === 'boolean' ? data['allow_private_ips'] : false;
-  base.enable_socks5 = typeof data['enable_socks5'] === 'boolean' ? data['enable_socks5'] : true;
 
   return base;
 }
@@ -111,7 +106,6 @@ export const SettingsModalNetworkTab = memo(() => {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [newHost, setNewHost] = useState('');
-  const [newDenyHost, setNewDenyHost] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -166,13 +160,6 @@ export const SettingsModalNetworkTab = memo(() => {
     [updateConfig]
   );
 
-  const onToggleAllowPrivateIps = useCallback(
-    (checked: boolean) => {
-      updateConfig((c) => ({ ...c, allow_private_ips: checked }));
-    },
-    [updateConfig]
-  );
-
   // Allowlist handlers
   const onChangeNewHost = useCallback((e: ChangeEvent<HTMLInputElement>) => {
     setNewHost(e.target.value);
@@ -202,40 +189,6 @@ export const SettingsModalNetworkTab = memo(() => {
       updateConfig((c) => ({
         ...c,
         allowlist: c.allowlist.filter((_, i) => i !== index),
-      }));
-    },
-    [updateConfig]
-  );
-
-  // Denylist handlers
-  const onChangeNewDenyHost = useCallback((e: ChangeEvent<HTMLInputElement>) => {
-    setNewDenyHost(e.target.value);
-  }, []);
-
-  const addDenyHost = useCallback(() => {
-    const host = newDenyHost.trim();
-    if (!host) {
-      return;
-    }
-    updateConfig((c) => ({ ...c, denylist: [...c.denylist, host] }));
-    setNewDenyHost('');
-  }, [newDenyHost, updateConfig]);
-
-  const onNewDenyHostKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLInputElement>) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        addDenyHost();
-      }
-    },
-    [addDenyHost]
-  );
-
-  const removeDenyHost = useCallback(
-    (index: number) => {
-      updateConfig((c) => ({
-        ...c,
-        denylist: c.denylist.filter((_, i) => i !== index),
       }));
     },
     [updateConfig]
@@ -288,8 +241,9 @@ export const SettingsModalNetworkTab = memo(() => {
             </Field>
 
             <p className="text-sm text-muted-foreground sm:text-xs">
-              When enabled, outbound network traffic is restricted to the hosts listed below in both chat and sandbox
-              modes. All other traffic is blocked. Hosts can be domain names, IP addresses, or CIDR ranges.
+              When enabled, outbound traffic from Docker sandboxes is restricted to the hosts listed below; everything
+              else is blocked. Hosts can be domain names, IP addresses, or CIDR ranges. Host-profile sessions are not
+              sandboxed and are unaffected.
             </p>
 
             {config.enabled && (
@@ -331,40 +285,6 @@ export const SettingsModalNetworkTab = memo(() => {
                     </Button>
                   </div>
                 </div>
-
-                <div className="flex flex-col gap-2">
-                  <span className="text-sm font-medium text-muted-foreground sm:text-xs">Denied hosts</span>
-                  <p className="text-sm text-muted-foreground sm:text-xs">
-                    Explicitly blocked hosts. Denied hosts take precedence over allowed hosts.
-                  </p>
-                  <div className="flex flex-col gap-1">
-                    {config.denylist.map((host, i) => (
-                      <HostRow key={i} host={host} index={i} onRemove={removeDenyHost} />
-                    ))}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Input
-                      type="text"
-                      value={newDenyHost}
-                      onChange={onChangeNewDenyHost}
-                      onKeyDown={onNewDenyHostKeyDown}
-                      placeholder="blocked.example.com"
-                      className="flex-1"
-                    />
-
-                    <Button size="sm" variant="ghost" onClick={addDenyHost} disabled={!newDenyHost.trim()}>
-                      <Plus className="mr-1" />
-                      Add denied host
-                    </Button>
-                  </div>
-                </div>
-
-                <Field orientation="horizontal" className="justify-between gap-4">
-                  <div className="min-w-0">
-                    <FieldLabel>Allow private IP ranges (10.x, 172.16.x, 192.168.x)</FieldLabel>
-                  </div>
-                  <Switch checked={config.allow_private_ips} onCheckedChange={onToggleAllowPrivateIps} />
-                </Field>
 
                 {effectiveHosts.length > 0 && (
                   <div className="flex flex-col gap-1">

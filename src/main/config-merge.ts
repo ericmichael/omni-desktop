@@ -68,16 +68,12 @@ export function mergeNetworkConfig(floor: NetworkConfig | undefined, team: Netwo
     return team;
   }
   const intersect = (a: string[], b: string[]): string[] => a.filter((x) => b.includes(x));
-  const union = (a: string[], b: string[]): string[] => Array.from(new Set([...a, ...b]));
   return {
     // Egress is allowed only if both layers enable it.
     enabled: floor.enabled && team.enabled,
-    // Allow only what both allow; deny what either denies.
+    // Allow only what both allow.
     presets: intersect(floor.presets, team.presets),
     allowlist: intersect(floor.allowlist, team.allowlist),
-    denylist: union(floor.denylist, team.denylist),
-    allow_private_ips: floor.allow_private_ips && team.allow_private_ips,
-    enable_socks5: floor.enable_socks5 && team.enable_socks5,
   };
 }
 

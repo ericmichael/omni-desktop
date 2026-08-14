@@ -16,10 +16,13 @@ import { join } from 'path';
 
 import { emptyMcpConfig, emptyModelsConfig, emptyNetworkConfig, parseEnvVars } from '@/lib/agent-config';
 import { getProductSlug } from '@/lib/product';
+import { pullRequestEventDetail, pullRequestSystemLine } from '@/lib/pull-request-watch';
 import { parseResidentPrincipal, residentPrincipalId } from '@/lib/resident-agent';
 import { uuidv4 } from '@/lib/uuid';
+import { AutomationManager, registerAutomationHandlers } from '@/main/automation-manager';
 import { listRepos as azureListRepos } from '@/main/azure-repos';
 import { type BrowserContext, buildBrowserContext, registerBrowserHandlers } from '@/main/browser-manager';
+import { registerChatHandlers } from '@/main/chat-service';
 import {
   type CodexTokens,
   ensureFreshTokens as codexEnsureFresh,
@@ -53,6 +56,7 @@ import { backfillProjectConfigs } from '@/main/project-config-backfill';
 import { closeProjectDb, getDb, openProjectDb } from '@/main/project-db';
 import { registerProjectHandlers } from '@/main/project-handlers';
 import { ProjectManager } from '@/main/project-manager';
+import { PullRequestWatcher } from '@/main/pull-request-watcher';
 import { registerResidentHandlers, ResidentAgentManager } from '@/main/resident-agent-manager';
 import { RoutineBridge } from '@/main/routine-bridge';
 import {
@@ -400,6 +404,8 @@ export const wireGlobalHandlers = async (arg: {
     processManager: ProcessManager;
     scheduledTaskManager: ScheduledTaskManager;
     residentAgentManager: ResidentAgentManager;
+    automationManager: AutomationManager;
+    pullRequestWatcher: PullRequestWatcher;
     routineBridge: RoutineBridge;
     settings: SettingsStore;
     extension: ExtensionManager;
@@ -643,6 +649,43 @@ export const wireGlobalHandlers = async (arg: {
           }
         : {}),
     });
+    // Automations (per tenant): user-defined event rules (PR event / channel
+    // message / schedule) that wake a resident with a standing instruction.
+    const automationManager = new AutomationManager({
+      store: settings as any,
+      deliver: (agentId, detail) => residentAgentManager.deliverAutomation(agentId, detail),
+      subscribeChatEvents: residentAgentManager.subscribeChatEvents,
+      sendToWindow: (channel, ...args) => {
+        if (channel === 'store:changed') {
+          tenantSend('store:changed', getStoreSnapshot(teamId, principalId));
+          return;
+        }
+        tenantSend(channel, ...args);
+      },
+    });
+    automationManager.start();
+    // Watched-PR poller (per tenant): state flips persist through the links'
+    // owners; review verdicts / merges on ticket-linked PRs wake the assigned
+    // resident. Tokens resolve per principal in cloud mode, like ProcessManager.
+    const pullRequestWatcher = new PullRequestWatcher({
+      getSnapshot: () => getStoreSnapshot(teamId, principalId),
+      resolveGitToken: (id) => (pgSecret ? pgSecret.getUserGitToken(principalId, id) : secretStore.getGitToken(id)),
+      fetchFn: globalThis.fetch,
+      updateTicket: (ticketId, patch) => projectManager.updateTicket(ticketId, patch),
+      setGlobalLinks: (links) => settings.set('pullRequestLinks', links),
+      onEvent: (ev) => {
+        // Team visibility first: every PR event lands in #system regardless of
+        // whether anyone wakes — the Activity feed is the complete record.
+        residentAgentManager.postSystemNotice(pullRequestSystemLine(ev));
+        const residentId = ev.assignee ? parseResidentPrincipal(ev.assignee) : null;
+        if (residentId) {
+          residentAgentManager.deliverPullRequestEvent(residentId, pullRequestEventDetail(ev));
+        }
+        // User-defined rules see every PR event, ticket-linked or not.
+        automationManager.onPullRequestEvent(ev);
+      },
+    });
+    pullRequestWatcher.start();
     // Per-tenant extensions + browser, backed by the same tenant settings store
     // (enabledExtensions / browser profiles/tabs/history/bookmarks are per-user).
     const extension = new ExtensionManager({ store: settings as any, sendToWindow: tenantSend });
@@ -652,6 +695,8 @@ export const wireGlobalHandlers = async (arg: {
       processManager,
       scheduledTaskManager,
       residentAgentManager,
+      automationManager,
+      pullRequestWatcher,
       routineBridge,
       settings,
       extension,
@@ -744,10 +789,13 @@ export const wireGlobalHandlers = async (arg: {
 
   const sandboxProfileLabel = (name: string): string => {
     if (name === 'host') {
-      return 'This computer (no sandbox)';
+      return 'My computer (no sandbox)';
     }
     if (name === 'devbox') {
-      return 'Devbox (Docker)';
+      return 'Workstation (desktop + tools)';
+    }
+    if (name === 'wasmbox') {
+      return 'Mini computer (instant, sealed)';
     }
     if (name === 'platform') {
       return 'Cloud (managed)';
@@ -901,7 +949,11 @@ export const wireGlobalHandlers = async (arg: {
   registerInboxHandlers(ipc, (e) => tenantPM(e).inbox);
   registerProcessHandlers(ipc, (e) => ctxTenant(e).processManager);
   registerScheduledTaskHandlers(ipc, (e) => ctxTenant(e).scheduledTaskManager);
+  registerAutomationHandlers(ipc, (e) => ctxTenant(e).automationManager);
   registerResidentHandlers(ipc, (e) => ctxTenant(e).residentAgentManager);
+  // chat-v1's internal binding — same per-tenant manager resolution; the
+  // HandlerContext in the event slot stamps named principals in teams mode.
+  registerChatHandlers(ipc, (e) => ctxTenant(e).residentAgentManager);
   registerExtensionHandlers(ipc, (e) => ctxTenant(e).extension);
   registerBrowserHandlers(ipc, (e) => ctxTenant(e).browser);
 
@@ -1703,6 +1755,8 @@ export const wireGlobalHandlers = async (arg: {
     }
     const tenantCleanups = [...tenants.values()].flatMap((t) => [
       Promise.resolve(t.scheduledTaskManager.stop()),
+      Promise.resolve(t.automationManager.stop()),
+      Promise.resolve(t.pullRequestWatcher.stop()),
       t.residentAgentManager.cleanup(),
       Promise.resolve(t.routineBridge.disposeAll()),
       t.projectManager.exit(),
@@ -1739,6 +1793,9 @@ export const wireGlobalHandlers = async (arg: {
     pgSecret,
     /** Cloud-only — `server/index.ts` releases the WS binding on close. */
     machineRegistry,
+    /** chat-v1: the /ws/chat endpoint resolves its tenant's manager here. */
+    getResidentManager: (tenantId: string, principalId?: string): ResidentAgentManager =>
+      getTenant(tenantId, principalId ?? tenantId).residentAgentManager,
   };
 };
 

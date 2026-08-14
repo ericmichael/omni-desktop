@@ -36,16 +36,21 @@ import { RESIDENT_SUPERUSER_TOOLS } from '@/lib/client-tools';
 import {
   advanceThread,
   channelIdFromName,
+  chatChannelFromDef,
   dayKey,
   daySessionId,
   DEFAULT_TEAM_HANDBOOK,
   type DigestRow,
   dmChannelId,
   dmParticipants,
+  humanHandle,
+  isHumanGradeParticipant,
   isWakeNow,
+  knownHumansFromLog,
   memberChannelIds,
   memoryKey,
   mentionsAgent,
+  morningBeatReady,
   nextThreadDelivery,
   renderIdentityInstructions,
   renderReflectPrompt,
@@ -83,6 +88,10 @@ import type { IIpcListener } from '@/shared/ipc-listener';
 import { OmniagentsRpcError } from '@/shared/omniagents-rpc';
 import type {
   AgentRuntimeConnection,
+  ChatChannel,
+  ChatEvent,
+  ChatListMessagesParams,
+  ChatRosterAgent,
   IpcRendererEvents,
   ResidentAgent,
   ResidentAgentInput,
@@ -134,7 +143,9 @@ const STALE_DIGEST_MS = 4 * 60 * 60_000;
  *  so the agent gets the corrective "enough said" as the tool result
  *  mid-run and adapts within the same turn. */
 const MAX_POSTS_PER_TURN = 10;
-/** Local hour after which the daily morning beat (`day_start`) fires. */
+/** Legacy implicit morning hour, materialized by the store→db migration
+ *  (pre-fold agents had no explicit field). New agents default to `null` —
+ *  the beat is opt-in (quiet-start: docs/chat-v1-plan.md follow-ups). */
 const MORNING_HOUR = 8;
 const ALARM_TICK_MS = 60_000;
 /** Self-set alarm guards: bounded horizon, bounded open count. */
@@ -468,6 +479,9 @@ export class ResidentAgentManager {
   private dayTimer: ReturnType<typeof setInterval> | null = null;
   private alarmTimer: ReturnType<typeof setInterval> | null = null;
   private disposed = false;
+  /** When this manager started ticking — the quiet-start anchor for
+   *  `morningBeatReady` (beats only fire for hours that come due after it). */
+  private bootedAt = Number.MAX_SAFE_INTEGER;
 
   /**
    * Write-through cache of the durable data in projects-db. Hydrated once
@@ -543,18 +557,15 @@ export class ResidentAgentManager {
   }
 
   /**
-   * The five durable-data keys of the renderer's store snapshot, served from
-   * the cache (never from the host store — the fold cleared those keys).
-   * Both entry points spread this over the ProjectManager snapshot.
+   * The durable-data keys still mirrored into the renderer's store snapshot
+   * (roster/memories/alarms — the admin surfaces), served from the cache.
+   * Channel data left the snapshot for chat-v1 (docs/chat-v1-plan.md): the
+   * renderer seeds via `chat.list_messages`/`chat.list_channels` and stays
+   * live on the `chat.*` notifications.
    */
-  getDurableSnapshot = (): Pick<
-    StoreData,
-    'residentAgents' | 'residentMemories' | 'residentChannels' | 'residentChannelDefs' | 'residentAlarms'
-  > => ({
+  getDurableSnapshot = (): Pick<StoreData, 'residentAgents' | 'residentMemories' | 'residentAlarms'> => ({
     residentAgents: this.data.agents,
     residentMemories: this.data.memories,
-    residentChannels: this.data.log,
-    residentChannelDefs: this.data.channelDefs,
     residentAlarms: this.data.alarms,
   });
 
@@ -707,6 +718,9 @@ export class ResidentAgentManager {
   }
 
   private startAfterHydrate(): void {
+    // The quiet-start anchor: morning beats fire only for hours that come
+    // due AFTER this moment (see morningBeatReady) — never as boot catch-up.
+    this.bootedAt = this.now();
     // One-shot cleanup: identity used to be written to `<home>/AGENTS.md`.
     // Stale copies would keep being surfaced by omni-code's discovery walk
     // beside the fresh session-variable instructions — remove the
@@ -720,11 +734,11 @@ export class ResidentAgentManager {
       }
     }
     // Boot cursors at the channel tail — a restart must not re-deliver
-    // the whole stored backlog as "unread". Morning beats are NOT
-    // suppressed on boot: the delivered-day record persists in
-    // `residentMorningBeats`, so a mid-day restart re-fires nothing, and
-    // a beat the closed app owed catches up (marked late) on the first
-    // day tick — the agent reads the clock and adjusts.
+    // the whole stored backlog as "unread". Together with the quiet-start
+    // beat rule above, this makes boot spontaneously wake NOTHING except
+    // alarms that came due while the app was closed (agent commitments made
+    // during earlier engagement) — opening the app is never by itself the
+    // moment the roster starts working.
     const tail = this.channelLog().reduce((max, m) => Math.max(max, m.id), 0);
     for (const agent of this.roster()) {
       this.runtime(agent.id).cursor = tail;
@@ -749,33 +763,33 @@ export class ResidentAgentManager {
       this.alarmTimer = setInterval(() => this.sweepAlarms(), ALARM_TICK_MS);
       this.alarmTimer.unref?.();
     }
-    // Owed wakeups must not wait for the first interval tick — setInterval
-    // never fires at t=0, so without this a user opening the app at 11:47
-    // stares at a roster that owes an 8:00 morning beat for five more
-    // minutes. Sweep once NOW; the run gate bounds any pile-up.
-    for (const agent of this.roster()) {
-      this.sweepMorningBeat(agent);
-      this.sweepStaleDigest(agent);
-    }
+    // Owed alarms must not wait for the first interval tick — setInterval
+    // never fires at t=0. Alarms are the one debt boot pays immediately:
+    // they are the agent's own commitments from earlier engagement. Beats
+    // (quiet-start rule) and stale digests (cursors just booted at the
+    // tail, so nothing is unread) have nothing to do at t=0.
     this.sweepAlarms();
     this.broadcastStatus();
   }
 
   /**
    * The morning beat — the game's 06:00 `day_start`, one wakeup per agent
-   * per day at the first tick past the morning hour. Gives the day a
-   * planning beat: memories arrive (first-of-day ping), overnight digests
-   * ride along, and the agent decides what today is for. The delivered-day
-   * record is PERSISTED: a restart re-fires nothing, and a beat missed
-   * while the app was closed catches up on the next tick that day — the
-   * event line says it's late so the agent plans the shortened day.
+   * per day when the morning hour comes due WHILE THE APP IS RUNNING
+   * (`morningBeatReady`: the quiet-start rule — a beat whose hour passed
+   * while the app was closed or the machine slept is skipped for the day,
+   * never delivered late; opening the app must not be what starts the
+   * roster working). Gives the day a planning beat: memories arrive
+   * (first-of-day ping), overnight digests ride along, and the agent
+   * decides what today is for. Opt-in per agent (`morningHour`, null by
+   * default) — proactivity is a choice, not a surprise. The delivered-day
+   * record is PERSISTED so a mid-day restart re-fires nothing.
    */
   private sweepMorningBeat(agent: ResidentAgent): void {
-    const now = new Date(this.now());
-    const today = dayKey(this.now());
-    // Per-agent hour; `null` opts this agent out of the beat entirely.
+    const nowMs = this.now();
+    const today = dayKey(nowMs);
+    // Per-agent hour; `null` (the default) opts this agent out entirely.
     const hour = agent.morningHour;
-    if (!agent.enabled || hour === null || now.getHours() < hour) {
+    if (!agent.enabled || hour === null || !morningBeatReady(hour, nowMs, this.bootedAt)) {
       return;
     }
     const beats = this.store.get('residentMorningBeats') ?? {};
@@ -787,26 +801,13 @@ export class ResidentAgentManager {
     // day's beat even when the delivery pipeline (debounce → sandbox boot →
     // enqueue) is interrupted by an app quit/restart, silently losing the
     // beat for the whole day with no failure recorded anywhere. An
-    // interrupted beat now re-dispatches on the next tick or the next boot.
+    // interrupted beat re-dispatches on the next tick inside the window.
     const rt = this.runtime(agent.id);
     if (rt.beatQueuedDay === today || rt.pending.some((e) => e.kind === 'day_start')) {
       return;
     }
     rt.beatQueuedDay = today;
-    // Fired in a later hour than configured = the app was closed (or the
-    // agent was created mid-day on an earlier day) — tell the agent.
-    const late = now.getHours() > hour;
-    const clock = `${`${now.getHours()}`.padStart(2, '0')}:${`${now.getMinutes()}`.padStart(2, '0')}`;
-    this.dispatchEvent(agent.id, {
-      kind: 'day_start',
-      ...(late
-        ? {
-            detail:
-              `a new working day begins — late start: your ${hour}:00 morning beat ` +
-              `waited for the app to open (it is now ${clock}); plan for the shortened day`,
-          }
-        : {}),
-    });
+    this.dispatchEvent(agent.id, { kind: 'day_start' });
   }
 
   /** Fire due self-set alarms as WAKE_NOW `scheduled` events (one-shot). */
@@ -887,7 +888,10 @@ export class ResidentAgentManager {
       // not inherit `host` (no isolation) unless the user picks it.
       profileName: input.profileName ?? 'devbox',
       ...(input.projectIds?.length ? { projectIds: [...new Set(input.projectIds)] } : {}),
-      morningHour: input.morningHour === undefined ? MORNING_HOUR : input.morningHour,
+      // Proactivity is opt-in: no morning beat unless the user picks an
+      // hour. Agents work when engagement creates activity, not on a clock
+      // the user never chose.
+      morningHour: input.morningHour === undefined ? null : input.morningHour,
       enabled: true,
       ...(input.superuser ? { superuser: true } : {}),
       createdAt: this.now(),
@@ -902,6 +906,7 @@ export class ResidentAgentManager {
       ...(this.store.get('residentMorningBeats') ?? {}),
       [agent.id]: dayKey(this.now()),
     });
+    this.emitRosterChanged();
     this.broadcastStatus();
     return agent;
   };
@@ -968,6 +973,7 @@ export class ResidentAgentManager {
     if (patch.enabled === false || reconfigured) {
       this.enqueueChain(agentId, () => this.park(agentId, { skipReflection: true }));
     }
+    this.emitRosterChanged();
     this.broadcastStatus();
     return updated;
   };
@@ -998,11 +1004,19 @@ export class ResidentAgentManager {
     // Prune the agent's DM threads — orphaned rows would linger unreachable
     // once no view can address the participant. #team history stays: it is
     // the shared record. Channel ids are derived from the participant set
-    // (not scanned from the cache) so rows older than the cached tail are
-    // pruned from the DB too.
+    // (user + roster — not scanned from the cache) so rows older than the
+    // cached tail are pruned from the DB too; personal threads with named
+    // people have no enumerable participant set, so those are gathered from
+    // the cached tail instead — a long-quiet personal thread may leave rows
+    // in the DB, unreachable but harmless (accepted residue).
     const dmChannels = new Set<string>(
       [USER_PARTICIPANT, ...this.roster().map((a) => a.id)].map((other) => dmChannelId(agentId, other))
     );
+    for (const msg of this.channelLog()) {
+      if (dmParticipants(msg.channel)?.includes(agentId)) {
+        dmChannels.add(msg.channel);
+      }
+    }
     this.data.log = this.channelLog().filter((m) => {
       const pair = dmParticipants(m.channel);
       return !pair || !pair.includes(agentId);
@@ -1015,6 +1029,11 @@ export class ResidentAgentManager {
         await this.repo.deleteResidentMessagesForChannel(channel);
       }
     });
+    // The agent's DM channels went with it — clients drop their feeds.
+    for (const channel of dmChannels) {
+      this.emitChatEvent({ method: 'chat.channel_changed', params: { deletedId: channel } });
+    }
+    this.emitRosterChanged();
     this.broadcastStatus();
   };
 
@@ -1047,10 +1066,28 @@ export class ResidentAgentManager {
     return memberChannelIds(this.channelDefs(), agentId);
   }
 
-  post = (channel: string, text: string, replyTo?: number): void => {
+  /**
+   * A human-grade participant posts to a channel: the collective `user`
+   * (default), a named cloud principal (`human:<id>`), or a bridged
+   * external user (`ext:<network>:<id>` — /ws/chat bridge scope). Agents
+   * never come through here; they speak via their client tools. Returns
+   * the created message; unknown channels throw (chat-v1's
+   * `unknown_channel` corrective, surfaced verbatim to the renderer too).
+   */
+  post = (
+    channel: string,
+    text: string,
+    replyTo?: number,
+    poster?: { id: string; name: string | null }
+  ): ResidentChannelMessage => {
+    const from = poster?.id ?? USER_PARTICIPANT;
+    const fromName = poster?.name ?? undefined;
     const trimmed = text.trim();
     if (!trimmed) {
-      return;
+      throw new Error('Cannot post an empty message.');
+    }
+    if (channel === SYSTEM_CHANNEL) {
+      throw new Error(`#${SYSTEM_CHANNEL} is the incident log — it is server-authored only.`);
     }
     if (this.namedChannels().includes(channel)) {
       // Threading: normalize the reply target to its root; an id that isn't
@@ -1063,7 +1100,7 @@ export class ResidentAgentManager {
       // Participants BEFORE the append — the poster's own message must not
       // make everyone a participant of everything.
       const participants = root ? this.threadParticipantAgents(root.rootId) : new Set<string>();
-      const msg = this.appendMessage(channel, USER_PARTICIPANT, 'You', trimmed, root?.rootId);
+      const msg = this.appendMessage(channel, from, fromName, trimmed, root?.rootId);
       // Slack membership: only agents IN the channel are woken by a post.
       const members = this.roster().filter((a) => a.enabled && this.memberChannelsOf(a.id).includes(channel));
       for (const agent of members) {
@@ -1078,23 +1115,44 @@ export class ResidentAgentManager {
             : 'channel_user';
         this.dispatchEvent(agent.id, {
           kind,
-          from: USER_PARTICIPANT,
+          from,
+          ...(fromName ? { fromName } : {}),
           text: trimmed,
           channel,
           messageId: msg.id,
           ...(kind === 'thread_reply' && root?.rootExcerpt ? { rootText: root.rootExcerpt } : {}),
         });
       }
-      return;
+      return msg;
     }
     const pair = dmParticipants(channel);
-    const target = pair?.find((p) => p !== USER_PARTICIPANT);
-    if (target && this.agent(target)) {
-      // DM channels are flat — they are threads by construction; `replyTo`
-      // is meaningless here and deliberately ignored.
-      this.appendMessage(channel, USER_PARTICIPANT, 'You', trimmed);
-      this.dispatchEvent(target, { kind: 'dm', from: USER_PARTICIPANT, text: trimmed });
+    if (pair) {
+      const target = pair.find((p) => this.agent(p));
+      const humanSide = pair.find((p) => isHumanGradeParticipant(p));
+      if (target && humanSide && target !== humanSide) {
+        // DM channels are flat — they are threads by construction; `replyTo`
+        // is meaningless here and deliberately ignored. Two thread shapes:
+        // the collective `user`↔agent thread is every human's, while a
+        // personal thread (`human:*`/`ext:*` participant) is TEAM-VISIBLE
+        // but single-writer — only its named participant posts into it
+        // (everyone else reads it in Activity, like agent↔agent threads).
+        if (humanSide !== USER_PARTICIPANT && from !== humanSide) {
+          throw new Error(
+            `This is someone's personal thread — post in your own thread with this agent, or a shared channel.`
+          );
+        }
+        const msg = this.appendMessage(channel, from, fromName, trimmed);
+        this.dispatchEvent(target, {
+          kind: 'dm',
+          from,
+          ...(fromName ? { fromName } : {}),
+          text: trimmed,
+          messageId: msg.id,
+        });
+        return msg;
+      }
     }
+    throw new Error(`Unknown channel: ${channel}`);
   };
 
   createChannel = (name: string, description?: string): ResidentChannelDef => {
@@ -1114,6 +1172,7 @@ export class ResidentAgentManager {
     };
     this.data.channelDefs = [...this.channelDefs(), def];
     this.enqueuePersist(() => this.repo.upsertResidentChannel(residentChannelDefToRow(def)));
+    this.emitChatEvent({ method: 'chat.channel_changed', params: { channel: chatChannelFromDef(def) } });
     return def;
   };
 
@@ -1133,6 +1192,7 @@ export class ResidentAgentManager {
     next[idx] = updated;
     this.data.channelDefs = next;
     this.enqueuePersist(() => this.repo.upsertResidentChannel(residentChannelDefToRow(updated)));
+    this.emitChatEvent({ method: 'chat.channel_changed', params: { channel: chatChannelFromDef(updated) } });
     return updated;
   };
 
@@ -1144,6 +1204,7 @@ export class ResidentAgentManager {
     this.data.log = this.channelLog().filter((m) => m.channel !== channelId);
     // Repo-side, deleteResidentChannel prunes the channel's log rows too.
     this.enqueuePersist(() => this.repo.deleteResidentChannel(channelId));
+    this.emitChatEvent({ method: 'chat.channel_changed', params: { deletedId: channelId } });
   };
 
   setChannelMembers = (channelId: string, members: string[] | null): void => {
@@ -1166,6 +1227,7 @@ export class ResidentAgentManager {
     this.data.channelDefs = next;
     const updated = next[idx]!;
     this.enqueuePersist(() => this.repo.upsertResidentChannel(residentChannelDefToRow(updated)));
+    this.emitChatEvent({ method: 'chat.channel_changed', params: { channel: chatChannelFromDef(updated) } });
   };
 
   wake = (agentId: string): void => {
@@ -1186,6 +1248,37 @@ export class ResidentAgentManager {
         `${ticket.projectLabel ? ` in ${ticket.projectLabel}` : ''}; ` +
         `read it with get_ticket and take it from there`,
     });
+  };
+
+  /**
+   * A watched pull request changed (merged / closed / review verdict) — the
+   * pull-request watcher routes it to the owning ticket's resident assignee.
+   * WAKE_NOW: a verdict on your own PR is direct address. The detail carries
+   * the PR reference; the agent reads the PR itself (`gh`/`az` in its
+   * workspace) — delta, not dump.
+   */
+  deliverPullRequestEvent = (agentId: string, detail: string): void => {
+    this.dispatchEvent(agentId, { kind: 'pr_event', detail });
+  };
+
+  /**
+   * A user-defined automation rule fired for this agent (AutomationManager).
+   * WAKE_NOW: the user wired this event to this agent on purpose — that is
+   * direct address by proxy. The detail carries the cause and the standing
+   * instruction verbatim.
+   */
+  deliverAutomation = (agentId: string, detail: string): void => {
+    this.dispatchEvent(agentId, { kind: 'automation', detail });
+  };
+
+  /**
+   * Quiet town-crier row: append a server-authored line to #system so the
+   * Activity feed carries the record, WITHOUT the incident path's toast
+   * (`attention()` is for things going wrong; this is for things happening).
+   * Agents never see #system, so this can't double-wake anyone.
+   */
+  postSystemNotice = (message: string): void => {
+    this.appendMessage(SYSTEM_CHANNEL, SYSTEM_CHANNEL, 'System', message);
   };
 
   /**
@@ -1267,6 +1360,13 @@ export class ResidentAgentManager {
         day: rt.day,
         pendingCount: rt.pending.length,
         decisions: rt.decisions,
+        // The digest cursor IS the read watermark: deliver() advances it
+        // past every log row it just handed the agent (as an event line or
+        // a digest row), so `id <= cursor` means "reached the agent".
+        seenMessageId: rt.cursor,
+        // Routed but not yet handed over — the events still sitting in the
+        // queue behind the delivery debounce or a digest-only backlog.
+        queuedMessageIds: rt.pending.map((e) => e.messageId).filter((id): id is number => typeof id === 'number'),
       };
     }
     return out;
@@ -1275,7 +1375,7 @@ export class ResidentAgentManager {
   private appendMessage(
     channel: string,
     from: string,
-    fromName: string,
+    fromName: string | undefined,
     text: string,
     replyTo?: number
   ): ResidentChannelMessage {
@@ -1283,7 +1383,9 @@ export class ResidentAgentManager {
       id: this.nextMessageId++,
       channel,
       from,
-      fromName,
+      // No name for the collective `user` — display is viewer-relative
+      // ("You" is the reader's judgment, not a stored fact).
+      ...(fromName ? { fromName } : {}),
       text,
       at: this.now(),
       ...(replyTo !== undefined ? { replyTo } : {}),
@@ -1293,7 +1395,41 @@ export class ResidentAgentManager {
     const next = [...this.channelLog(), msg];
     this.data.log = next.length > CHANNEL_LOG_TAIL ? next.slice(-CHANNEL_LOG_TAIL) : next;
     this.enqueuePersist(() => this.repo.appendResidentMessage(residentMessageToRow(msg)));
+    this.emitChatEvent({ method: 'chat.message_added', params: { message: msg } });
     return msg;
+  }
+
+  // ------------------------------------------------------- chat-v1 events
+
+  /** chat-v1 notification subscribers — the /ws/chat fan-out taps here. */
+  private chatSubscribers = new Set<(event: ChatEvent) => void>();
+
+  subscribeChatEvents = (cb: (event: ChatEvent) => void): (() => void) => {
+    this.chatSubscribers.add(cb);
+    return () => {
+      this.chatSubscribers.delete(cb);
+    };
+  };
+
+  /**
+   * Fan one chat-v1 notification out: message/channel changes also ride the
+   * internal binding (the renderer's live feed now that chat data left the
+   * store snapshot); presence/roster/attention stay on their existing
+   * internal events and reach only the subscribers (endpoint clients).
+   */
+  private emitChatEvent(event: ChatEvent): void {
+    if (event.method === 'chat.message_added') {
+      this.sendToWindow('chat.message_added', event.params);
+    } else if (event.method === 'chat.channel_changed') {
+      this.sendToWindow('chat.channel_changed', event.params);
+    }
+    for (const cb of this.chatSubscribers) {
+      try {
+        cb(event);
+      } catch {
+        /* a broken subscriber must not break delivery */
+      }
+    }
   }
 
   // ---------------------------------------------------------------- threads
@@ -1472,10 +1608,11 @@ export class ResidentAgentManager {
     }
   }
 
-  /** Rows whose text already arrived as a WAKE_NOW event line would render twice. */
+  /** Rows already in the batch as WAKE_NOW event lines would render twice —
+   *  every message-carrying event stamps its `messageId`, so dedup is by id. */
   private dropRowsAlreadyInEvents(rows: DigestRow[], events: ResidentEvent[]): DigestRow[] {
-    const inBatch = new Set(events.filter((e) => e.text).map((e) => `${e.from ?? ''}|${e.text ?? ''}`));
-    return rows.filter((r) => !inBatch.has(`${r.from === 'You' ? USER_PARTICIPANT : r.from.toLowerCase()}|${r.text}`));
+    const inBatch = new Set(events.map((e) => e.messageId).filter((id): id is number => id !== undefined));
+    return rows.filter((r) => !inBatch.has(r.id));
   }
 
   // ------------------------------------------------------- agent speech out
@@ -1656,15 +1793,29 @@ export class ResidentAgentManager {
       if (target && target.id !== agentId) {
         rt.speechCount += 1;
         this.episodic(rt, `I messaged ${target.name}: "${text.slice(0, 150)}"`);
-        this.appendMessage(dmChannelId(agentId, target.id), agentId, agent.name, text);
-        this.deliverAgentDm(agentId, target.id, text);
+        const msg = this.appendMessage(dmChannelId(agentId, target.id), agentId, agent.name, text);
+        this.deliverAgentDm(agentId, target.id, text, msg.id);
         return { message: `Sent to ${target.name}.` };
+      }
+      // Named people (cloud principals, bridged users): the directory is the
+      // log itself — whoever has spoken is addressable, into their personal
+      // thread. No wakeup fires (humans aren't woken; they get unread
+      // badges), so this is outside the DM round budget's concern too.
+      const humans = knownHumansFromLog(this.channelLog());
+      const person = [...humans.entries()].find(([id, name]) => id === to || humanHandle(id, name) === to);
+      if (person) {
+        const [personId, personName] = person;
+        rt.speechCount += 1;
+        this.episodic(rt, `I messaged ${personName ?? personId}: "${text.slice(0, 150)}"`);
+        this.appendMessage(dmChannelId(agentId, personId), agentId, agent.name, text);
+        return { message: `Sent to ${personName ?? personId} (their personal thread).` };
       }
       const valid = [
         USER_PARTICIPANT,
         ...this.roster()
           .filter((a) => a.id !== agentId)
           .map((a) => residentHandle(a.name)),
+        ...[...humans.entries()].map(([id, name]) => humanHandle(id, name)),
       ];
       return { message: `Error: unknown recipient '${to}'. Valid recipients: ${valid.join(', ')}.` };
     }
@@ -1672,7 +1823,7 @@ export class ResidentAgentManager {
   }
 
   /** Agent→agent DM: the round budget decides now / delayed slot / pen-pal. */
-  private deliverAgentDm(fromId: string, toId: string, text: string): void {
+  private deliverAgentDm(fromId: string, toId: string, text: string, messageId: number): void {
     const pairKey = dmChannelId(fromId, toId);
     const nowMs = this.now();
     const delivery = nextThreadDelivery(this.threads.get(pairKey), nowMs);
@@ -1682,7 +1833,7 @@ export class ResidentAgentManager {
     const fire = (): void => {
       this.threadTimers.delete(pairKey);
       this.threads.set(pairKey, advanceThread(this.threads.get(pairKey), this.now()));
-      this.dispatchEvent(toId, { kind: 'dm', from: fromId, text }, delivery.urge);
+      this.dispatchEvent(toId, { kind: 'dm', from: fromId, text, messageId }, delivery.urge);
     };
     if (delivery.mode === 'now') {
       fire();
@@ -2182,6 +2333,7 @@ export class ResidentAgentManager {
   private attention(agentId: string, message: string): void {
     console.warn(`[resident] ${agentId}: ${message}`);
     this.sendToWindow('resident:attention', { agentId, message, at: this.now() });
+    this.emitChatEvent({ method: 'chat.attention', params: { agentId, message, at: this.now() } });
     // The town-crier rule: incidents also land in the channel log as system
     // rows, so the Activity feed is the complete record — a missed toast is
     // not a lost event. The `system` channel is user-facing only: agents
@@ -2220,7 +2372,71 @@ export class ResidentAgentManager {
 
   private broadcastStatus(): void {
     this.sendToWindow('resident:status', this.getStatus());
+    this.emitChatEvent({ method: 'chat.presence_changed', params: { presence: this.getStatus() } });
   }
+
+  /** chat-v1 roster projection — addressing/display fields only. */
+  chatRoster = (): ChatRosterAgent[] =>
+    this.roster().map((a) => ({
+      id: a.id,
+      handle: residentHandle(a.name),
+      name: a.name,
+      role: a.role,
+      enabled: a.enabled,
+      ...(a.superuser ? { superuser: true } : {}),
+    }));
+
+  private emitRosterChanged(): void {
+    this.emitChatEvent({ method: 'chat.roster_changed', params: { agents: this.chatRoster() } });
+  }
+
+  /**
+   * Every channel a chat-v1 client can see: `#team`, the named defs, one DM
+   * channel per roster agent (the start-a-DM row), every DM channel with
+   * history in the cached tail (agent↔agent threads are observable — the
+   * log is the record), and `#system`.
+   */
+  listChatChannels = (): ChatChannel[] => {
+    const dms = new Map<string, [string, string]>();
+    for (const agent of this.roster()) {
+      const id = dmChannelId(USER_PARTICIPANT, agent.id);
+      dms.set(id, dmParticipants(id)!);
+    }
+    for (const msg of this.channelLog()) {
+      const pair = dmParticipants(msg.channel);
+      if (pair) {
+        dms.set(msg.channel, pair);
+      }
+    }
+    return [
+      { id: TEAM_CHANNEL, kind: 'team' },
+      ...this.channelDefs().map(chatChannelFromDef),
+      ...[...dms.entries()].map(([id, pair]): ChatChannel => ({ id, kind: 'dm', dmParticipants: pair })),
+      { id: SYSTEM_CHANNEL, kind: 'system' },
+    ];
+  };
+
+  /**
+   * Keyset page of the durable log (chat-v1 `list_messages`): ascending
+   * rows, `hasMore` in the paged direction. The DB is the replay substrate —
+   * reconnecting clients resume with `after: <last seen id>`.
+   */
+  listMessages = async (
+    params: ChatListMessagesParams
+  ): Promise<{ messages: ResidentChannelMessage[]; hasMore: boolean }> => {
+    const limit = Math.max(1, Math.min(500, Math.round(params.limit ?? 100)));
+    const rows = await this.repo.listResidentMessagesPage({
+      ...(params.channel !== undefined ? { channel: params.channel } : {}),
+      ...(params.after !== undefined ? { after: params.after } : {}),
+      ...(params.before !== undefined ? { before: params.before } : {}),
+      limit: limit + 1,
+    });
+    const hasMore = rows.length > limit;
+    // `after` pages forward (drop the extra newest row); otherwise the page
+    // is the newest window (drop the extra oldest row).
+    const page = hasMore ? (params.after !== undefined ? rows.slice(0, limit) : rows.slice(rows.length - limit)) : rows;
+    return { messages: page.map(rowToResidentMessage), hasMore };
+  };
 
   cleanup = async (): Promise<void> => {
     this.disposed = true;
@@ -2281,12 +2497,9 @@ export function registerResidentHandlers(
   h('resident:create', (m, input) => m.create(input));
   h('resident:update', (m, agentId, patch) => m.update(agentId, patch));
   h('resident:delete', (m, agentId) => m.delete(agentId));
-  h('resident:post', (m, channel, text, replyTo) => m.post(channel, text, replyTo));
-  h('resident:create-channel', (m, name, description) => m.createChannel(name, description));
-  h('resident:update-channel', (m, channelId, patch) => m.updateChannel(channelId, patch));
-  h('resident:delete-channel', (m, channelId) => m.deleteChannel(channelId));
-  h('resident:set-channel-members', (m, channelId, members) => m.setChannelMembers(channelId, members));
-  h('resident:wake', (m, agentId) => m.wake(agentId));
+  // Messaging (post/channels/wake/presence) lives on the chat-v1 binding —
+  // registerChatHandlers in src/main/chat-service.ts. This namespace keeps
+  // the roster/config admin surface.
   h('resident:get-status', (m) => m.getStatus());
   h('resident:ensure-session', (m, agentId) => m.ensureSession(agentId));
   h('resident:set-memories', (m, agentId, memories) => m.setMemories(agentId, memories));

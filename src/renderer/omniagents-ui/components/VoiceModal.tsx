@@ -51,6 +51,14 @@ export function VoiceModal({
   const bufferQueueRef = useRef<{ chunks: Float32Array[]; length: number }>({ chunks: [], length: 0 });
   const clientRef = useRef<RealtimeRPCClient | null>(null);
   const sessionIdRef = useRef<string | null>(null);
+  // Latched at mount: the connection effect must not re-run when the parent
+  // echoes the created session id back down as the `sessionId` prop (or
+  // re-renders with a fresh `onSessionCreated` identity) — tearing down a
+  // live session to redial with the same id collides with the server's
+  // still-registered session ("Session ... already exists").
+  const requestedSessionIdRef = useRef(sessionId);
+  const onSessionCreatedRef = useRef(onSessionCreated);
+  onSessionCreatedRef.current = onSessionCreated;
   const scheduledTimeRef = useRef<number>(0);
   const isMutedRef = useRef<boolean>(true);
   const duplexHoldRef = useRef<boolean>(false);
@@ -834,11 +842,11 @@ export function VoiceModal({
         }
         setErrorMessage(null);
         try {
-          const res = await client.startSession(sessionId);
+          const res = await client.startSession(requestedSessionIdRef.current);
           const newSid = String(res?.session_id || '');
           sessionIdRef.current = newSid;
-          if (!sessionId && newSid && onSessionCreated) {
-            onSessionCreated(newSid);
+          if (!requestedSessionIdRef.current && newSid) {
+            onSessionCreatedRef.current?.(newSid);
           }
           if (debugEnabled) {
             console.log('[ui] session started', res);
@@ -865,10 +873,19 @@ export function VoiceModal({
       if (debugEnabled) {
         console.log('[ui] cleanup', { sid });
       }
-      if (sid && clientRef.current) {
-        clientRef.current.stopSession(sid).catch(() => {});
+      if (sid) {
+        // Let the stop RPC reach the server before dropping the socket — a
+        // fire-and-forget stop followed by an immediate disconnect dies
+        // in-flight and leaves the session registered server-side.
+        client
+          .stopSession(sid)
+          .catch(() => {})
+          .finally(() => {
+            client.disconnect();
+          });
+      } else {
+        client.disconnect();
       }
-      client.disconnect();
       clientRef.current = null;
       sessionIdRef.current = null;
       scheduledTimeRef.current = 0;
@@ -886,7 +903,7 @@ export function VoiceModal({
       setChatInput('');
       setErrorMessage(null);
     };
-  }, [debugEnabled, isOpen, onSessionCreated, sessionId, token, wsRealtimeUrl]);
+  }, [debugEnabled, isOpen, token, wsRealtimeUrl]);
 
   // Look up the kind of an in-flight approval so handleApprove/Reject
   // can pick the right RPC. MCP-side notifications stash the

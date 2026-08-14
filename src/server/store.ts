@@ -51,6 +51,7 @@ export const DEFAULTS: StoreData = {
   activeTicketId: null,
   wipLimit: 3,
   scheduledTasks: [],
+  automations: [],
   activityLog: [],
   dismissedHomeHints: [],
   enabledExtensions: {},

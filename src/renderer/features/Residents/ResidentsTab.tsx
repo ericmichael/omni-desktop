@@ -23,8 +23,10 @@ import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState
 
 import { formatDayLabel, formatTimeOfDay, formatTimestamp } from '@/lib/format-time';
 import {
+  channelAudienceIds,
   dmChannelId,
   dmParticipants,
+  isHumanGradeParticipant,
   memoryKey,
   parseResidentPrincipal,
   residentHandle,
@@ -108,14 +110,20 @@ import type { AgentPresence } from './agent-avatar';
 import { AgentAvatar, AgentAvatarGroup, participantPresence, PRESENCE_LABEL, presenceStatus } from './agent-avatar';
 import { $dmSpokenReplies, speakDmMessage, toggleDmSpokenReplies } from './dm-voice';
 import {
+  $chatChannels,
+  $chatLog,
+  $knownHumans,
   $residentStatus,
   $residentsView,
   goToHandbook,
   goToNewAgent,
   goToResidentChannel,
   goToRoster,
+  isOwnDmChannel,
+  isSelfFrom,
   markResidentMessagesSeen,
   residentApi,
+  syncChatState,
   syncResidentStatus,
 } from './state';
 
@@ -160,8 +168,17 @@ const infoLabel = (text: string, info: string): ReactNode => (
   </Tooltip>
 );
 
+/** A participant's display name: 'you' for the viewer/collective human,
+ *  roster name for agents, latest known display name for named people. */
+const participantDisplayName = (p: string, roster: ResidentAgent[], humans: Map<string, string | null>): string => {
+  if (p === USER_PARTICIPANT || isSelfFrom(p)) {
+    return 'you';
+  }
+  return roster.find((a) => a.id === p)?.name ?? humans.get(p) ?? p;
+};
+
 /** Human label for a channel: null for #team, "you ↔ Scout" for DMs. */
-const channelLabel = (channel: string, roster: ResidentAgent[]): string | null => {
+const channelLabel = (channel: string, roster: ResidentAgent[], humans: Map<string, string | null>): string | null => {
   if (channel === TEAM_CHANNEL) {
     return null;
   }
@@ -169,8 +186,7 @@ const channelLabel = (channel: string, roster: ResidentAgent[]): string | null =
   if (!pair) {
     return `#${channel}`;
   }
-  const nameOf = (p: string): string => (p === USER_PARTICIPANT ? 'you' : (roster.find((a) => a.id === p)?.name ?? p));
-  return `${nameOf(pair[0])} ↔ ${nameOf(pair[1])}`;
+  return `${participantDisplayName(pair[0], roster, humans)} ↔ ${participantDisplayName(pair[1], roster, humans)}`;
 };
 
 /** One row of the @-mention typeahead. Mouse-down (not click) so the pick
@@ -245,6 +261,126 @@ type FeedItem =
   | { kind: 'expand'; rootId: number; hiddenCount: number }
   | { kind: 'day'; ts: number };
 
+// ---------------------------------------------------------------------------
+// Read receipts + working indicator — the two live signals a wakeup-driven
+// roster owes the user. A parked agent gives no natural feedback, so the
+// silence between "I posted" and "a reply appeared" has to be filled with
+// something honest: whether the message reached the agent, and whether the
+// agent is mid-turn. Both read state the status broadcast already carries.
+// ---------------------------------------------------------------------------
+
+/** Agents named in a receipt before it collapses to a count. */
+const RECEIPT_NAME_CAP = 3;
+
+const nameList = (names: readonly string[]): string => {
+  if (names.length > RECEIPT_NAME_CAP) {
+    return `${names.slice(0, RECEIPT_NAME_CAP).join(', ')} +${names.length - RECEIPT_NAME_CAP}`;
+  }
+  if (names.length <= 1) {
+    return names[0] ?? '';
+  }
+  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1] ?? ''}`;
+};
+
+/**
+ * Delivery state of the user's NEWEST message in this thread — the only
+ * message a receipt can be honest about. `seenMessageId` is runtime-only, so
+ * after a restart every older message would read as unseen; anchoring to the
+ * newest post makes "no receipt yet" mean "not yet", never "lost".
+ *
+ * Three states, straight off the wakeup pipeline:
+ *   read    — the agent's digest cursor has passed this id
+ *   queued  — routed, waiting on the delivery debounce or the next WAKE_NOW
+ *   absent  — not routed to this agent; render nothing rather than a
+ *             delivery claim we cannot support
+ */
+const SeenReceipt = memo(function SeenReceipt({
+  messageId,
+  audience,
+  statuses,
+}: {
+  messageId: number;
+  audience: readonly ResidentAgent[];
+  statuses: Record<string, ResidentAgentRuntime>;
+}): React.JSX.Element | null {
+  const read: string[] = [];
+  const queued: string[] = [];
+  for (const agent of audience) {
+    const rt = statuses[agent.id];
+    if (!rt) {
+      continue;
+    }
+    if (rt.seenMessageId >= messageId) {
+      read.push(agent.name);
+    } else if (rt.queuedMessageIds.includes(messageId)) {
+      queued.push(agent.name);
+    }
+  }
+  if (read.length === 0 && queued.length === 0) {
+    return null;
+  }
+  const parts: string[] = [];
+  if (read.length > 0) {
+    parts.push(`Read by ${nameList(read)}`);
+  }
+  if (queued.length > 0) {
+    parts.push(`${read.length > 0 ? 'queued' : 'Queued'} for ${nameList(queued)}`);
+  }
+  return (
+    <div className="shrink-0 self-end pt-1 pr-1 text-xs text-muted-foreground" aria-live="polite">
+      {parts.join(' · ')}
+    </div>
+  );
+});
+
+/**
+ * Agents in this thread that are mid-turn. The feed's answer to a typing
+ * indicator — `thinking`/`reflecting` already ride `resident:status`, so this
+ * renders state we have rather than adding a channel. It sits inside the
+ * scroller at the bottom so stick-to-bottom keeps it in view, the way a
+ * typing row behaves in any chat client.
+ */
+const WorkingIndicator = memo(function WorkingIndicator({
+  audience,
+  statuses,
+}: {
+  audience: readonly ResidentAgent[];
+  statuses: Record<string, ResidentAgentRuntime>;
+}): React.JSX.Element | null {
+  const working = audience.filter((a) => {
+    const state = statuses[a.id]?.state;
+    return state === 'thinking' || state === 'reflecting';
+  });
+  if (working.length === 0) {
+    return null;
+  }
+  // Reflecting is the nightly curation beat, not a reply — say so, so an
+  // agent busy archiving its day doesn't read as one about to answer.
+  const allReflecting = working.every((a) => statuses[a.id]?.state === 'reflecting');
+  const verb = allReflecting
+    ? working.length === 1
+      ? 'is reflecting on the day'
+      : 'are reflecting on the day'
+    : working.length === 1
+      ? 'is working'
+      : 'are working';
+  return (
+    <div className="shrink-0 flex items-center gap-2 pt-2 pb-1 pl-1" aria-live="polite">
+      <div className="flex -space-x-2">
+        {working.map((a) => (
+          <AgentAvatar key={a.id} name={a.name} colorId={a.id} size={20} />
+        ))}
+      </div>
+      <span className="text-xs text-muted-foreground">{`${nameList(working.map((a) => a.name))} ${verb}`}</span>
+      <span className="flex items-center gap-0.5" aria-hidden="true">
+        <span className="size-1 rounded-full bg-muted-foreground/60 motion-safe:animate-bounce" />
+        <span className="size-1 rounded-full bg-muted-foreground/60 motion-safe:animate-bounce [animation-delay:150ms]" />
+        <span className="size-1 rounded-full bg-muted-foreground/60 motion-safe:animate-bounce [animation-delay:300ms]" />
+      </span>
+    </div>
+  );
+});
+
 function ActivityFeed({
   roster,
   channel,
@@ -258,6 +394,9 @@ function ActivityFeed({
    *  target that opens the channel/thread it names. */ onOpenChannel?: (channelId: string) => void;
 }): React.JSX.Element {
   const storeData = useStore(persistedStoreApi.$atom);
+  const chatLog = useStore($chatLog);
+  const chatChannels = useStore($chatChannels);
+  const knownHumans = useStore($knownHumans);
   // Same presence source as the sidebar — every avatar this feed paints
   // (message gutters, the @-mention typeahead) reads from it, so a state
   // change repaints them all together.
@@ -277,13 +416,15 @@ function ActivityFeed({
   const dmPair = channel ? dmParticipants(channel) : null;
   // Threads live in named channels; the Activity view and DMs stay flat.
   const isNamedChannel = !!channel && !dmPair;
-  const dmPeerId = dmPair?.find((p) => p !== USER_PARTICIPANT);
+  // The agent side of the thread (personal threads pair a named human with
+  // an agent, so "not the human participant" is the general peer rule).
+  const dmPeerId = dmPair?.find((p) => !isHumanGradeParticipant(p) && p !== USER_PARTICIPANT);
   const dmPeerName = dmPeerId ? (roster.find((a) => a.id === dmPeerId)?.name ?? dmPeerId) : null;
 
-  // Voice lives on the DM surface (user↔agent threads only): mic in the
+  // Voice lives on the DM surface (your own human↔agent threads): mic in the
   // composer for input, spoken replies for output — the agent's reply IS
   // the DM message, so the surface reads it aloud; no session plumbing.
-  const isUserDm = dmPair !== null && dmPair.includes(USER_PARTICIPANT);
+  const isUserDm = channel !== undefined && dmPair !== null && isOwnDmChannel(channel);
   const voiceMode = configuredVoiceMode(storeData);
   const voiceReady = isUserDm && voiceMode === 'local' && isLocalVoiceCapable();
   // Hosted mode: the realtime VoiceModal against the DM peer's own serve.
@@ -310,19 +451,45 @@ function ActivityFeed({
   }, [channel]);
 
   // No channel = the all-traffic Activity view; otherwise one channel's feed.
-  const messages = useMemo(
-    () => (storeData.residentChannels ?? []).filter((m) => !channel || m.channel === channel),
-    [storeData.residentChannels, channel]
-  );
+  const messages = useMemo(() => chatLog.filter((m) => !channel || m.channel === channel), [chatLog, channel]);
+
+  // Who a post here actually reaches — the audience receipts and the working
+  // indicator are computed against. The all-traffic Activity view has no
+  // single audience (and is the record, not a conversation), so it gets
+  // neither signal.
+  const audience = useMemo(() => {
+    if (!channel) {
+      return [];
+    }
+    const ids = new Set(
+      channelAudienceIds(
+        channel,
+        chatChannels,
+        roster.map((a) => a.id)
+      )
+    );
+    return roster.filter((a) => ids.has(a.id));
+  }, [channel, chatChannels, roster]);
+
+  // Receipts anchor to the viewer's newest post only — see `SeenReceipt`.
+  const lastUserMessageId = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (m && isSelfFrom(m.from)) {
+        return m.id;
+      }
+    }
+    return null;
+  }, [messages]);
 
   // Root lookup for reply markers (all-view rows and orphaned replies).
   const messageById = useMemo(() => {
     const map = new Map<number, ResidentChannelMessage>();
-    for (const m of storeData.residentChannels ?? []) {
+    for (const m of chatLog) {
       map.set(m.id, m);
     }
     return map;
-  }, [storeData.residentChannels]);
+  }, [chatLog]);
 
   /**
    * Display order. Named channels group replies under their roots and BUMP
@@ -593,8 +760,9 @@ function ActivityFeed({
     : replyTarget
       ? 'Reply in thread…'
       : `Message #${channel ?? TEAM_CHANNEL}`;
-  const participantName = (m: ResidentChannelMessage): string =>
-    m.from === USER_PARTICIPANT ? 'you' : (m.fromName ?? m.from);
+  // Viewer-relative: YOUR posts read as "you"; other participants (agents,
+  // named humans, bridged users) go by their stored display name.
+  const participantName = (m: ResidentChannelMessage): string => (isSelfFrom(m.from) ? 'you' : (m.fromName ?? m.from));
   /** Presence for a message's sender — `undefined` for you, #system, and
    *  agents that have since left the roster (no live identity to report). */
   const senderPresence = (m: ResidentChannelMessage): AgentPresence | undefined =>
@@ -661,7 +829,7 @@ function ActivityFeed({
               );
             }
             const { msg: m, indent, groupHead, replyCount } = item;
-            const label = channel ? null : channelLabel(m.channel, roster);
+            const label = channel ? null : channelLabel(m.channel, roster, knownHumans);
             // #system rows are incident reports (declined approvals, failed
             // deliveries) — they must not read like ordinary chatter.
             const isIncident = m.channel === SYSTEM_CHANNEL;
@@ -684,7 +852,7 @@ function ActivityFeed({
                 <div className={cn('shrink-0 pt-0.5', indent ? 'w-6' : 'w-8')}>
                   {groupHead && (
                     <AgentAvatar
-                      name={m.from === USER_PARTICIPANT ? 'You' : fromName}
+                      name={isSelfFrom(m.from) ? 'You' : fromName}
                       colorId={m.from}
                       size={indent ? 24 : 32}
                       {...(fromPresence ? { presence: fromPresence } : {})}
@@ -694,7 +862,7 @@ function ActivityFeed({
                 <div className="min-w-0 flex flex-col">
                   {groupHead && (
                     <div className="flex items-baseline gap-2 min-w-0">
-                      <span className="font-semibold text-sm">{m.from === USER_PARTICIPANT ? 'You' : fromName}</span>
+                      <span className="font-semibold text-sm">{isSelfFrom(m.from) ? 'You' : fromName}</span>
                       {/* Incident (#system) tags stay inert — `system` is a
                     reserved id with no channel view to open. */}
                       {label &&
@@ -751,10 +919,17 @@ function ActivityFeed({
             );
           })
         )}
+        {lastUserMessageId !== null && audience.length > 0 && (
+          <SeenReceipt messageId={lastUserMessageId} audience={audience} statuses={statuses} />
+        )}
+        {/* Shown in observed agent↔agent threads too — watching a teammate
+            think is the whole point of that surface. */}
+        {audience.length > 0 && <WorkingIndicator audience={audience} statuses={statuses} />}
       </div>
       {readOnly ? (
         <div className="px-5 py-4 border-t border-border text-muted-foreground text-xs">
-          An agent-to-agent thread — you’re observing. Post in #team (or DM an agent) to join the conversation.
+          Someone else’s thread — you’re observing. Post in #team (or your own DM with an agent) to join the
+          conversation.
         </div>
       ) : (
         <Popover
@@ -1078,9 +1253,9 @@ function MemberBar({
   roster: ResidentAgent[];
   onOpenAgent: (agentId: string) => void;
 }): React.JSX.Element | null {
-  const storeData = useStore(persistedStoreApi.$atom);
+  const chatChannels = useStore($chatChannels);
   const statuses = useStore($residentStatus);
-  const def = (storeData.residentChannelDefs ?? []).find((c) => c.id === channel);
+  const def = chatChannels.find((c) => c.id === channel);
   // Absent member list = open channel: every agent (incl. future ones) is in.
   const isOpenChannel = !def?.members;
   const memberIds = useMemo(() => def?.members ?? roster.map((a) => a.id), [def?.members, roster]);
@@ -1840,30 +2015,32 @@ function AgentConversations({
   onOpenChannel: (channelId: string) => void;
 }): React.JSX.Element {
   const storeData = useStore(persistedStoreApi.$atom);
+  const chatLog = useStore($chatLog);
+  const knownHumans = useStore($knownHumans);
   const statuses = useStore($residentStatus);
 
   // Latest message per DM thread containing this agent — the same reduction
   // the sidebar runs, scoped to one participant.
   const threads = useMemo(() => {
     const latest = new Map<string, ResidentChannelMessage>();
-    for (const m of storeData.residentChannels ?? []) {
+    for (const m of chatLog) {
       if (dmParticipants(m.channel)?.includes(agent.id)) {
         latest.set(m.channel, m);
       }
     }
     return [...latest.entries()].map(([id, last]) => ({ id, last })).sort((a, b) => b.last.at - a.last.at);
-  }, [storeData.residentChannels, agent.id]);
+  }, [chatLog, agent.id]);
 
   const unreadIn = useMemo(() => {
     const seen = storeData.residentChannelSeen ?? {};
     const counts: Record<string, number> = {};
-    for (const m of storeData.residentChannels ?? []) {
+    for (const m of chatLog) {
       if (m.id > (seen[m.channel] ?? 0)) {
         counts[m.channel] = (counts[m.channel] ?? 0) + 1;
       }
     }
     return counts;
-  }, [storeData.residentChannels, storeData.residentChannelSeen]);
+  }, [chatLog, storeData.residentChannelSeen]);
 
   if (threads.length === 0) {
     return (
@@ -1889,14 +2066,15 @@ function AgentConversations({
             const other = pair?.find((p) => p !== agent.id) ?? USER_PARTICIPANT;
             const peer = other === USER_PARTICIPANT ? null : roster.find((a) => a.id === other);
             const presence = participantPresence(other, roster, statuses);
-            const otherName = other === USER_PARTICIPANT ? 'You' : (peer?.name ?? other);
+            const otherName =
+              other === USER_PARTICIPANT || isSelfFrom(other) ? 'You' : (peer?.name ?? knownHumans.get(other) ?? other);
             return (
               <DmRow
                 key={t.id}
                 channelId={t.id}
                 title={otherName}
                 avatars={[{ name: otherName, colorId: other, ...(presence ? { presence } : {}) }]}
-                snippet={`${t.last.from === USER_PARTICIPANT ? 'You' : (t.last.fromName ?? t.last.from)}: ${t.last.text}`}
+                snippet={`${isSelfFrom(t.last.from) ? 'You' : (t.last.fromName ?? t.last.from)}: ${t.last.text}`}
                 lastAt={t.last.at}
                 unread={unreadIn[t.id] ?? 0}
                 onSelect={onOpenChannel}
@@ -1922,19 +2100,18 @@ function AgentOverview({
   projects: Project[];
   runtime: ResidentAgentRuntime | undefined;
 }): React.JSX.Element {
-  const storeData = useStore(persistedStoreApi.$atom);
+  const chatLog = useStore($chatLog);
   const projectLabels = (agent.projectIds ?? [])
     .map((id) => projects.find((project) => project.id === id)?.label)
     .filter((label): label is string => Boolean(label));
   const latestMessage = useMemo(() => {
-    const messages = storeData.residentChannels ?? [];
-    for (let index = messages.length - 1; index >= 0; index -= 1) {
-      if (messages[index]?.from === agent.id) {
-        return messages[index];
+    for (let index = chatLog.length - 1; index >= 0; index -= 1) {
+      if (chatLog[index]?.from === agent.id) {
+        return chatLog[index];
       }
     }
     return null;
-  }, [agent.id, storeData.residentChannels]);
+  }, [agent.id, chatLog]);
 
   return (
     <div className="flex-1 min-h-0 overflow-y-auto p-5 flex flex-col gap-4">
@@ -2498,21 +2675,26 @@ export function ResidentsTab(): React.JSX.Element {
 
   useEffect(() => {
     void syncResidentStatus();
+    // Re-seed the chat mirror on tab mount — cheap, and it heals any gap a
+    // dropped notification (Electron has no reconnect hook) left behind.
+    void syncChatState();
   }, []);
 
-  const channelDefs = useMemo(() => storeData.residentChannelDefs ?? [], [storeData.residentChannelDefs]);
-  const channelIds = useMemo(() => [TEAM_CHANNEL, ...channelDefs.map((c) => c.id)], [channelDefs]);
+  const chatChannelDefs = useStore($chatChannels);
+  const chatLog = useStore($chatLog);
+  const knownHumansAll = useStore($knownHumans);
+  const channelIds = useMemo(() => [TEAM_CHANNEL, ...chatChannelDefs.map((c) => c.id)], [chatChannelDefs]);
   // DM threads are first-class rows, derived from the log (newest first),
   // carrying their last message for the row snippet.
   const dmThreads = useMemo(() => {
     const latest = new Map<string, ResidentChannelMessage>();
-    for (const m of storeData.residentChannels ?? []) {
+    for (const m of chatLog) {
       if (m.channel.startsWith('dm:')) {
         latest.set(m.channel, m);
       }
     }
     return [...latest.entries()].map(([id, last]) => ({ id, at: last.at, last })).sort((a, b) => b.at - a.at);
-  }, [storeData.residentChannels]);
+  }, [chatLog]);
   const dmTitle = useCallback(
     (channelId: string): string => {
       const pair = dmParticipants(channelId);
@@ -2520,22 +2702,27 @@ export function ResidentsTab(): React.JSX.Element {
         return channelId;
       }
       const nameOf = (p: string): string =>
-        p === USER_PARTICIPANT ? 'You' : (roster.find((a) => a.id === p)?.name ?? p);
+        p === USER_PARTICIPANT || isSelfFrom(p)
+          ? 'You'
+          : (roster.find((a) => a.id === p)?.name ?? knownHumansAll.get(p) ?? p);
       // Your own threads read as the peer's name (the Slack DM shape);
-      // observed agent↔agent threads name both parties.
-      if (pair.includes(USER_PARTICIPANT)) {
-        return nameOf(pair.find((p) => p !== USER_PARTICIPANT) ?? pair[0]);
+      // observed threads (agent↔agent, other people's) name both parties.
+      if (pair.includes(USER_PARTICIPANT) || pair.some((p) => isSelfFrom(p))) {
+        return nameOf(pair.find((p) => p !== USER_PARTICIPANT && !isSelfFrom(p)) ?? pair[0]);
       }
       return `${nameOf(pair[0])} ↔ ${nameOf(pair[1])}`;
     },
-    [roster]
+    [roster, knownHumansAll]
   );
   // A DM channel is addressable when every participant still resolves —
   // including threads with NO messages yet (the start-a-DM path).
   const isKnownDm = useCallback(
     (ch: string): boolean => {
       const pair = dmParticipants(ch);
-      return pair !== null && pair.every((p) => p === USER_PARTICIPANT || roster.some((a) => a.id === p));
+      return (
+        pair !== null &&
+        pair.every((p) => p === USER_PARTICIPANT || isHumanGradeParticipant(p) || roster.some((a) => a.id === p))
+      );
     },
     [roster]
   );
@@ -2546,10 +2733,11 @@ export function ResidentsTab(): React.JSX.Element {
       isKnownDm(view.selectedChannel))
       ? view.selectedChannel
       : null;
-  // The user can post into their own DM threads; agent↔agent threads are
-  // observed (the composer would misroute — post() targets one participant).
+  // The user can post into their own DM threads (collective + personal);
+  // agent↔agent threads and OTHER people's personal threads are observed
+  // (team-visible, single-writer — the manager enforces the same rule).
   const selectedDmPair = selectedChannel ? dmParticipants(selectedChannel) : null;
-  const selectedIsAgentDm = selectedDmPair !== null && !selectedDmPair.includes(USER_PARTICIPANT);
+  const selectedIsObservedDm = selectedDmPair !== null && selectedChannel !== null && !isOwnDmChannel(selectedChannel);
   // Flags are mutually exclusive: every navigation replaces the whole atom.
   const handbookOpen = view.showHandbook === true;
   const rosterOpen = view.showRoster === true;
@@ -2662,15 +2850,17 @@ export function ResidentsTab(): React.JSX.Element {
           <span className="text-base font-semibold whitespace-nowrap overflow-hidden text-ellipsis">
             {dmTitle(selectedChannel)}
           </span>
-          {selectedIsAgentDm && (
+          {selectedIsObservedDm && (
             <span className="text-muted-foreground text-xs overflow-hidden text-ellipsis whitespace-nowrap min-w-0">
-              agent↔agent — observed
+              {selectedDmPair?.some((p) => isHumanGradeParticipant(p))
+                ? 'personal thread — observed'
+                : 'agent↔agent — observed'}
             </span>
           )}
         </div>
       );
     } else {
-      const def = channelDefs.find((c) => c.id === selectedChannel);
+      const def = chatChannelDefs.find((c) => c.id === selectedChannel);
       const headerMeta =
         def?.description ?? (selectedChannel === TEAM_CHANNEL ? 'All-hands — everyone reads it' : null);
       feedHeader = (
@@ -2753,7 +2943,7 @@ export function ResidentsTab(): React.JSX.Element {
     <>
       {feedHeader}
       <MemberBar channel={selectedChannel} roster={roster} onOpenAgent={handleSelect} />
-      <ActivityFeed roster={roster} channel={selectedChannel} readOnly={selectedIsAgentDm} />
+      <ActivityFeed roster={roster} channel={selectedChannel} readOnly={selectedIsObservedDm} />
     </>
   ) : (
     <ActivityFeed roster={roster} onOpenChannel={handleSelectChannel} />

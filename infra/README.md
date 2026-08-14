@@ -1,29 +1,23 @@
 # Infrastructure (Azure, Bicep)
 
 Infrastructure-as-code for the multi-tenant cloud deployment (Path B): the
-launcher server runs as the stateless control plane and provisions agent
-sandboxes as Azure Container Instances (ACI) directly. `main.bicep` declares everything
-the server (`src/server/managers.ts`) and the `aci` sandbox-profile builder
-(`src/main/aci-profile.ts`) read from the environment at runtime.
+launcher server runs as the stateless control plane. `main.bicep` declares
+everything the server (`src/server/managers.ts`) reads from the environment at
+runtime.
 
 ## What it provisions
 
-| Resource                           | Purpose                                                      | App env var(s) produced                |
-| ---------------------------------- | ------------------------------------------------------------ | -------------------------------------- |
-| User-assigned managed identity     | AcrPull + manage ACI sandbox groups + Files                  | `AZURE_CLIENT_ID`                      |
-| Log Analytics workspace            | ACI + app logs                                               | —                                      |
-| Container Registry (ACR)           | launcher + agent images (admin off; MI AcrPull)              | `OMNI_AZURE_REGISTRY`                  |
-| Storage account + file share       | per-project workspace (Azure Files)                          | `AZURE_STORAGE_ACCOUNT_NAME`           |
-| Container Apps managed environment | agent-sandbox env (sandboxes themselves spawn as ACI groups) | `OMNI_AZURE_ENV`                       |
-| PostgreSQL Flexible Server + db    | pooled multi-tenant data (RLS)                               | `OMNI_DATABASE_URL`                    |
-| Web App for Containers + plan      | the launcher server                                          | `OMNI_DATA_API_URL`, `OMNI_AZURE_*`, … |
+| Resource                        | Purpose                                | App env var(s) produced      |
+| ------------------------------- | -------------------------------------- | ---------------------------- |
+| User-assigned managed identity  | AcrPull + Key Vault                    | `AZURE_CLIENT_ID`            |
+| Log Analytics workspace         | app logs                               | —                            |
+| Container Registry (ACR)        | launcher image (admin off; MI AcrPull) | —                            |
+| Storage account + file share    | per-project workspace (Azure Files)    | `AZURE_STORAGE_ACCOUNT_NAME` |
+| PostgreSQL Flexible Server + db | pooled multi-tenant data (RLS)         | `OMNI_DATABASE_URL`          |
+| Web App for Containers + plan   | the launcher server                    | `OMNI_DATA_API_URL`, …       |
 
-Role assignments granted to the managed identity: **AcrPull** (on the ACR) and a
-**least-privilege custom role** (`<prefix>-aci-sandbox-manager`, scoped to the
-resource group) granting exactly the ACI container-group verbs the launcher needs
-— create/read/delete/exec + subnet join — **not** Contributor. No Storage Files
-data-plane role is granted: ACI mounts the workspace share via the account key
-(`AzureFileVolume`), not SMB RBAC.
+Role assignments granted to the managed identity: **AcrPull** (on the ACR) and
+Key Vault secrets access — **not** Contributor.
 
 ## Validate locally (no subscription)
 
@@ -46,8 +40,7 @@ value (it must be identical across replicas; see `src/server/runtime-token.ts`).
 
 Chicken-and-egg: the Web App references `launcherImage`. Either push the image
 to a pre-existing registry first, or deploy once (the app will fail to pull),
-then `az acr build`/push and restart. Same for the agent sandbox image
-(`OMNI_AZURE_IMAGE` → `<acr>/omni-launcher-devbox-min:latest`).
+then `az acr build`/push and restart.
 
 ## Manual post-provision steps (not expressible in Bicep)
 
@@ -75,19 +68,7 @@ then `az acr build`/push and restart. Same for the agent sandbox image
 
 ## How the launcher gets an ARM token
 
-The launcher delegates ACI provisioning to the `omniagents[sandbox-aci]` extra
-(baked into the server image), which authenticates via azure-identity. Its
-credential chain tries three sources in priority order:
-
-1. **Service principal** — when `AZURE_CLIENT_ID` + `AZURE_CLIENT_SECRET` +
-   `AZURE_TENANT_ID` are all set (explicit opt-out of platform identity).
-2. **App Service / Functions managed identity** — when `IDENTITY_ENDPOINT` +
-   `IDENTITY_HEADER` are present (App Service injects these automatically once an
-   identity is assigned to the site). Uses `AZURE_CLIENT_ID` to select the
-   user-assigned identity.
-3. **IMDS** (`169.254.169.254`) — VMs and Container Apps.
-
-This template assigns the user-assigned managed identity to the Web App and sets
-`AZURE_CLIENT_ID` to its client id, so **path (2) works out of the box on App
-Service — no service-principal secret required.** If you prefer a service
-principal anyway, set all three `AZURE_*` settings and path (1) takes precedence.
+Azure SDK calls (Key Vault references, blob/file storage) authenticate via
+azure-identity. This template assigns the user-assigned managed identity to the
+Web App and sets `AZURE_CLIENT_ID` to its client id, so the App Service managed
+identity works out of the box — no service-principal secret required.

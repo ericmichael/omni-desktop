@@ -106,9 +106,6 @@ RUN curl -fsSL https://packages.microsoft.com/keys/microsoft.asc -o /usr/share/k
 COPY entrypoint.min.sh /usr/local/bin/omni-sandbox-entrypoint
 RUN chmod +x /usr/local/bin/omni-sandbox-entrypoint
 
-COPY apply-network-isolation.sh /usr/local/bin/apply-network-isolation.sh
-RUN chmod +x /usr/local/bin/apply-network-isolation.sh
-
 ENTRYPOINT ["/usr/local/bin/omni-sandbox-entrypoint"]
 # Stay alive so omni serve can drive the container via exec. (In ACI this CMD
 # is replaced by the container group's command anyway.)

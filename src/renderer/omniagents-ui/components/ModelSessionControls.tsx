@@ -1,4 +1,4 @@
-import { BrainIcon, ChevronDownIcon, ListChecksIcon, ShieldCheckIcon, SparklesIcon } from 'lucide-react';
+import { BrainIcon, ChevronDownIcon, GlobeIcon, GlobeLockIcon, ListChecksIcon, ShieldCheckIcon, SparklesIcon } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 
 import { Button } from '@/renderer/ds/ui/button';
@@ -37,6 +37,14 @@ function isReasoningEffort(value: string): value is ReasoningEffort {
   return REASONING_EFFORTS.has(value as ReasoningEffort);
 }
 
+/** Result shape of the `sandbox.get_network` / `sandbox.set_network` RPCs. */
+export type SandboxNetworkState = {
+  ok: boolean;
+  supported?: boolean;
+  enabled?: boolean;
+  reason?: string;
+};
+
 function reasonMessage(reasons: Array<{ message: string }> | undefined, fallback: string): string {
   return (
     reasons
@@ -55,6 +63,8 @@ export function ModelSessionControls({
   onSetApprovalsReviewer,
   workflowSupported = false,
   onSetWorkflowReviewer,
+  onGetSandboxNetwork,
+  onSetSandboxNetwork,
 }: {
   sessionId: string;
   transport: ModelCatalogRpcTransport;
@@ -65,6 +75,11 @@ export function ModelSessionControls({
   /** True only when the runtime negotiated the workflowReviewer feature. */
   workflowSupported?: boolean;
   onSetWorkflowReviewer?: (reviewer: WorkflowReviewer) => Promise<unknown>;
+  /** Probe the sandbox network toggle (`sandbox.get_network`). The pill
+   *  renders only when this resolves `{ok: true, supported: true}` — host
+   *  sessions and older runtimes reject or report unsupported. */
+  onGetSandboxNetwork?: () => Promise<SandboxNetworkState>;
+  onSetSandboxNetwork?: (enabled: boolean) => Promise<SandboxNetworkState>;
 }) {
   const catalog = useMemo(() => new ModelCatalogClient(transport), [transport]);
   const [models, setModels] = useState<ModelDescriptor[]>([]);
@@ -77,6 +92,11 @@ export function ModelSessionControls({
   const [loading, setLoading] = useState(true);
   const [mutating, setMutating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // null = unsupported / unknown → no pill. Deliberately NOT gated on the
+  // shared `locked`: pulling the sandbox offline mid-run is the point of a
+  // live toggle, so only its own mutation locks it.
+  const [networkEnabled, setNetworkEnabled] = useState<boolean | null>(null);
+  const [networkMutating, setNetworkMutating] = useState(false);
 
   useEffect(() => {
     let current = true;
@@ -111,6 +131,30 @@ export function ModelSessionControls({
       current = false;
     };
   }, [catalog, sessionId]);
+
+  useEffect(() => {
+    if (!onGetSandboxNetwork) {
+      setNetworkEnabled(null);
+      return;
+    }
+    let current = true;
+    void onGetSandboxNetwork()
+      .then((state) => {
+        if (current) {
+          setNetworkEnabled(state.ok && state.supported ? (state.enabled ?? true) : null);
+        }
+      })
+      .catch(() => {
+        // Older runtimes reject the unknown function; host environments
+        // have no lifecycle controller. Both mean: no pill.
+        if (current) {
+          setNetworkEnabled(null);
+        }
+      });
+    return () => {
+      current = false;
+    };
+  }, [onGetSandboxNetwork]);
 
   const activeDescriptor = models.find((model) => model.id === activeModel) ?? null;
   const reasoningOptions = (activeDescriptor?.reasoning.options ?? []).filter(isReasoningEffort);
@@ -190,6 +234,27 @@ export function ModelSessionControls({
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setMutating(false);
+    }
+  };
+
+  const chooseNetwork = async (value: string) => {
+    const enabled = value === 'on';
+    if (networkEnabled === null || enabled === networkEnabled || networkMutating || !onSetSandboxNetwork) {
+      return;
+    }
+    setNetworkMutating(true);
+    setError(null);
+    try {
+      const result = await onSetSandboxNetwork(enabled);
+      if (!result.ok) {
+        setError(result.reason ?? 'Omniagents refused the network change.');
+        return;
+      }
+      setNetworkEnabled(result.enabled ?? enabled);
+    } catch (cause: unknown) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setNetworkMutating(false);
     }
   };
 
@@ -322,6 +387,55 @@ export function ModelSessionControls({
                 </DropdownMenuRadioGroup>
               </>
             ) : null}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ) : null}
+
+      {networkEnabled !== null && onSetSandboxNetwork ? (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              disabled={networkMutating}
+              className="h-7 gap-1.5 px-2 text-xs font-normal"
+              title="Sandbox internet access"
+              data-testid="sandbox-network-control"
+            >
+              {networkEnabled ? (
+                <GlobeIcon className="size-3.5 text-muted-foreground" />
+              ) : (
+                <GlobeLockIcon className="size-3.5 text-primary" />
+              )}
+              {networkEnabled ? 'Internet on' : 'Offline'}
+              <ChevronDownIcon className="size-3" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent side="top" align="start">
+            <DropdownMenuLabel>Internet access</DropdownMenuLabel>
+            <DropdownMenuRadioGroup
+              value={networkEnabled ? 'on' : 'off'}
+              onValueChange={(value) => void chooseNetwork(value)}
+              data-testid="sandbox-network-group"
+            >
+              <DropdownMenuRadioItem value="on">
+                <span className="flex min-w-0 flex-col gap-0.5">
+                  <span>On</span>
+                  <span className="max-w-52 text-xs text-muted-foreground">
+                    The sandbox can reach the internet
+                  </span>
+                </span>
+              </DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="off">
+                <span className="flex min-w-0 flex-col gap-0.5">
+                  <span>Off</span>
+                  <span className="max-w-52 text-xs text-muted-foreground">
+                    No internet — work in the sandbox continues
+                  </span>
+                </span>
+              </DropdownMenuRadioItem>
+            </DropdownMenuRadioGroup>
           </DropdownMenuContent>
         </DropdownMenu>
       ) : null}

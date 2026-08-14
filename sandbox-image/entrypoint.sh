@@ -123,7 +123,5 @@ gosu "${uid}:${gid}" git config --global --add safe.directory /home/user/workspa
 mkdir -p "${HOME}/.gitconfig.d" >/dev/null 2>&1 || true
 cp "${HOME}/.gitconfig" "${HOME}/.gitconfig.d/gitconfig" 2>/dev/null || true
 
-# Apply network isolation rules (if OMNI_SANDBOX_NETWORK_ALLOWLIST is set)
-source /usr/local/bin/apply-network-isolation.sh
 
 exec gosu "${uid}:${gid}" "$@"

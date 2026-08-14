@@ -321,13 +321,13 @@ export const HealthPane = memo(() => {
         <Card>
           <CardHeader>
             <CardTitle>Images</CardTitle>
-            <CardDescription>The base environment used when a Devbox sandbox starts.</CardDescription>
+            <CardDescription>The base environment used when a Workstation sandbox starts.</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="flex flex-col gap-4">
               <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center">
                 <div className="flex-1 min-w-0 flex flex-col gap-0.5">
-                  <span className="text-sm">Devbox image</span>
+                  <span className="text-sm">Workstation image</span>
                   <span
                     className={cn(
                       'text-xs text-muted-foreground',

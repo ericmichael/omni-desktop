@@ -6,6 +6,7 @@ import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   channelIdFromName,
   dmParticipants,
+  isHumanGradeParticipant,
   RESERVED_CHANNEL_IDS,
   TEAM_CHANNEL,
   USER_PARTICIPANT,
@@ -44,17 +45,22 @@ import {
 } from '@/renderer/ds/ui/sidebar';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/renderer/ds/ui/tooltip';
 import { persistedStoreApi } from '@/renderer/services/store';
-import type { ResidentChannelDef, ResidentChannelMessage } from '@/shared/types';
+import type { ChatChannel, ResidentChannelMessage } from '@/shared/types';
 
 import type { AgentPresence } from './agent-avatar';
 import { AgentAvatar, AgentPresenceBadge, presenceStatus } from './agent-avatar';
 import {
+  $activityDirectedUnread,
   $activityUnread,
+  $chatChannels,
+  $chatLog,
+  $residentDirectedUnreadByChannel,
   $residentStatus,
   $residentsView,
   $residentUnreadByChannel,
   goToActivity,
   goToResidentChannel,
+  isOwnDmChannel,
   residentApi,
 } from './state';
 
@@ -73,6 +79,7 @@ const ChannelRow = memo(function ChannelRow({
   selected,
   manageable,
   unread,
+  directed,
   onSelect,
   onRequestEdit,
   onRequestDelete,
@@ -80,7 +87,8 @@ const ChannelRow = memo(function ChannelRow({
   channelId: string;
   selected: boolean;
   /** Built-ins (#team) take no edit/delete menu. */ manageable: boolean;
-  unread: number;
+  /** Any unread — emphasis only ("there is something new here"). */ unread: number;
+  /** Unread aimed at the user — the count badge ("this one wants you"). */ directed: number;
   onSelect: (id: string) => void;
   onRequestEdit: (id: string) => void;
   onRequestDelete: (id: string) => void;
@@ -96,7 +104,11 @@ const ChannelRow = memo(function ChannelRow({
         <Hash />
         <span className={cn('min-w-0 flex-1 truncate', unread > 0 && 'font-semibold')}>{channelId}</span>
       </SidebarMenuButton>
-      {!selected && unread > 0 && <SidebarMenuBadge className="h-4 min-w-4 text-xs">{unread}</SidebarMenuBadge>}
+      {!selected && directed > 0 && (
+        <SidebarMenuBadge className="h-4 min-w-4 text-xs" aria-label={`${directed} directed at you`}>
+          {directed}
+        </SidebarMenuBadge>
+      )}
       {manageable && (
         <SidebarRowActions open={menuOpen}>
           <DropdownMenu open={menuOpen} onOpenChange={handleMenuOpenChange}>
@@ -239,7 +251,7 @@ function EditChannelDialog({
   channel,
   onClose,
 }: {
-  channel: ResidentChannelDef | null;
+  channel: ChatChannel | null;
   onClose: () => void;
 }): React.JSX.Element {
   const [description, setDescription] = useState('');
@@ -322,10 +334,12 @@ export function ChannelsSection({ onNavigate }: { onNavigate?: () => void }): Re
   const storeData = useStore(persistedStoreApi.$atom);
   const view = useStore($residentsView);
   const unreadByChannel = useStore($residentUnreadByChannel);
+  const directedByChannel = useStore($residentDirectedUnreadByChannel);
 
-  const channelDefs = useMemo(() => storeData.residentChannelDefs ?? [], [storeData.residentChannelDefs]);
+  const channelDefs = useStore($chatChannels);
   const channelIds = useMemo(() => [TEAM_CHANNEL, ...channelDefs.map((c) => c.id)], [channelDefs]);
   const activityUnread = useStore($activityUnread);
+  const activityDirected = useStore($activityDirectedUnread);
   // Selection paints only while the Agents surface is frontmost — the atom
   // keeps its value across tab switches (keep-mounted panels).
   const selectedChannel = storeData.layoutMode === 'agents' ? view.selectedChannel : null;
@@ -343,7 +357,7 @@ export function ChannelsSection({ onNavigate }: { onNavigate?: () => void }): Re
   const startAdd = useCallback(() => setAdding(true), []);
   const stopAdd = useCallback(() => setAdding(false), []);
 
-  const [editing, setEditing] = useState<ResidentChannelDef | null>(null);
+  const [editing, setEditing] = useState<ChatChannel | null>(null);
   const closeEdit = useCallback(() => setEditing(null), []);
   const handleRequestEdit = useCallback(
     (channelId: string) => setEditing(channelDefs.find((c) => c.id === channelId) ?? null),
@@ -378,16 +392,18 @@ export function ChannelsSection({ onNavigate }: { onNavigate?: () => void }): Re
     onNavigate?.();
   }, [onNavigate]);
 
-  // Aggregate attention for the collapsed header: unread across the named
-  // channels (the Activity row's merged count would double-count them).
-  const unreadTotal = channelIds.reduce((sum, id) => sum + (unreadByChannel[id] ?? 0), 0);
+  // Aggregate attention for the collapsed header: DIRECTED unread across the
+  // named channels (the Activity row's merged count would double-count them).
+  // A collapsed section is exactly where an ambient count would mislead —
+  // the rows that would have shown "new, but not for you" aren't rendered.
+  const directedTotal = channelIds.reduce((sum, id) => sum + (directedByChannel[id] ?? 0), 0);
 
   return (
     <>
       <NavSection
         id="channels"
         label="Channels"
-        collapsedBadge={unreadTotal}
+        collapsedBadge={directedTotal}
         actions={
           <Tooltip>
             <TooltipTrigger asChild>
@@ -408,10 +424,12 @@ export function ChannelsSection({ onNavigate }: { onNavigate?: () => void }): Re
           <SidebarRow>
             <SidebarMenuButton type="button" isActive={activityOpen} onClick={handleActivity}>
               <UsersRound />
-              <span className="min-w-0 flex-1 truncate">Activity</span>
+              <span className={cn('min-w-0 flex-1 truncate', activityUnread > 0 && 'font-semibold')}>Activity</span>
             </SidebarMenuButton>
-            {!activityOpen && activityUnread > 0 && (
-              <SidebarMenuBadge className="h-4 min-w-4 text-xs">{activityUnread}</SidebarMenuBadge>
+            {!activityOpen && activityDirected > 0 && (
+              <SidebarMenuBadge className="h-4 min-w-4 text-xs" aria-label={`${activityDirected} directed at you`}>
+                {activityDirected}
+              </SidebarMenuBadge>
             )}
           </SidebarRow>
           {channelIds.map((channelId) => (
@@ -421,6 +439,7 @@ export function ChannelsSection({ onNavigate }: { onNavigate?: () => void }): Re
               selected={selectedChannel === channelId}
               manageable={channelId !== TEAM_CHANNEL}
               unread={unreadByChannel[channelId] ?? 0}
+              directed={directedByChannel[channelId] ?? 0}
               onSelect={handleSelect}
               onRequestEdit={handleRequestEdit}
               onRequestDelete={handleRequestDelete}
@@ -507,21 +526,24 @@ export function DmsSection({ onNavigate }: { onNavigate?: () => void }): React.J
   const unreadByChannel = useStore($residentUnreadByChannel);
   const roster = useMemo(() => storeData.residentAgents ?? [], [storeData.residentAgents]);
 
-  // Latest message per user↔agent thread, newest first.
+  const chatLog = useStore($chatLog);
+
+  // Latest message per thread of YOURS (the collective `user` threads plus
+  // your own personal threads), newest first.
   const threadIds = useMemo(() => {
     const latest = new Map<string, ResidentChannelMessage>();
-    for (const m of storeData.residentChannels ?? []) {
-      if (dmParticipants(m.channel)?.includes(USER_PARTICIPANT)) {
+    for (const m of chatLog) {
+      if (dmParticipants(m.channel) && isOwnDmChannel(m.channel)) {
         latest.set(m.channel, m);
       }
     }
     return [...latest.entries()].sort((a, b) => b[1].at - a[1].at).map(([id]) => id);
-  }, [storeData.residentChannels]);
+  }, [chatLog]);
 
   const rows = useMemo(() => {
     const out = [...threadIds];
     const selected = view.selectedChannel;
-    if (selected && dmParticipants(selected)?.includes(USER_PARTICIPANT) && !out.includes(selected)) {
+    if (selected && dmParticipants(selected) && isOwnDmChannel(selected) && !out.includes(selected)) {
       out.unshift(selected);
     }
     return out;
@@ -549,7 +571,9 @@ export function DmsSection({ onNavigate }: { onNavigate?: () => void }): React.J
     <NavSection id="dms" label="Direct messages" collapsedBadge={unreadTotal}>
       <SidebarMenu aria-label="Direct messages">
         {rows.map((channelId) => {
-          const peerId = dmParticipants(channelId)?.find((p) => p !== USER_PARTICIPANT);
+          // The agent side of the thread — personal threads pair a named
+          // human with an agent, so exclude the human-grade participant.
+          const peerId = dmParticipants(channelId)?.find((p) => p !== USER_PARTICIPANT && !isHumanGradeParticipant(p));
           const peer = peerId ? roster.find((a) => a.id === peerId) : undefined;
           const title = peer?.name ?? peerId ?? 'You';
           const presence = peerId ? presenceStatus(statuses[peerId]?.state, peer?.enabled ?? true) : undefined;

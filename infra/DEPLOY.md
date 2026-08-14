@@ -1,6 +1,6 @@
 # Deploying the Omni Code Launcher (Azure)
 
-The runbook for the cloud deployment (ACI host-runs-agent model). Two workflows:
+The runbook for the cloud deployment. Two workflows:
 
 - **A. Ship a code change** (the common case) — build an image, push, pin the
   digest, restart. No `deploy.sh`.
@@ -19,13 +19,11 @@ The runbook for the cloud deployment (ACI host-runs-agent model). Two workflows:
 - Docker, Node, and `az` CLI
 - `source infra/deploy.env` (gives you `$RG`, `$SITE_NAME`, `$ACR_NAME`, …)
 
-## The three images (all in `$ACR_NAME` = omnilauncheracr)
+## The launcher image (in `$ACR_NAME` = omnilauncheracr)
 
-| Image                             | Built by                          | Contents                                                     |
-| --------------------------------- | --------------------------------- | ------------------------------------------------------------ |
-| `omni-launcher:latest`            | `scripts/build-launcher-image.sh` | the server (control plane); bakes `omni-code` + `omniagents` |
-| `omni-launcher-devbox-min:latest` | `npm run build:devbox-min`        | thin sandbox (fast `aci` profile, ~166 MB)                   |
-| `omni-launcher-devbox:latest`     | `npm run build:devbox`            | full sandbox (`aci-desktop`: IDE + VNC, ~3.3 GB)             |
+| Image                  | Built by                          | Contents                                                     |
+| ---------------------- | --------------------------------- | ------------------------------------------------------------ |
+| `omni-launcher:latest` | `scripts/build-launcher-image.sh` | the server (control plane); bakes `omni-code` + `omniagents` |
 
 The launcher image version is pinned in **one** place — `src/lib/omni-version.ts`
 (`OMNI_CODE_VERSION`); the build script reads it, and `omni-code` pins
@@ -69,16 +67,6 @@ az webapp restart -g "$RG" -n "$SITE_NAME"
 curl -s -o /dev/null -w "%{http_code}\n" "https://$SITE_NAME.azurewebsites.net/"
 ```
 
-Sandbox-image change? Rebuild + push the relevant devbox image instead, e.g.:
-
-```bash
-az acr login -n "$ACR_NAME"
-docker build -f sandbox-image/Dockerfile.min -t "$ACR_NAME.azurecr.io/omni-launcher-devbox-min:latest" sandbox-image
-docker push "$ACR_NAME.azurecr.io/omni-launcher-devbox-min:latest"
-```
-
-ACI pulls the devbox image fresh per sandbox, so no digest pin/restart needed.
-
 ## B. Provision / change infrastructure
 
 `deploy.sh` runs `what-if`, then applies `main.bicep`. It **reuses** the secrets
@@ -92,9 +80,9 @@ source infra/deploy.env
 # linuxFxVersion to the :latest TAG, which won't update on later restarts.
 ```
 
-First-ever provision into an empty registry: build + push the three images
-first (workflow A + the devbox builds), or `IMPORT_IMAGES=1 SOURCE_ACR=<other>`
-to seed from another registry.
+First-ever provision into an empty registry: build + push the launcher image
+first (workflow A), or `IMPORT_IMAGES=1 SOURCE_ACR=<other>` to seed from
+another registry.
 
 ## Post-provision
 
@@ -108,9 +96,6 @@ to seed from another registry.
 | Setting                                                         | Meaning                                                                                              |
 | --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
 | `OMNI_CLI_PATH=/usr/local/bin/omni`                             | use the image-baked CLI (no runtime venv install)                                                    |
-| `OMNI_AZURE_IMAGE`                                              | fast/default sandbox image (`-devbox-min`)                                                           |
-| `OMNI_AZURE_DESKTOP_IMAGE`                                      | desktop sandbox image (`-devbox`)                                                                    |
-| `OMNI_AZURE_SUBNET_ID`                                          | delegated subnet → ACI gets private IPs (desktop profile)                                            |
 | `OMNI_DATABASE_URL`, `OMNI_RUNTIME_TOKEN_SECRET`                | secrets (also in `deploy.env`)                                                                       |
 | `OMNIAGENTS_HISTORY_URL`                                        | omniagents session DB (Postgres, `omni_sessions`) — chat history durability                          |
 | `OMNI_AZURE_SNAPSHOT_CONTAINER` / `OMNI_AZURE_AUDIO_CONTAINER`  | blob containers for sandbox snapshot tars + realtime audio chunks                                    |
@@ -157,18 +142,16 @@ a valid Bearer is honoured.
 
 Everything except the launcher's public front door is VNet-only:
 
-| Resource               | Access                                                                                                                                |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| App Service (launcher) | public + EasyAuth (the only ingress)                                                                                                  |
-| Postgres               | private (VNet-integrated, public off)                                                                                                 |
-| Key Vault              | private endpoint, public off                                                                                                          |
-| Storage / Azure Files  | private endpoint (`file`), public off                                                                                                 |
-| ACR                    | public, **admin user off** — launcher + sandboxes pull via managed-identity AcrPull (ACI can't pull from a private-endpoint-only ACR) |
-| Sandboxes (ACI)        | VNet-joined (private IPs); `omni-aci-nsg` denies sandbox→DB / →launcher / →peer                                                       |
+| Resource               | Access                                                                       |
+| ---------------------- | ---------------------------------------------------------------------------- |
+| App Service (launcher) | public + EasyAuth (the only ingress)                                         |
+| Postgres               | private (VNet-integrated, public off)                                        |
+| Key Vault              | private endpoint, public off                                                 |
+| Storage / Azure Files  | private endpoint (`file`), public off                                        |
+| ACR                    | public, **admin user off** — the launcher pulls via managed-identity AcrPull |
 
-Implications: **all** sandbox launches now pay the VNet NIC-provisioning time
-(the fast profile no longer skips it); private DNS zones (`postgres`,
-`vaultcore`, `file`) are VNet-linked so names resolve to the private IPs.
+Implications: private DNS zones (`postgres`, `vaultcore`, `file`) are
+VNet-linked so names resolve to the private IPs.
 **Encryption at rest is customer-managed (CMK)** for Storage + Postgres — an RSA
 key in Key Vault (`cmk-encryption`); the managed identity holds the crypto role.
 No ACR admin password exists; image pushes use `az acr login` (AAD).

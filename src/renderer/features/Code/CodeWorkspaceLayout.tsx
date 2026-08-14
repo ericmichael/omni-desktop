@@ -38,6 +38,13 @@ type CodeWorkspaceLayoutProps = {
   sandboxOptions?: { value: string; label: string }[];
   currentSandboxProfile?: string;
   onSandboxChange?: (value: string) => void;
+  /**
+   * Capability names of the attached execution environment. Gates
+   * capability-dependent dock apps: Terminal hides when `pty` is absent
+   * (wasm sandboxes run commands to completion — nothing to attach a
+   * shell to). Undefined = unknown environment; everything stays visible.
+   */
+  environmentCapabilities?: string[];
   composerExtras?: ReactNode;
   onClientToolCall?: ClientToolCallHandler;
   pendingPlan?: import('@/shared/chat-types').PlanItem | null;
@@ -110,6 +117,7 @@ export const CodeWorkspaceLayout = memo(
     sandboxOptions,
     currentSandboxProfile,
     onSandboxChange,
+    environmentCapabilities,
     composerExtras,
     onClientToolCall,
     pendingPlan,
@@ -133,7 +141,32 @@ export const CodeWorkspaceLayout = memo(
     const registry = useMemo(() => buildAppRegistry(store.customApps ?? []), [store.customApps]);
     // The dock only surfaces apps marked column-scoped. Global-only custom
     // apps are opened via the app launcher as their own deck column instead.
-    const dockApps = useMemo(() => registry.filter((app) => app.columnScoped && app.id !== 'chat'), [registry]);
+    // Capability-dependent apps additionally require the attached
+    // environment to affirmatively support them: Terminal appears only
+    // once the environment reports the `pty` capability — no environment
+    // yet means no shell to offer, and wasm sandboxes never grow one
+    // (terminal.create would only return a typed refusal).
+    const dockApps = useMemo(
+      () =>
+        registry.filter((app) => {
+          if (!app.columnScoped || app.id === 'chat') {
+            return false;
+          }
+          if (app.id === 'terminal' && !environmentCapabilities?.includes('pty')) {
+            return false;
+          }
+          return true;
+        }),
+      [registry, environmentCapabilities]
+    );
+    // If Terminal was already open when its capability disappeared (column
+    // relaunched, profile switched to a wasm sandbox), bounce back to chat
+    // instead of stranding the user on a panel whose dock icon vanished.
+    useEffect(() => {
+      if (activeApp === 'terminal' && !environmentCapabilities?.includes('pty')) {
+        onActiveAppChange?.('chat');
+      }
+    }, [activeApp, environmentCapabilities, onActiveAppChange]);
 
     // Register this column's agent controller (by tabId) so the global
     // orchestrator can drive it via the `column_*` tools. The App hands the

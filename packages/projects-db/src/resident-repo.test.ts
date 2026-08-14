@@ -153,6 +153,22 @@ describe('resident channels + message log', () => {
     repo.pruneResidentMessages(3);
     expect(repo.listResidentMessages(10).map((m) => m.id)).toEqual([8, 9, 10]);
   });
+
+  it('keyset paging (chat-v1 list_messages): after pages forward, before/neither the newest window', () => {
+    for (let i = 1; i <= 6; i++) {
+      repo.appendResidentMessage(messageRow(i, { channel: i % 2 === 0 ? 'team' : 'ops' }));
+    }
+    // Neither cursor → newest window, ascending.
+    expect(repo.listResidentMessagesPage({ limit: 2 }).map((m) => m.id)).toEqual([5, 6]);
+    // Forward from a cursor.
+    expect(repo.listResidentMessagesPage({ after: 2, limit: 2 }).map((m) => m.id)).toEqual([3, 4]);
+    // History before a cursor.
+    expect(repo.listResidentMessagesPage({ before: 5, limit: 2 }).map((m) => m.id)).toEqual([3, 4]);
+    // Channel scope composes with every mode.
+    expect(repo.listResidentMessagesPage({ channel: 'team', limit: 10 }).map((m) => m.id)).toEqual([2, 4, 6]);
+    expect(repo.listResidentMessagesPage({ channel: 'ops', after: 1, limit: 1 }).map((m) => m.id)).toEqual([3]);
+    expect(repo.listResidentMessagesPage({ channel: 'ops', before: 5, limit: 10 }).map((m) => m.id)).toEqual([1, 3]);
+  });
 });
 
 describe('resident alarms', () => {

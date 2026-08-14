@@ -15,6 +15,7 @@ import type { IncomingHttpHeaders } from 'node:http';
 
 import { uuidv4 } from '@/lib/uuid';
 import { isEnterpriseBuild } from '@/main/platform-mode';
+import { registerChatWsRoute } from '@/server/chat-ws';
 import { CODEX_REFRESH_PATH, registerCodexRefreshRoute } from '@/server/codex-refresh-http';
 import { setupLocalTunnelProxy } from '@/server/local-tunnel-proxy';
 import { wireClientManagers, wireGlobalHandlers } from '@/server/managers';
@@ -254,6 +255,7 @@ const main = async () => {
     resolveActiveTeam,
     pgSecret,
     machineRegistry,
+    getResidentManager,
   } = await wireGlobalHandlers({
     wsHandler,
     store,
@@ -381,7 +383,10 @@ const main = async () => {
             sessionId,
             teamId,
             ready,
-            principal
+            principal,
+            // Display name rides the session so chat-v1 posts from this
+            // connection sign as the person, not a bare principal id.
+            claims.displayName ?? null
           );
           // Replay frames that arrived during async resolution.
           for (const raw of buffered) {
@@ -392,6 +397,22 @@ const main = async () => {
           socket.close(4500, 'Server error during team resolution');
         }
       })();
+    });
+
+    // chat-v1's public binding (docs/chat-v1-plan.md): JSON-RPC over WS for
+    // external clients (mobile apps, network bridges). Same token auth as
+    // /ws, plus raw bridge keys from OMNI_CHAT_BRIDGE_KEYS.
+    registerChatWsRoute(f, {
+      runtimeTokenSecret,
+      getResidentManager,
+      teamsEnabled,
+      ensureUserBootstrapped,
+      resolveActiveTeam,
+      principalClaims,
+      bridgeKeys: (process.env['OMNI_CHAT_BRIDGE_KEYS'] ?? '')
+        .split(',')
+        .map((k) => k.trim())
+        .filter((k) => k.length > 0),
     });
   });
 

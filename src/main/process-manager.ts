@@ -441,6 +441,7 @@ export class ProcessManager {
         workspaceRoot: runtime.workspaceRoot,
         ...(runtime.defaultCwd ? { defaultCwd: runtime.defaultCwd } : {}),
         ...(runtime.mounts ? { mounts: runtime.mounts } : {}),
+        ...(runtime.environmentCapabilities ? { environmentCapabilities: runtime.environmentCapabilities } : {}),
         services: runtime.services,
         containerId: runtime.containerId,
         ...(runtime.paused !== undefined ? { paused: runtime.paused } : {}),

@@ -189,20 +189,6 @@ mount -t 9p -o trans=virtio,version=9p2000.L,msize=104857600 workspace /home/use
 # Fix ownership — use UID 1000 (the default "user" account).
 chown -R 1000:1000 /home/user 2>/dev/null || true
 
-# Read network allowlist from QEMU fw_cfg if available.
-ALLOWLIST=""
-if [[ -f /sys/firmware/qemu_fw_cfg/by_name/opt/omni/net_allowlist/raw ]]; then
-    ALLOWLIST=$(cat /sys/firmware/qemu_fw_cfg/by_name/opt/omni/net_allowlist/raw)
-fi
-
-# Apply network isolation if allowlist is set.
-if [[ -n "${ALLOWLIST}" ]]; then
-    export OMNI_SANDBOX_NETWORK_ALLOWLIST="${ALLOWLIST}"
-    if [[ -f /usr/local/bin/apply-network-isolation.sh ]]; then
-        source /usr/local/bin/apply-network-isolation.sh
-    fi
-fi
-
 # Start PostgreSQL.
 postgres_data_dir="/var/lib/postgresql/data"
 postgres_bin_dir="$(pg_config --bindir 2>/dev/null || echo /usr/lib/postgresql/16/bin)"

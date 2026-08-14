@@ -113,8 +113,15 @@ describe('store→db migration + hydration', () => {
     // Legacy {id,text} memory got a slug key; the orphan was skipped.
     expect(snapshot.residentMemories['sable']![0]!.key).toBe('the-deploy-window-is-friday');
     expect(snapshot.residentMemories['ghost']).toBeUndefined();
-    expect(snapshot.residentChannels.map((m) => m.id)).toEqual([1, 2]);
-    expect(snapshot.residentChannelDefs.map((d) => d.id)).toEqual(['deploy-log']);
+    // Channel data left the snapshot for chat-v1 — read it off the manager.
+    const { messages } = await manager.listMessages({});
+    expect(messages.map((m) => m.id)).toEqual([1, 2]);
+    expect(
+      manager
+        .listChatChannels()
+        .filter((c) => c.kind === 'named')
+        .map((c) => c.id)
+    ).toEqual(['deploy-log']);
     expect(snapshot.residentAlarms['sable']).toHaveLength(1);
 
     // Store keys are cleared — the migration is one-shot.
@@ -151,18 +158,18 @@ describe('store→db migration + hydration', () => {
 });
 
 describe('write-through persistence', () => {
-  it('create() mints an opaque res_ id and lands in the DB with the morning-hour default', async () => {
+  it('create() mints an opaque res_ id; no morning beat unless opted in (quiet-start)', async () => {
     const manager = buildManager({ residentMorningBeats: {} });
     await manager.whenReady;
 
     const agent = manager.create({ name: 'Sable', role: 'engineer', personaText: 'p' });
     expect(agent.id).toMatch(/^res_/);
-    expect(agent.morningHour).toBe(8);
+    expect(agent.morningHour).toBeNull();
     await manager.cleanup(); // flushes the persist chain
 
     const rows = await repo.listResidents();
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ id: agent.id, name: 'Sable', morning_hour: 8, enabled: 1 });
+    expect(rows[0]).toMatchObject({ id: agent.id, name: 'Sable', morning_hour: null, enabled: 1 });
   });
 
   it('rejects a name whose @handle is taken, and frees it on rename', async () => {

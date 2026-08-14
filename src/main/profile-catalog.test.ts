@@ -74,7 +74,7 @@ describe('listProfiles', () => {
     const profiles = listProfiles(deps);
     const devbox = profiles.find((p) => p.name === 'devbox');
     expect(devbox).toMatchObject({
-      label: 'Devbox (Docker)',
+      label: 'Workstation (desktop + tools)',
       clientType: 'docker',
       builtin: true,
       path: path.join(root, 'bundled', 'devbox.yml'),

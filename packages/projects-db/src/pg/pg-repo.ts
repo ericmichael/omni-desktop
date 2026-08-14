@@ -842,6 +842,38 @@ export class PgProjectsRepo implements IProjectsRepo {
     ]);
   }
 
+  /** Keyset page, ascending — see the interface doc. RLS scopes every
+   *  branch to the tenant, including the newest-window subquery. */
+  listResidentMessagesPage(opts: {
+    channel?: string;
+    after?: number;
+    before?: number;
+    limit: number;
+  }): Promise<ResidentMessageRow[]> {
+    const where: string[] = [];
+    const params: (string | number)[] = [];
+    const bind = (value: string | number): string => {
+      params.push(value);
+      return `$${params.length}`;
+    };
+    if (opts.channel !== undefined) {
+      where.push(`channel = ${bind(opts.channel)}`);
+    }
+    if (opts.after !== undefined) {
+      where.push(`id > ${bind(opts.after)}`);
+    }
+    if (opts.before !== undefined) {
+      where.push(`id < ${bind(opts.before)}`);
+    }
+    const cond = where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';
+    const limit = bind(opts.limit);
+    const sql =
+      opts.after !== undefined
+        ? `SELECT * FROM resident_messages ${cond} ORDER BY id LIMIT ${limit}`
+        : `SELECT * FROM (SELECT * FROM resident_messages ${cond} ORDER BY id DESC LIMIT ${limit}) page ORDER BY id`;
+    return this.rows<ResidentMessageRow>(sql, params);
+  }
+
   listResidentMessages(limit: number): Promise<ResidentMessageRow[]> {
     return this.rows<ResidentMessageRow>(
       'SELECT * FROM (SELECT * FROM resident_messages ORDER BY id DESC LIMIT $1) tail ORDER BY id',

@@ -50,6 +50,9 @@ export type HandlerContext = {
   tenantId: string;
   /** Authenticated identity. Equals tenantId in single-user/local mode; the EasyAuth principal in cloud. */
   principalId: string;
+  /** EasyAuth display name resolved at connect time (cloud only) — how a
+   *  named principal signs chat-v1 posts. Null when the IdP offered none. */
+  displayName?: string | null;
   sessionId: string;
   ws: WebSocket | null;
   sendToWindow: <T extends keyof IpcRendererEvents>(channel: T, ...args: IpcRendererEvents[T]) => void;
@@ -66,6 +69,8 @@ type PersistentSession = {
   tenantId: string;
   /** Authenticated identity (EasyAuth principal; equals tenantId in single-user mode). */
   principalId: string;
+  /** EasyAuth display name captured at connect (cloud only). */
+  displayName?: string | null;
   ws: WebSocket | null;
   handlers: Map<string, CtxHandler>;
   cleanup?: () => Promise<void>;
@@ -257,7 +262,8 @@ export class WsHandler {
     sessionId?: string,
     tenantId: string = DEFAULT_TENANT,
     ready?: Promise<void>,
-    principalId: string = tenantId
+    principalId: string = tenantId,
+    displayName?: string | null
   ): void {
     // Persistent sessions are keyed by tenant + principal + client sessionId so a
     // client can only ever reattach to its OWN (team, principal) session — a
@@ -274,6 +280,9 @@ export class WsHandler {
       }
       existingSession.ws = ws;
       existingSession.ready = ready;
+      if (displayName !== undefined) {
+        existingSession.displayName = displayName;
+      }
       this.wsSessions.set(ws, existingSession);
       console.log(`[ws-handler] Session ${existingSession.sessionId} reattached (tenant ${tenantId})`);
     } else {
@@ -283,6 +292,7 @@ export class WsHandler {
         sessionId: id,
         tenantId,
         principalId,
+        ...(displayName !== undefined ? { displayName } : {}),
         ws,
         handlers: new Map(),
         ready,
@@ -458,6 +468,7 @@ export class WsHandler {
     const ctx: HandlerContext = {
       tenantId: session?.tenantId ?? DEFAULT_TENANT,
       principalId: session?.principalId ?? session?.tenantId ?? DEFAULT_TENANT,
+      ...(session?.displayName !== undefined ? { displayName: session.displayName } : {}),
       sessionId: session?.sessionId ?? '',
       ws,
       sendToWindow: session?.sendToWindow ?? (() => {}),

@@ -1,6 +1,7 @@
 /**
  * Build the human-readable label shown for the active sandbox profile (the
- * compact "pill"). Examples: "Host", "Devbox", "Cloud · Fast", "Custom (dev)".
+ * compact "pill"). Examples: "My computer", "Workstation", "Cloud · Fast",
+ * "Custom (dev)".
  *
  * The label is keyed off the profile *name*; unknown profile names render as
  * title-cased text so user-created profiles still display cleanly. For
@@ -14,8 +15,9 @@ import { $machines } from '@/renderer/services/machines';
 import type { MachineSummary } from '@/shared/types';
 
 const KNOWN_PROFILE_LABELS: Record<string, string> = {
-  host: 'Host',
-  devbox: 'Devbox',
+  host: 'My computer',
+  devbox: 'Workstation',
+  wasmbox: 'Mini computer',
   platform: 'Platform',
 };
 

@@ -11,11 +11,14 @@ import { pathToFileURL } from 'url';
 
 import { emptyMcpConfig, emptyModelsConfig, emptyNetworkConfig, parseEnvVars } from '@/lib/agent-config';
 import { getArtifactsDir } from '@/lib/artifacts';
+import { pullRequestEventDetail, pullRequestSystemLine } from '@/lib/pull-request-watch';
 import { parseResidentPrincipal } from '@/lib/resident-agent';
 import { winToWslPath } from '@/lib/wsl-path';
 import { createAppControlManager } from '@/main/app-control-manager';
+import { AutomationManager, registerAutomationHandlers } from '@/main/automation-manager';
 import { listRepos as azureListRepos } from '@/main/azure-repos';
 import { createBrowserManager } from '@/main/browser-manager';
+import { registerChatHandlers } from '@/main/chat-service';
 import {
   getStatus as codexStatus,
   loginWithBrowser,
@@ -58,6 +61,7 @@ import { getBundledProfilesDir } from '@/main/profile-resolver';
 import { backfillProjectConfigs } from '@/main/project-config-backfill';
 import { closeProjectDb, getDb, openProjectDb } from '@/main/project-db';
 import { createProjectManager } from '@/main/project-manager';
+import { createPullRequestWatcher } from '@/main/pull-request-watcher';
 import { registerResidentHandlers, ResidentAgentManager } from '@/main/resident-agent-manager';
 import { wireReverseRpcRouter } from '@/main/reverse-rpc-bridge';
 import { RoutineBridge } from '@/main/routine-bridge';
@@ -412,7 +416,22 @@ const residentAgentManager = new ResidentAgentManager({
   getSnapshot: () => (main.getStoreSnapshot ? main.getStoreSnapshot() : store.store),
 });
 registerResidentHandlers(main.ipc, () => residentAgentManager);
+// chat-v1's internal binding (docs/chat-v1-plan.md): messaging methods under
+// their wire names, resolved against the same manager.
+registerChatHandlers(main.ipc, () => residentAgentManager);
 residentAgentManager.start();
+
+// Automations: user-defined event rules (PR event / channel message /
+// schedule) that wake a resident with a standing instruction.
+const automationManager = new AutomationManager({
+  store,
+  deliver: (agentId, detail) => residentAgentManager.deliverAutomation(agentId, detail),
+  subscribeChatEvents: residentAgentManager.subscribeChatEvents,
+  sendToWindow: main.sendToWindow,
+  getSnapshot: () => (main.getStoreSnapshot ? main.getStoreSnapshot() : store.store),
+});
+const automationChannels = registerAutomationHandlers(main.ipc, () => automationManager);
+automationManager.start();
 
 // Create ConsoleManager — proxies terminal:* IPC into omni serve's
 // WebSocket. Constructed after ProcessManager because it needs the
@@ -506,6 +525,26 @@ const [projectManager, cleanupProject] = createProjectManager({
 // from SQLite. Resident durable keys ride along via ProjectManager's
 // snapshotExtras, so this single snapshot is complete everywhere it's used.
 main.getStoreSnapshot = () => projectManager.getStoreSnapshot();
+// Watched-PR poller: state flips persist through the links' owners; review
+// verdicts / merges on ticket-linked PRs wake the assigned resident.
+const [, cleanupPrWatcher] = createPullRequestWatcher({
+  getSnapshot: () => projectManager.getStoreSnapshot(),
+  resolveGitToken: (id) => secretStore.getGitToken(id),
+  fetchFn: ((input, init) => net.fetch(input as string, init)) as typeof globalThis.fetch,
+  updateTicket: (ticketId, patch) => projectManager.updateTicket(ticketId, patch),
+  setGlobalLinks: (links) => store.set('pullRequestLinks', links),
+  onEvent: (ev) => {
+    // Team visibility first: every PR event lands in #system regardless of
+    // whether anyone wakes — the Activity feed is the complete record.
+    residentAgentManager.postSystemNotice(pullRequestSystemLine(ev));
+    const residentId = ev.assignee ? parseResidentPrincipal(ev.assignee) : null;
+    if (residentId) {
+      residentAgentManager.deliverPullRequestEvent(residentId, pullRequestEventDetail(ev));
+    }
+    // User-defined rules see every PR event, ticket-linked or not.
+    automationManager.onPullRequestEvent(ev);
+  },
+});
 const [, cleanupExtensions] = createExtensionManager({
   ipc: main.ipc,
   store,
@@ -665,8 +704,15 @@ async function cleanup() {
         ipcMain.removeHandler(channel);
       }
     })(),
+    (async () => {
+      automationManager.stop();
+      for (const channel of automationChannels) {
+        ipcMain.removeHandler(channel);
+      }
+    })(),
     residentAgentManager.cleanup(),
     cleanupProcessManager(),
+    Promise.resolve(cleanupPrWatcher()),
     cleanupProject(),
     cleanupExtensions(),
     cleanupBrowser(),

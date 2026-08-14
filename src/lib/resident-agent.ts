@@ -10,7 +10,13 @@
  * module is a pure function over plain data so it unit-tests directly.
  */
 
-import type { ResidentAgent, ResidentChannelDef, ResidentChannelMessage, ResidentMemoryEntry } from '@/shared/types';
+import type {
+  ChatChannel,
+  ResidentAgent,
+  ResidentChannelDef,
+  ResidentChannelMessage,
+  ResidentMemoryEntry,
+} from '@/shared/types';
 
 /** Reserved ProcessManager id prefix, alongside `"chat"` and `"global"`. */
 export const RESIDENT_PROCESS_PREFIX = 'agent:';
@@ -35,6 +41,83 @@ export const isResidentProcessId = (processId: string): boolean => processId.sta
 
 /** The user's stable participant id in channels. */
 export const USER_PARTICIPANT = 'user';
+
+// ---------------------------------------------------------------------------
+// Participants (chat-v1 identity grammar — docs/chat-v1-plan.md)
+// ---------------------------------------------------------------------------
+
+export type ParticipantKind = 'human' | 'agent' | 'system' | 'external';
+
+/**
+ * Classify a message's `from` id. The grammar is backwards compatible with
+ * every stored row: `system` and `user` are the legacy fixed ids, new
+ * namespaced forms (`human:<principalId>` for cloud team members,
+ * `ext:<network>:<id>` for bridged users) parse by prefix, and anything
+ * else is a bare roster id — exactly what agent rows have always stored.
+ */
+export const participantKind = (fromId: string): ParticipantKind => {
+  if (fromId === 'system') {
+    return 'system';
+  }
+  if (fromId === USER_PARTICIPANT || fromId.startsWith('human:')) {
+    return 'human';
+  }
+  if (fromId.startsWith('ext:')) {
+    return 'external';
+  }
+  return 'agent';
+};
+
+/** Whether a participant id names a human — the collective `user` or a
+ *  specific `human:<principalId>`. The wake machinery treats bridged
+ *  external users as human-grade too (a person deliberately talking), so
+ *  callers deciding wake semantics want {@link isHumanGradeParticipant}. */
+export const isHumanParticipant = (fromId: string): boolean => participantKind(fromId) === 'human';
+
+/** Human OR bridged-external — "a person spoke", for wake classification. */
+export const isHumanGradeParticipant = (fromId: string): boolean => {
+  const kind = participantKind(fromId);
+  return kind === 'human' || kind === 'external';
+};
+
+/**
+ * The @address of a named human or bridged user, for agents' `dm(to:)` —
+ * derived from the display name when one is known (the same rename-follows
+ * rule as agent handles), else from the id's own tail. Purely an addressing
+ * convenience: exact participant ids are always accepted too.
+ */
+export const humanHandle = (id: string, name?: string | null): string => {
+  if (name?.trim()) {
+    return residentHandle(name);
+  }
+  if (id.startsWith('human:')) {
+    return residentHandle(id.slice('human:'.length));
+  }
+  if (id.startsWith('ext:')) {
+    return residentHandle(id.slice(id.lastIndexOf(':') + 1));
+  }
+  return residentHandle(id);
+};
+
+/**
+ * The named people visible in a log window (`human:*`/`ext:*` authors with
+ * their latest known display name). This IS the human directory: the
+ * launcher keeps no separate roster of people, so "who can an agent DM" =
+ * "who has spoken where the agent could see" — which also bounds it to the
+ * cached tail, deliberately (you can DM people who are active).
+ */
+export const knownHumansFromLog = (
+  log: ReadonlyArray<Pick<ResidentChannelMessage, 'from' | 'fromName'>>
+): Map<string, string | null> => {
+  const out = new Map<string, string | null>();
+  for (const m of log) {
+    const kind = participantKind(m.from);
+    if ((kind === 'human' && m.from !== USER_PARTICIPANT) || kind === 'external') {
+      out.set(m.from, m.fromName ?? out.get(m.from) ?? null);
+    }
+  }
+  return out;
+};
 
 const slugify = (name: string): string =>
   name
@@ -78,10 +161,28 @@ export const memberChannelIds = (
   agentId: string
 ): string[] => [TEAM_CHANNEL, ...defs.filter((d) => !d.members || d.members.includes(agentId)).map((d) => d.id)];
 
-/** Canonical DM channel id for a participant pair (order-insensitive). */
+/** A named channel def as chat-v1 clients see it (docs/chat-v1-plan.md). */
+export const chatChannelFromDef = (def: ResidentChannelDef): ChatChannel => ({
+  id: def.id,
+  kind: 'named',
+  ...(def.description ? { description: def.description } : {}),
+  ...(def.members ? { members: [...def.members] } : {}),
+  createdAt: def.createdAt,
+});
+
+/**
+ * Canonical DM channel id for a participant pair (order-insensitive).
+ *
+ * Two encodings, one per participant vocabulary: the legacy `dm:<a>:<b>`
+ * form survives verbatim for colon-free participants (`user`, roster ids —
+ * every pre-chat-v1 channel), while pairs whose ids carry the participant
+ * grammar's namespaces (`human:<pid>`, `ext:<net>:<id>`) use `~` as the
+ * pair separator, which no participant id may contain. Same pair → same id
+ * always; nothing re-encodes existing channels.
+ */
 export const dmChannelId = (a: string, b: string): string => {
-  const [x, y] = [a, b].sort();
-  return `dm:${x}:${y}`;
+  const [x, y] = [a, b].sort() as [string, string];
+  return x.includes(':') || y.includes(':') ? `dm:${x}~${y}` : `dm:${x}:${y}`;
 };
 
 /** The two participants of a DM channel id, or null for non-DM channels. */
@@ -90,12 +191,94 @@ export const dmParticipants = (channel: string): [string, string] | null => {
     return null;
   }
   const rest = channel.slice(3);
+  const tilde = rest.indexOf('~');
+  if (tilde > 0) {
+    return [rest.slice(0, tilde), rest.slice(tilde + 1)];
+  }
   const sep = rest.indexOf(':');
   if (sep <= 0) {
     return null;
   }
   return [rest.slice(0, sep), rest.slice(sep + 1)];
 };
+
+/**
+ * The roster ids a post to `channel` actually reaches — the inverse of
+ * {@link memberChannelIds}, and the audience a read receipt or working
+ * indicator is computed against. `#team` is all-hands; a named channel is
+ * its member list (absent = everyone); a DM channel is its non-user
+ * participant. Unknown ids and `system` have no agent audience.
+ */
+export const channelAudienceIds = (
+  channel: string,
+  defs: ReadonlyArray<Pick<ResidentChannelDef, 'id' | 'members'>>,
+  rosterIds: readonly string[]
+): string[] => {
+  const dm = dmParticipants(channel);
+  if (dm) {
+    return dm.filter((p) => p !== USER_PARTICIPANT && rosterIds.includes(p));
+  }
+  if (channel === TEAM_CHANNEL) {
+    return [...rosterIds];
+  }
+  const def = defs.find((d) => d.id === channel);
+  if (!def) {
+    return [];
+  }
+  return def.members ? def.members.filter((id) => rosterIds.includes(id)) : [...rosterIds];
+};
+
+// ---------------------------------------------------------------------------
+// Directed traffic (the user's attention split)
+// ---------------------------------------------------------------------------
+
+/**
+ * Whether a message is aimed AT the user, as against ambient traffic the
+ * user may read at leisure. Directed rows earn a count badge; everything
+ * else only emboldens its sidebar row.
+ *
+ * The split deliberately mirrors the agents' own `WAKE_NOW_KINDS` vs
+ * digest classification: the same question ("is this addressed to me, or
+ * am I overhearing it?") should get the same answer whoever is asking.
+ *
+ *   - anything in a DM thread the user is part of — a DM is address by
+ *     construction
+ *   - a reply under a thread a HUMAN rooted — someone answered you
+ *   - `#system` incidents — the attention channel exists to be noticed
+ *
+ * Humans' own posts are never directed at the user (v1 keeps the collective
+ * human view: every human shares one read/badge perspective — see the
+ * participant-model section of docs/chat-v1-plan.md).
+ */
+export const isDirectedAtUser = (
+  msg: Pick<ResidentChannelMessage, 'channel' | 'from' | 'replyTo'>,
+  /** Author of a thread root by id — see {@link rootAuthors}. */
+  rootAuthorOf: (rootId: number) => string | undefined,
+  /** The viewer's own participant id — personal DM threads are directed at
+   *  their named participant only. The collective `user` threads count for
+   *  every viewer. */
+  viewerId: string = USER_PARTICIPANT
+): boolean => {
+  if (isHumanParticipant(msg.from)) {
+    return false;
+  }
+  if (msg.channel === SYSTEM_CHANNEL) {
+    return true;
+  }
+  const dm = dmParticipants(msg.channel);
+  if (dm && (dm.includes(USER_PARTICIPANT) || dm.includes(viewerId))) {
+    return true;
+  }
+  if (msg.replyTo === undefined) {
+    return false;
+  }
+  const rootAuthor = rootAuthorOf(msg.replyTo);
+  return rootAuthor !== undefined && isHumanParticipant(rootAuthor);
+};
+
+/** Author lookup for thread roots, for {@link isDirectedAtUser}. */
+export const rootAuthors = (log: ReadonlyArray<Pick<ResidentChannelMessage, 'id' | 'from'>>): Map<number, string> =>
+  new Map(log.map((m) => [m.id, m.from]));
 
 // ---------------------------------------------------------------------------
 // Events
@@ -119,9 +302,14 @@ export type ResidentEvent = {
     | 'catch_up'
     | 'scheduled'
     | 'assignment'
-    | 'column_done';
+    | 'column_done'
+    | 'pr_event'
+    | 'automation';
   /** Participant id that caused the event, when there is one. */
   from?: string;
+  /** Display name of `from`, when one is known (named humans, bridged
+   *  external users) — lets ping lines tell teammates apart. */
+  fromName?: string;
   /** Message text, when the event carries one. */
   text?: string;
   /** Channel id, for channel-scoped kinds (mention / channel_user / thread_reply / channel_post). */
@@ -146,9 +334,38 @@ const WAKE_NOW_KINDS: ReadonlySet<ResidentEvent['kind']> = new Set([
   'scheduled', // a self-set alarm fired (the game's plan() appointments)
   'assignment', // a ticket was assigned to this agent — direct delegation
   'column_done', // a column run this agent dispatched (column_send) ended
+  'pr_event', // a watched pull request changed (merged / review verdict) — feedback on your own work
+  'automation', // a user-defined rule fired — the user wired this event to you on purpose
 ]);
 
 export const isWakeNow = (event: ResidentEvent): boolean => WAKE_NOW_KINDS.has(event.kind);
+
+// ---------------------------------------------------------------------------
+// Morning beat timing
+// ---------------------------------------------------------------------------
+
+/**
+ * How long past its hour a morning beat stays deliverable. Must exceed the
+ * manager's day-tick interval (5 min) so a running app always lands a tick
+ * inside the window; sized small so a missed window means SKIPPED, not late.
+ */
+export const MORNING_BEAT_FRESH_MS = 15 * 60_000;
+
+/**
+ * Whether an agent's morning beat should fire NOW — the quiet-start rule:
+ * a beat fires only when its hour comes due while the app is already
+ * running, never as catch-up. Opening the app must never be the moment the
+ * roster erupts (the user engages first; agents follow), so a beat whose
+ * hour passed while the app was closed (`due < bootedAt`) or while the
+ * machine slept (no tick landed inside the freshness window) is skipped
+ * for the day rather than delivered late.
+ */
+export const morningBeatReady = (hour: number, nowMs: number, bootedAtMs: number): boolean => {
+  const due = new Date(nowMs);
+  due.setHours(hour, 0, 0, 0);
+  const dueMs = due.getTime();
+  return dueMs >= bootedAtMs && nowMs >= dueMs && nowMs - dueMs <= MORNING_BEAT_FRESH_MS;
+};
 
 // ---------------------------------------------------------------------------
 // Sessions & days
@@ -283,12 +500,18 @@ export const speechClientTools = (channels: readonly string[]): ClientToolDef[] 
   {
     name: 'dm',
     description:
-      'Send a direct message to the user (`to: "user"`) or a teammate (`to: <teammate handle>`). ' +
-      'Teammate DMs are paced — a long back-and-forth cools off; let closers rest.',
+      'Send a direct message to the user (`to: "user"`), a teammate (`to: <teammate handle>`), or a ' +
+      'named person from your wakeups (`to: <their handle>` — replies to their personal thread; ' +
+      'the wakeup line shows the exact address). Teammate DMs are paced — a long back-and-forth ' +
+      'cools off; let closers rest.',
     parameters: {
       type: 'object',
       properties: {
-        to: { type: 'string', description: 'Recipient: "user" or a teammate\'s @handle (with or without the @).' },
+        to: {
+          type: 'string',
+          description:
+            'Recipient: "user", a teammate\'s @handle, or a named person\'s @handle (with or without the @).',
+        },
         text: { type: 'string', description: 'The message to send.' },
       },
       required: ['to', 'text'],
@@ -393,19 +616,31 @@ const eventLine = (e: ResidentEvent): string => {
   // Channel messages carry their id so the agent can thread a reply onto
   // them (`post_channel(..., reply_to: N)`). DMs are flat — no id bait.
   const id = e.messageId !== undefined ? ` [msg ${e.messageId}]` : '';
+  // Who spoke, as the agent should read it: the collective human is "the
+  // user"; named humans and bridged users go by display name so teammates
+  // stay distinguishable; agents by their id/name as before.
+  const who = e.fromName ?? (e.from !== undefined && isHumanParticipant(e.from) ? 'the user' : (e.from ?? '?'));
   switch (e.kind) {
-    case 'dm':
-      return `${e.from ?? '?'} sent you a direct message: "${e.text ?? ''}"`;
+    case 'dm': {
+      // A named person's DM lands in THEIR personal thread — teach the
+      // reply address in context (dm(to:"user") would answer in the wrong
+      // thread), instead of growing the identity render.
+      const addr =
+        e.from !== undefined && e.from !== USER_PARTICIPANT && isHumanGradeParticipant(e.from)
+          ? ` — reply with dm(to: "${humanHandle(e.from, e.fromName)}")`
+          : '';
+      return `${who} sent you a direct message: "${e.text ?? ''}"${addr}`;
+    }
     case 'mention':
-      return `${e.from ?? '?'} mentioned you on ${ch}${id}: "${e.text ?? ''}"`;
+      return `${who} mentioned you on ${ch}${id}: "${e.text ?? ''}"`;
     case 'channel_user':
-      return `the user posted on ${ch}${id}: "${e.text ?? ''}"`;
+      return `${who} posted on ${ch}${id}: "${e.text ?? ''}"`;
     case 'thread_reply':
-      return `${e.from ?? '?'} replied in a thread you're in on ${ch}${id}: "${e.text ?? ''}"${
+      return `${who} replied in a thread you're in on ${ch}${id}: "${e.text ?? ''}"${
         e.rootText ? ` (thread: "${e.rootText}")` : ''
       }`;
     case 'channel_post':
-      return `${e.from ?? '?'} posted on ${ch}${id}: "${e.text ?? ''}"`;
+      return `${who} posted on ${ch}${id}: "${e.text ?? ''}"`;
     case 'wake':
       return e.detail ?? 'the user woke you from the roster panel';
     case 'day_start':
@@ -423,6 +658,14 @@ const eventLine = (e: ResidentEvent): string => {
       // The detail carries the column reference; the agent reads the outcome
       // through column_transcript — delta, not dump.
       return e.detail ?? 'an agent you dispatched to a workspace column finished its run';
+    case 'pr_event':
+      // The detail carries the PR reference; the agent reads the PR itself
+      // (`gh` / `az` in its workspace) — delta, not dump.
+      return e.detail ?? 'a pull request on a ticket assigned to you changed — check it from your workspace';
+    case 'automation':
+      // The detail carries the rule's cause + standing instruction verbatim
+      // (automationFireDetail in src/lib/automations.ts).
+      return e.detail ?? 'an automation wired to you fired — follow its standing instruction';
   }
 };
 
@@ -717,7 +960,9 @@ export const unreadRowsFor = (
     all.push({
       id: msg.id,
       channel: msg.channel,
-      from: msg.fromName ?? msg.from,
+      // Same naming rule as event lines: named humans/bridged users by
+      // display name, the collective human as "the user", agents by id.
+      from: msg.fromName ?? (isHumanParticipant(msg.from) ? 'the user' : msg.from),
       text: msg.text,
       agoMin: Math.max(0, Math.floor((nowMs - msg.at) / 60_000)),
       ...(msg.replyTo !== undefined ? { replyTo: msg.replyTo } : {}),
