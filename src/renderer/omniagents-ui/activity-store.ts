@@ -1,5 +1,8 @@
 import { atom, map } from 'nanostores';
 
+import type { ChatItemMetadata, MessageItem } from '@/shared/chat-types';
+import { appendAssistantMessage, applyToolResult, HIDDEN_TOOLS, upsertToolCall } from '@/shared/transcript-items';
+
 import type { TaskSummary } from './canonical-plan-tasks';
 
 /**
@@ -107,6 +110,7 @@ export function normalizeSubagentSnapshot(snapshot: unknown[]): SubagentSummary[
 export function publishSubagentsSnapshot(sessionId: string, subagents: SubagentSummary[]): void {
   const prev = $activityBySession.get()[sessionId] ?? EMPTY;
   $activityBySession.setKey(sessionId, { ...prev, subagents });
+  pruneSubagentTranscripts(sessionId, new Set(subagents.map((s) => s.subagent_id)));
 }
 
 /** Fold a workers-only snapshot (``workers.kill`` response) into the
@@ -120,6 +124,118 @@ export function mergeWorkersSnapshot(sessionId: string, workers: SubagentSummary
 export function publishBashJobs(sessionId: string, jobs: BashJobSummary[]): void {
   const prev = $activityBySession.get()[sessionId] ?? EMPTY;
   $activityBySession.setKey(sessionId, { ...prev, jobs });
+}
+
+// ---------------------------------------------------------------------------
+// Nested transcripts. An agent-tool run (``explore`` and friends) executes
+// inside the parent's turn and owns no session, so there is no thread for the
+// read-only viewer to mount — the only record of what it did is the narrative
+// beats the subagent bus relays as ``ui.subagent.event``. Those beats carry
+// the SAME payload shape the parent's own run emits (one server-side mapper,
+// ``bridge.stream_event_payload``), so folding them through the shared
+// transcript reducer yields real transcript items: the Agents detail page
+// renders a nested run with the same MessageList a worker's thread gets.
+//
+// Live-only by construction. Workers persist because their session is
+// journaled; these buffers live as long as the run stays in the snapshot and
+// are dropped when the server ages it out of its ended tail.
+// ---------------------------------------------------------------------------
+
+/** Items per subagent, keyed sessionId -> subagentId. Separate from
+ *  ``$activityBySession`` on purpose: beats arrive per tool call, and only
+ *  the Agents surface reads them — splitting the maps keeps that firehose
+ *  from re-rendering the chat column on every step. */
+export const $subagentTranscriptsBySession = map<Record<string, Record<string, MessageItem[]>>>({});
+
+/** Bounds one run's buffer. An explorer chews through reads and searches;
+ *  the detail page needs the shape of the run, not an unbounded log. */
+const TRANSCRIPT_CAP = 500;
+
+const capped = (items: MessageItem[]): MessageItem[] =>
+  items.length > TRANSCRIPT_CAP ? items.slice(items.length - TRANSCRIPT_CAP) : items;
+
+/**
+ * Fold one relayed beat into the subagent's transcript. ``method`` and
+ * ``params`` are the bus envelope's fields — the same method names and
+ * payloads the parent session's own stream uses.
+ *
+ * Every item is stamped with the subagent id as its run id (for agent-tool
+ * runs ``run_id === subagent_id === the outer call_id``), so activity
+ * grouping folds the whole nested run into ONE chain-of-thought block and
+ * the trailing message lands as its answer.
+ */
+export function publishSubagentEvent(
+  sessionId: string,
+  subagentId: string,
+  method: string,
+  params: Record<string, unknown>
+): void {
+  const tool = typeof params.tool === 'string' ? params.tool : '';
+  if ((method === 'tool_called' || method === 'tool_result') && HIDDEN_TOOLS.has(tool)) {
+    return;
+  }
+  const bySession = $subagentTranscriptsBySession.get()[sessionId] ?? {};
+  const items = bySession[subagentId] ?? [];
+  let next: MessageItem[];
+  if (method === 'message_output') {
+    const content = typeof params.content === 'string' ? params.content : '';
+    if (!content) {
+      return;
+    }
+    next = appendAssistantMessage(items, content, subagentId);
+  } else if (method === 'tool_called') {
+    next = upsertToolCall(
+      items,
+      {
+        call_id: String(params.call_id ?? ''),
+        tool,
+        input: typeof params.input === 'string' ? params.input : JSON.stringify(params.input ?? ''),
+        metadata: params.metadata as ChatItemMetadata | undefined,
+      },
+      subagentId
+    );
+  } else if (method === 'tool_result') {
+    next = applyToolResult(
+      items,
+      {
+        call_id: String(params.call_id ?? ''),
+        tool,
+        output: typeof params.output === 'string' ? params.output : JSON.stringify(params.output ?? ''),
+        metadata: params.metadata as ChatItemMetadata | undefined,
+      },
+      subagentId
+    );
+  } else {
+    // run_started / run_end / run_status carry lifecycle, which the snapshot
+    // already reports (status dot, elapsed clock, result). Nothing to append.
+    return;
+  }
+  if (next === items) {
+    return;
+  }
+  $subagentTranscriptsBySession.setKey(sessionId, { ...bySession, [subagentId]: capped(next) });
+}
+
+/** Drop buffers for runs the snapshot no longer carries — the server keeps
+ *  only a bounded ended tail, and a transcript for a run nothing can open is
+ *  dead weight. */
+function pruneSubagentTranscripts(sessionId: string, live: ReadonlySet<string>): void {
+  const bySession = $subagentTranscriptsBySession.get()[sessionId];
+  if (!bySession) {
+    return;
+  }
+  const ids = Object.keys(bySession);
+  if (!ids.some((id) => !live.has(id))) {
+    return;
+  }
+  const kept: Record<string, MessageItem[]> = {};
+  for (const id of ids) {
+    const buf = bySession[id];
+    if (live.has(id) && buf) {
+      kept[id] = buf;
+    }
+  }
+  $subagentTranscriptsBySession.setKey(sessionId, kept);
 }
 
 // ---------------------------------------------------------------------------

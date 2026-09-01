@@ -3,7 +3,7 @@
  * toggle off to transcribe via VoiceClient and receive the text. Captures mono,
  * resamples to 24 kHz PCM16 (the rate the sidecar/launcher pipeline uses).
  *
- * Audio path mirrors VoiceModal's capture (AudioWorklet → 24 kHz → Int16) but
+ * Audio path mirrors the realtime voice capture (AudioWorklet → 24 kHz → Int16) but
  * is self-contained and routes to the local sidecar instead of the realtime WS.
  */
 import { useCallback, useRef, useState } from 'react';

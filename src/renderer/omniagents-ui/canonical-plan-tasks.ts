@@ -92,7 +92,8 @@ export function rpcPlanTasks(plan: RpcPlanItem | null): TaskSummary[] | null {
       blockedBy: step.blocked_by,
       exitCriteria: (typeof step.exit_criteria === 'string' ? step.exit_criteria : '') || undefined,
       verified,
-      criteriaEdited: step.criteria_edited === true || step.criteriaEdited === true || originalCriteria !== '' || undefined,
+      criteriaEdited:
+        step.criteria_edited === true || step.criteriaEdited === true || originalCriteria !== '' || undefined,
     };
   });
 }

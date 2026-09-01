@@ -29,14 +29,20 @@ import {
 import {
   $activityActionsBySession,
   $activityBySession,
+  $subagentTranscriptsBySession,
   type ActivityActions,
   subagentItemId,
   type SubagentSummary,
 } from '@/renderer/omniagents-ui/activity-store';
 import type { TaskSummary } from '@/renderer/omniagents-ui/canonical-plan-tasks';
+import { MessageList } from '@/renderer/omniagents-ui/components/MessageList';
 import { serverOrigin } from '@/renderer/services/ipc';
 import { persistedStoreApi } from '@/renderer/services/store';
+import type { MessageItem } from '@/shared/chat-types';
 import type { AgentRuntimeConnection, ExecutionTarget } from '@/shared/types';
+
+/** Stable empty reference — a fresh literal per render would defeat memo. */
+const EMPTY_ITEMS: MessageItem[] = [];
 
 /**
  * The Agents sidecar app: the session's subagents — background workers and
@@ -63,6 +69,7 @@ export type AgentsRuntime = {
 /** Detail page for one subagent: toolbar, task, facts, live transcript. */
 const SubagentDetail = memo(
   ({
+    sessionId,
     subagent,
     connection,
     executionTarget,
@@ -70,6 +77,9 @@ const SubagentDetail = memo(
     controller,
     onBack,
   }: {
+    /** The PARENT session — the key both the snapshot and the relayed
+     *  transcript buffers are stored under. */
+    sessionId: string;
     subagent: SubagentSummary;
     connection: AgentRuntimeConnection | undefined;
     executionTarget: ExecutionTarget | undefined;
@@ -78,6 +88,12 @@ const SubagentDetail = memo(
     onBack: () => void;
   }) => {
     const stoppable = actions && subagent.kind === 'worker' && subagent.worker_id && subagent.status === 'running';
+
+    // Transcript items folded from this run's relayed beats. Empty for
+    // workers — they own a session, so the viewer below reads the real
+    // thread instead.
+    const transcripts = useStore($subagentTranscriptsBySession, { keys: [sessionId] });
+    const relayedItems = transcripts[sessionId]?.[subagent.subagent_id] ?? EMPTY_ITEMS;
 
     // Worker-plan drill-down: the worker's own plan, read by its session id
     // over the parent session's plan-read RPC. Fetched lazily — only while
@@ -165,13 +181,28 @@ const SubagentDetail = memo(
           ) : null}
           <section className="flex min-h-0 flex-1 flex-col">
             <ActivityDetailLabel>Transcript</ActivityDetailLabel>
-            {/* Guard the empty id: agent-tool runs execute inside the
-                parent's turn and carry no session of their own — an empty
-                sessionId would make the viewer MINT a fresh session. */}
+            {/* Two sources, one reading. A worker owns a session, so the
+                viewer mounts its real thread (journaled, survives reload).
+                An agent-tool run executes inside the parent's turn and owns
+                no session — an empty sessionId would make the viewer MINT a
+                fresh one — so it renders the items folded from the relayed
+                beats instead, through the same MessageList. */}
             {!subagent.session_id ? (
-              <p className="text-xs italic text-muted-foreground">
-                This run executed inside the parent session&rsquo;s turn — read it in the parent transcript.
-              </p>
+              relayedItems.length > 0 ? (
+                <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border border-border">
+                  <MessageList
+                    items={relayedItems}
+                    currentRunId={subagent.subagent_id}
+                    thinking={subagent.status === 'running'}
+                  />
+                </div>
+              ) : (
+                <p className="text-xs italic text-muted-foreground">
+                  {subagent.status === 'running'
+                    ? 'Waiting for the first step…'
+                    : 'This run executed inside the parent session’s turn and left no relayed steps — read it in the parent transcript.'}
+                </p>
+              )
             ) : connection ? (
               <div className="min-h-0 flex-1 overflow-hidden rounded-md border border-border">
                 <OmniAgentsApp
@@ -264,6 +295,7 @@ export const AgentsSurface = memo(({ sessionId, runtime }: { sessionId: string; 
         {/* Keyed by item so navigating between items remounts the viewer. */}
         <SubagentDetail
           key={openSubagent.subagent_id}
+          sessionId={sessionId}
           subagent={openSubagent}
           connection={connection}
           executionTarget={executionTarget}

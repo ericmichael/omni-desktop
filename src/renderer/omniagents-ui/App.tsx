@@ -1,4 +1,5 @@
 import { useStore } from '@nanostores/react';
+import { useSelector } from '@xstate/react';
 import { AnimatePresence, motion } from 'framer-motion';
 import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { waitFor } from 'xstate';
@@ -30,6 +31,7 @@ import { persistedStoreApi } from '@/renderer/services/store';
 import { forwardEvent, registerColumnActor } from '@/renderer/services/supervisor-bridge';
 import { VoiceScopeContext } from '@/renderer/services/voice-recording';
 import type { RunDiffItem } from '@/shared/chat-types';
+import { voiceActive } from '@/shared/machines/voice-session.machine';
 import type { ExecutionTarget, TicketId } from '@/shared/types';
 
 import {
@@ -40,6 +42,7 @@ import {
   mergeWorkersSnapshot,
   normalizeSubagentSnapshot,
   publishBashJobs,
+  publishSubagentEvent,
   publishSubagentsSnapshot,
   registerActivityActions,
   type WorkersKillResult,
@@ -61,11 +64,15 @@ import { QueuedMessages } from './components/QueuedMessages';
 import { type RecapInfo, RecapPanel } from './components/RecapPanel';
 import { SessionList } from './components/SessionList';
 import { Sidebar } from './components/Sidebar';
+import { VoiceDock } from './components/VoiceDock';
 import { WakeupPanel, type WakeupSnapshot } from './components/WakeupPanel';
 import { OmniAgentsHeaderActionsPortal, OmniAgentsHeaderActionsProvider } from './header-actions';
 import { useChatBoot } from './hooks/use-chat-boot';
 import { useChatSession } from './hooks/use-chat-session';
 import { useConversationManagement } from './hooks/use-conversation-management';
+import { useRealtimeVoice } from './hooks/use-realtime-voice';
+import { respondToApproval } from './lib/approval-response';
+import { createVoiceMergeLedger, mergeVoiceTranscript } from './merge-voice-transcript';
 import { loadCanonicalSessionList } from './rpc/canonical-session-list';
 import type { ElicitationRequest, ElicitationResponse } from './rpc/elicitation';
 import { parsePlanResult } from './rpc/plans-and-diffs';
@@ -289,6 +296,42 @@ export function App({
     stageContext,
     clearStagedContext,
   } = machine;
+
+  // Hosted realtime voice — one session per chat surface. The dock renders
+  // above the composer; live transcript items merge into MessageList below.
+  const voice = useRealtimeVoice();
+  const voiceItems = useSelector(voice.actor, (s) => s.context.items);
+  const voiceIsActive = useSelector(voice.actor, voiceActive);
+  const voiceSessionId = useSelector(voice.actor, (s) => s.context.sessionId);
+  const voiceMuted = useSelector(voice.actor, (s) => s.context.muted);
+
+  // Voice-first: adopt the server-minted session id so the chat surface and
+  // the voice session stay one thread (tools, approvals, persistence).
+  useEffect(() => {
+    if (!voiceIsActive || !voiceSessionId) {
+      return;
+    }
+    if (!actor.getSnapshot().context.sessionId) {
+      setSessionId(voiceSessionId);
+    }
+    // A voice turn's tool approvals broadcast over THIS /ws channel, and
+    // the server only fans out to channels the session knows about. A
+    // session loaded from the list is already registered (loadSession →
+    // resume_session), but a freshly minted one is not — without this the
+    // approval is queued server-side and the voice turn hangs with no card.
+    void client.registerSession(voiceSessionId, true).catch(() => {});
+  }, [voiceIsActive, voiceSessionId, actor, setSessionId, client]);
+
+  const voiceWasActiveRef = useRef(false);
+
+  // One transcript from two streams that share no clock — see
+  // merge-voice-transcript.ts. The ledger is per-surface state, so it lives
+  // in a ref rather than in either machine.
+  const mergeLedgerRef = useRef(createVoiceMergeLedger());
+  const mergedItems = useMemo(
+    () => mergeVoiceTranscript(items, voiceItems, mergeLedgerRef.current, voiceIsActive),
+    [items, voiceItems, voiceIsActive]
+  );
 
   // Unified subagent list (workers + agent-tool runs). The session-keyed
   // activity store is the single source of truth — this component publishes
@@ -554,10 +597,28 @@ export function App({
         return;
       }
       if (fn === 'ui.subagent.event') {
-        // Relay beats are no longer consumed — the Agents detail mounts the
-        // subagent session's real transcript instead. Ack so the server
-        // doesn't retry the broadcast.
+        // One narrative beat from a subagent's run (tool_called /
+        // tool_result / message_output / run_*). Workers own a session, so
+        // the Agents detail mounts their real transcript and these beats add
+        // nothing. Agent-tool runs (``explore``) own no session — folding
+        // their beats into transcript items is the ONLY record of what they
+        // did, so the detail page can render one.
         const request_id = String(p?.request_id ?? '');
+        const eventSessionId = typeof p?.session_id === 'string' ? p.session_id : undefined;
+        const currentSessionId = actor.getSnapshot().context.sessionId;
+        if (!eventSessionId || !currentSessionId || eventSessionId === currentSessionId) {
+          const args = (p?.args || {}) as Record<string, unknown>;
+          const subagentId = typeof args.subagent_id === 'string' ? args.subagent_id : '';
+          const sid = eventSessionId ?? currentSessionId;
+          if (sid && subagentId && args.kind === 'agent_tool') {
+            publishSubagentEvent(
+              sid,
+              subagentId,
+              String(args.method ?? ''),
+              (args.params ?? {}) as Record<string, unknown>
+            );
+          }
+        }
         if (request_id) {
           client.clientResponse(request_id, true, { ack: true }).catch(() => {});
         }
@@ -1737,31 +1798,7 @@ export function App({
 
   const handleApprovalDecision = useCallback(
     async (request_id: string, value: 'yes' | 'always' | 'no', kind: 'function' | 'mcp' = 'function') => {
-      // ``request_id`` is the model-minted identifier we stored on the
-      // ApprovalItem when the approval event arrived (see
-      // use-chat-session.ts):
-      //   - kind 'function' → tool call_id  → tool_approval_response RPC
-      //   - kind 'mcp'      → McpApprovalRequest id → mcp_approval_response RPC
-      // Both take ``decision: "approve" | "reject"``; only the function
-      // path honors ``always_approve``.
-      const decision = value === 'no' ? 'reject' : 'approve';
-      const alwaysApprove = value === 'always';
-      const failureMessage = (e: unknown) => String((e as Error)?.message || 'failed');
-      try {
-        if (kind === 'mcp') {
-          await client.mcpApprovalResponse(request_id, decision);
-        } else {
-          await client.toolApprovalResponse(request_id, decision, alwaysApprove);
-        }
-      } catch (e) {
-        // Best-effort fallback: reject with the underlying error so the
-        // run unblocks instead of hanging on the approval future.
-        const reject =
-          kind === 'mcp'
-            ? client.mcpApprovalResponse(request_id, 'reject', failureMessage(e))
-            : client.toolApprovalResponse(request_id, 'reject', false, failureMessage(e));
-        await reject.catch(() => {});
-      }
+      await respondToApproval(client, request_id, value, kind);
       approvalDecided(request_id, value);
     },
     [client, approvalDecided]
@@ -1962,6 +1999,20 @@ export function App({
   // Controller `newSession` → fresh conversation (loadSession mints a new id).
   newSessionRef.current = () => void handleSelectSession(undefined);
 
+  // When the voice session ends, reload the thread: the server persisted the
+  // voice turns into canonical history, which replaces the machine's live
+  // transcript items (cleared on close) without a duplication window.
+  useEffect(() => {
+    if (voiceWasActiveRef.current && !voiceIsActive) {
+      const sid = actor.getSnapshot().context.sessionId;
+      if (sid) {
+        void handleSelectSession(sid);
+      }
+      refreshSessions();
+    }
+    voiceWasActiveRef.current = voiceIsActive;
+  }, [voiceIsActive, actor, handleSelectSession, refreshSessions]);
+
   useEffect(() => {
     if (urlSessionHandledRef.current) {
       return;
@@ -2085,12 +2136,7 @@ export function App({
     if (!sid || !executionTarget) {
       return { ok: false };
     }
-    return (await client.serverCall(
-      'sandbox.get_network',
-      {},
-      sid,
-      executionTarget
-    )) as SandboxNetworkState;
+    return (await client.serverCall('sandbox.get_network', {}, sid, executionTarget)) as SandboxNetworkState;
   }, [client, actor, executionTarget]);
   const setSandboxNetwork = useCallback(
     async (enabled: boolean) => {
@@ -2098,12 +2144,7 @@ export function App({
       if (!sid || !executionTarget) {
         return { ok: false };
       }
-      return (await client.serverCall(
-        'sandbox.set_network',
-        { enabled },
-        sid,
-        executionTarget
-      )) as SandboxNetworkState;
+      return (await client.serverCall('sandbox.set_network', { enabled }, sid, executionTarget)) as SandboxNetworkState;
     },
     [client, actor, executionTarget]
   );
@@ -2176,7 +2217,7 @@ export function App({
                 <div ref={setChatColumnEl} className="flex-1 min-h-0 min-w-0 overflow-x-hidden relative flex flex-col">
                   <ArtifactPortalProvider target={chatColumnEl}>
                     <MessageList
-                      items={items}
+                      items={mergedItems}
                       greeting={greeting}
                       suggestions={suggestions}
                       statusText={status}
@@ -2275,6 +2316,9 @@ export function App({
                 )}
                 {!readOnly && (
                   <>
+                    {/* Above the pills: the dock is the session's headline
+                        while a call is live, not another composer row. */}
+                    <VoiceDock voice={voice} />
                     <PillStrip
                       sessionId={sessionId}
                       subagents={visibleSubagents}
@@ -2306,6 +2350,13 @@ export function App({
                       thinking={thinking}
                       onStop={handleStop}
                       onSubmit={(text, files) => {
+                        // A live voice session owns the conversation: typed
+                        // text (without attachments) routes into it rather
+                        // than starting a parallel text run on the same
+                        // session/environment.
+                        if (voiceIsActive && !files?.length && voice.sendText(text)) {
+                          return;
+                        }
                         void handleSubmit(text, files);
                       }}
                       onVoiceSubmit={handleVoiceSubmit}
@@ -2319,15 +2370,11 @@ export function App({
                       onSandboxChange={handleSandboxChange}
                       composerExtras={composerExtras}
                       sandboxLoading={!connected}
-                      sessionId={sessionId}
-                      onVoiceSessionCreated={(id: string) => setSessionId(id)}
-                      onVoiceClose={() => {
-                        const sid = actor.getSnapshot().context.sessionId;
-                        if (sid) {
-                          handleSelectSession(sid);
-                        }
-                        refreshSessions();
-                      }}
+                      onVoiceStart={() => voice.open(actor.getSnapshot().context.sessionId)}
+                      onVoiceEnd={voice.close}
+                      onVoiceToggleMute={voice.toggleMute}
+                      voiceMuted={voiceMuted}
+                      voiceLive={voiceIsActive}
                     />
                   </>
                 )}

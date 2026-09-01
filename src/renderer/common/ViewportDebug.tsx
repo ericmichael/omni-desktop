@@ -24,8 +24,7 @@ const probePx = (cssHeight: string): number => {
   return height;
 };
 
-const rectBottom = (el: Element | null): string =>
-  el ? `${Math.round(el.getBoundingClientRect().bottom)}` : '—';
+const rectBottom = (el: Element | null): string => (el ? `${Math.round(el.getBoundingClientRect().bottom)}` : '—');
 
 const isStandalone = (): boolean =>
   (navigator as { standalone?: boolean }).standalone === true ||
@@ -53,7 +52,10 @@ const collect = (): Metrics => {
     ['sidebar bottom', rectBottom(sidebar)],
     ['sidebar height', sidebar ? getComputedStyle(sidebar).height : '—'],
     ['sidebar bg bottom', rectBottom(sidebarInner)],
-    ['scrollY/max', `${Math.round(window.scrollY)}/${Math.round((document.scrollingElement?.scrollHeight ?? 0) - window.innerHeight)}`],
+    [
+      'scrollY/max',
+      `${Math.round(window.scrollY)}/${Math.round((document.scrollingElement?.scrollHeight ?? 0) - window.innerHeight)}`,
+    ],
     ['standalone', isStandalone() ? 'yes' : 'no'],
   ];
 };

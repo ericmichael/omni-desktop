@@ -664,6 +664,76 @@ describe('chatSessionMachine', () => {
       // Stays in awaitingApproval (no decision, just resolved externally)
       expect(phase(snap)).toBe('awaitingApproval');
     });
+
+    // A voice turn's tool gate prompts over /ws with no text run in
+    // flight (the realtime channel never broadcasts run_started), so the
+    // machine is sitting in `ready.idle` when the approval lands.
+    describe('approval with no run in flight (voice)', () => {
+      it('appends the card from ready.idle without faking a run', () => {
+        const snap = next(idleSnap(), {
+          type: 'REQUEST_APPROVAL',
+          request_id: 'voice-1',
+          tool: 'bash',
+          argumentsText: '{"command":"ls"}',
+          session_id: 'sess-1',
+        });
+        expect(phase(snap)).toBe('idle');
+        expect(ctx(snap).runId).toBeUndefined();
+        expect(ctx(snap).pendingApprovals.has('voice-1')).toBe(true);
+        expect(ctx(snap).items).toEqual([
+          expect.objectContaining({ type: 'approval', request_id: 'voice-1', tool: 'bash' }),
+        ]);
+      });
+
+      it('dismisses the card on APPROVAL_DECIDED from ready.idle', () => {
+        let snap = next(idleSnap(), {
+          type: 'REQUEST_APPROVAL',
+          request_id: 'voice-1',
+          tool: 'bash',
+          session_id: 'sess-1',
+        });
+        snap = next(snap, { type: 'APPROVAL_DECIDED', request_id: 'voice-1', value: 'yes' });
+        expect(phase(snap)).toBe('idle');
+        expect(ctx(snap).pendingApprovals.size).toBe(0);
+        expect(ctx(snap).items.some((it) => it.type === 'approval')).toBe(false);
+      });
+
+      it('dismisses the card on the server-broadcast APPROVAL_RESOLVED from ready.idle', () => {
+        let snap = next(idleSnap(), {
+          type: 'REQUEST_APPROVAL',
+          request_id: 'voice-1',
+          tool: 'bash',
+          session_id: 'sess-1',
+        });
+        snap = next(snap, { type: 'APPROVAL_RESOLVED', request_id: 'voice-1' });
+        expect(ctx(snap).pendingApprovals.size).toBe(0);
+        expect(ctx(snap).items.some((it) => it.type === 'approval')).toBe(false);
+      });
+
+      it('rejects an approval addressed to another session', () => {
+        const snap = next(idleSnap(), {
+          type: 'REQUEST_APPROVAL',
+          request_id: 'voice-1',
+          tool: 'bash',
+          session_id: 'other-session',
+        });
+        expect(ctx(snap).pendingApprovals.size).toBe(0);
+        expect(ctx(snap).items).toEqual([]);
+      });
+
+      it('survives the post-voice history reload (pending approvals merge)', () => {
+        let snap = next(idleSnap(), {
+          type: 'REQUEST_APPROVAL',
+          request_id: 'voice-1',
+          tool: 'bash',
+          session_id: 'sess-1',
+        });
+        // Canonical reload after the dock closes: HISTORY_LOADED replaces
+        // items, and setHistoryItems re-merges the still-pending card.
+        snap = next(snap, { type: 'HISTORY_LOADED', items: [] });
+        expect(ctx(snap).items).toEqual([expect.objectContaining({ type: 'approval', request_id: 'voice-1' })]);
+      });
+    });
   });
 
   // -----------------------------------------------------------------------

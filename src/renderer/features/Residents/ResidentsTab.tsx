@@ -1,4 +1,5 @@
 import { useStore } from '@nanostores/react';
+import { useSelector } from '@xstate/react';
 import {
   BookOpen,
   Brain,
@@ -90,7 +91,13 @@ import { SandboxPicker } from '@/renderer/features/SandboxProfile/SandboxPicker'
 import { ScheduledTasks } from '@/renderer/features/ScheduledTasks/ScheduledTasks';
 import { OmniAgentsApp } from '@/renderer/omniagents-ui';
 import { LocalVoiceButton } from '@/renderer/omniagents-ui/components/LocalVoiceButton';
-import { VoiceModal } from '@/renderer/omniagents-ui/components/VoiceModal';
+import { ApprovalCard } from '@/renderer/omniagents-ui/components/MessageList';
+import { VoiceDock } from '@/renderer/omniagents-ui/components/VoiceDock';
+import { useChatBoot } from '@/renderer/omniagents-ui/hooks/use-chat-boot';
+import { useChatSession } from '@/renderer/omniagents-ui/hooks/use-chat-session';
+import { useRealtimeVoice } from '@/renderer/omniagents-ui/hooks/use-realtime-voice';
+import { respondToApproval } from '@/renderer/omniagents-ui/lib/approval-response';
+import { RPCClientProvider, useRPCClient } from '@/renderer/omniagents-ui/rpc-context';
 import { MarkdownMessage } from '@/renderer/omniagents-ui/shared/MarkdownMessage';
 import { UiConfigProvider } from '@/renderer/omniagents-ui/ui-config';
 import { emitter, serverOrigin } from '@/renderer/services/ipc';
@@ -98,6 +105,8 @@ import { $machines } from '@/renderer/services/machines';
 import { persistedStoreApi } from '@/renderer/services/store';
 import { isLocalVoiceCapable } from '@/renderer/services/voice-client';
 import { VoiceScopeContext } from '@/renderer/services/voice-recording';
+import type { ApprovalItem } from '@/shared/chat-types';
+import { voiceActive } from '@/shared/machines/voice-session.machine';
 import type {
   AgentRuntimeConnection,
   Project,
@@ -427,7 +436,7 @@ function ActivityFeed({
   const isUserDm = channel !== undefined && dmPair !== null && isOwnDmChannel(channel);
   const voiceMode = configuredVoiceMode(storeData);
   const voiceReady = isUserDm && voiceMode === 'local' && isLocalVoiceCapable();
-  // Hosted mode: the realtime VoiceModal against the DM peer's own serve.
+  // Hosted mode: the realtime VoiceDock against the DM peer's own serve.
   const hostedVoiceReady = isUserDm && voiceMode === 'hosted' && !!dmPeerId;
   const [hostedVoiceOpen, setHostedVoiceOpen] = useState(false);
   const openHostedVoice = useCallback(() => setHostedVoiceOpen(true), []);
@@ -1049,12 +1058,13 @@ function ActivityFeed({
 }
 
 // ---------------------------------------------------------------------------
-// Hosted realtime voice on the DM surface — the SAME VoiceModal the chat
+// Hosted realtime voice on the DM surface — the SAME VoiceDock the chat
 // composer uses, pointed at the resident's own serve. `ensureSession` wakes
-// the agent and returns its uiUrl; UiConfigProvider derives /ws/realtime and
-// the auth token from it, exactly as OmniAgentsApp does for the Session tab.
-// The voice conversation is with the same agent (same spec, same tools) and
-// its transcript lands in the resident's session history.
+// the agent and returns its uiUrl AND the session id; UiConfigProvider
+// derives /ws/realtime and the auth token from the connection, and the
+// voice session opens WITH that session id so it pairs with the resident's
+// live session — client tools, environment lease, approvals, and history
+// persistence all land on the same thread.
 // ---------------------------------------------------------------------------
 
 function ResidentHostedVoice({
@@ -1066,17 +1076,20 @@ function ResidentHostedVoice({
   onClose: () => void;
   onError: (message: string) => void;
 }): React.JSX.Element | null {
-  const [connection, setConnection] = useState<AgentRuntimeConnection | null>(null);
+  const [target, setTarget] = useState<{ connection: AgentRuntimeConnection; sessionId: string } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     residentApi
       .ensureSession(agentId)
-      .then(({ connection: nextConnection }) => {
+      .then(({ sessionId, connection: nextConnection }) => {
         if (!cancelled) {
-          setConnection({
-            ...nextConnection,
-            baseUrl: new URL(nextConnection.baseUrl, serverOrigin()).toString(),
+          setTarget({
+            sessionId,
+            connection: {
+              ...nextConnection,
+              baseUrl: new URL(nextConnection.baseUrl, serverOrigin()).toString(),
+            },
           });
         }
       })
@@ -1091,13 +1104,100 @@ function ResidentHostedVoice({
     };
   }, [agentId, onClose, onError]);
 
-  if (!connection) {
-    return null; // waking the agent; the modal appears once its serve is up
+  if (!target) {
+    return null; // waking the agent; the dock appears once its serve is up
   }
   return (
-    <UiConfigProvider connection={connection}>
-      <VoiceModal isOpen onClose={onClose} />
+    <UiConfigProvider connection={target.connection}>
+      {/* The dock needs the agent's /ws chat channel too, not just
+          /ws/realtime: gated tools during a voice turn prompt over the
+          text path (RealtimeSession._route_tool_approval →
+          AgentService.request_tool_approval), so without a chat client
+          attached to this session the approval had no surface at all and
+          the voice turn blocked until the dock closed. */}
+      <RPCClientProvider>
+        <ResidentVoiceSurface sessionId={target.sessionId} onClose={onClose} />
+      </RPCClientProvider>
     </UiConfigProvider>
+  );
+}
+
+/** Dock + compact live transcript + approval cards, on the DM session. */
+function ResidentVoiceSurface({ sessionId, onClose }: { sessionId: string; onClose: () => void }): React.JSX.Element {
+  const voice = useRealtimeVoice();
+  const active = useSelector(voice.actor, voiceActive);
+  const items = useSelector(voice.actor, (s) => s.context.items);
+
+  // The same chat plumbing every column runs — boot connects the client,
+  // loads the DM thread, and registers this channel for live events; the
+  // session machine turns `tool_approval_requested` into ApprovalItems.
+  // No realtime URL: this surface owns the voice channel already, and the
+  // boot probe would open a second one just to ask if voice exists.
+  const client = useRPCClient();
+  const chat = useChatSession(client);
+  useChatBoot({ client, chatSession: chat, sessionId });
+  const approvals = useSelector(chat.actor, (s) =>
+    s.context.items.filter((it): it is ApprovalItem => it.type === 'approval')
+  );
+  const decideApproval = useCallback(
+    async (requestId: string, value: 'yes' | 'always' | 'no', kind: 'function' | 'mcp' = 'function') => {
+      await respondToApproval(client, requestId, value, kind);
+      chat.approvalDecided(requestId, value);
+    },
+    [client, chat]
+  );
+
+  const openedRef = useRef(false);
+  useEffect(() => {
+    if (!openedRef.current) {
+      openedRef.current = true;
+      voice.open(sessionId);
+    }
+  }, [voice, sessionId]);
+
+  // Dock's end button drives the machine to closed — unmount the surface.
+  const wasActiveRef = useRef(false);
+  useEffect(() => {
+    if (wasActiveRef.current && !active) {
+      onClose();
+    }
+    wasActiveRef.current = active;
+  }, [active, onClose]);
+
+  const transcript = items.filter((it) => it.type === 'chat');
+  return (
+    <div className="mt-2 overflow-hidden rounded-lg border border-border bg-card">
+      {approvals.length > 0 && (
+        <div className="space-y-2 px-3 pt-3">
+          {approvals.map((approval, i) => (
+            <ApprovalCard
+              key={approval.request_id}
+              item={approval}
+              onDecision={decideApproval}
+              queuePosition={i + 1}
+              queueTotal={approvals.length}
+            />
+          ))}
+        </div>
+      )}
+      {transcript.length > 0 && (
+        <div className="max-h-48 space-y-1.5 overflow-y-auto px-3 py-2">
+          {transcript.map((it, i) => (
+            <div key={i} className={cn('flex', it.role === 'user' ? 'justify-end' : 'justify-start')}>
+              <div
+                className={cn(
+                  'max-w-[85%] rounded-lg px-2.5 py-1.5 text-xs leading-relaxed',
+                  it.role === 'user' ? 'bg-primary/15 text-foreground' : 'bg-muted text-foreground/85'
+                )}
+              >
+                {it.content}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      <VoiceDock voice={voice} />
+    </div>
   );
 }
 

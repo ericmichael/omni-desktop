@@ -1,6 +1,6 @@
 /**
  * Push-to-talk mic button for local voice (Option A). Replaces the realtime
- * VoiceModal mic button when local models are active (see Input.tsx). Click to
+ * voice-dock mic button when local models are active (see Input.tsx). Click to
  * record, click again to transcribe-and-send. Enabling voice mode registers the
  * agent's `speak` tool so the reply comes back as speech.
  */

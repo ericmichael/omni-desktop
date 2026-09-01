@@ -1,12 +1,15 @@
 import { useStore } from '@nanostores/react';
 import {
   ArrowUpIcon,
+  AudioLinesIcon,
   CheckIcon,
   FolderIcon,
   LockIcon,
   MicIcon,
+  MicOffIcon,
   MonitorIcon,
   PaperclipIcon,
+  PhoneOffIcon,
   SquareIcon,
   Volume2Icon,
   VolumeXIcon,
@@ -31,7 +34,6 @@ import { isLocalVoiceCapable } from '@/renderer/services/voice-client';
 
 import { LocalVoiceButton } from './LocalVoiceButton';
 import { PromptInput, PromptInputActions, PromptInputTextarea } from './promptkit/PromptInput';
-import { VoiceModal } from './VoiceModal';
 
 /** Trailing path segment, tolerant of both `/` and `\` separators and trailing slashes. Falls back to the input when nothing would be left. */
 function basename(p: string): string {
@@ -69,9 +71,11 @@ export function Input({
   currentSandboxProfile,
   onSandboxChange,
   composerExtras,
-  sessionId,
-  onVoiceSessionCreated,
-  onVoiceClose,
+  onVoiceStart,
+  onVoiceEnd,
+  onVoiceToggleMute,
+  voiceMuted,
+  voiceLive,
 }: {
   disabled?: boolean;
   thinking?: boolean;
@@ -92,16 +96,22 @@ export function Input({
    *  chip row is the one home for column-context controls, pre- and
    *  post-launch, so callers pass the same node to ChatShell and the app. */
   composerExtras?: React.ReactNode;
-  sessionId?: string;
-  onVoiceSessionCreated?: (id: string) => void;
-  onVoiceClose?: () => void;
+  /** Start a hosted realtime voice session (the host renders the VoiceDock). */
+  onVoiceStart?: () => void;
+  /** Ends the live hosted-voice session (the primary button while it runs). */
+  onVoiceEnd?: () => void;
+  /** Toggles the live session's mic. */
+  onVoiceToggleMute?: () => void;
+  /** Live session's mic state, for the mute button's icon. */
+  voiceMuted?: boolean;
+  /** True while a voice session is active — the dock owns the controls, so the mic button hides. */
+  voiceLive?: boolean;
 }) {
   const [text, setText] = useState('');
   const [files, setFiles] = useState<File[]>([]);
   const [history, setHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(0);
   const [historyDraft, setHistoryDraft] = useState('');
-  const [isVoiceModalOpen, setIsVoiceModalOpen] = useState(false);
   // Which mic to show follows the configured mode, not availability: gating
   // the hosted button on `voiceEnabled` alone meant a credential existing was
   // enough to render it, so Voice = Off still showed a mic.
@@ -129,6 +139,10 @@ export function Input({
   );
 
   const canSend = useMemo(() => !disabled && (text.trim().length > 0 || files.length > 0), [disabled, text, files]);
+  const hostedVoiceLive = hostedVoiceSupported && Boolean(voiceLive);
+  // An empty composer has no send to offer; hand it to voice instead.
+  const startVoiceFromEmpty =
+    hostedVoiceSupported && !voiceLive && !canSend && !disabled && typeof onVoiceStart === 'function';
 
   const insertNewlineAtCursor = useCallback(
     (el?: HTMLTextAreaElement) => {
@@ -407,7 +421,9 @@ export function Input({
                               <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                                 <span className="flex items-center gap-2">
                                   <span className="flex-1">{option.label}</span>
-                                  {option.value === currentSandboxProfile && <CheckIcon className="size-3.5 shrink-0" />}
+                                  {option.value === currentSandboxProfile && (
+                                    <CheckIcon className="size-3.5 shrink-0" />
+                                  )}
                                 </span>
                                 {option.description && (
                                   <span className="max-w-56 text-xs text-muted-foreground">{option.description}</span>
@@ -440,20 +456,54 @@ export function Input({
                   </Toggle>
                   <LocalVoiceButton onSubmit={(t) => (onVoiceSubmit ?? onSubmit)(t)} />
                 </>
-              ) : hostedVoiceSupported ? (
+              ) : hostedVoiceLive && onVoiceToggleMute ? (
+                // The mic means "mute" for as long as the call runs — the
+                // affordance that starts voice is the primary button now.
                 <Button
                   type="button"
-                  variant="ghost"
+                  variant={voiceMuted ? 'secondary' : 'ghost'}
                   size="icon-sm"
-                  onClick={() => setIsVoiceModalOpen(true)}
+                  onClick={onVoiceToggleMute}
                   className="rounded-2xl"
-                  aria-label="Voice mode"
+                  aria-label={voiceMuted ? 'Unmute' : 'Mute'}
+                  title={voiceMuted ? 'Unmute' : 'Mute'}
                 >
-                  <MicIcon className="size-4 text-foreground" />
+                  {voiceMuted ? (
+                    <MicOffIcon className="size-4 text-destructive" />
+                  ) : (
+                    <MicIcon className="size-4 text-foreground" />
+                  )}
                 </Button>
               ) : null}
 
-              {!thinking ? (
+              {thinking ? null : hostedVoiceLive && onVoiceEnd ? (
+                // Live call: the primary button hangs up. Typed text still
+                // goes into the session on Enter, so nothing is trapped.
+                <Button
+                  type="button"
+                  variant="destructive"
+                  size="icon-sm"
+                  onClick={onVoiceEnd}
+                  className="rounded-full"
+                  aria-label="End voice mode"
+                  title="End voice mode"
+                >
+                  <PhoneOffIcon className="pointer-events-none size-4" />
+                </Button>
+              ) : startVoiceFromEmpty ? (
+                // Nothing to send, but there is something better to offer than
+                // a dead button.
+                <Button
+                  type="button"
+                  size="icon-sm"
+                  onClick={onVoiceStart}
+                  className="rounded-full"
+                  aria-label="Start voice mode"
+                  title="Start voice mode"
+                >
+                  <AudioLinesIcon className="pointer-events-none size-4" />
+                </Button>
+              ) : (
                 <Button
                   type="button"
                   size="icon-sm"
@@ -465,7 +515,9 @@ export function Input({
                 >
                   <ArrowUpIcon className="pointer-events-none size-4" />
                 </Button>
-              ) : (
+              )}
+
+              {thinking ? (
                 <Button
                   type="button"
                   variant="destructive"
@@ -477,23 +529,11 @@ export function Input({
                 >
                   <SquareIcon className="pointer-events-none size-4" />
                 </Button>
-              )}
+              ) : null}
             </div>
           </PromptInputActions>
         </PromptInput>
       </div>
-
-      {isVoiceModalOpen && (
-        <VoiceModal
-          isOpen={isVoiceModalOpen}
-          sessionId={sessionId}
-          onSessionCreated={onVoiceSessionCreated}
-          onClose={() => {
-            setIsVoiceModalOpen(false);
-            onVoiceClose?.();
-          }}
-        />
-      )}
     </div>
   );
 }

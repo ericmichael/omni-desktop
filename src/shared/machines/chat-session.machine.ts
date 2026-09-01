@@ -18,9 +18,13 @@ import type {
   ChatMessage,
   GuardianReviewItem,
   MessageItem,
-  ToolItem,
   WorkflowReviewItem,
 } from '@/shared/chat-types';
+import {
+  appendAssistantMessage as appendAssistantMessageItem,
+  applyToolResult as applyToolResultItem,
+  upsertToolCall as upsertToolCallItem,
+} from '@/shared/transcript-items';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -317,24 +321,13 @@ export const chatSessionMachine = setup({
       return { items: [...context.items, msg] };
     }),
 
-    // Live narration lands in the transcript IMMEDIATELY as a normal
-    // assistant message, stamped with the run identity. Live items carry no
-    // canonical envelope, so the runId stamp is what lets activity grouping
-    // fold the narration into the run's chain the moment later machinery
-    // from the same run arrives — matching what a reload rebuilds from
-    // canonical history (agent_message items with a turn_id).
+    // Live narration, tool calls and their results all build items through
+    // the shared reducer (`@/shared/transcript-items`) — the same one the
+    // subagent transcript store uses, so a nested run reads identically.
     appendAssistantMessage: assign(({ context, event }) => {
       const e = event as Extract<ChatSessionEvent, { type: 'MESSAGE_OUTPUT' }>;
-      // Dedupe on (runId, content): resync replay / reconnect can deliver
-      // the same message_output twice — the message has no call_id, so
-      // identity is the run plus the exact text (the spirit of
-      // appendToolItem's call_id upsert).
-      const dup = context.items.some(
-        (it) => it.type === 'chat' && it.role === 'assistant' && it.runId === context.runId && it.content === e.content
-      );
-      const msg: ChatMessage = { type: 'chat', role: 'assistant', content: e.content, runId: context.runId };
       return {
-        items: dup ? context.items : [...context.items, msg],
+        items: appendAssistantMessageItem(context.items, e.content, context.runId),
         status: undefined,
         statusItalic: false,
       };
@@ -342,55 +335,12 @@ export const chatSessionMachine = setup({
 
     appendToolItem: assign(({ context, event }) => {
       const e = event as Extract<ChatSessionEvent, { type: 'TOOL_CALLED' }>;
-      const item: ToolItem = {
-        type: 'tool',
-        tool: e.tool,
-        server_label: e.server_label,
-        tool_label: e.tool_label,
-        input: e.input,
-        call_id: e.call_id,
-        status: 'called',
-        metadata: e.metadata,
-        runId: context.runId,
-      };
-      // Upsert by call_id: a live tool_called can arrive after the same
-      // call was already rehydrated from the canonical transcript (late
-      // attach, post-resync replay) — appending blindly would duplicate it.
-      const idx = context.items.findIndex((it) => it.type === 'tool' && (it as ToolItem).call_id === e.call_id);
-      const items = idx >= 0 ? context.items.slice() : [...context.items, item];
-      if (idx >= 0) {
-        items[idx] = { ...(items[idx] as ToolItem), ...item };
-      }
-      return { items };
+      return { items: upsertToolCallItem(context.items, e, context.runId) };
     }),
 
     updateToolResult: assign(({ context, event }) => {
       const e = event as Extract<ChatSessionEvent, { type: 'TOOL_RESULT' }>;
-      const idx = context.items.findIndex((it) => it.type === 'tool' && (it as ToolItem).call_id === e.call_id);
-      const next = context.items.slice();
-      if (idx >= 0) {
-        next[idx] = {
-          ...next[idx],
-          output: e.output,
-          status: 'result',
-          metadata: e.metadata,
-          server_label: e.server_label ?? (next[idx] as ToolItem).server_label,
-          tool_label: e.tool_label ?? (next[idx] as ToolItem).tool_label,
-        } as ToolItem;
-      } else {
-        next.push({
-          type: 'tool',
-          tool: e.tool,
-          server_label: e.server_label,
-          tool_label: e.tool_label,
-          output: e.output,
-          call_id: e.call_id,
-          status: 'result',
-          metadata: e.metadata,
-          runId: context.runId,
-        } as ToolItem);
-      }
-      return { items: next };
+      return { items: applyToolResultItem(context.items, e, context.runId) };
     }),
 
     updateRunStatus: assign(({ event }) => {
@@ -669,6 +619,16 @@ export const chatSessionMachine = setup({
     ADD_ARTIFACT: { guard: 'acceptLoose', actions: 'addArtifact' },
     STAGE_CONTEXT: { actions: 'stageContext' },
     CLEAR_STAGED_CONTEXT: { actions: 'clearStagedContext' },
+    // Approvals are NOT bound to a text run. A voice turn's tool gate
+    // prompts over the same /ws channel while this machine sits in
+    // `ready.idle` — the realtime channel never broadcasts run_started —
+    // so a state-scoped handler dropped the card until the voice session
+    // ended and the canonical reload re-projected it. Appending the item
+    // is a pure context assign, so it belongs here; `running` keeps its
+    // own targeted transition into `awaitingApproval` (child wins) and
+    // `awaitingApproval` keeps its queue-aware APPROVAL_DECIDED branches.
+    REQUEST_APPROVAL: { guard: 'acceptStrict', actions: 'addApproval' },
+    APPROVAL_DECIDED: { actions: 'removeApproval' },
     APPROVAL_RESOLVED: { actions: 'removeApproval' },
     SELECT_SESSION: {
       target: '.initializing',

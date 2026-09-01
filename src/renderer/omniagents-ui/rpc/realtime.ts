@@ -477,36 +477,4 @@ export class RealtimeRPCClient {
   async interrupt(sessionId: string): Promise<boolean> {
     return this.call('interrupt', { session_id: sessionId });
   }
-
-  async clientResponse(requestId: string, ok: boolean, result?: Record<string, unknown>): Promise<boolean> {
-    return this.call('client_response', { request_id: requestId, ok, result });
-  }
-
-  async toolApprovalResponse(
-    callId: string,
-    decision: 'approve' | 'reject',
-    alwaysApprove: boolean = false,
-    rejectionMessage?: string
-  ): Promise<boolean> {
-    const params: Record<string, unknown> = { call_id: callId, decision };
-    if (alwaysApprove) {
-      params.always_approve = true;
-    }
-    if (rejectionMessage) {
-      params.rejection_message = rejectionMessage;
-    }
-    return this.call('tool_approval_response', params);
-  }
-
-  async mcpApprovalResponse(
-    requestId: string,
-    decision: 'approve' | 'reject',
-    rejectionMessage?: string
-  ): Promise<boolean> {
-    const params: Record<string, unknown> = { request_id: requestId, decision };
-    if (rejectionMessage) {
-      params.rejection_message = rejectionMessage;
-    }
-    return this.call('mcp_approval_response', params);
-  }
 }

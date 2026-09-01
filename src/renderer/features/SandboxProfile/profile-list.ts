@@ -108,7 +108,9 @@ export const getAvailableProfileNames = (ctx: ProfileListContext): string[] => {
   if (discovered.length > 0) {
     return discovered.map((p) => p.name).sort((a, b) => profileSafetyRank(a) - profileSafetyRank(b));
   }
-  const fallback = ctx.isEnterprise ? [...OPEN_SOURCE_PROFILES, ...ENTERPRISE_EXTRA_PROFILES] : [...OPEN_SOURCE_PROFILES];
+  const fallback = ctx.isEnterprise
+    ? [...OPEN_SOURCE_PROFILES, ...ENTERPRISE_EXTRA_PROFILES]
+    : [...OPEN_SOURCE_PROFILES];
   return fallback.sort((a, b) => profileSafetyRank(a) - profileSafetyRank(b));
 };
 

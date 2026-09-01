@@ -1,4 +1,12 @@
-import { BrainIcon, ChevronDownIcon, GlobeIcon, GlobeLockIcon, ListChecksIcon, ShieldCheckIcon, SparklesIcon } from 'lucide-react';
+import {
+  BrainIcon,
+  ChevronDownIcon,
+  GlobeIcon,
+  GlobeLockIcon,
+  ListChecksIcon,
+  ShieldCheckIcon,
+  SparklesIcon,
+} from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 
 import { Button } from '@/renderer/ds/ui/button';
@@ -422,9 +430,7 @@ export function ModelSessionControls({
               <DropdownMenuRadioItem value="on">
                 <span className="flex min-w-0 flex-col gap-0.5">
                   <span>On</span>
-                  <span className="max-w-52 text-xs text-muted-foreground">
-                    The sandbox can reach the internet
-                  </span>
+                  <span className="max-w-52 text-xs text-muted-foreground">The sandbox can reach the internet</span>
                 </span>
               </DropdownMenuRadioItem>
               <DropdownMenuRadioItem value="off">

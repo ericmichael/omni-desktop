@@ -19,14 +19,13 @@ import { PlansAndDiffsClient } from '@/renderer/omniagents-ui/rpc/plans-and-diff
 import type { Attachment } from '@/shared/chat-types';
 import { chatSessionMachine, type ChatSessionPhase, isThinking } from '@/shared/machines/chat-session.machine';
 import { createMachineLogger } from '@/shared/machines/machine-logger';
-
-// Tools whose user-visible side-effect is painted entirely by client-
-// side handlers (notify -> Notifications panel, escalate -> banner,
-// goal_complete -> goal state). Their tool_called / tool_result events
-// still flow through the agent's history so the LLM sees them, but we
-// suppress the transcript row so the docked panel / banner is the
-// only render.
-const HIDDEN_TOOLS = new Set(['notify', 'escalate', 'goal_complete']);
+// Tools whose user-visible side-effect is painted entirely by client-side
+// handlers (notify -> Notifications panel, escalate -> banner,
+// goal_complete -> goal state). Their tool_called / tool_result events still
+// flow through the agent's history so the LLM sees them, but we suppress the
+// transcript row so the docked panel / banner is the only render. Shared with
+// the subagent transcript store so nested runs hide the same tools.
+import { HIDDEN_TOOLS } from '@/shared/transcript-items';
 
 // ---------------------------------------------------------------------------
 // Hook

@@ -43,6 +43,7 @@ import { Plan, PlanContent, PlanDescription, PlanFooter, PlanHeader, PlanTitle }
 import { Shimmer } from './ai/shimmer';
 import { Tool, ToolContent, ToolHeader, ToolInput, ToolOutput } from './ai/tool';
 import { ChatContainerContent, ChatContainerRoot, ChatContainerScrollAnchor } from './ChatContainer';
+import { messageKey } from './message-key';
 import { Markdown } from './promptkit/markdown';
 import { RunDiffCard } from './RunDiffCard';
 
@@ -128,39 +129,41 @@ export function MessageList({
 }) {
   const [fallbackGreeting] = useState(getGreeting);
   const greeting = greetingProp ?? fallbackGreeting;
-  const [reactions, setReactions] = useState<Record<number, 'like' | 'dislike' | undefined>>({});
-  const [feedbackIndex, setFeedbackIndex] = useState<number | undefined>(undefined);
-  const handleReaction = useCallback((index: number, type: 'like' | 'dislike') => {
+  // Keyed by messageKey, not position: a reaction belongs to the message the
+  // user clicked, and rows move (voice reordering, two-stream interleave).
+  const [reactions, setReactions] = useState<Record<string, 'like' | 'dislike' | undefined>>({});
+  const [feedbackKey, setFeedbackKey] = useState<string | undefined>(undefined);
+  const handleReaction = useCallback((key: string, type: 'like' | 'dislike') => {
     setReactions((prev) => {
-      const toggled = prev[index] === type ? undefined : type;
+      const toggled = prev[key] === type ? undefined : type;
       if (toggled) {
-        setFeedbackIndex(index);
+        setFeedbackKey(key);
       } else {
-        setFeedbackIndex(undefined);
+        setFeedbackKey(undefined);
       }
-      return { ...prev, [index]: toggled };
+      return { ...prev, [key]: toggled };
     });
   }, []);
   const handleFeedbackSubmit = useCallback(
-    (index: number, text: string) => {
-      const type = reactions[index];
+    (key: string, text: string) => {
+      const type = reactions[key];
       if (type) {
         onReaction?.(type, text);
       }
-      setFeedbackIndex(undefined);
+      setFeedbackKey(undefined);
     },
     [reactions, onReaction]
   );
   const handleFeedbackDismiss = useCallback(() => {
-    const idx = feedbackIndex;
-    if (idx !== undefined) {
-      const type = reactions[idx];
+    const key = feedbackKey;
+    if (key !== undefined) {
+      const type = reactions[key];
       if (type) {
         onReaction?.(type);
       }
     }
-    setFeedbackIndex(undefined);
-  }, [feedbackIndex, reactions, onReaction]);
+    setFeedbackKey(undefined);
+  }, [feedbackKey, reactions, onReaction]);
   // Tools may opt out of the conversation log by attaching
   // ``ui_metadata.hidden = true`` on their RichToolOutput (e.g.
   // ``bash_status`` polls, no-op ``bash_kill`` results). The omniagents
@@ -240,11 +243,12 @@ export function MessageList({
           // step as "awaiting approval" instead of a lying "Running…".
           const pendingApprovalSet = new Set(pendingApprovalIds);
           return displayItems.map((m, i) => {
+            const key = messageKey(m, i);
             if (m.type === 'activity_group') {
               const group = m as ActivityGroupData;
               return (
                 <ActivityChain
-                  key={`${group.runId ?? 'machinery'}-${i}`}
+                  key={key}
                   group={group}
                   statusText={tickerStatus}
                   renderTool={renderActivityTool}
@@ -255,15 +259,15 @@ export function MessageList({
             if (m.type === 'chat') {
               return (
                 <MessageBubble
-                  key={i}
-                  index={i}
+                  key={key}
+                  messageKey={key}
                   role={(m as ChatMessage).role}
                   content={(m as ChatMessage).content}
                   attachments={(m as ChatMessage).attachments}
                   stagedContext={(m as ChatMessage).staged_context}
                   reactions={reactions}
                   onReact={handleReaction}
-                  feedbackIndex={feedbackIndex}
+                  feedbackKey={feedbackKey}
                   onFeedbackSubmit={handleFeedbackSubmit}
                   onFeedbackDismiss={handleFeedbackDismiss}
                 />
@@ -272,7 +276,7 @@ export function MessageList({
             if (m.type === 'artifact') {
               return (
                 <InlineArtifact
-                  key={(m as ArtifactItem).artifact_id || i}
+                  key={key}
                   item={m as ArtifactItem}
                   onSubmitMessage={onSubmitMessage}
                   onStageContext={onStageContext}
@@ -285,7 +289,7 @@ export function MessageList({
               const queuePosition = idx >= 0 ? idx + 1 : 1;
               return (
                 <ApprovalCard
-                  key={reqId}
+                  key={key}
                   item={m as ApprovalItem}
                   onDecision={onApprovalDecision}
                   queuePosition={queuePosition}
@@ -294,21 +298,13 @@ export function MessageList({
               );
             }
             if (m.type === 'plan') {
-              return <PlanCard key={(m as PlanItem).id} item={m as PlanItem} />;
+              return <PlanCard key={key} item={m as PlanItem} />;
             }
             if (m.type === 'run_diff') {
-              return (
-                <RunDiffCard
-                  key={(m as RunDiffItem).canonical.item_id}
-                  item={m as RunDiffItem}
-                  onReview={onOpenReview}
-                />
-              );
+              return <RunDiffCard key={key} item={m as RunDiffItem} onReview={onOpenReview} />;
             }
             if (m.type === 'structured') {
-              return (
-                <StructuredConversationCard key={(m as StructuredItem).canonical.item_id} item={m as StructuredItem} />
-              );
+              return <StructuredConversationCard key={key} item={m as StructuredItem} />;
             }
             return null;
           });
@@ -356,30 +352,30 @@ function StagedContextRibbon({ entries }: { entries: NonNullable<ChatMessage['st
 }
 
 function MessageBubble({
-  index,
+  messageKey: key,
   role,
   content,
   attachments,
   stagedContext,
   reactions,
   onReact,
-  feedbackIndex,
+  feedbackKey,
   onFeedbackSubmit,
   onFeedbackDismiss,
 }: {
-  index: number;
+  messageKey: string;
   role: ChatMessage['role'];
   content: string;
   attachments?: Attachment[];
   stagedContext?: ChatMessage['staged_context'];
-  reactions?: Record<number, 'like' | 'dislike' | undefined>;
-  onReact?: (index: number, type: 'like' | 'dislike') => void;
-  feedbackIndex?: number;
-  onFeedbackSubmit?: (index: number, text: string) => void;
+  reactions?: Record<string, 'like' | 'dislike' | undefined>;
+  onReact?: (key: string, type: 'like' | 'dislike') => void;
+  feedbackKey?: string;
+  onFeedbackSubmit?: (key: string, text: string) => void;
   onFeedbackDismiss?: () => void;
 }) {
   const [feedbackText, setFeedbackText] = useState('');
-  const showFeedback = feedbackIndex === index;
+  const showFeedback = feedbackKey === key;
   if (role === 'user') {
     return (
       <div className="flex justify-end">
@@ -418,7 +414,7 @@ function MessageBubble({
     );
   }
   // assistant
-  const hasReaction = !!(reactions && reactions[index]);
+  const hasReaction = !!(reactions && reactions[key]);
   return (
     <div className="group flex justify-start">
       <div className="flex w-full min-w-0 max-w-full flex-col items-start">
@@ -458,8 +454,8 @@ function MessageBubble({
               type="button"
               variant="ghost"
               size="icon-xs"
-              onClick={() => onReact && onReact(index, 'like')}
-              className={`pointer-coarse:p-3 ${reactions && reactions[index] === 'like' ? 'text-success' : 'text-muted-foreground'}`}
+              onClick={() => onReact && onReact(key, 'like')}
+              className={`pointer-coarse:p-3 ${reactions && reactions[key] === 'like' ? 'text-success' : 'text-muted-foreground'}`}
               aria-label="Like"
             >
               <ThumbsUpIcon className="size-4" />
@@ -468,8 +464,8 @@ function MessageBubble({
               type="button"
               variant="ghost"
               size="icon-xs"
-              onClick={() => onReact && onReact(index, 'dislike')}
-              className={`pointer-coarse:p-3 ${reactions && reactions[index] === 'dislike' ? 'text-destructive' : 'text-muted-foreground'}`}
+              onClick={() => onReact && onReact(key, 'dislike')}
+              className={`pointer-coarse:p-3 ${reactions && reactions[key] === 'dislike' ? 'text-destructive' : 'text-muted-foreground'}`}
               aria-label="Dislike"
             >
               <ThumbsDownIcon className="size-4" />
@@ -485,7 +481,7 @@ function MessageBubble({
                   onChange={(e) => setFeedbackText(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
-                      onFeedbackSubmit?.(index, feedbackText);
+                      onFeedbackSubmit?.(key, feedbackText);
                       setFeedbackText('');
                     } else if (e.key === 'Escape') {
                       onFeedbackDismiss?.();
@@ -498,7 +494,7 @@ function MessageBubble({
                   <InputGroupButton
                     variant="default"
                     onClick={() => {
-                      onFeedbackSubmit?.(index, feedbackText);
+                      onFeedbackSubmit?.(key, feedbackText);
                       setFeedbackText('');
                     }}
                   >
@@ -1272,7 +1268,12 @@ const SELF_CONTAINED_DISPLAY_TYPES = new Set([
   'table',
 ]);
 
-function ApprovalCard({
+/**
+ * Exported for surfaces that render approval cards outside the transcript
+ * — the resident DM voice dock has no MessageList, but its approvals must
+ * be the same card, not a re-implementation.
+ */
+export function ApprovalCard({
   item,
   onDecision,
   queuePosition,

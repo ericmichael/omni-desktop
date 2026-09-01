@@ -3,7 +3,9 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  $subagentTranscriptsBySession,
   type ActivityActions,
+  publishSubagentEvent,
   publishSubagentsSnapshot,
   registerActivityActions,
   requestActivityFocus,
@@ -49,6 +51,7 @@ afterEach(() => {
   container.remove();
   publishSubagentsSnapshot(SESSION, []);
   registerActivityActions(SESSION, null);
+  $subagentTranscriptsBySession.set({});
   vi.unstubAllGlobals();
 });
 
@@ -70,6 +73,20 @@ const worker = (overrides: Partial<SubagentSummary> = {}): SubagentSummary => ({
   ...overrides,
 });
 
+/** An agent-tool run (``explore``): no session of its own, so its only
+ *  record is the beats the subagent bus relays. */
+const agentTool = (overrides: Partial<SubagentSummary> = {}): SubagentSummary => ({
+  ...worker(),
+  subagent_id: 'call-1',
+  kind: 'agent_tool',
+  agent: 'explorer',
+  worker_id: undefined,
+  task: 'how is auth implemented?',
+  session_id: '',
+  run_id: 'call-1',
+  ...overrides,
+});
+
 const actionsWith = (getWorkerPlan: ActivityActions['getWorkerPlan']): ActivityActions => ({
   killWorker: vi.fn(),
   killJob: vi.fn(),
@@ -77,8 +94,8 @@ const actionsWith = (getWorkerPlan: ActivityActions['getWorkerPlan']): ActivityA
   getWorkerPlan,
 });
 
-/** Publish state, deep-link straight into the worker's detail page, render. */
-const renderWorkerDetail = async (subagent: SubagentSummary, actions: ActivityActions | null) => {
+/** Publish state, deep-link straight into the subagent's detail page, render. */
+const renderSubagentDetail = async (subagent: SubagentSummary, actions: ActivityActions | null) => {
   publishSubagentsSnapshot(SESSION, [subagent]);
   registerActivityActions(SESSION, actions);
   requestActivityFocus(SESSION, subagentItemId(subagent.subagent_id));
@@ -101,7 +118,7 @@ describe('AgentsSurface worker-plan drill-down', () => {
       { id: '2', subject: 'fix it', status: 'in_progress', blockedBy: [] },
     ];
     const getWorkerPlan = vi.fn().mockResolvedValue(tasks);
-    await renderWorkerDetail(worker(), actionsWith(getWorkerPlan));
+    await renderSubagentDetail(worker(), actionsWith(getWorkerPlan));
 
     expect(getWorkerPlan).toHaveBeenCalledExactlyOnceWith('worker-sess');
     const section = workerPlanSection();
@@ -118,7 +135,7 @@ describe('AgentsSurface worker-plan drill-down', () => {
 
   it('renders no plan section when the read fails', async () => {
     const getWorkerPlan = vi.fn().mockRejectedValue(new Error('runtime gone'));
-    await renderWorkerDetail(worker(), actionsWith(getWorkerPlan));
+    await renderSubagentDetail(worker(), actionsWith(getWorkerPlan));
 
     expect(getWorkerPlan).toHaveBeenCalled();
     expect(workerPlanSection()).toBeNull();
@@ -126,12 +143,37 @@ describe('AgentsSurface worker-plan drill-down', () => {
 
   it('renders no plan section when the worker has no plan or no actions are registered', async () => {
     const getWorkerPlan = vi.fn().mockResolvedValue(null);
-    await renderWorkerDetail(worker(), actionsWith(getWorkerPlan));
+    await renderSubagentDetail(worker(), actionsWith(getWorkerPlan));
     expect(workerPlanSection()).toBeNull();
 
     await act(async () => root.unmount());
     root = createRoot(container);
-    await renderWorkerDetail(worker(), null);
+    await renderSubagentDetail(worker(), null);
     expect(workerPlanSection()).toBeNull();
+  });
+});
+
+describe('AgentsSurface agent-tool transcript', () => {
+  it('renders the relayed steps of a sessionless run through the normal transcript', async () => {
+    publishSubagentEvent(SESSION, 'call-1', 'tool_called', {
+      call_id: 'c1',
+      tool: 'search',
+      input: '{"query":"login"}',
+    });
+    publishSubagentEvent(SESSION, 'call-1', 'tool_result', { call_id: 'c1', tool: 'search', output: '3 files' });
+    publishSubagentEvent(SESSION, 'call-1', 'message_output', { content: 'auth lives in auth.ts' });
+    await renderSubagentDetail(agentTool(), null);
+
+    const chat = container.querySelector('[data-testid="chat-transcript"]');
+    expect(chat).not.toBeNull();
+    expect(chat!.textContent).toContain('search');
+    expect(chat!.textContent).toContain('auth lives in auth.ts');
+  });
+
+  it('says the run left no steps rather than mounting an empty viewer', async () => {
+    await renderSubagentDetail(agentTool({ status: 'completed' }), null);
+
+    expect(container.querySelector('[data-testid="chat-transcript"]')).toBeNull();
+    expect(container.textContent).toContain('left no relayed steps');
   });
 });

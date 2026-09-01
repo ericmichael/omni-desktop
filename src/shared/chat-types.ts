@@ -45,6 +45,13 @@ export type ChatMessage = {
   type: 'chat';
   role: 'user' | 'assistant' | 'system';
   content: string;
+  /**
+   * Realtime conversation item id, stamped by the voice-session machine on
+   * live voice turns. Live items carry no canonical envelope, so this is the
+   * only stable identity a spoken turn has — and it needs one, because the
+   * voice transcript re-sorts itself into the model's item order.
+   */
+  item_id?: string;
   timestamp?: string;
   attachments?: Attachment[];
   /**
@@ -288,4 +295,3 @@ export type MessageItem =
   | PlanItem
   | RunDiffItem
   | StructuredItem;
-

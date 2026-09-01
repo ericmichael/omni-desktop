@@ -87,11 +87,7 @@ function preambleIndices(items: MessageItem[]): Set<number> {
   const lastMachineryIndexByRun = new Map<string, number>();
   for (let i = 0; i < items.length; i++) {
     const item = items[i]!;
-    if (
-      item.type === 'tool' ||
-      item.type === 'reasoning' ||
-      (item.type === 'chat' && item.role === 'assistant')
-    ) {
+    if (item.type === 'tool' || item.type === 'reasoning' || (item.type === 'chat' && item.role === 'assistant')) {
       const rid = itemRunId(item);
       if (rid) {
         lastMachineryIndexByRun.set(rid, i);

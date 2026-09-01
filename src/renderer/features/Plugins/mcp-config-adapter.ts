@@ -1,7 +1,4 @@
-import type {
-  McpMutationPersistence,
-  McpServerSnapshot,
-} from '@/renderer/omniagents-ui/rpc/mcp-management';
+import type { McpMutationPersistence, McpServerSnapshot } from '@/renderer/omniagents-ui/rpc/mcp-management';
 import type { McpConfig, McpServerEntry } from '@/shared/types';
 
 const MCP_TYPES = new Set(['stdio', 'sse', 'http', 'streamable_http']);
@@ -53,9 +50,7 @@ export function mcpServerEntryFromSnapshot(snapshot: McpServerSnapshot): McpServ
         }
       : {
           url: typeof params['url'] === 'string' ? params['url'] : '',
-          ...(stored.headers.length > 0
-            ? { headers: Object.fromEntries(stored.headers.map((key) => [key, ''])) }
-            : {}),
+          ...(stored.headers.length > 0 ? { headers: Object.fromEntries(stored.headers.map((key) => [key, ''])) } : {}),
         }),
   };
 }
@@ -83,7 +78,10 @@ function nonEmptySecrets(values: Record<string, string> | undefined): Record<str
   return entries.length > 0 ? Object.fromEntries(entries) : undefined;
 }
 
-export function mcpCreateInput(serverName: string, entry: McpServerEntry): {
+export function mcpCreateInput(
+  serverName: string,
+  entry: McpServerEntry
+): {
   serverName: string;
   type: NonNullable<McpServerEntry['type']>;
   params: Record<string, unknown>;
