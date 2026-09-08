@@ -1333,7 +1333,10 @@ export class RPCClient {
       params.environment_id = target.environmentId;
       params.environment_generation = target.environmentGeneration;
     }
-    return this.call('server_call', params);
+    // Compaction owns its backend deadline (20 minutes by default).
+    return func === 'compact'
+      ? this.callWithOptions('server_call', params, { timeoutMs: null })
+      : this.call('server_call', params);
   }
 
   // MCP Apps host helpers used by the MCP-UI ``AppRenderer`` integration
