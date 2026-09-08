@@ -1028,7 +1028,9 @@ export class RPCClient {
     const req = { jsonrpc: '2.0' as const, id, method, params };
     const serialized = JSON.stringify(req);
     const startedAt = performance.now();
-    const timeoutMs = options.timeoutMs === undefined ? RPC_CALL_TIMEOUT_MS : options.timeoutMs;
+    const isCompaction =
+      method === 'server_call' && (params as { function?: unknown } | undefined)?.function === 'compact';
+    const timeoutMs = options.timeoutMs === undefined ? (isCompaction ? null : RPC_CALL_TIMEOUT_MS) : options.timeoutMs;
 
     const p = new Promise<RpcMethodMap[Method]['result']>((resolve, reject) => {
       const settleLocally = (error: Error) => {
@@ -1333,10 +1335,7 @@ export class RPCClient {
       params.environment_id = target.environmentId;
       params.environment_generation = target.environmentGeneration;
     }
-    // Compaction owns its backend deadline (20 minutes by default).
-    return func === 'compact'
-      ? this.callWithOptions('server_call', params, { timeoutMs: null })
-      : this.call('server_call', params);
+    return this.call('server_call', params);
   }
 
   // MCP Apps host helpers used by the MCP-UI ``AppRenderer`` integration

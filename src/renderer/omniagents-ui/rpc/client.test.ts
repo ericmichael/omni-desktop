@@ -103,6 +103,47 @@ describe('RPCClient GUI protocol handshake', () => {
     vi.unstubAllGlobals();
   });
 
+  it.each(['helper', 'raw'] as const)(
+    'keeps %s compaction pending beyond 20 minutes while probes succeed',
+    async (entry) => {
+      vi.useFakeTimers();
+      const { client, socket } = await connectedClient();
+      try {
+        const send = socket.send.bind(socket);
+        vi.spyOn(socket, 'send').mockImplementation((payload) => {
+          send(payload);
+          const request = JSON.parse(payload);
+          if (request.method === 'get_agent_info') {
+            queueMicrotask(() => socket.receive({ jsonrpc: '2.0', id: request.id, result: {} }));
+          }
+        });
+        const pending =
+          entry === 'helper'
+            ? client.serverCall('compact', {}, 'session-1')
+            : client.request('server_call', { function: 'compact', session_id: 'session-1' });
+        let settled = false;
+        void pending.then(
+          () => {
+            settled = true;
+          },
+          () => {
+            settled = true;
+          }
+        );
+        const request = JSON.parse(socket.sent[0]!);
+        await vi.advanceTimersByTimeAsync(21 * 60_000);
+        expect(settled).toBe(false);
+        expect(client.isConnected).toBe(true);
+        expect(socket.sent.filter((row) => JSON.parse(row).method === 'get_agent_info').length).toBeGreaterThan(1);
+        socket.receive({ jsonrpc: '2.0', id: request.id, result: { ok: true } });
+        await expect(pending).resolves.toEqual({ ok: true });
+      } finally {
+        client.dispose();
+        vi.useRealTimers();
+      }
+    }
+  );
+
   it('cannot reopen a permanently retired client from late async work', async () => {
     const { client, socket } = await connectedClient();
     client.dispose();
