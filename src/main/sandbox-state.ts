@@ -82,8 +82,8 @@ export const sandboxStateContainerIds = (dir: string = sandboxStateDir()): strin
 
 /**
  * Destroy the durable environment behind *snapshotRef*: force-remove its
- * container (best-effort — dockerd down or container already gone are fine)
- * and delete the record. Used by the tab-close cascade when no live serve
+ * container and delete the record only after removal is confirmed. A Docker
+ * outage preserves the ownership record for retry. Used when no live serve
  * process owns the environment, and by the stale-workspace GC.
  */
 export const destroySandboxState = async (
@@ -94,26 +94,46 @@ export const destroySandboxState = async (
   if (!SAFE_REF.test(snapshotRef)) {
     return;
   }
-  const record = listSandboxStates(dir).find((item) => item.snapshotRef === snapshotRef);
-  if (!record) {
-    return;
+  const filename = path.join(dir, `${snapshotRef}${STATE_SUFFIX}`);
+  let original: string;
+  try {
+    original = readFileSync(filename, 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return;
+    }
+    throw error;
   }
-  if (record.containerId) {
+  // Corrupt/unreadable state is not evidence that no container is owned.
+  const record = JSON.parse(original) as { container_id?: unknown };
+  if (record.container_id !== null && typeof record.container_id !== 'string') {
+    throw new Error(`Invalid sandbox ownership record: ${snapshotRef}`);
+  }
+  if (record.container_id) {
+    const opts = { encoding: 'utf8' as const, timeout: 15_000, env: deps.getEnv() };
     try {
-      await deps.execFileFn('docker', ['rm', '-f', record.containerId], {
-        encoding: 'utf8',
-        timeout: 15_000,
-        env: deps.getEnv(),
-      });
-    } catch {
-      // Container already gone, or dockerd unreachable — the record delete
-      // below still retires the claim; the labeled-container sweep catches
-      // any survivor.
+      await deps.execFileFn('docker', ['rm', '-f', '--', record.container_id], opts);
+    } catch (error) {
+      // A lost reply/already-removed container is success only if a fresh,
+      // successful daemon query proves absence. Never parse error prose.
+      const { stdout } = await deps.execFileFn(
+        'docker',
+        ['ps', '-a', '--no-trunc', '--filter', `id=${record.container_id}`, '--format', '{{.ID}}'],
+        opts
+      );
+      if (stdout.trim()) {
+        throw error;
+      }
     }
   }
   try {
-    rmSync(path.join(dir, `${snapshotRef}${STATE_SUFFIX}`), { force: true });
-  } catch {
-    // Best-effort.
+    if (readFileSync(filename, 'utf8') !== original) {
+      throw new Error(`Sandbox ownership changed during cleanup: ${snapshotRef}`);
+    }
+    rmSync(filename);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      throw error;
+    }
   }
 };

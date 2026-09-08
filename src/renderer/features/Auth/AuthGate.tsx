@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useState } from 'react';
 
+import { StartupError } from '@/renderer/common/StartupError';
 import { Button } from '@/renderer/ds/ui/button';
 import { Spinner } from '@/renderer/ds/ui/spinner';
 import { emitter, ipc } from '@/renderer/services/ipc';
@@ -18,19 +19,46 @@ export const AuthGate = memo(({ children }: { children: React.ReactNode }) => {
   const [isEnterprise, setIsEnterprise] = useState<boolean | null>(null);
   const [auth, setAuth] = useState<PlatformCredentials | null | undefined>(undefined);
   const [flow, setFlow] = useState<AuthFlowState>({ step: 'idle' });
+  const [bootstrapError, setBootstrapError] = useState<string | null>(null);
 
   useEffect(() => {
-    emitter.invoke('platform:is-enterprise').then(setIsEnterprise);
-    emitter.invoke('platform:get-auth').then(setAuth);
-  }, []);
-
-  useEffect(() => {
-    return ipc.on('platform:auth-changed', (credentials) => {
+    let live = true;
+    let authChanged = false;
+    const stop = ipc.on('platform:auth-changed', (credentials) => {
+      authChanged = true;
       setAuth(credentials);
-      if (credentials) {
-        setFlow({ step: 'idle' });
-      }
+      setFlow({ step: 'idle' });
     });
+    const failed = (error: unknown) => {
+      if (live) {
+        setBootstrapError(error instanceof Error ? error.message : 'Unable to connect. Please reload.');
+      }
+    };
+    void emitter
+      .invoke('platform:is-enterprise')
+      .then((value) => {
+        if (live) {
+          setIsEnterprise(value);
+        }
+      })
+      .catch(failed);
+    void emitter
+      .invoke('platform:get-auth')
+      .then((value) => {
+        // A sign-in/out event is newer than this bootstrap snapshot.
+        if (live && !authChanged) {
+          setAuth(value);
+        }
+      })
+      .catch((error) => {
+        if (!authChanged) {
+          failed(error);
+        }
+      });
+    return () => {
+      live = false;
+      stop();
+    };
   }, []);
 
   const handleSignIn = useCallback(async () => {
@@ -69,6 +97,10 @@ export const AuthGate = memo(({ children }: { children: React.ReactNode }) => {
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   }, [flow]);
+
+  if (bootstrapError) {
+    return <StartupError title="Unable to check sign-in status" error={bootstrapError} />;
+  }
 
   // Still loading
   if (isEnterprise === null || auth === undefined) {

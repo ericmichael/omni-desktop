@@ -1,8 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { applyChatCommand, type ChatCommand } from '@/shared/chat-commands';
 import type { CodeTab, Project, StoreData } from '@/shared/types';
 
-const invoke = vi.fn(() => Promise.resolve());
+const invoke = vi.fn((method: string, command?: unknown) => {
+  if (method === 'store:chat-command') {
+    const { patch, result } = applyChatCommand(store, command as ChatCommand);
+    store = { ...store, ...patch };
+    return Promise.resolve(result);
+  }
+  return Promise.resolve();
+});
 const setKey = vi.fn((key: keyof StoreData, value: StoreData[keyof StoreData]) => {
   store = { ...store, [key]: value } as StoreData;
   return Promise.resolve();
@@ -28,6 +36,7 @@ vi.mock('@/renderer/services/agent-process', () => ({
 
 vi.mock('@/renderer/features/Console/state', () => ({
   destroyAllTerminalsForTab: vi.fn(),
+  forgetTerminalsForTab: vi.fn(),
 }));
 
 vi.mock('@/renderer/constants', () => ({
@@ -72,6 +81,23 @@ const resetStore = (patch: Partial<StoreData> = {}) => {
 };
 
 describe('code tab sandbox profile resolution', () => {
+  it('does not override a newer tile selection while closing another tile', async () => {
+    const { codeApi } = await import('./state');
+    resetStore({ codeTabs: [tab({ id: 'A' }), tab({ id: 'B' }), tab({ id: 'C' })], activeCodeTabId: 'A' });
+    let saved!: () => void;
+    invoke.mockImplementationOnce((_method, command) => {
+      const { patch, result } = applyChatCommand(store, command as ChatCommand);
+      store = { ...store, ...patch };
+      return new Promise<typeof result>((resolve) => {
+        saved = () => resolve(result);
+      });
+    });
+    const closing = codeApi.removeTab('A');
+    store = { ...store, activeCodeTabId: 'B' };
+    saved();
+    await closing;
+    expect(store.activeCodeTabId).toBe('B');
+  });
   beforeEach(() => {
     vi.resetModules();
     resetStore();
@@ -215,7 +241,9 @@ describe('chat columns and conversation history', () => {
     await codeApi.archiveTab('chat-tab', 'Plan my week');
 
     expect(store.codeTabs).toHaveLength(0);
-    expect(invoke).toHaveBeenCalledWith('snapshot:delete', 'snapshot-chat');
+    // Runtime and snapshot cleanup now happen before the authoritative RPC
+    // replies; the renderer must not issue a second deletion.
+    expect(invoke).not.toHaveBeenCalledWith('snapshot:delete', 'snapshot-chat');
     expect(store.chatConversations[0]).toMatchObject({
       sessionId: 'sess-1',
       title: 'Plan my week',
@@ -243,8 +271,8 @@ describe('chat columns and conversation history', () => {
     await codeApi.removeTab('fresh-chat');
     await codeApi.removeTab('proj-tab');
 
-    expect(invoke).toHaveBeenCalledWith('snapshot:delete', 'snapshot-fresh');
-    expect(invoke).toHaveBeenCalledWith('snapshot:delete', 'snapshot-proj');
+    expect(invoke).not.toHaveBeenCalledWith('snapshot:delete', 'snapshot-fresh');
+    expect(invoke).not.toHaveBeenCalledWith('snapshot:delete', 'snapshot-proj');
     expect(store.chatConversations).toEqual([]);
   });
 

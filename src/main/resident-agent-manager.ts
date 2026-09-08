@@ -31,7 +31,7 @@ import type Store from 'electron-store';
 import { fromIso, type IProjectsRepo, residentId, toIso } from 'omni-projects-db';
 import { WebSocket as WsWebSocket } from 'ws';
 
-import type { JsonRpcError, RpcMethodMap } from '@/generated/omniagents-gui-v1/gui-v1';
+import type { JsonRpcError, RpcMethodMap } from '@/generated/omniagents-gui-v2/gui-v2';
 import { RESIDENT_SUPERUSER_TOOLS } from '@/lib/client-tools';
 import {
   advanceThread,

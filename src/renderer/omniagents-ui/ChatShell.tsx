@@ -8,16 +8,18 @@ import { Button } from '@/renderer/ds/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/renderer/ds/ui/card';
 import { Spinner } from '@/renderer/ds/ui/spinner';
 
-import { Input } from './components/Input';
+import { ConversationComposer } from './components/ConversationComposer';
 import { getGreeting } from './greeting';
 import { OmniAgentsHeaderActionsProvider } from './header-actions';
 
 type ChatShellPhase = 'loading' | 'idle' | 'error';
 
-export type PendingMessage = { text: string; files?: File[] };
+export type PendingMessage = { text: string; files?: File[]; inputId?: string };
 export type ChatShellSuggestion = { label: string; prompt: string };
 
 type ChatShellProps = {
+  conversationId?: string;
+  sessionControls?: ReactNode;
   greeting?: string;
   phase: ChatShellPhase;
   error?: string | null;
@@ -46,6 +48,8 @@ const headerActions = {
 
 export const ChatShell = memo(
   ({
+    conversationId,
+    sessionControls,
     greeting: greetingProp,
     phase,
     error,
@@ -64,8 +68,8 @@ export const ChatShell = memo(
     onOpenWorkspaceSettings,
   }: ChatShellProps) => {
     const handleSubmit = useCallback(
-      (text: string, files?: File[]) => {
-        onSubmit({ text, files });
+      (text: string, files?: File[], inputId?: string) => {
+        onSubmit({ text, files, inputId });
       },
       [onSubmit]
     );
@@ -206,7 +210,9 @@ export const ChatShell = memo(
                     </div>
                   )}
                 </div>
-                <Input
+                {sessionControls}
+                <ConversationComposer
+                  conversationId={conversationId}
                   onSubmit={handleSubmit}
                   disabled={!workspaceReady}
                   sandboxLabel={sandboxLabel}

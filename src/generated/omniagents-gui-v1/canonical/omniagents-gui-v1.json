@@ -1313,6 +1313,13 @@
           "schema": {
             "$ref": "./schemas/gui-v1.schema.json#/$defs/start_run/properties/prompt_role"
           }
+        },
+        {
+          "name": "submission_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/start_run/properties/submission_id"
+          }
         }
       ],
       "result": {
@@ -2162,10 +2169,24 @@
           }
         },
         {
+          "name": "submission_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/enqueue_message/properties/submission_id"
+          }
+        },
+        {
           "name": "role",
           "required": false,
           "schema": {
             "$ref": "./schemas/gui-v1.schema.json#/$defs/enqueue_message/properties/role"
+          }
+        },
+        {
+          "name": "input_content",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/enqueue_message/properties/input_content"
           }
         },
         {
@@ -4885,6 +4906,20 @@
           "required": true,
           "schema": {
             "$ref": "./schemas/gui-v1.schema.json#/$defs/queue_status/properties/session_id"
+          }
+        },
+        {
+          "name": "include_snapshot",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/queue_status/properties/include_snapshot"
+          }
+        },
+        {
+          "name": "submission_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/queue_status/properties/submission_id"
           }
         }
       ],
@@ -10301,6 +10336,13 @@
           }
         },
         {
+          "name": "source_call_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/tool_approval_requested/properties/source_call_id"
+          }
+        },
+        {
           "name": "seq",
           "required": false,
           "schema": {
@@ -10438,6 +10480,13 @@
           "required": false,
           "schema": {
             "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_approval_requested/properties/run_id"
+          }
+        },
+        {
+          "name": "source_request_id",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/gui-v1.schema.json#/$defs/mcp_approval_requested/properties/source_request_id"
           }
         },
         {

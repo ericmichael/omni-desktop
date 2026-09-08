@@ -1,4 +1,4 @@
-import { withConnectTicket } from '@/renderer/omniagents-ui/rpc/ws-ticket';
+import { withConnectTicket, WsTicketError } from '@/renderer/omniagents-ui/rpc/ws-ticket';
 import {
   classifyCloseCode,
   ConnectionClosedError,
@@ -67,6 +67,7 @@ export class RealtimeRPCClient {
   private generation = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private rejectReconnectWait: ((error: Error) => void) | null = null;
+  private cancelConnectingSocket: (() => void) | null = null;
 
   constructor(
     private readonly url: string,
@@ -143,12 +144,14 @@ export class RealtimeRPCClient {
         new RpcTimeoutError('connect', this.policy.connectTimeoutMs)
       );
     } catch (error) {
-      // Ticket exchange failures are credential failures and deterministic.
-      // A deadline remains retryable because the credential was not rejected.
+      // Only explicit credential rejection is terminal. Network failures,
+      // rate limits and service outages remain retryable.
       if (error instanceof RpcTimeoutError) {
         throw error;
       }
-      throw new ConnectionClosedError((error as Error).message || 'Authentication failed', { permanent: true });
+      throw new ConnectionClosedError((error as Error).message || 'Authentication failed', {
+        permanent: error instanceof WsTicketError && error.permanent,
+      });
     }
 
     if (this.closedByUser || generation !== this.generation) {
@@ -171,6 +174,9 @@ export class RealtimeRPCClient {
         }
         settled = true;
         clearTimeout(timer);
+        if (this.cancelConnectingSocket === cancel) {
+          this.cancelConnectingSocket = null;
+        }
         ws.onopen = null;
         ws.onerror = null;
         ws.onclose = null;
@@ -191,6 +197,8 @@ export class RealtimeRPCClient {
       const timer = setTimeout(() => {
         finish(new ConnectionClosedError(`Connect timed out after ${this.policy.connectTimeoutMs}ms`));
       }, remainingMs);
+      const cancel = () => finish(new ConnectionClosedError('Connection closed by client', { permanent: true }));
+      this.cancelConnectingSocket = cancel;
       ws.onopen = () => {
         if (this.debug) {
           console.log('[rpc] open');
@@ -331,6 +339,8 @@ export class RealtimeRPCClient {
   disconnect(): void {
     this.closedByUser = true;
     this.generation += 1;
+    this.cancelConnectingSocket?.();
+    this.cancelConnectingSocket = null;
     if (this.reconnectTimer !== null) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;

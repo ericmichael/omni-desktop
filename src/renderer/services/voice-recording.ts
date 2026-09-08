@@ -20,6 +20,12 @@ export const $recordingScope = atom<string | null>(null);
  */
 export const $hoveredVoiceScope = atom<string | null>(null);
 
+/** Keyboard focus wins over a pointer resting above a different tile. */
+export function resolveCodeVoiceScope(active: string | null): string | null {
+  const focused = document.activeElement?.closest<HTMLElement>('[data-voice-scope]')?.dataset.voiceScope;
+  return focused ?? $hoveredVoiceScope.get() ?? active;
+}
+
 /** Per-column scope id, provided around the agent UI subtree. */
 export const VoiceScopeContext = createContext<string | null>(null);
 

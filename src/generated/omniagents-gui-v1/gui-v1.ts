@@ -18,12 +18,13 @@ export interface StartRunParams {
   session_id?: string;
   variables?: Record<string, unknown>;
   context?: Record<string, unknown>;
-  content?: string;
+  content?: string | Record<string, unknown>[];
   workflow_name?: string;
   group_id?: string;
   safe_tool_overrides?: Record<string, unknown>;
   approvals_reviewer?: string;
   prompt_role?: string;
+  submission_id?: string;
 }
 export interface StartRunResult { run_id: string; session_id: string }
 export interface StopRunParams {
@@ -87,7 +88,9 @@ export interface ServerCallParams {
 export interface EnqueueMessageParams {
   session_id: string;
   content: string;
+  submission_id?: string;
   role?: string;
+  input_content?: unknown[];
   trigger_run?: boolean;
   variables?: Record<string, unknown>;
   safe_tool_overrides?: Record<string, unknown>;
@@ -267,6 +270,8 @@ export interface SetSessionHoldParams {
 }
 export interface QueueStatusParams {
   session_id: string;
+  include_snapshot?: boolean;
+  submission_id?: string;
 }
 export interface EnqueueNotificationParams {
   session_id: string;
@@ -725,6 +730,7 @@ export interface ToolApprovalRequestedParams {
   metadata?: Record<string, unknown>;
   session_id?: string;
   run_id?: string;
+  source_call_id?: string;
   seq?: number;
   stream_id?: string;
 }
@@ -743,6 +749,7 @@ export interface McpApprovalRequestedParams {
   arguments: string;
   session_id?: string;
   run_id?: string;
+  source_request_id?: string;
   seq?: number;
   stream_id?: string;
 }

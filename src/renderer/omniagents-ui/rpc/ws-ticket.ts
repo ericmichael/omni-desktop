@@ -22,7 +22,18 @@ export function ticketPathFor(wsPathname: string): string {
 }
 
 /** Exchange a bearer token for a short-lived single-use connect ticket. */
-export async function fetchWsTicket(wsUrl: string, token: string): Promise<string> {
+export class WsTicketError extends Error {
+  constructor(readonly status: number) {
+    super(`Authentication failed (${status})`);
+    this.name = 'WsTicketError';
+  }
+
+  get permanent(): boolean {
+    return this.status === 401 || this.status === 403;
+  }
+}
+
+export async function fetchWsTicket(wsUrl: string, token: string, signal?: AbortSignal): Promise<string> {
   const httpUrl = new URL(wsUrl);
   httpUrl.protocol = httpUrl.protocol === 'wss:' ? 'https:' : 'http:';
   httpUrl.pathname = ticketPathFor(httpUrl.pathname);
@@ -30,9 +41,10 @@ export async function fetchWsTicket(wsUrl: string, token: string): Promise<strin
   const res = await fetch(httpUrl.toString(), {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
+    ...(signal ? { signal } : {}),
   });
   if (!res.ok) {
-    throw new Error(`Authentication failed (${res.status})`);
+    throw new WsTicketError(res.status);
   }
   const body = (await res.json()) as { ticket?: string };
   if (!body.ticket) {
@@ -43,11 +55,11 @@ export async function fetchWsTicket(wsUrl: string, token: string): Promise<strin
 
 /** Append a freshly minted connect ticket to a WebSocket URL when a token
  *  is configured; otherwise return the URL unchanged. */
-export async function withConnectTicket(wsUrl: string, token?: string): Promise<string> {
+export async function withConnectTicket(wsUrl: string, token?: string, signal?: AbortSignal): Promise<string> {
   if (!token) {
     return wsUrl;
   }
-  const ticket = await fetchWsTicket(wsUrl, token);
+  const ticket = await fetchWsTicket(wsUrl, token, signal);
   const url = new URL(wsUrl);
   url.searchParams.set('ticket', ticket);
   return url.toString();

@@ -5,6 +5,20 @@ import { appendAssistantMessage, applyToolResult, upsertToolCall } from '@/share
 
 const tools = (items: MessageItem[]): ToolItem[] => items.filter((it): it is ToolItem => it.type === 'tool');
 
+it('keeps repeated provider call IDs in separate runs and never reopens a settled call', () => {
+  const called = { call_id: 'same', tool: 'bash', input: '{}' };
+  let items = upsertToolCall([], called, 'one');
+  items = applyToolResult(items, { ...called, output: 'first' }, 'one');
+  expect(upsertToolCall(items, called, 'one')).toBe(items);
+  expect(applyToolResult(items, { ...called, output: 'late' }, 'one')).toBe(items);
+  items = upsertToolCall(items, called, 'two');
+  items = applyToolResult(items, { ...called, output: 'second' }, 'two');
+  expect(tools(items).map((item) => [item.runId, item.output])).toEqual([
+    ['one', 'first'],
+    ['two', 'second'],
+  ]);
+});
+
 describe('appendAssistantMessage', () => {
   it('appends a run-stamped assistant message', () => {
     const items = appendAssistantMessage([], 'found it in auth.ts', 'run-1');

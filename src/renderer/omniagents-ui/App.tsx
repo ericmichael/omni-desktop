@@ -2,9 +2,11 @@ import { useStore } from '@nanostores/react';
 import { useSelector } from '@xstate/react';
 import { AnimatePresence, motion } from 'framer-motion';
 import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { waitFor } from 'xstate';
 
 import { MAX_CHAT_CONVERSATIONS } from '@/lib/chat-conversations';
+import { uuidv4 } from '@/lib/uuid';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -18,6 +20,7 @@ import {
 import { Button } from '@/renderer/ds/ui/button';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/renderer/ds/ui/resizable';
 import { Spinner } from '@/renderer/ds/ui/spinner';
+import { resetConversation } from '@/renderer/omniagents-ui/session/reset-conversation';
 import { clearColumnActivity, publishColumnActivity } from '@/renderer/services/column-activity';
 import { forwardRoutineEvent, registerRoutineActor } from '@/renderer/services/routine-bridge';
 import {
@@ -42,33 +45,33 @@ import {
   mergeWorkersSnapshot,
   normalizeSubagentSnapshot,
   publishBashJobs,
-  publishSubagentEvent,
-  publishSubagentsSnapshot,
   registerActivityActions,
   type WorkersKillResult,
 } from './activity-store';
 import { negotiatedPlanTasks, planUpdateForBridge, rpcPlanTasks, type TaskSummary } from './canonical-plan-tasks';
 import type { PendingMessage } from './ChatShell';
 import { type ArtifactItem, ArtifactsPanel } from './components/ArtifactsPanel';
+import { ConversationComposer } from './components/ConversationComposer';
 import { ElicitationCard } from './components/ElicitationCard';
-import { EscalationBanner, type EscalationInfo } from './components/EscalationBanner';
-import { GoalPanel, type GoalSnapshot } from './components/GoalPanel';
+import { EscalationBanner } from './components/EscalationBanner';
+import { GoalPanel } from './components/GoalPanel';
 import { Header } from './components/Header';
-import { Input } from './components/Input';
-import { LoopPanel, type LoopTaskSnapshot } from './components/LoopPanel';
-import { ArtifactPortalProvider, type Attachment, MessageList } from './components/MessageList';
+import { LoopPanel } from './components/LoopPanel';
+import { ArtifactPortalProvider, MessageList } from './components/MessageList';
 import { ModelSessionControls, type SandboxNetworkState } from './components/ModelSessionControls';
-import { type NotificationInfo, Notifications } from './components/Notifications';
+import { Notifications } from './components/Notifications';
 import { PillStrip } from './components/PillStrip';
 import { QueuedMessages } from './components/QueuedMessages';
-import { type RecapInfo, RecapPanel } from './components/RecapPanel';
+import { RecapPanel } from './components/RecapPanel';
 import { SessionList } from './components/SessionList';
 import { Sidebar } from './components/Sidebar';
 import { VoiceDock } from './components/VoiceDock';
-import { WakeupPanel, type WakeupSnapshot } from './components/WakeupPanel';
+import { WakeupPanel } from './components/WakeupPanel';
+import { getConversationDraft, updateConversationDraft } from './conversation-drafts';
+import { conversationIsReady } from './conversation-readiness';
 import { OmniAgentsHeaderActionsPortal, OmniAgentsHeaderActionsProvider } from './header-actions';
 import { useChatBoot } from './hooks/use-chat-boot';
-import { useChatSession } from './hooks/use-chat-session';
+import { useChatSession, useSessionField } from './hooks/use-chat-session';
 import { useConversationManagement } from './hooks/use-conversation-management';
 import { useRealtimeVoice } from './hooks/use-realtime-voice';
 import { respondToApproval } from './lib/approval-response';
@@ -87,36 +90,7 @@ export type ClientToolCallHandler = (
   args: Record<string, unknown>
 ) => Promise<{ ok: boolean; result?: Record<string, unknown>; error?: Record<string, unknown> }>;
 
-export function App({
-  sessionId: sessionIdProp,
-  executionTarget,
-  onSessionChange,
-  variables: variablesProp,
-  voiceVariables,
-  greeting,
-  suggestions,
-  onReady,
-  headerActionsTargetId,
-  headerActionsCompact,
-  pendingMessages,
-  onPendingMessagesFlushed,
-  sandboxLabel: sandboxLabelProp,
-  sandboxOptions,
-  currentSandboxProfile,
-  onSandboxChange,
-  composerExtras,
-  onClientToolCall,
-  onController,
-  onRunEnd,
-  onRunStarted,
-  pendingPlan,
-  onPlanDecision,
-  ticketId,
-  routineId,
-  workspaceDir,
-  onOpenApp,
-  readOnly,
-}: {
+type AppProps = {
   sessionId?: string;
   /** Explicit execution identity. Never inferred from the conversation id. */
   executionTarget?: ExecutionTarget;
@@ -156,12 +130,89 @@ export function App({
    *  is embedded to READ another session (e.g. a subagent's transcript in
    *  the Agents sidecar detail page). */
   readOnly?: boolean;
+};
+
+export function App(props: AppProps) {
+  const config = useUiConfig();
+  const client = useRPCClient();
+  const connectionKey = useMemo(() => uuidv4(), [client]);
+  const [selection, setSelection] = useState(() => ({
+    propId: props.sessionId,
+    id: props.sessionId ?? config.session ?? uuidv4(),
+    resume: !props.sessionId && config.searchParams.get('resume') === 'true',
+  }));
+  const [initialIntent] = useState(() => ({ sessionId: selection.id, text: config.searchParams.get('initial') }));
+  if (selection.propId !== props.sessionId) {
+    setSelection({ propId: props.sessionId, id: props.sessionId ?? uuidv4(), resume: false });
+  }
+  const select = useCallback(
+    (requested?: string) => {
+      const id = requested ?? uuidv4();
+      setSelection({ propId: props.sessionId, id, resume: false });
+      props.onSessionChange?.(id);
+    },
+    [props.sessionId, props.onSessionChange]
+  );
+  return (
+    <SessionView
+      {...props}
+      key={`${connectionKey}:${selection.id}`}
+      sessionId={selection.id}
+      onSelectConversation={select}
+      resumeRequested={selection.resume}
+      initialMessage={selection.id === initialIntent.sessionId ? initialIntent.text : null}
+    />
+  );
+}
+
+/** This view has immutable session identity. UI layout may unmount; its
+ * connection-owned controller and in-flight operations do not. */
+function SessionView({
+  sessionId: sessionIdProp,
+  executionTarget,
+  onSessionChange,
+  variables: variablesProp,
+  voiceVariables,
+  greeting,
+  suggestions,
+  onReady,
+  headerActionsTargetId,
+  headerActionsCompact,
+  pendingMessages,
+  onPendingMessagesFlushed,
+  sandboxLabel: sandboxLabelProp,
+  sandboxOptions,
+  currentSandboxProfile,
+  onSandboxChange,
+  composerExtras,
+  onClientToolCall,
+  onController,
+  onRunEnd,
+  onRunStarted,
+  pendingPlan,
+  onPlanDecision,
+  ticketId,
+  routineId,
+  workspaceDir,
+  onOpenApp,
+  readOnly,
+  onSelectConversation,
+  resumeRequested,
+  initialMessage,
+}: AppProps & {
+  sessionId: string;
+  onSelectConversation: (id?: string) => void;
+  resumeRequested: boolean;
+  initialMessage: string | null;
 }) {
   const environmentId = executionTarget?.environmentId;
   const uiConfig = useUiConfig();
   const launcherStore = useStore(persistedStoreApi.$atom);
   const [ui, setUI] = useState<UIState>('connecting');
   const client = useRPCClient();
+  const machine = useChatSession(client, sessionIdProp);
+  const session = machine.controller;
+  const [modelMutating] = useSessionField(session, 'modelMutating');
   // Stable refs so the run_started/run_end subscriptions (set up once) always
   // call the latest callbacks without re-subscribing.
   const onRunEndRef = useRef(onRunEnd);
@@ -170,27 +221,9 @@ export function App({
   onRunStartedRef.current = onRunStarted;
   const connected = useRPCConnected();
   const [voiceEnabled, setVoiceEnabled] = useState(false);
-  const [_usageTotals, setUsageTotals] = useState<any | undefined>(undefined);
-  const [_usageDelta, setUsageDelta] = useState<any | undefined>(undefined);
-  const [_modelInfo, setModelInfo] = useState<
-    { model?: string; max_input_tokens?: number; max_output_tokens?: number } | undefined
-  >(undefined);
   const [agentName, setAgentName] = useState<string>('OmniAgent');
   const [welcomeText, setWelcomeText] = useState<string | undefined>(undefined);
-  const normalizeAgentName = useCallback((name: string) => {
-    let s = String(name || '').trim();
-    s = s.replace(/[_-]+/g, ' ');
-    s = s.replace(/([a-z0-9])([A-Z])/g, '$1 $2');
-    s = s.replace(/\s+/g, ' ');
-    return s
-      .split(' ')
-      .map((w) => (w ? w.charAt(0).toUpperCase() + w.slice(1).toLowerCase() : ''))
-      .join(' ')
-      .trim();
-  }, []);
 
-  const [initialSent, setInitialSent] = useState(false);
-  const urlSessionHandledRef = useRef(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [artifactsPanelOpen, setArtifactsPanelOpen] = useState(false);
   const [pendingSandboxProfile, setPendingSandboxProfile] = useState<string | null>(null);
@@ -209,7 +242,7 @@ export function App({
   // surfaces (Code tab). The chat-boot RPC still runs after connect to confirm
   // and refresh — but seeding keeps the folder chip stable while the
   // round-trip is in flight.
-  const [workspacePath, setWorkspacePath] = useState<string | null>(workspaceDir ?? null);
+  const [workspacePath, setWorkspacePath] = useSessionField(session, 'workspacePath');
   // Keep workspacePath aligned with the prop when the launcher swaps the
   // project under us (e.g. moving a tab to a different project). The chat-boot
   // / session-restore RPCs will overwrite it again once they resolve; this
@@ -219,46 +252,40 @@ export function App({
       setWorkspacePath(workspaceDir);
     }
   }, [workspaceDir]);
-  const [workspaceLocked, setWorkspaceLocked] = useState(false);
+  const [workspaceLocked, setWorkspaceLocked] = useSessionField(session, 'workspaceLocked');
   // Background-bash live override: `ui.bash_jobs.update` broadcasts (and the
   // kill/tail/list server calls below) push a fresh snapshot here. When non-
   // null this takes precedence over the snapshot derived from tool_result
   // metadata in `items`. Reset to null on session change so the new session
   // starts from its own history-derived state.
-  const [liveBashJobs, setLiveBashJobs] = useState<BashJobSummary[] | null>(null);
-  const [goalSnapshot, setGoalSnapshot] = useState<GoalSnapshot | null>(null);
-  const [wakeupSnapshot, setWakeupSnapshot] = useState<WakeupSnapshot | null>(null);
-  const [loopTasks, setLoopTasks] = useState<LoopTaskSnapshot[]>([]);
+  const [liveBashJobs, setLiveBashJobs] = useSessionField(session, 'liveBashJobs');
+  const [goalSnapshot, setGoalSnapshot] = useSessionField(session, 'goalSnapshot');
+  const [wakeupSnapshot, setWakeupSnapshot] = useSessionField(session, 'wakeupSnapshot');
+  const [loopTasks, setLoopTasks] = useSessionField(session, 'loopTasks');
   // Dismissed IDs for each docked panel. Snapshotted on user submit:
   // every item currently in a terminal state gets added so it disappears
   // from the panel when the next run begins. Items spawned during the
   // new run aren't in the set yet, so they show normally; when THEY
   // exit they remain visible until the user's next submit. Reset on
   // session change so a fresh session starts clean.
-  const [dismissedWorkerIds, setDismissedWorkerIds] = useState<Set<string>>(new Set());
-  const [dismissedJobIds, setDismissedJobIds] = useState<Set<string>>(new Set());
-  const [dismissedTaskIds, setDismissedTaskIds] = useState<Set<string>>(new Set());
+  const [dismissedWorkerIds, setDismissedWorkerIds] = useSessionField(session, 'dismissedWorkerIds');
+  const [dismissedJobIds, setDismissedJobIds] = useSessionField(session, 'dismissedJobIds');
+  const [dismissedTaskIds, setDismissedTaskIds] = useSessionField(session, 'dismissedTaskIds');
   // Notifications accumulate from the agent's `notify` builtin calls;
   // dismissed manually via the docked panel buttons.
-  const [notifications, setNotifications] = useState<NotificationInfo[]>([]);
+  const [notifications, setNotifications] = useSessionField(session, 'notifications');
   // Most recent session recap (from /recap or a programmatic trigger).
   // Single-slot — a new recap replaces the old; dismissible.
-  const [recap, setRecap] = useState<RecapInfo | null>(null);
+  const [recap, setRecap] = useSessionField(session, 'recap');
   // Pending agent escalation — the next user submit becomes the reply.
-  const [escalation, setEscalation] = useState<EscalationInfo | null>(null);
+  const [escalation] = useSessionField(session, 'escalation');
   // Element backing the maximized-artifact portal. Callback ref triggers a
   // re-render when the chat-column wrapper attaches/detaches.
   const [chatColumnEl, setChatColumnEl] = useState<HTMLDivElement | null>(null);
-  const [runActive, setRunActive] = useState(false);
-  const [initialSessionParam] = useState<string | undefined>(() => uiConfig.session);
-  const [queuedMessages, setQueuedMessages] = useState<import('./rpc/client').QueuedMessage[]>([]);
+  const [queuedMessages, setQueuedMessages] = useSessionField(session, 'queuedMessages');
   const [speakRepliesEnabled, setSpeakRepliesEnabled] = useState(false);
   const readyRef = useRef(false);
-  const onClientToolCallRef = useRef(onClientToolCall);
   const voiceRunRef = useRef(false);
-  useEffect(() => {
-    onClientToolCallRef.current = onClientToolCall;
-  }, [onClientToolCall]);
   const onSessionChangeRef = useRef(onSessionChange);
   useEffect(() => {
     onSessionChangeRef.current = onSessionChange;
@@ -269,7 +296,7 @@ export function App({
 
   // Chat session state machine — manages items, sessionId, runId, thinking,
   // status, tool status, and approval state.
-  const machine = useChatSession(client);
+  const runActive = machine.thinking;
   const {
     actor,
     items,
@@ -281,18 +308,8 @@ export function App({
     runId,
     sessionId,
     stagedContext,
-    submit,
-    submitError,
-    stop,
     loadSession,
-    selectSession,
-    historyLoaded,
-    historyError,
-    newSession,
     approvalDecided,
-    appendResponse,
-    addArtifact,
-    setSessionId,
     stageContext,
     clearStagedContext,
   } = machine;
@@ -312,7 +329,7 @@ export function App({
       return;
     }
     if (!actor.getSnapshot().context.sessionId) {
-      setSessionId(voiceSessionId);
+      onSelectConversation(voiceSessionId);
     }
     // A voice turn's tool approvals broadcast over THIS /ws channel, and
     // the server only fans out to channels the session knows about. A
@@ -320,7 +337,7 @@ export function App({
     // resume_session), but a freshly minted one is not — without this the
     // approval is queued server-side and the voice turn hangs with no card.
     void client.registerSession(voiceSessionId, true).catch(() => {});
-  }, [voiceIsActive, voiceSessionId, actor, setSessionId, client]);
+  }, [voiceIsActive, voiceSessionId, actor, onSelectConversation, client]);
 
   const voiceWasActiveRef = useRef(false);
 
@@ -356,6 +373,13 @@ export function App({
     // avoided socket matters when several viewers share the sandbox origin.
     wsRealtimeUrl: readOnly ? undefined : uiConfig.wsRealtimeUrl,
     token: uiConfig.token,
+  });
+  const conversationReady = conversationIsReady({
+    connected,
+    bootReady: bootState.ready,
+    sessionReady: machine.phase !== 'initializing' && machine.phase !== 'initError' && !modelMutating,
+    sessionId,
+    expectedSessionId: sessionIdProp,
   });
 
   const {
@@ -432,7 +456,7 @@ export function App({
     setVoiceEnabled(caps.voiceEnabled);
     setWorkspaceSupported(caps.workspaceSupported);
     if (caps.workspacePath) {
-      setWorkspacePath(caps.workspacePath);
+      setWorkspacePath((previous) => previous ?? caps.workspacePath ?? null);
     }
     // Note: the host window title (index.html "Omni Code") is left alone —
     // overwriting it with the agent name made the title flip between tabs.
@@ -454,9 +478,7 @@ export function App({
     if (!bootState.ready) {
       return;
     }
-    const resume = uiConfig.searchParams.get('resume') === 'true';
-    const sid = sessionIdProp || uiConfig.searchParams.get('session') || undefined;
-    if (resume && !sid) {
+    if (resumeRequested) {
       void refreshSessions();
       setUI('resume');
     } else {
@@ -464,363 +486,41 @@ export function App({
     }
   }, [bootState.phase, bootState.ready, refreshSessions, sessionIdProp, uiConfig.searchParams]);
 
-  // Side-effect-only listeners for events the machine doesn't handle
-  // (session state + filtering is handled by the useChatSession hook).
-  // These run for the lifetime of the component and are independent of
-  // the boot machine — they need to be live even before boot completes
-  // so that any early events aren't lost.
+  // View/host notifications only. Session data and client-request replies
+  // are owned by the controller even when no view is mounted.
   useEffect(() => {
-    const offQueueChanged = client.on('queue_changed', (p: any) => {
-      // Server broadcasts a full snapshot (small queue, simple to apply).
-      // Only accept events targeted at the currently-loaded session so a
-      // stale ``queue_changed`` from a session we just switched away from
-      // doesn't poison the panel.
-      const liveSessionId = actor.getSnapshot().context.sessionId;
-      if (typeof p?.session_id === 'string' && p.session_id !== liveSessionId) {
-        return;
-      }
-      setQueuedMessages(Array.isArray(p?.items) ? p.items : []);
-    });
-    const offRunStarted = client.on('run_started', (p: any) => {
-      setRunActive(true);
-      setRecap(null);
-      try {
+    const offs = [
+      session.on('run_started', (p: any) => {
         if (typeof p?.run_id === 'string') {
           onRunStartedRef.current?.(p.run_id);
         }
-      } catch {}
-      onSessionChangeRef.current?.(actor.getSnapshot().context.sessionId);
-      refreshSessions();
-    });
-    const offRunEnd = client.on('run_end', (p: any) => {
-      setRunActive(false);
-      try {
-        const usage = p?.usage || {};
-        const info = {
-          model: p?.model,
-          max_input_tokens: p?.max_input_tokens,
-          max_output_tokens: p?.max_output_tokens,
-        };
-        setModelInfo(info);
-        setUsageTotals(usage);
-      } catch {}
-      try {
-        onRunEndRef.current?.({
-          runId: typeof p?.run_id === 'string' ? p.run_id : undefined,
-          reason: String(p?.end_reason ?? 'completed'),
-        });
-      } catch {}
-      refreshSessions();
-    });
-    const offToken = client.on('token', (p: any) => {
-      try {
-        setUsageDelta(p?.delta);
-        setUsageTotals(p?.totals);
-        setModelInfo({
-          model: p?.model,
-          max_input_tokens: p?.max_input_tokens,
-          max_output_tokens: p?.max_output_tokens,
-        });
-      } catch {}
-    });
-    // Single dispatcher for every `client_request` the server sends.
-    //   - ui.add_artifact → local artifact panel
-    //   - tool.call → local client-tool handler (works in every mode — autopilot
-    //     agents share the same path as user-initiated agents)
-    // `ui.set_status` is handled by use-chat-session.ts. Tool approvals
-    // are now on the dedicated `tool_approval_requested` event (omniagents
-    // 0.16+), also wired in use-chat-session.ts — not on client_request.
-    const offClientRequest = client.on('client_request', (p: any) => {
-      const fn = String(p?.function ?? '');
-      if (fn === 'ui.add_artifact') {
-        const request_id = String(p?.request_id ?? '');
-        const args = p?.args || {};
-        addArtifact({
-          title: typeof args?.title === 'string' ? args.title : '',
-          content: typeof args?.content === 'string' ? args.content : '',
-          mode: typeof args?.mode === 'string' ? args.mode : 'markdown',
-          artifact_id: typeof args?.artifact_id === 'string' ? args.artifact_id : undefined,
-          session_id: typeof p?.session_id === 'string' ? p.session_id : undefined,
-        });
-        if (request_id) {
-          client.clientResponse(request_id, true, { ack: true }).catch(() => {});
+        onSessionChangeRef.current?.(session.id);
+        void refreshSessions();
+      }),
+      session.on('run_end', (p: any) => {
+        onRunEndRef.current?.({ runId: p?.run_id, reason: String(p?.end_reason ?? 'completed') });
+        void refreshSessions();
+      }),
+      session.on('client_request', (p: any) => {
+        if (ticketId && p?.function === 'ui.goal.update') {
+          void forwardEvent({ kind: 'goal-update', ticketId, snapshot: p?.args?.snapshot ?? null });
         }
-        return;
-      }
-      if (fn === 'ui.bash_jobs.update') {
-        const request_id = String(p?.request_id ?? '');
-        const eventSessionId = typeof p?.session_id === 'string' ? p.session_id : undefined;
-        const currentSessionId = actor.getSnapshot().context.sessionId;
-        if (eventSessionId && currentSessionId && currentSessionId !== eventSessionId) {
-          if (request_id) {
-            client.clientResponse(request_id, true, { ack: true }).catch(() => {});
-          }
-          return;
-        }
-        const args = p?.args || {};
-        const snap = args?.snapshot;
-        if (Array.isArray(snap)) {
-          setLiveBashJobs(snap as BashJobSummary[]);
-        }
-        if (request_id) {
-          client.clientResponse(request_id, true, { ack: true }).catch(() => {});
-        }
-        return;
-      }
-      if (fn === 'ui.workers.update' || fn === 'ui.subagents.update') {
-        // Subagent snapshot broadcast. Older omniagents (the pinned PyPI
-        // release) sends ``ui.workers.update`` (workers only, no ``kind``);
-        // newer ones send the unified ``ui.subagents.update`` from the
-        // subagent bus (workers plus agent-tool runs). The launcher must
-        // speak both across its supported server range; drop the legacy
-        // branch when the pin advances.
-        const request_id = String(p?.request_id ?? '');
-        const eventSessionId = typeof p?.session_id === 'string' ? p.session_id : undefined;
-        const currentSessionId = actor.getSnapshot().context.sessionId;
-        if (eventSessionId && currentSessionId && currentSessionId !== eventSessionId) {
-          if (request_id) {
-            client.clientResponse(request_id, true, { ack: true }).catch(() => {});
-          }
-          return;
-        }
-        const args = p?.args || {};
-        const snap = args?.snapshot;
-        if (Array.isArray(snap)) {
-          const sid = eventSessionId ?? currentSessionId;
-          if (sid) {
-            publishSubagentsSnapshot(sid, normalizeSubagentSnapshot(snap));
-          }
-        }
-        if (request_id) {
-          client.clientResponse(request_id, true, { ack: true }).catch(() => {});
-        }
-        return;
-      }
-      if (fn === 'ui.subagent.event') {
-        // One narrative beat from a subagent's run (tool_called /
-        // tool_result / message_output / run_*). Workers own a session, so
-        // the Agents detail mounts their real transcript and these beats add
-        // nothing. Agent-tool runs (``explore``) own no session — folding
-        // their beats into transcript items is the ONLY record of what they
-        // did, so the detail page can render one.
-        const request_id = String(p?.request_id ?? '');
-        const eventSessionId = typeof p?.session_id === 'string' ? p.session_id : undefined;
-        const currentSessionId = actor.getSnapshot().context.sessionId;
-        if (!eventSessionId || !currentSessionId || eventSessionId === currentSessionId) {
-          const args = (p?.args || {}) as Record<string, unknown>;
-          const subagentId = typeof args.subagent_id === 'string' ? args.subagent_id : '';
-          const sid = eventSessionId ?? currentSessionId;
-          if (sid && subagentId && args.kind === 'agent_tool') {
-            publishSubagentEvent(
-              sid,
-              subagentId,
-              String(args.method ?? ''),
-              (args.params ?? {}) as Record<string, unknown>
-            );
-          }
-        }
-        if (request_id) {
-          client.clientResponse(request_id, true, { ack: true }).catch(() => {});
-        }
-        return;
-      }
-      if (fn === 'tool.call') {
-        const request_id = String(p?.request_id ?? '');
-        if (!request_id) {
-          return;
-        }
-        const args = (p?.args || {}) as Record<string, unknown>;
-        const toolName = String(args.tool ?? '');
-        const toolArgs = (args.arguments ?? {}) as Record<string, unknown>;
-        if (!onClientToolCallRef.current) {
-          client
-            .clientResponse(request_id, false, undefined, { message: 'No client tool handler registered' })
-            .catch(() => {});
-          return;
-        }
-        onClientToolCallRef
-          .current(toolName, toolArgs)
-          .then((res) => {
-            client.clientResponse(request_id, res.ok, res.result, res.error).catch(() => {});
-          })
-          .catch((err: Error) => {
-            client.clientResponse(request_id, false, undefined, { message: err.message }).catch(() => {});
-          });
-        return;
-      }
-      if (fn === 'notify') {
-        // Agent ``notify`` builtin — fire-and-forget heads-up. Push to
-        // the docked notifications panel and ack immediately; the user
-        // dismisses manually via the panel buttons.
-        const request_id = String(p?.request_id ?? '');
-        const eventSessionId = typeof p?.session_id === 'string' ? p.session_id : undefined;
-        const currentSessionId = actor.getSnapshot().context.sessionId;
-        if (eventSessionId && currentSessionId && currentSessionId !== eventSessionId) {
-          if (request_id) {
-            client.clientResponse(request_id, true, { ack: true }).catch(() => {});
-          }
-          return;
-        }
-        const args = p?.args || {};
-        const message = typeof args?.message === 'string' ? args.message : '';
-        if (message) {
-          setNotifications((prev) => [
-            ...prev,
-            {
-              id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-              message,
-              timestamp: Date.now(),
-            },
-          ]);
-        }
-        if (request_id) {
-          client.clientResponse(request_id, true, { ack: true }).catch(() => {});
-        }
-        return;
-      }
-      if (fn === 'ui.recap') {
-        // Session recap pushed from the server (/recap or a programmatic
-        // trigger). Single-slot panel; newest replaces any prior recap.
-        const request_id = String(p?.request_id ?? '');
-        const eventSessionId = typeof p?.session_id === 'string' ? p.session_id : undefined;
-        const currentSessionId = actor.getSnapshot().context.sessionId;
-        if (eventSessionId && currentSessionId && currentSessionId !== eventSessionId) {
-          if (request_id) {
-            client.clientResponse(request_id, true, { ack: true }).catch(() => {});
-          }
-          return;
-        }
-        const args = p?.args || {};
-        const text = typeof args?.text === 'string' ? args.text : '';
-        if (text) {
-          setRecap({ text, timestamp: Date.now() });
-        }
-        if (request_id) {
-          client.clientResponse(request_id, true, { ack: true }).catch(() => {});
-        }
-        return;
-      }
-      if (fn === 'ui.goal.update') {
-        // Two consumers for the /goal autopilot snapshot:
-        //   1. The local GoalPanel chip rendered above the input — every
-        //      chat surface (Chat tab, Spaces Agent Session) gets the
-        //      visible status indicator.
-        //   2. main's SupervisorOrchestrator — Tickets-only path that
-        //      maps active/completed/cancelled onto the ticket's phase.
-        // Always ack so the omniagents server doesn't hang.
-        const request_id = String(p?.request_id ?? '');
-        const eventSessionId = typeof p?.session_id === 'string' ? p.session_id : undefined;
-        const currentSessionId = actor.getSnapshot().context.sessionId;
-        if (eventSessionId && currentSessionId && currentSessionId !== eventSessionId) {
-          if (request_id) {
-            client.clientResponse(request_id, true, { ack: true }).catch(() => {});
-          }
-          return;
-        }
-        const args = p?.args || {};
-        const snap = args?.snapshot;
-        if (snap === null || snap === undefined) {
-          setGoalSnapshot(null);
-        } else if (typeof snap === 'object') {
-          setGoalSnapshot(snap as GoalSnapshot);
-        }
-        if (ticketId) {
-          void forwardEvent({
-            kind: 'goal-update',
-            ticketId,
-            snapshot: snap === null || snap === undefined ? null : (snap as any),
-          });
-        }
-        if (request_id) {
-          client.clientResponse(request_id, true, { ack: true }).catch(() => {});
-        }
-        return;
-      }
-      if (fn === 'ui.wakeup.update') {
-        // schedule_wakeup tick loop snapshot. Fired on start, every tick,
-        // and on cancel/exhaustion. snapshot=null means torn down (panel
-        // clears). Source: omni-code server_functions/wakeup.py. No ticket
-        // mapping — just refresh the local WakeupPanel chip.
-        const request_id = String(p?.request_id ?? '');
-        const eventSessionId = typeof p?.session_id === 'string' ? p.session_id : undefined;
-        const currentSessionId = actor.getSnapshot().context.sessionId;
-        if (eventSessionId && currentSessionId && currentSessionId !== eventSessionId) {
-          if (request_id) {
-            client.clientResponse(request_id, true, { ack: true }).catch(() => {});
-          }
-          return;
-        }
-        const args = p?.args || {};
-        const snap = args?.snapshot;
-        if (snap === null || snap === undefined) {
-          setWakeupSnapshot(null);
-        } else if (typeof snap === 'object') {
-          setWakeupSnapshot(snap as WakeupSnapshot);
-        }
-        if (request_id) {
-          client.clientResponse(request_id, true, { ack: true }).catch(() => {});
-        }
-        return;
-      }
-      if (fn === 'ui.loop.update') {
-        const request_id = String(p?.request_id ?? '');
-        const eventSessionId = typeof p?.session_id === 'string' ? p.session_id : undefined;
-        const currentSessionId = actor.getSnapshot().context.sessionId;
-        if (eventSessionId && currentSessionId && currentSessionId !== eventSessionId) {
-          if (request_id) {
-            client.clientResponse(request_id, true, { ack: true }).catch(() => {});
-          }
-          return;
-        }
-        const args = p?.args || {};
-        const snap = args?.snapshot;
-        if (Array.isArray(snap)) {
-          setLoopTasks(snap as LoopTaskSnapshot[]);
-        }
-        if (request_id) {
-          client.clientResponse(request_id, true, { ack: true }).catch(() => {});
-        }
-        return;
-      }
-      if (fn === 'escalate') {
-        // Agent ``escalate`` builtin — blocking. Surface the banner and
-        // intentionally do NOT call clientResponse here; the next user
-        // submit reads the pending escalation, sends the reply via
-        // clientResponse, and clears the banner.
-        const request_id = String(p?.request_id ?? '');
-        const eventSessionId = typeof p?.session_id === 'string' ? p.session_id : undefined;
-        const currentSessionId = actor.getSnapshot().context.sessionId;
-        if (eventSessionId && currentSessionId && currentSessionId !== eventSessionId) {
-          if (request_id) {
-            client.clientResponse(request_id, true, { ack: true }).catch(() => {});
-          }
-          return;
-        }
-        const args = p?.args || {};
-        const message = typeof args?.message === 'string' ? args.message : '';
-        const runIdArg = typeof p?.run_id === 'string' ? p.run_id : undefined;
-        if (!request_id) {
-          return;
-        }
-        setEscalation({
-          request_id,
-          message,
-          session_id: eventSessionId,
-          run_id: runIdArg,
-        });
-        return;
-      }
-    });
+      }),
+    ];
+    return () => offs.forEach((off) => off());
+  }, [session, refreshSessions, ticketId]);
+  useEffect(() => {
+    if (!onClientToolCall || readOnly) {
+      return;
+    }
+    session.setToolHandler(onClientToolCall);
+  }, [session, onClientToolCall, readOnly]);
 
-    return () => {
-      offQueueChanged();
-      offRunStarted();
-      offRunEnd();
-      offClientRequest();
-      offToken();
-      client.disconnect();
-    };
-  }, [client, actor, addArtifact, refreshSessions]);
+  useEffect(() => {
+    if (bootState.ready) {
+      void session.refreshPanels(executionTarget, workspaceSupported);
+    }
+  }, [session, bootState.ready, executionTarget, workspaceSupported]);
 
   // Derive artifact index from the items stream (artifacts are now inline in conversation)
   const visibleArtifacts = useMemo(() => {
@@ -905,21 +605,6 @@ export function App({
       publishBashJobs(sessionId, allBashJobs);
     }
   }, [sessionId, allBashJobs]);
-
-  // Clear the live override on session change so the next session starts
-  // from its own history-derived snapshot instead of the previous session's
-  // last broadcast.
-  useEffect(() => {
-    setLiveBashJobs(null);
-    // Subagents need no clearing here: the activity store is keyed by
-    // session, so the pill reads the new session's slice immediately and
-    // the ``workers.list`` seed below refreshes it.
-    // Reset dismissal sets on session change so a fresh session starts
-    // with the panels showing their full server-side snapshot.
-    setDismissedWorkerIds(new Set());
-    setDismissedJobIds(new Set());
-    setDismissedTaskIds(new Set());
-  }, [sessionId]);
 
   const handleWorkerKill = useCallback(
     async (worker_id: string): Promise<WorkersKillResult> => {
@@ -1101,15 +786,18 @@ export function App({
   }, [artifactsPanelWidth]);
 
   // Scroll to an inline artifact in the conversation stream
-  const handleScrollToArtifact = useCallback((artifactId: string) => {
-    setArtifactsPanelOpen(false);
-    const el = document.querySelector(`[data-artifact-id="${CSS.escape(artifactId)}"]`);
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      el.classList.add('ring-2', 'ring-primary', 'rounded-lg');
-      setTimeout(() => el.classList.remove('ring-2', 'ring-primary', 'rounded-lg'), 1500);
-    }
-  }, []);
+  const handleScrollToArtifact = useCallback(
+    (artifactId: string) => {
+      setArtifactsPanelOpen(false);
+      const el = chatColumnEl?.querySelector(`[data-artifact-id="${CSS.escape(artifactId)}"]`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        el.classList.add('ring-2', 'ring-primary', 'rounded-lg');
+        setTimeout(() => el.classList.remove('ring-2', 'ring-primary', 'rounded-lg'), 1500);
+      }
+    },
+    [chatColumnEl]
+  );
 
   // moved below handleSubmit
 
@@ -1117,8 +805,21 @@ export function App({
     async (
       text: string,
       files?: File[],
-      runOverrides?: import('@/shared/types').RunOverrides
+      runOverrides?: import('@/shared/types').RunOverrides,
+      inputId?: string
     ): Promise<{ runId: string } | undefined> => {
+      const submittingSession = actor.getSnapshot();
+      if (
+        !conversationIsReady({
+          connected: client.isConnected,
+          bootReady: bootState.actor.getSnapshot().matches('ready'),
+          sessionReady: submittingSession.matches('ready'),
+          sessionId: submittingSession.context.sessionId,
+          expectedSessionId: sessionIdProp,
+        })
+      ) {
+        throw new Error('Conversation is still connecting. Your message has been kept; please retry.');
+      }
       // Dismiss successfully-completed items from each docked panel so the
       // next run starts with a clean dock. Failures (worker error/cancelled,
       // non-zero/null bash exit) stick until the user dismisses them so a
@@ -1160,266 +861,28 @@ export function App({
         return prev;
       });
 
-      // Escalation reply: when the agent is paused on an ``escalate``
-      // tool call, route the user's next message back as the reply via
-      // client_response (and clear the banner) instead of starting a
-      // new run. Slash commands pass through so the user can still
-      // issue /goal.stop, /help, etc. mid-escalation.
-      if (escalation && !text.startsWith('/')) {
-        const pending = escalation;
-        setEscalation(null);
-        try {
-          await client.clientResponse(pending.request_id, true, { reply: text });
-        } catch {}
-        return undefined;
-      }
-
-      // Slash commands
-      if (text.startsWith('/')) {
-        const parts = text.trim().split(/\s+/);
-        const command = parts[0] ?? '';
-        const name = command.slice(1);
-        const argText = text.slice(command.length).trim();
-        try {
-          const sid = actor.getSnapshot().context.sessionId ?? sessionId;
-          const funcs = await client.listServerFunctions();
-          const found = funcs.find((f) => String(f.name).toLowerCase() === name.toLowerCase());
-          if (!found) {
-            // Not a known server function; send to LLM. Queue instead of
-            // starting directly when a run is already active or the queue
-            // is non-empty — same guard as the main path below.
-            if (runActive || queuedMessages.length > 0) {
-              const sid = actor.getSnapshot().context.sessionId ?? sessionId;
-              if (sid) {
-                await client.enqueueMessage(sid, text, { triggerRun: true, role: 'user', source: 'ui' });
-              }
-            } else {
-              await client.startRun(
-                text,
-                executionTarget
-                  ? {
-                      mode: 'explicit',
-                      environment_id: executionTarget.environmentId,
-                      environment_generation: executionTarget.environmentGeneration,
-                    }
-                  : { mode: 'none' },
-                sessionId
-              );
-            }
-            return;
-          }
-          let args: Record<string, unknown> = {};
-          if (argText) {
-            try {
-              const parsed = JSON.parse(argText);
-              if (typeof parsed === 'object' && !Array.isArray(parsed)) {
-                args = parsed;
-              } else if (Array.isArray(parsed)) {
-                args = { args: parsed };
-              } else if (typeof parsed === 'string') {
-                args = { text: parsed };
-              } else {
-                args = { value: parsed };
-              }
-            } catch {
-              args = { text: argText };
-            }
-          }
-          const result = await client.serverCall(name, args, sessionId, executionTarget);
-          // /recap renders in the docked RecapPanel via the ui.recap
-          // broadcast — don't also dump it into the chat transcript. The
-          // return value carries the text as a fallback if the broadcast
-          // was dropped.
-          if (name.toLowerCase() === 'recap') {
-            const text =
-              typeof (result as { text?: unknown })?.text === 'string' ? (result as { text: string }).text : '';
-            if (text) {
-              setRecap({ text, timestamp: Date.now() });
-            }
-            return;
-          }
-          const formatted = JSON.stringify(result, null, 2);
-          appendResponse(formatted === 'null' ? 'Done.' : formatted);
-          return;
-        } catch (e) {
-          appendResponse(`Error: ${String((e as Error)?.message || e)}`);
-          return;
-        }
-      }
-      try {
-        // Read sessionId from the actor snapshot rather than the destructured
-        // React state — the chat-session machine sets context.sessionId
-        // synchronously when entering ready.idle, but the React render that
-        // would update the destructured value may not have flushed yet when
-        // the supervisor bridge calls us right after awaitChatReady() resolves.
-        const liveSessionId = actor.getSnapshot().context.sessionId ?? sessionId;
-        if (!liveSessionId) {
-          submitError('No active session — loadSession must run first');
-          return;
-        }
-        let content: any | undefined = undefined;
-        let attachments: Attachment[] = [];
-        if (files && files.length > 0) {
-          const parts: any[] = [];
-          if (text.trim().length > 0) {
-            parts.push({ type: 'input_text', text });
-          }
-          const processed = await Promise.all(
-            files.map(async (f) => {
-              if (f.type && f.type.startsWith('image/')) {
-                const dataUrl = await new Promise<string>((resolve, reject) => {
-                  const reader = new FileReader();
-                  reader.onload = () => resolve(String(reader.result || ''));
-                  reader.onerror = () => reject(new Error('Failed to read image'));
-                  reader.readAsDataURL(f);
-                });
-                return {
-                  filePart: { type: 'input_image', image_url: dataUrl, detail: 'auto' },
-                  attachment: { type: 'image' as const, url: dataUrl, filename: f.name, mime: f.type, size: f.size },
-                };
-              } else {
-                const base64 = await new Promise<string>((resolve, reject) => {
-                  const reader = new FileReader();
-                  reader.onload = () => {
-                    try {
-                      const buf = reader.result as ArrayBuffer;
-                      const bytes = new Uint8Array(buf);
-                      let binary = '';
-                      for (let i = 0; i < bytes.length; i++) {
-                        binary += String.fromCharCode(bytes[i]!);
-                      }
-                      resolve(btoa(binary));
-                    } catch {
-                      reject(new Error('Failed to encode file'));
-                    }
-                  };
-                  reader.onerror = () => reject(new Error('Failed to read file'));
-                  reader.readAsArrayBuffer(f);
-                });
-                const param: any = { type: 'input_file', file_data: base64 };
-                if (f.name) {
-                  param.filename = f.name;
-                }
-                return {
-                  filePart: param,
-                  attachment: { type: 'file' as const, filename: f.name, mime: f.type, size: f.size },
-                };
-              }
-            })
-          );
-          parts.push(...processed.map((p) => p.filePart));
-          attachments = processed.map((p) => p.attachment);
-          content = parts;
-        }
-        // MCP-Apps ``ui/update-model-context``: prepend any staged context
-        // blocks to the prompt the agent sees. Snapshot the staged entries
-        // before clearing so we can attach them to the user-turn message
-        // for visibility in the chat log.
-        const stagedSnapshot = stagedContext.length > 0 ? stagedContext.slice() : undefined;
-        const agentPrompt = stagedSnapshot ? `${stagedSnapshot.map((c) => c.text).join('\n\n')}\n\n${text}` : text;
-
-        // Execution identity comes from start_run's environment selection;
-        // session variables carry product/client metadata only.
-        const useVoiceRun = voiceRunRef.current;
-        voiceRunRef.current = false;
-        const variablesSource = (speakRepliesEnabled || useVoiceRun) && voiceVariables ? voiceVariables : variablesProp;
-        const baseVariables: Record<string, unknown> | undefined = variablesSource ? { ...variablesSource } : undefined;
-        // Merge per-dispatch overrides (from the orchestrator's bridge.run call)
-        // on top of the column's locally owned variables. The orchestrator owns
-        // autopilot mode and ships its run intent atomically with the dispatch,
-        // so we never derive that state by reading a separate store.
-        // additional_instructions is prepended (orchestrator framing first);
-        // safe_tool_overrides is replaced wholesale.
-        const variables: Record<string, unknown> | undefined = runOverrides
-          ? {
-              ...(baseVariables ?? {}),
-              ...(runOverrides.additionalInstructions
-                ? {
-                    additional_instructions:
-                      typeof baseVariables?.additional_instructions === 'string'
-                        ? `${runOverrides.additionalInstructions}\n\n${baseVariables.additional_instructions}`
-                        : runOverrides.additionalInstructions,
-                  }
-                : {}),
-              ...(runOverrides.safeToolOverrides ? { safe_tool_overrides: runOverrides.safeToolOverrides } : {}),
-              ...(runOverrides.approvalsReviewer ? { approvals_reviewer: runOverrides.approvalsReviewer } : {}),
-            }
-          : baseVariables;
-
-        // Queue the message instead of starting a run directly when a run is
-        // currently active or the queue is non-empty. The drainer on the
-        // server side calls start_run for us once the current run finishes,
-        // and the chat-session machine handles the resulting RUN_STARTED
-        // from idle state (appending the user message via event.prompt).
-        // Critical: skip the local ``submit()`` machine call on this path —
-        // the machine is in ``running`` and would drop SUBMIT, while
-        // appending an optimistic user item that would later be duplicated
-        // when RUN_STARTED fires with the same prompt.
-        const queueAhead = runActive || queuedMessages.length > 0;
-        if (queueAhead) {
-          await client.enqueueMessage(liveSessionId, agentPrompt, {
-            triggerRun: true,
-            role: 'user',
-            variables,
-            source: 'ui',
-          });
-          if (stagedSnapshot) {
-            clearStagedContext();
-          }
-          if (workspaceSupported) {
-            setWorkspaceLocked(true);
-          }
-          // No run_id yet — the drainer mints one when start_run fires.
-          return { runId: '' };
-        }
-
-        // Direct-start path: machine submit() owns the optimistic user-item
-        // append and the idle → starting transition.
-        submit(text, attachments.length ? attachments : undefined, stagedSnapshot);
-        if (stagedSnapshot) {
-          clearStagedContext();
-        }
-
-        const startResult = await client.startRun(
-          agentPrompt,
-          executionTarget
-            ? {
-                mode: 'explicit',
-                environment_id: executionTarget.environmentId,
-                environment_generation: executionTarget.environmentGeneration,
-              }
-            : { mode: 'none' },
-          liveSessionId,
-          variables,
-          content
-        );
-        if (workspaceSupported) {
-          setWorkspaceLocked(true);
-        }
-        return { runId: String(startResult?.run_id ?? '') };
-      } catch (e) {
-        submitError(String((e as Error)?.message || 'Failed to start run'));
-        return undefined;
-      }
+      const useVoiceRun = voiceRunRef.current;
+      voiceRunRef.current = false;
+      const variables = (speakRepliesEnabled || useVoiceRun) && voiceVariables ? voiceVariables : variablesProp;
+      return session.send(text, files, {
+        executionTarget,
+        variables,
+        overrides: runOverrides,
+        workspaceSupported,
+        inputId,
+      });
     },
     [
+      session,
       client,
-      executionTarget,
-      sessionId,
       actor,
       bootState.actor,
+      sessionIdProp,
+      executionTarget,
       variablesProp,
       voiceVariables,
       speakRepliesEnabled,
-      submit,
-      submitError,
-      workspacePath,
       workspaceSupported,
-      stagedContext,
-      clearStagedContext,
-      runActive,
-      queuedMessages.length,
-      escalation,
       subagents,
       allBashJobs,
       rawTasks,
@@ -1430,18 +893,14 @@ export function App({
     (text: string) => {
       setSpeakRepliesEnabled(true);
       voiceRunRef.current = true;
-      void handleSubmit(text);
+      void handleSubmit(text).catch(() => {});
     },
     [handleSubmit]
   );
 
   const handleStop = useCallback(() => {
-    if (!runId) {
-      return;
-    }
-    stop();
-    client.stopRun(runId).catch(() => {});
-  }, [client, stop, runId]);
+    void session.stopRun().catch(() => {});
+  }, [session]);
 
   // ---------------------------------------------------------------------------
   // Supervisor bridge event forwarding. The Code column owns the session id;
@@ -1466,20 +925,20 @@ export function App({
     const offs: Array<() => void> = [];
 
     offs.push(
-      client.on('run_started', (raw: unknown) => {
+      session.on('run_started', (raw: unknown) => {
         const p = (raw ?? {}) as RunEvent;
         const runId = String(p.run_id ?? '');
         forwardEvent({ kind: 'run-started', ticketId, runId });
       })
     );
     offs.push(
-      client.on('run_end', (raw: unknown) => {
+      session.on('run_end', (raw: unknown) => {
         const p = (raw ?? {}) as RunEvent;
         forwardEvent({ kind: 'run-end', ticketId, reason: String(p.end_reason ?? 'completed') });
       })
     );
     offs.push(
-      client.on('message_output', (raw: unknown) => {
+      session.on('message_output', (raw: unknown) => {
         const p = (raw ?? {}) as RunEvent;
         forwardEvent({
           kind: 'message',
@@ -1491,7 +950,7 @@ export function App({
       })
     );
     offs.push(
-      client.on('token_usage', (raw: unknown) => {
+      session.on('token_usage', (raw: unknown) => {
         const p = (raw ?? {}) as RunEvent;
         const u = p.total_token_usage ?? p;
         forwardEvent({
@@ -1549,13 +1008,7 @@ export function App({
       },
       goalStart: async ({ prompt, maxTurns, tickInterval, runOverrides }) => {
         await awaitChatReady();
-        // Mint a client-side session id if we don't have one yet. The
-        // chat-session machine is the single mint point so we stay in
-        // sync with its UUID.
-        let sid = actor.getSnapshot().context.sessionId;
-        if (!sid) {
-          sid = await machine.loadSession(undefined);
-        }
+        const sid = session.id;
 
         // Session variables are non-execution metadata. The goal server
         // function receives the selected environment explicitly below.
@@ -1613,26 +1066,25 @@ export function App({
         await handleSubmit(message, undefined);
       },
       stop: async () => {
-        const currentRunId = actor.getSnapshot().context.runId;
-        if (currentRunId) {
-          await client.stopRun(currentRunId).catch(() => {});
-        }
-        machine.stop();
+        await session.stopRun();
       },
       reset: async () => {
-        const currentRunId = actor.getSnapshot().context.runId;
-        if (currentRunId) {
-          await client.stopRun(currentRunId).catch(() => {});
-        }
-        machine.stop();
-        await machine.loadSession(undefined);
+        await resetConversation({
+          runId: actor.getSnapshot().context.runId,
+          stopRun: (id) => client.stopRun(id),
+          selectNew: () => {
+            machine.stop();
+            // Commit the new owner only after the stop RPC succeeds.
+            flushSync(() => onSelectConversation());
+          },
+        });
       },
     });
 
     return () => {
       unregister();
     };
-  }, [ticketId, client, machine, actor, handleSubmit]);
+  }, [ticketId, client, machine, actor, handleSubmit, session, onSelectConversation]);
 
   // ---------------------------------------------------------------------------
   // Routine bridge — same column-ownership model as the supervisor bridge
@@ -1667,18 +1119,14 @@ export function App({
         return { runId: result.runId };
       },
       stop: async () => {
-        const currentRunId = actor.getSnapshot().context.runId;
-        if (currentRunId) {
-          await client.stopRun(currentRunId).catch(() => {});
-        }
-        machine.stop();
+        await session.stopRun();
       },
     });
 
     return () => {
       unregister();
     };
-  }, [routineId, client, machine, actor, handleSubmit]);
+  }, [routineId, client, machine, actor, handleSubmit, session]);
 
   // Forward routine run/approval events back to main's ScheduledTaskManager.
   useEffect(() => {
@@ -1691,19 +1139,19 @@ export function App({
     const offs: Array<() => void> = [];
 
     offs.push(
-      client.on('run_started', (raw: unknown) => {
+      session.on('run_started', (raw: unknown) => {
         const p = (raw ?? {}) as ApprovalEvent;
         forwardRoutineEvent({ kind: 'run-started', taskId: routineId, runId: String(p.run_id ?? '') });
       })
     );
     offs.push(
-      client.on('run_end', (raw: unknown) => {
+      session.on('run_end', (raw: unknown) => {
         const p = (raw ?? {}) as ApprovalEvent;
         forwardRoutineEvent({ kind: 'run-end', taskId: routineId, reason: String(p.end_reason ?? 'completed') });
       })
     );
     offs.push(
-      client.on('tool_approval_requested', (raw: unknown) => {
+      session.on('tool_approval_requested', (raw: unknown) => {
         const p = (raw ?? {}) as ApprovalEvent;
         forwardRoutineEvent({
           kind: 'approval-requested',
@@ -1713,12 +1161,12 @@ export function App({
       })
     );
     offs.push(
-      client.on('tool_approval_resolved', () => {
+      session.on('tool_approval_resolved', () => {
         forwardRoutineEvent({ kind: 'approval-resolved', taskId: routineId });
       })
     );
     offs.push(
-      client.on('mcp_approval_requested', (raw: unknown) => {
+      session.on('mcp_approval_requested', (raw: unknown) => {
         const p = (raw ?? {}) as ApprovalEvent;
         forwardRoutineEvent({
           kind: 'approval-requested',
@@ -1732,7 +1180,7 @@ export function App({
       })
     );
     offs.push(
-      client.on('mcp_approval_resolved', () => {
+      session.on('mcp_approval_resolved', () => {
         forwardRoutineEvent({ kind: 'approval-resolved', taskId: routineId });
       })
     );
@@ -1745,26 +1193,18 @@ export function App({
   }, [routineId, client]);
 
   useEffect(() => {
-    if (!connected) {
+    const initial = initialMessage;
+    if (!initial || !conversationReady || ui !== 'chat' || items.length || !session.claimIntent('url-initial')) {
       return;
     }
-    if (ui !== 'chat') {
-      return;
-    }
-    if (initialSent) {
-      return;
-    }
-    // Only send initial message if there's no session param (session param is handled separately)
-    const hasSessionParam = uiConfig.searchParams.has('session');
-    if (hasSessionParam) {
-      return;
-    }
-    const initial = uiConfig.searchParams.get('initial');
-    if (initial && items.length === 0) {
-      handleSubmit(initial);
-      setInitialSent(true);
-    }
-  }, [connected, ui, initialSent, items.length, handleSubmit]);
+    void handleSubmit(initial).catch((cause: unknown) => {
+      const draft = getConversationDraft(session.id);
+      updateConversationDraft(session.id, {
+        text: [initial, draft.text].filter(Boolean).join('\n\n'),
+        error: cause instanceof Error ? cause.message : 'Message was not sent. Please retry.',
+      });
+    });
+  }, [session, conversationReady, ui, items.length, handleSubmit, initialMessage]);
 
   // Flush messages queued from ChatShell before the backend was ready
   const pendingFlushedRef = useRef(false);
@@ -1777,7 +1217,13 @@ export function App({
     if (pendingFlushedRef.current) {
       return;
     }
-    if (!connected || ui !== 'chat') {
+    if (
+      !connected ||
+      !bootState.ready ||
+      machine.phase === 'initializing' ||
+      machine.phase === 'initError' ||
+      ui !== 'chat'
+    ) {
       return;
     }
     if (!pendingMessages || pendingMessages.length === 0) {
@@ -1790,11 +1236,36 @@ export function App({
     // run, the old preview cannot be claimed and submitted a second time.
     onPendingMessagesFlushed?.();
     void (async () => {
-      for (const msg of claimedMessages) {
-        await handleSubmit(msg.text, msg.files);
+      for (let index = 0; index < claimedMessages.length; index++) {
+        const msg = claimedMessages[index]!;
+        try {
+          await handleSubmit(msg.text, msg.files, undefined, msg.inputId);
+        } catch (cause) {
+          const id = sessionIdProp ?? sessionId;
+          if (id) {
+            const remaining = claimedMessages.slice(index);
+            const draft = getConversationDraft(id);
+            updateConversationDraft(id, {
+              text: [...remaining.map((message) => message.text), draft.text].filter(Boolean).join('\n\n'),
+              files: [...remaining.flatMap((message) => message.files ?? []), ...draft.files],
+              error: cause instanceof Error ? cause.message : 'Message was not sent. Please retry.',
+            });
+          }
+          break;
+        }
       }
     })();
-  }, [connected, ui, pendingMessages, handleSubmit, onPendingMessagesFlushed]);
+  }, [
+    connected,
+    bootState.ready,
+    machine.phase,
+    ui,
+    pendingMessages,
+    handleSubmit,
+    onPendingMessagesFlushed,
+    sessionIdProp,
+    sessionId,
+  ]);
 
   const handleApprovalDecision = useCallback(
     async (request_id: string, value: 'yes' | 'always' | 'no', kind: 'function' | 'mcp' = 'function') => {
@@ -1879,124 +1350,22 @@ export function App({
   }, [onController, client, actor]);
 
   const handleSelectSession = useCallback(
-    async (id?: string, opts?: { fromProp?: boolean }) => {
-      // loadSession owns the machine choreography AND the UUID mint for
-      // new chats. It returns the resolved id so we can notify the parent.
-      const resolvedId = await loadSession(id);
-      if (!opts?.fromProp) {
-        onSessionChange?.(resolvedId);
+    async (id?: string) => {
+      if (id !== session.id) {
+        onSelectConversation(id);
+        return;
       }
-      // Seed the Up-next panel from server state. ``queue_changed``
-      // notifications will keep it in sync from here on.
-      if (resolvedId) {
-        try {
-          const snap = await client.listQueue(resolvedId);
-          setQueuedMessages(snap.items);
-        } catch {
-          setQueuedMessages([]);
-        }
-      } else {
-        setQueuedMessages([]);
+      try {
+        await session.load({ force: true });
+        await session.refreshPanels(executionTarget, workspaceSupported);
+        setUI('chat');
+      } catch {
+        // The controller publishes initError for the retry surface.
       }
-      // Workspace restore is a side-effect of session selection, not part
-      // of machine state — it stays here.
-      if (id) {
-        if (workspaceSupported) {
-          try {
-            const res = (await client.serverCall('fs_get_workspace_root', {}, id, executionTarget)) as any;
-            if (res?.path) {
-              setWorkspacePath(res.path);
-            }
-          } catch {}
-          setWorkspaceLocked(true);
-        }
-      } else {
-        setWorkspaceLocked(false);
-        if (workspaceSupported) {
-          try {
-            // Match the chat-boot path: prefer the sandbox manifest root
-            // over omni serve's host cwd so docker / remote sandboxes show
-            // the path the agent's tools actually operate on.
-            const res = (await client.serverCall(
-              'fs_get_workspace_root',
-              undefined,
-              undefined,
-              executionTarget
-            )) as any;
-            if (res?.path) {
-              setWorkspacePath(res.path);
-            }
-          } catch {}
-        }
-      }
-      // Seed the /goal panel from server state on session bind. The
-      // autopilot loop broadcasts ui.goal.update on every state change,
-      // but if a goal is already running when we attach to this session
-      // we need to pull the current snapshot so the panel renders
-      // immediately instead of waiting for the next turn boundary.
-      if (resolvedId) {
-        try {
-          const res = (await client.serverCall('goal.status', {}, resolvedId, executionTarget)) as
-            | { snapshot?: unknown }
-            | undefined;
-          const snap = res?.snapshot;
-          setGoalSnapshot(snap && typeof snap === 'object' ? (snap as GoalSnapshot) : null);
-        } catch {
-          setGoalSnapshot(null);
-        }
-      } else {
-        setGoalSnapshot(null);
-      }
-      // Seed the wakeup panel from server state. Same rationale as goal —
-      // picks up a schedule that was already running before we attached.
-      // wakeup.status may not be registered on every agent; silently
-      // ignore so the panel stays empty.
-      if (resolvedId) {
-        try {
-          const res = (await client.serverCall('wakeup.status', {}, resolvedId, executionTarget)) as
-            | { snapshot?: unknown }
-            | undefined;
-          const snap = res?.snapshot;
-          setWakeupSnapshot(snap && typeof snap === 'object' ? (snap as WakeupSnapshot) : null);
-        } catch {
-          setWakeupSnapshot(null);
-        }
-      } else {
-        setWakeupSnapshot(null);
-      }
-      if (resolvedId) {
-        try {
-          const res = (await client.serverCall('loop.status', {}, resolvedId, executionTarget)) as
-            | { snapshot?: unknown }
-            | undefined;
-          const snap = res?.snapshot;
-          setLoopTasks(Array.isArray(snap) ? (snap as LoopTaskSnapshot[]) : []);
-        } catch {
-          setLoopTasks([]);
-        }
-      } else {
-        setLoopTasks([]);
-      }
-      // Seed the subagent list from server state. Same rationale as goal:
-      // catches the case where workers were spawned earlier and are still
-      // running when we attach.
-      if (resolvedId) {
-        try {
-          const res = (await client.serverCall('workers.list', {}, resolvedId, executionTarget)) as
-            | { snapshot?: unknown }
-            | undefined;
-          const snap = res?.snapshot;
-          publishSubagentsSnapshot(resolvedId, Array.isArray(snap) ? normalizeSubagentSnapshot(snap) : []);
-        } catch {
-          // Keep whatever the store holds — a failed seed is not evidence
-          // the session has no subagents, and broadcasts may be fresher.
-        }
-      }
-      setUI('chat');
     },
-    [client, executionTarget, loadSession, workspaceSupported, onSessionChange]
+    [session, onSelectConversation, executionTarget, workspaceSupported]
   );
-  // Controller `newSession` → fresh conversation (loadSession mints a new id).
+  // New chat selects a fresh controller; the old controller keeps its identity.
   newSessionRef.current = () => void handleSelectSession(undefined);
 
   // When the voice session ends, reload the thread: the server persisted the
@@ -2012,60 +1381,6 @@ export function App({
     }
     voiceWasActiveRef.current = voiceIsActive;
   }, [voiceIsActive, actor, handleSelectSession, refreshSessions]);
-
-  useEffect(() => {
-    if (urlSessionHandledRef.current) {
-      return;
-    }
-    if (!initialSessionParam) {
-      return;
-    }
-    if (!connected) {
-      return;
-    }
-    if (ui !== 'chat') {
-      return;
-    }
-    urlSessionHandledRef.current = true;
-    // Load session history, then send initial message only if session is empty
-    (async () => {
-      await handleSelectSession(initialSessionParam);
-      const initial = uiConfig.searchParams.get('initial');
-      if (initial && !initialSent) {
-        // handleSelectSession has already loaded the authoritative canonical
-        // transcript into the actor. Do not issue a second legacy history read
-        // merely to decide whether the URL-provided initial prompt is needed.
-        if (actor.getSnapshot().context.items.length === 0) {
-          handleSubmit(initial);
-          setInitialSent(true);
-        }
-      }
-    })();
-  }, [connected, ui, handleSelectSession, initialSessionParam, client, initialSent, handleSubmit]);
-
-  // React to controlled sessionId prop changes from parent
-  const prevSessionIdProp = useRef(sessionIdProp);
-  useEffect(() => {
-    if (sessionIdProp === prevSessionIdProp.current) {
-      return;
-    }
-    if (!connected) {
-      // Not connected yet — leave the change unconsumed. `connected` is a
-      // dependency, so this effect re-fires on reconnect and applies the
-      // selection then. Consuming it here and bailing (the old behavior)
-      // silently dropped any session selected during a disconnected
-      // window: the column header showed the new chat while the transcript
-      // stayed on the old session forever, with no history fetch.
-      return;
-    }
-    prevSessionIdProp.current = sessionIdProp;
-    const currentSessionId = actor.getSnapshot().context.sessionId;
-    if (sessionIdProp && sessionIdProp !== currentSessionId) {
-      handleSelectSession(sessionIdProp, { fromProp: true });
-    } else if (!sessionIdProp && currentSessionId) {
-      handleSelectSession(undefined, { fromProp: true });
-    }
-  }, [sessionIdProp, connected, handleSelectSession, actor]);
 
   useEffect(() => {
     if (readyRef.current || !onReady) {
@@ -2232,7 +1547,14 @@ export function App({
                       currentRunId={runId}
                       toolStatusText={toolStatus}
                       onSubmitMessage={(text) => {
-                        void handleSubmit(text);
+                        void handleSubmit(text).catch((cause: unknown) => {
+                          if (sessionId) {
+                            updateConversationDraft(sessionId, {
+                              text,
+                              error: cause instanceof Error ? cause.message : 'Message was not sent',
+                            });
+                          }
+                        });
                       }}
                       onStageContext={stageContext}
                       onOpenReview={onOpenApp ? handleOpenReview : undefined}
@@ -2331,8 +1653,16 @@ export function App({
                       onJobKill={handleBashKill}
                       onJobDismiss={handleBashDismiss}
                     >
-                      {sessionId && connected && bootState.ready ? (
+                      {sessionId ? (
                         <ModelSessionControls
+                          session={session}
+                          key={sessionId}
+                          connected={
+                            connected &&
+                            bootState.ready &&
+                            machine.phase !== 'initializing' &&
+                            machine.phase !== 'initError'
+                          }
                           sessionId={sessionId}
                           transport={client}
                           disabled={runActive}
@@ -2345,11 +1675,25 @@ export function App({
                         />
                       ) : null}
                     </PillStrip>
-                    <Input
-                      disabled={!connected || !bootState.ready}
-                      thinking={thinking}
+                    {machine.phase === 'initError' && (
+                      <div role="alert" className="px-3 py-2 text-sm">
+                        Couldn’t load this conversation. Your draft has been kept.
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          onClick={() => void loadSession(sessionId).catch(() => {})}
+                        >
+                          Retry
+                        </Button>
+                      </div>
+                    )}
+                    <ConversationComposer
+                      key={sessionIdProp ?? sessionId}
+                      conversationId={sessionIdProp ?? sessionId}
+                      disabled={!conversationReady}
+                      thinking={thinking || machine.phase === 'awaitingApproval'}
                       onStop={handleStop}
-                      onSubmit={(text, files) => {
+                      onSubmit={(text, files, inputId) => {
                         // A live voice session owns the conversation: typed
                         // text (without attachments) routes into it rather
                         // than starting a parallel text run on the same
@@ -2357,7 +1701,7 @@ export function App({
                         if (voiceIsActive && !files?.length && voice.sendText(text)) {
                           return;
                         }
-                        void handleSubmit(text, files);
+                        return handleSubmit(text, files, undefined, inputId);
                       }}
                       onVoiceSubmit={handleVoiceSubmit}
                       voiceEnabled={voiceEnabled}

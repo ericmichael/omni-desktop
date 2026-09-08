@@ -24,8 +24,9 @@ function signalProcessTree(child: ChildProcessWithoutNullStreams, signal: NodeJS
 }
 
 export type ManagedProcess = {
+  crashDescendant: (pid: number) => void;
   logs: () => string;
-  stop: () => Promise<void>;
+  stop: (signal?: NodeJS.Signals) => Promise<void>;
   waitForOutput: (pattern: RegExp, timeoutMs: number) => Promise<void>;
 };
 
@@ -59,12 +60,30 @@ export function startProcess(input: {
   });
 
   return {
+    crashDescendant: (pid) => {
+      const parents = new Map(
+        execFileSync('ps', ['-eo', 'pid=,ppid='], { encoding: 'utf8' })
+          .trim()
+          .split('\n')
+          .map((line) => line.trim().split(/\s+/).map(Number) as [number, number])
+      );
+      let ancestor = parents.get(pid);
+      const seen = new Set<number>();
+      while (ancestor && ancestor !== child.pid && !seen.has(ancestor)) {
+        seen.add(ancestor);
+        ancestor = parents.get(ancestor);
+      }
+      if (!child.pid || ancestor !== child.pid) {
+        throw new Error('Refusing to crash a process outside this test launcher');
+      }
+      process.kill(pid, 'SIGKILL');
+    },
     logs: () => output,
-    stop: async () => {
+    stop: async (signal = 'SIGTERM') => {
       if (child.exitCode !== null || child.signalCode !== null) {
         return;
       }
-      signalProcessTree(child, 'SIGTERM');
+      signalProcessTree(child, signal);
       await Promise.race([
         new Promise<void>((resolve) => {
           child.once('exit', () => resolve());

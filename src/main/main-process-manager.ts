@@ -4,8 +4,10 @@ import contextMenu from 'electron-context-menu';
 import type Store from 'electron-store';
 import path from 'path';
 
+import { completeChatRemoval } from '@/main/chat-removal';
 import { PROJECT_KEYS } from '@/main/db-store-bridge';
 import { isDevelopment, manageWindowSize } from '@/main/util';
+import { applyChatCommand } from '@/shared/chat-commands';
 import type {
   IpcEvents,
   IpcRendererEvents,
@@ -30,6 +32,7 @@ export class MainProcessManager {
    * after the ProjectManager is created.
    */
   getStoreSnapshot: (() => StoreData) | null = null;
+  cleanupRemovedChat?: (tab: import('@/shared/types').CodeTab) => Promise<void>;
 
   ipc: IpcListener<IpcEvents>;
   emitter: IpcEmitter<IpcRendererEvents>;
@@ -54,7 +57,25 @@ export class MainProcessManager {
       }
       return this.store.get(key);
     });
+    this.ipc.handle('store:chat-command', async (_, command) => {
+      const { patch, result } = applyChatCommand(this.getStoreSnapshot?.() ?? this.store.store, command);
+      // One synchronous commit: no window can observe half of a tab/history mutation.
+      this.store.set(patch);
+      if (this.getStoreSnapshot) {
+        this.sendToWindow('store:changed', this.getStoreSnapshot());
+      }
+      await completeChatRemoval(command, result, (tab) => {
+        if (!this.cleanupRemovedChat) {
+          throw new Error('Chat cleanup is not initialized');
+        }
+        return this.cleanupRemovedChat(tab);
+      });
+      return result;
+    });
     this.ipc.handle('store:set-key', (_, key, value) => {
+      if (key === 'codeTabs' || key === 'chatConversations' || key === 'activeCodeTabId' || key === 'chatCleanupJobs') {
+        throw new Error('Use store:chat-command for chat state mutations');
+      }
       if (this.getStoreSnapshot && PROJECT_KEYS.has(key)) {
         throw new Error(
           `store:set-key for project key "${String(key)}" is not allowed when SQLite is active. Use ProjectManager APIs.`
@@ -73,6 +94,9 @@ export class MainProcessManager {
       return this.store.store;
     });
     this.ipc.handle('store:set', (_, data) => {
+      if ('codeTabs' in data || 'chatConversations' in data || 'activeCodeTabId' in data || 'chatCleanupJobs' in data) {
+        throw new Error('Use store:chat-command for chat state mutations');
+      }
       if (this.getStoreSnapshot) {
         const conflicts = [...PROJECT_KEYS].filter((k) => k in data);
         if (conflicts.length > 0) {
@@ -111,6 +135,14 @@ export class MainProcessManager {
   };
 
   sendToWindow = <T extends keyof IpcRendererEvents>(channel: T, ...args: IpcRendererEvents[T]) => {
+    if (channel === 'store:changed') {
+      for (const window of BrowserWindow.getAllWindows()) {
+        if (!window.isDestroyed()) {
+          this.emitter.send(window.webContents, channel as Extract<T, string>, ...args);
+        }
+      }
+      return;
+    }
     if (!this.window) {
       console.warn(NOT_INITIALIZED_MESSAGE);
       return;

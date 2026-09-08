@@ -1172,6 +1172,130 @@ describe('ProcessManager', () => {
       );
     });
 
+    it('rejects delayed starts and rebuilds for a retired tab while allowing a new tab', async () => {
+      const { pm } = makePm();
+      await pm.start('closed-tab', { workspaceDir: '/tmp/ws', projectId: 'project-1' });
+      await pm.retire('closed-tab');
+      await expect(pm.start('closed-tab', { workspaceDir: '/tmp/ws' })).rejects.toThrow('closed');
+      await expect(pm.rebuild('closed-tab', { workspaceDir: '/tmp/ws' })).rejects.toThrow('closed');
+      await expect(
+        pm.start('reopened-tab', { workspaceDir: '/tmp/ws', projectId: 'project-1' })
+      ).resolves.toBeUndefined();
+    });
+
+    it('retries the exact failed host stop without attaching a new tab to the dying host', async () => {
+      const { pm } = makePm();
+      await pm.start('old-tab', { workspaceDir: '/tmp/ws' });
+      const oldHost = hoisted.agentProcessInstances[0]!;
+      oldHost.stop.mockRejectedValueOnce(new Error('shutdown unavailable'));
+      await expect(pm.stop('old-tab')).rejects.toThrow('shutdown unavailable');
+      await expect(pm.start('old-tab', { workspaceDir: '/tmp/ws' })).rejects.toThrow('still stopping');
+      await expect(pm.rebuild('old-tab', { workspaceDir: '/tmp/ws' })).rejects.toThrow('still stopping');
+      await expect(pm.switchSandbox('old-tab', 'host')).resolves.toMatchObject({ ok: false });
+      await pm.start('new-tab', { workspaceDir: '/tmp/new' });
+      expect(hoisted.agentProcessInstances).toHaveLength(2);
+      await expect(pm.stop('old-tab')).resolves.toMatchObject({ scope: 'host' });
+      expect(oldHost.stop).toHaveBeenCalledTimes(2);
+      expect(hoisted.agentProcessInstances[1]!.stop).not.toHaveBeenCalled();
+      await expect(pm.start('old-tab', { workspaceDir: '/tmp/ws' })).resolves.toBeUndefined();
+    });
+
+    it('retains a failed shared-environment stop target without stopping the neighboring tile', async () => {
+      const { pm } = makePm();
+      await pm.start('tab-a', { workspaceDir: '/tmp/ws' });
+      const host = hoisted.agentProcessInstances[0]!;
+      host.getStatus.mockReturnValue({
+        type: 'running',
+        data: { wsUrl: 'ws://localhost:9000/ws', uiUrl: 'http://localhost:9000' },
+        timestamp: Date.now(),
+      } satisfies WithTimestamp<AgentProcessStatus>);
+      await pm.start('tab-b', { workspaceDir: '/tmp/ws' });
+      host.stopConsumerEnvironment.mockRejectedValueOnce(new Error('environment busy'));
+      await expect(pm.retire('tab-a')).rejects.toThrow('environment busy');
+      const target = host.stopConsumerEnvironment.mock.calls[0];
+      await pm.retire('tab-a');
+      expect(host.stopConsumerEnvironment.mock.calls[1]).toEqual(target);
+      expect(host.stop).not.toHaveBeenCalled();
+      expect(pm.getStatus('tab-b').type).toBe('running');
+      await pm.stop('tab-b');
+      expect(host.stop).toHaveBeenCalledTimes(1);
+    });
+
+    it('still includes detached failed-stop hosts in application shutdown', async () => {
+      const { pm } = makePm();
+      await pm.start('tab-a', { workspaceDir: '/tmp/ws' });
+      const host = hoisted.agentProcessInstances[0]!;
+      host.stop.mockRejectedValueOnce(new Error('stop failed'));
+      await expect(pm.stop('tab-a')).rejects.toThrow('stop failed');
+      await pm.cleanup();
+      expect(host.exit).toHaveBeenCalledTimes(1);
+    });
+
+    it.each(['rebuild', 'switch'] as const)(
+      'waits for an in-flight %s before retiring its final environment',
+      async (operation) => {
+        const { pm } = makePm();
+        await pm.start('tab-a', { workspaceDir: '/tmp/ws' });
+        const host = hoisted.agentProcessInstances[0]!;
+        let release!: () => void;
+        hoisted.configureConsumerGate = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        const changing =
+          operation === 'rebuild'
+            ? pm.rebuild('tab-a', { workspaceDir: '/tmp/ws' })
+            : pm.switchSandbox('tab-a', 'host');
+        await vi.waitFor(() => expect(host.configureConsumer).toHaveBeenCalledTimes(2));
+        let stopped = false;
+        const closing = pm.retire('tab-a').then(() => {
+          stopped = true;
+        });
+        await Promise.resolve();
+        expect(stopped).toBe(false);
+        release();
+        await changing;
+        await closing;
+        expect(pm.getStatus('tab-a').type).toBe('uninitialized');
+        expect(host.stop).toHaveBeenCalledTimes(1);
+        await expect(pm.start('tab-a', { workspaceDir: '/tmp/ws' })).rejects.toThrow('closed');
+      }
+    );
+
+    it('does not acknowledge an environment retry before its shared host finishes stopping', async () => {
+      const { pm } = makePm();
+      await pm.start('tab-a', { workspaceDir: '/tmp/ws' });
+      const host = hoisted.agentProcessInstances[0]!;
+      host.getStatus.mockReturnValue({
+        type: 'running',
+        data: { wsUrl: 'ws://localhost:9000/ws', uiUrl: 'http://localhost:9000' },
+        timestamp: Date.now(),
+      } satisfies WithTimestamp<AgentProcessStatus>);
+      await pm.start('tab-b', { workspaceDir: '/tmp/ws' });
+      host.stopConsumerEnvironment.mockRejectedValueOnce(new Error('reply lost'));
+      await expect(pm.stop('tab-a')).rejects.toThrow('reply lost');
+      let finishHost!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        finishHost = resolve;
+      });
+      host.stop.mockImplementationOnce(async () => {
+        await gate;
+        return { scope: 'host', shutdown: 'graceful' };
+      });
+      const stopB = pm.stop('tab-b');
+      await vi.waitFor(() => expect(host.stop).toHaveBeenCalledTimes(1));
+      let acknowledged = false;
+      const retryA = pm.stop('tab-a').then(() => {
+        acknowledged = true;
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(acknowledged).toBe(false);
+      expect(host.stopConsumerEnvironment).toHaveBeenCalledTimes(1);
+      finishHost();
+      await Promise.all([stopB, retryA]);
+      expect(acknowledged).toBe(true);
+    });
+
     it('rebinds one tab profile without mutating a host shared by two tabs', async () => {
       const { pm } = makePm();
       await pm.start('tab-a', { workspaceDir: '/tmp/ws', projectId: 'project-1' });

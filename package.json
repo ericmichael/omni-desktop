@@ -67,9 +67,9 @@
     "start:server": "npm run rebuild:node && node out/server/index.mjs",
     "seed": "node scripts/seed.mjs",
     "seed:reset": "node scripts/seed.mjs --reset",
-    "protocol:check": "node scripts/sync-omniagents-gui-v1.mjs --check",
-    "protocol:verify-source": "node scripts/sync-omniagents-gui-v1.mjs --verify-source",
-    "protocol:sync": "node scripts/sync-omniagents-gui-v1.mjs --sync"
+    "protocol:check": "node scripts/sync-omniagents-gui-v1.mjs --major 2 --check",
+    "protocol:verify-source": "node scripts/sync-omniagents-gui-v1.mjs --major 2 --verify-source",
+    "protocol:sync": "node scripts/sync-omniagents-gui-v1.mjs --major 2 --sync"
   },
   "devDependencies": {
     "@electron-toolkit/preload": "^3.0.2",
@@ -116,6 +116,7 @@
     "eslint-plugin-react-refresh": "^0.4.20",
     "eslint-plugin-simple-import-sort": "^12.1.1",
     "eslint-plugin-unused-imports": "^4.1.4",
+    "fake-indexeddb": "^6.2.5",
     "follow-redirects": "^1.15.11",
     "globals": "^16.3.0",
     "jsdom": "^26.1.0",

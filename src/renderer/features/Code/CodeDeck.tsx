@@ -66,6 +66,7 @@ import { $previewRequest, clearPreviewRequest } from '@/renderer/features/Ticket
 import { PullRequestBanner } from '@/renderer/features/Tickets/PullRequestBanner';
 import { TicketBannerActions, TicketColumnBadge } from '@/renderer/features/Tickets/TicketControls';
 import { type TicketPanel, TicketPanelOverlay } from '@/renderer/features/Tickets/TicketPanelOverlay';
+import { OmniAgentsHeaderActionsSlot } from '@/renderer/omniagents-ui/header-actions';
 import { $columnActivity, activityStatusText } from '@/renderer/services/column-activity';
 import { persistedStoreApi } from '@/renderer/services/store';
 import { ENTER_ANIMATE, ENTER_INITIAL, FADE_DURATION_S, SPRING_GENTLE, SPRING_STANDARD } from '@/renderer/theme/motion';
@@ -80,7 +81,7 @@ import { firstSource, isChatColumn, projectHasRepoSource } from '@/shared/types'
 import { AppIcon } from './AppIcon';
 import { CodeTabContent } from './CodeTabContent';
 import { ColumnAura } from './ColumnAura';
-import { $codeTabPhases, $codeTabStatuses, APP_LAUNCHER_ID, codeApi } from './state';
+import { $codeTabPhases, $codeTabStatuses, APP_LAUNCHER_ID, codeApi, finishRemoval } from './state';
 import { useRecentConversations } from './use-recent-conversations';
 
 const BROWSER_APP_ID = 'browser';
@@ -1517,14 +1518,20 @@ const CodeSessionPane = memo(
 
     return (
       // Shared-element target for Focus-as-zoom: only the visible pane claims
-      // the card's layoutId (hidden panes are display:none and would report
-      // zero bounds). Switching Tile <-> Focus morphs the active column
+      // the card's layoutId. Park inactive panes with real geometry: collapsing
+      // them to zero makes transcript scrollers forget their reading position.
+      // Switching Tile <-> Focus morphs the active column
       // between its tile card and this full pane.
       <motion.div
         layoutId={isVisible ? `colcard-${tab.id}` : undefined}
         layout={isVisible}
         transition={SPRING_GENTLE}
-        className={cn('w-full h-full flex flex-col relative bg-card', !isVisible && 'hidden')}
+        className={cn(
+          'w-full h-full flex flex-col bg-card',
+          isVisible ? 'relative' : 'absolute inset-0 invisible pointer-events-none'
+        )}
+        inert={!isVisible}
+        aria-hidden={!isVisible}
       >
         <ColumnAura tabId={tab.id} />
         <CodeSessionHeader
@@ -1584,6 +1591,16 @@ export const CodeDeck = memo(() => {
   const store = useStore(persistedStoreApi.$atom);
   const statuses = useStore($codeTabStatuses);
   const tabs = useMemo(() => store.codeTabs ?? [], [store.codeTabs]);
+  const previousTabIds = useRef(new Set(tabs.map((tab) => tab.id)));
+  useEffect(() => {
+    const current = new Set(tabs.map((tab) => tab.id));
+    for (const id of previousTabIds.current) {
+      if (!current.has(id)) {
+        finishRemoval(id);
+      }
+    }
+    previousTabIds.current = current;
+  }, [tabs]);
   // One persistent CodeTabContent per session tab, portaled into a stable
   // detached host that the live layout mode's TabContentSlot adopts.
   const sessionTabs = useMemo(() => tabs.filter((t) => !t.customAppId), [tabs]);
@@ -1676,6 +1693,20 @@ export const CodeDeck = memo(() => {
     }
   }, [sessionTabs]);
   const activeTabId = store.activeCodeTabId ?? tabs[0]?.id ?? null;
+  const interactionActivation = useRef<CodeTabId | null>(null);
+  const activateInteractedTile = useCallback(
+    (event: { target: EventTarget | null }) => {
+      const element = event.target instanceof Element ? event.target : null;
+      const id = element?.closest<HTMLElement>('[data-deck-column]')?.dataset.deckColumn as CodeTabId | undefined;
+      if (id && tabs.some((tab) => tab.id === id) && persistedStoreApi.getKey('activeCodeTabId') !== id) {
+        // A pointer/focus gesture already places the user in this column. Do
+        // not scroll the deck as though this were an external navigation.
+        interactionActivation.current = id;
+        void codeApi.setActiveTab(id);
+      }
+    },
+    [tabs]
+  );
   const [previewUrls, setPreviewUrls] = useState<Record<CodeTabId, string>>({});
   const [expandedTabIds, setExpandedTabIds] = useState<ReadonlySet<CodeTabId>>(() => spacesExpandedFromTabs(tabs));
   // Pixel sizes reported by the shadcn resizable group. A custom width
@@ -1819,6 +1850,10 @@ export const CodeDeck = memo(() => {
   // this never fights the user.
   useEffect(() => {
     if (layoutMode !== 'tile' || !activeTabId) {
+      return;
+    }
+    if (interactionActivation.current === activeTabId) {
+      interactionActivation.current = null;
       return;
     }
     scrollToColumn(activeTabId);
@@ -2143,20 +2178,12 @@ export const CodeDeck = memo(() => {
       }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'e') {
         event.preventDefault();
-        setExpandedTabIds((current) => {
-          const next = new Set(current);
-          if (next.has(activeTabId)) {
-            next.delete(activeTabId);
-          } else {
-            next.add(activeTabId);
-          }
-          return next;
-        });
+        handleToggleExpand(interactionActivation.current ?? activeTabId);
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [activeTabId]);
+  }, [activeTabId, handleToggleExpand]);
 
   const renderSessionActions = useCallback(
     (tab: CodeTab) => (
@@ -2302,7 +2329,11 @@ export const CodeDeck = memo(() => {
 
   return (
     <LayoutGroup>
-      <div className="flex flex-col w-full h-full min-h-0 overflow-hidden bg-background">
+      <div
+        className="flex flex-col w-full h-full min-h-0 overflow-hidden bg-background"
+        onPointerDownCapture={activateInteractedTile}
+        onFocusCapture={activateInteractedTile}
+      >
         <CodeDeckHeader
           layoutMode={layoutMode}
           onLayoutModeChange={handleLayoutModeChange}
@@ -2402,7 +2433,9 @@ export const CodeDeck = memo(() => {
                               onFocus={handleFocusColumn}
                               isExpanded={expandedTabIds.has(tab.id)}
                               onToggleExpand={handleToggleExpand}
-                              headerActionsSlot={<div id={`code-deck-header-actions-${tab.id}`} />}
+                              headerActionsSlot={
+                                <OmniAgentsHeaderActionsSlot id={`code-deck-header-actions-${tab.id}`} />
+                              }
                               hasSidecar={Boolean(sidecar)}
                             >
                               <TabContentSlot host={getContentHost(tab.id)} />
@@ -2475,7 +2508,7 @@ export const CodeDeck = memo(() => {
                 id={`focus:${activeTab?.id ?? 'none'}`}
                 defaultSize={activeSidecar ? '50%' : '100%'}
                 minSize={activeSidecar ? '30%' : undefined}
-                className="flex-1 min-w-0 min-h-0"
+                className="relative flex-1 min-w-0 min-h-0"
               >
                 {tabs.map((tab) => {
                   const isLauncher = tab.customAppId === APP_LAUNCHER_ID;

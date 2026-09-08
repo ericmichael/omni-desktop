@@ -14,7 +14,7 @@ const stubMachine = chatBootMachine.provide({
   actors: {
     waitForConnection: fromCallback<ChatBootEvent>(() => () => {}),
     bootstrap: fromCallback<ChatBootEvent>(() => () => {}),
-    loadSession: fromCallback<ChatBootEvent>(() => () => {}),
+    loadSession: fromCallback<ChatBootEvent, { sessionId?: string }>(() => () => {}),
   },
 });
 
@@ -260,7 +260,7 @@ describe('chatBootMachine', () => {
         actors: {
           waitForConnection: fromCallback<ChatBootEvent>(spy),
           bootstrap: fromCallback<ChatBootEvent>(() => () => {}),
-          loadSession: fromCallback<ChatBootEvent>(() => () => {}),
+          loadSession: fromCallback<ChatBootEvent, { sessionId?: string }>(() => () => {}),
         },
       });
       const actor = createActor(m, { input: { sessionId: 'sess-1' } });
@@ -278,7 +278,7 @@ describe('chatBootMachine', () => {
             return () => {};
           }),
           bootstrap: fromCallback<ChatBootEvent>(spy),
-          loadSession: fromCallback<ChatBootEvent>(() => () => {}),
+          loadSession: fromCallback<ChatBootEvent, { sessionId?: string }>(() => () => {}),
         },
       });
       const actor = createActor(m, { input: { sessionId: 'sess-1' } });
@@ -302,7 +302,7 @@ describe('chatBootMachine', () => {
             });
             return () => {};
           }),
-          loadSession: fromCallback<ChatBootEvent>(spy),
+          loadSession: fromCallback<ChatBootEvent, { sessionId?: string }>(spy),
         },
       });
       const actor = createActor(m, { input: { sessionId: 'sess-1' } });
@@ -326,7 +326,7 @@ describe('chatBootMachine', () => {
             });
             return () => {};
           }),
-          loadSession: fromCallback<ChatBootEvent>(() => cleanup),
+          loadSession: fromCallback<ChatBootEvent, { sessionId?: string }>(() => cleanup),
         },
       });
       const actor = createActor(m, { input: { sessionId: 'sess-1' } });

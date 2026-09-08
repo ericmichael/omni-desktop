@@ -467,7 +467,7 @@ export class PlatformClient implements IComputeClient {
       body: JSON.stringify({ session_id: sessionId }),
     });
     if (!res.ok) {
-      this.log.warn(`Stop session failed: ${res.status}`);
+      throw new Error(`Stop session failed: HTTP ${res.status}`);
     }
   }
 

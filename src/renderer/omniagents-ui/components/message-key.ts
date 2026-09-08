@@ -38,7 +38,11 @@ export function messageKey(item: DisplayItem, index: number): string {
     case 'chat':
       return item.item_id ? `chat:${item.item_id}` : positional(item.type, index);
     case 'tool':
-      return item.call_id ? `tool:${item.call_id}` : positional(item.type, index);
+      return item.call_id
+        ? item.runId
+          ? `tool:${JSON.stringify([item.runId, item.call_id])}`
+          : `tool:${item.call_id}`
+        : positional(item.type, index);
     case 'approval':
       return `approval:${item.request_id}`;
     case 'guardian_review':

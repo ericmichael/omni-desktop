@@ -32,7 +32,7 @@ const runOpenTicketInCode = async (ticketId: TicketId): Promise<void> => {
   const tabs = persistedStoreApi.getKey('codeTabs') ?? [];
   const existing = tabs.find((t) => t.ticketId === ticketId);
   if (existing) {
-    await persistedStoreApi.setKey('activeCodeTabId', existing.id);
+    await codeApi.setActiveTab(existing.id);
     await persistedStoreApi.setKey('layoutMode', 'chat');
     return;
   }

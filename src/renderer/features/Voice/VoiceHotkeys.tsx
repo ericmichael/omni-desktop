@@ -22,7 +22,7 @@ import { configuredVoiceMode } from '@/lib/voice-mode';
 import { goToResidentChannel } from '@/renderer/features/Residents/state';
 import { persistedStoreApi } from '@/renderer/services/store';
 import { isLocalVoiceCapable } from '@/renderer/services/voice-client';
-import { $hoveredVoiceScope, getVoiceMic, startOrArmVoiceMic } from '@/renderer/services/voice-recording';
+import { getVoiceMic, resolveCodeVoiceScope, startOrArmVoiceMic } from '@/renderer/services/voice-recording';
 
 // keyup too, so a hold can send on release.
 const hotkeyOptions = { enableOnFormTags: true, preventDefault: true, keydown: true, keyup: true } as const;
@@ -33,7 +33,7 @@ const TAP_MS = 250;
 function resolveColumnScope(): string | null {
   const store = persistedStoreApi.get();
   if (store.layoutMode === 'chat') {
-    return $hoveredVoiceScope.get() ?? store.activeCodeTabId;
+    return resolveCodeVoiceScope(store.activeCodeTabId);
   }
   return null;
 }

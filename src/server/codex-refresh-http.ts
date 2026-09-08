@@ -16,7 +16,7 @@
 import type { FastifyInstance } from 'fastify';
 
 import type { PgSecretStore } from '@/server/pg-secret-store';
-import { verifyRuntimeToken } from '@/server/runtime-token';
+import { type RuntimeTokenClaims, verifyRuntimeToken } from '@/server/runtime-token';
 
 export const CODEX_REFRESH_PATH = '/api/codex/refresh';
 
@@ -25,6 +25,7 @@ export interface CodexRefreshDeps {
   runtimeTokenSecret: string;
   /** Durable per-principal token store. */
   pgSecret: PgSecretStore;
+  authorize?: (claims: RuntimeTokenClaims) => Promise<boolean>;
 }
 
 function bearer(header: string | string[] | undefined): string | undefined {
@@ -47,8 +48,12 @@ export function registerCodexRefreshRoute(fastify: FastifyInstance, deps: CodexR
   fastify.post(CODEX_REFRESH_PATH, async (request, reply) => {
     const token = bearer(request.headers['authorization']);
     const claims = token ? verifyRuntimeToken(deps.runtimeTokenSecret, token) : null;
-    if (!claims || !claims.principalId) {
+    if (!claims || claims.purpose !== 'runtime' || !claims.principalId) {
       reply.code(401).send({ error: 'Unauthorized: missing or invalid runtime token' });
+      return;
+    }
+    if (deps.authorize && !(await deps.authorize(claims))) {
+      reply.code(403).send({ error: 'Forbidden: runtime authorization revoked' });
       return;
     }
     const body = (request.body ?? {}) as RefreshBody;

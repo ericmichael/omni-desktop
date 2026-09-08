@@ -1,4 +1,4 @@
-import type { RpcMethodMap } from '@/generated/omniagents-gui-v1/gui-v1';
+import type { RpcMethodMap } from '@/generated/omniagents-gui-v2/gui-v2';
 import type { ExecutionTarget } from '@/shared/types';
 
 type AgentHostMethod = Extract<keyof RpcMethodMap, `agent_host_${string}`>;

@@ -9,7 +9,7 @@ import { shellEnvSync } from 'shell-env';
 import { assert } from 'tsafe';
 import { WebSocket as WsWebSocket } from 'ws';
 
-import type { RpcMethodMap } from '@/generated/omniagents-gui-v1/gui-v1';
+import type { RpcMethodMap } from '@/generated/omniagents-gui-v2/gui-v2';
 import { getProductSlug } from '@/lib/product';
 import { DEFAULT_ENV } from '@/lib/pty-utils';
 import { SimpleLogger } from '@/lib/simple-logger';
@@ -388,7 +388,7 @@ const resourceString = (value: Record<string, unknown>, field: string, label: st
   return result;
 };
 
-const decodeAgentHostResources = (value: unknown): AgentHostResourceSnapshot => {
+export const decodeAgentHostResources = (value: unknown): AgentHostResourceSnapshot => {
   const root = resourceRecord(value, 'resource listing');
   if (!Array.isArray(root.workspaces) || !Array.isArray(root.environments)) {
     throw new Error('AgentHost resource listing must contain workspace and environment arrays');
@@ -596,6 +596,7 @@ export class AgentProcess {
   private fetchFn: FetchFn;
   private computeClient: IComputeClient | null = null;
   private computeSessionId: string | null = null;
+  private recordCompute?: (profile: string, sessionId: string) => void;
   private getExtraEnv?: () => Record<string, string> | Promise<Record<string, string>>;
   private readonly processStopTimeoutMs: number;
   private readonly stopReconcilePollMs: number;
@@ -604,6 +605,9 @@ export class AgentProcess {
   private agentHostControlClient: AgentHostControlClient | null = null;
   /** Desired consumer bindings retained across renderer/control reconnects. */
   private consumerRegistrations = new Map<string, ConsumerRegistration>();
+  private recordConsumer?: (
+    claim: Omit<import('./chat-runtime-journal').ChatRuntimeClaim, 'machine'>
+  ) => void | Promise<void>;
   /**
    * Children we deliberately killed via {@link killProcess} (SIGTERM → SIGKILL).
    * Their late `close` events should NOT flip status to `error("signal SIGKILL")`
@@ -621,6 +625,7 @@ export class AgentProcess {
     onStatusChange: (status: WithTimestamp<AgentProcessStatus>) => void;
     fetchFn?: FetchFn;
     computeClient?: IComputeClient;
+    recordCompute?: (profile: string, sessionId: string) => void;
     /**
      * Extra env merged into the spawned `omni serve` (serve mode), evaluated
      * per start. Cloud uses this to inject a fresh per-tenant
@@ -634,8 +639,13 @@ export class AgentProcess {
     /** Test/embedding overrides for observing an already-committed stop. */
     stopReconcilePollMs?: number;
     stopReconcileTimeoutMs?: number;
+    recordConsumer?: (
+      claim: Omit<import('./chat-runtime-journal').ChatRuntimeClaim, 'machine'>
+    ) => void | Promise<void>;
   }) {
     this.mode = opts.mode;
+    this.recordCompute = opts.recordCompute;
+    this.recordConsumer = opts.recordConsumer;
     this.ipcRawOutput = opts.ipcRawOutput;
     this.onStatusChange = opts.onStatusChange;
     this.fetchFn = opts.fetchFn ?? globalThis.fetch;
@@ -789,6 +799,20 @@ export class AgentProcess {
         !isDeepStrictEqual(registeredWorkspace.sources, sources))
     ) {
       throw new Error(`AgentHost workspace ${workspaceId} is registered with a different definition`);
+    }
+    if (this.recordConsumer) {
+      if (!this.childProcess?.pid) {
+        throw new Error('Runtime process identity unavailable');
+      }
+      await this.recordConsumer({
+        consumerId,
+        workspaceId,
+        snapshotRef,
+        hostId: resources.agentHostId,
+        wsUrl: data.wsUrl,
+        controlToken: this.agentHostControlToken,
+        pid: this.childProcess.pid,
+      });
     }
     const registeredProfile = resources.profiles[profileId];
     if (registeredProfile && !isDeepStrictEqual(registeredProfile, definition)) {
@@ -1054,11 +1078,9 @@ export class AgentProcess {
       this.updateStatus({ type: 'stopping' });
       if (this.computeSessionId && this.computeClient) {
         const sessionId = this.computeSessionId;
-        try {
-          await this.computeClient.stopSession(sessionId);
-        } catch {
-          // best-effort cleanup
-        }
+        // Do not drop the only remote session identity on an uncertain stop.
+        // The caller retains its cleanup job and can retry this same session.
+        await this.computeClient.stopSession(sessionId);
 
         // Download workspace files back from Azure Files share unless the
         // sync manager handles it or the source is a git-remote (container
@@ -1349,6 +1371,7 @@ export class AgentProcess {
 
       const session = await this.computeClient.startSession(agentSlug, arg.domain, arg.gitRepo, arg.localComputeExtras);
       this.computeSessionId = session.sessionId;
+      this.recordCompute?.(arg.profileName, session.sessionId);
 
       if (arg.gitRepo) {
         this.log.info(
@@ -1647,25 +1670,37 @@ export class AgentProcess {
       return Promise.resolve('not-applicable');
     }
     this.intentionallyKilled.add(child);
-    return new Promise<HostTermination>((resolve) => {
+    return new Promise<HostTermination>((resolve, reject) => {
       let timer: ReturnType<typeof setTimeout>;
+      let shutdown: HostTermination = 'graceful';
       const onExit = (): void => {
         clearTimeout(timer);
         if (this.childProcess === child) {
           this.childProcess = null;
         }
-        resolve('graceful');
+        resolve(shutdown);
       };
       child.once('close', onExit);
-      child.kill('SIGTERM');
-      timer = setTimeout(() => {
+      const fail = (error: unknown) => {
+        clearTimeout(timer);
         child.removeListener('close', onExit);
-        child.kill('SIGKILL');
-        if (this.childProcess === child) {
-          this.childProcess = null;
+        // Keep the child reference: an unconfirmed kill must remain retryable.
+        reject(error);
+      };
+      timer = setTimeout(() => {
+        shutdown = 'forced';
+        timer = setTimeout(() => fail(new Error('Agent host exit was not confirmed after SIGKILL')), timeout);
+        try {
+          child.kill('SIGKILL');
+        } catch (error) {
+          fail(error);
         }
-        resolve('forced');
       }, timeout);
+      try {
+        child.kill('SIGTERM');
+      } catch (error) {
+        fail(error);
+      }
     });
   };
 

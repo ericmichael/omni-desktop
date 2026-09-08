@@ -19,26 +19,13 @@ export async function ensureRoutineSessionTab(
   const tabs = persistedStoreApi.getKey('codeTabs') ?? [];
   const existing = tabs.find((tab) => tab.sessionId === sessionId);
   if (existing) {
-    const nextExisting = {
-      ...existing,
-      routineId: task.id,
-      routineName: task.name,
-      routineSchedule: formatSchedule(task),
-    };
-    if (
-      existing.routineId !== nextExisting.routineId ||
-      existing.routineName !== nextExisting.routineName ||
-      existing.routineSchedule !== nextExisting.routineSchedule
-    ) {
-      await persistedStoreApi.setKey(
-        'codeTabs',
-        tabs.map((tab) => (tab.id === existing.id ? nextExisting : tab))
-      );
-    }
-    if (activate) {
-      await persistedStoreApi.setKey('activeCodeTabId', existing.id);
-    }
-    return nextExisting;
+    return (await emitter.invoke('store:chat-command', {
+      method: 'ensureRoutineTab',
+      args: [
+        { ...existing, routineId: task.id, routineName: task.name, routineSchedule: formatSchedule(task) },
+        activate,
+      ],
+    })) as CodeTab;
   }
   const workspaceDir = await resolveRoutineWorkspaceDir(task, sessionId, store);
   // A tab without a workspaceDir never launches (useAutoLaunch stays parked
@@ -62,11 +49,7 @@ export async function ensureRoutineSessionTab(
     createdAt: Date.now(),
     ...(workspaceDir ? { workspaceDir } : {}),
   };
-  await persistedStoreApi.setKey('codeTabs', [...tabs, tab]);
-  if (activate) {
-    await persistedStoreApi.setKey('activeCodeTabId', tab.id);
-  }
-  return tab;
+  return (await emitter.invoke('store:chat-command', { method: 'ensureRoutineTab', args: [tab, activate] })) as CodeTab;
 }
 
 export async function resolveRoutineWorkspaceDir(

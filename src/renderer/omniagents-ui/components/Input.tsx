@@ -15,9 +15,11 @@ import {
   VolumeXIcon,
   XIcon,
 } from 'lucide-react';
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useId, useMemo, useRef, useState } from 'react';
 
+import { uuidv4 } from '@/lib/uuid';
 import { configuredVoiceMode } from '@/lib/voice-mode';
+import { Alert, AlertDescription } from '@/renderer/ds/ui/alert';
 import { Button } from '@/renderer/ds/ui/button';
 import {
   DropdownMenu,
@@ -29,9 +31,18 @@ import {
 import { Spinner } from '@/renderer/ds/ui/spinner';
 import { Toggle } from '@/renderer/ds/ui/toggle';
 import { getProfileIcon, isUnsandboxedProfile } from '@/renderer/features/SandboxProfile/profile-icons';
+import {
+  conversationDrafts,
+  draftStorageState,
+  flushConversationDrafts,
+  getConversationDraft,
+  restoreOtherConversationDraft,
+  updateConversationDraft,
+} from '@/renderer/omniagents-ui/conversation-drafts';
 import { persistedStoreApi } from '@/renderer/services/store';
 import { isLocalVoiceCapable } from '@/renderer/services/voice-client';
 
+import { AttachmentPreview } from './AttachmentPreview';
 import { LocalVoiceButton } from './LocalVoiceButton';
 import { PromptInput, PromptInputActions, PromptInputTextarea } from './promptkit/PromptInput';
 
@@ -55,7 +66,8 @@ function isSessionScratchPath(p: string): boolean {
 }
 
 export function Input({
-  disabled,
+  conversationId,
+  disabled: externallyDisabled,
   thinking,
   onStop,
   onSubmit,
@@ -77,10 +89,11 @@ export function Input({
   voiceMuted,
   voiceLive,
 }: {
+  conversationId?: string;
   disabled?: boolean;
   thinking?: boolean;
   onStop?: () => void;
-  onSubmit: (text: string, files?: File[]) => void;
+  onSubmit: (text: string, files?: File[], inputId?: string) => void | Promise<unknown>;
   onVoiceSubmit?: (text: string) => void;
   voiceEnabled?: boolean;
   speakRepliesEnabled?: boolean;
@@ -107,8 +120,23 @@ export function Input({
   /** True while a voice session is active — the dock owns the controls, so the mic button hides. */
   voiceLive?: boolean;
 }) {
-  const [text, setText] = useState('');
-  const [files, setFiles] = useState<File[]>([]);
+  const localId = useId();
+  const draftId = conversationId ?? localId;
+  const storageState = useStore(draftStorageState);
+  const disabled = externallyDisabled || storageState === 'loading';
+  const drafts = useStore(conversationDrafts);
+  const { text, files, error, pendingInput } = drafts[draftId] ?? getConversationDraft(draftId);
+  const setText = useCallback((text: string) => updateConversationDraft(draftId, { text }), [draftId]);
+  const setFiles = useCallback(
+    (value: File[] | ((files: File[]) => File[])) => {
+      updateConversationDraft(draftId, {
+        files: typeof value === 'function' ? value(getConversationDraft(draftId).files) : value,
+      });
+    },
+    [draftId]
+  );
+  const sending = useRef(false);
+  const [submitting, setSubmitting] = useState(false);
   const [history, setHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(0);
   const [historyDraft, setHistoryDraft] = useState('');
@@ -138,7 +166,10 @@ export function Input({
     [currentSandboxProfile, onSandboxChange]
   );
 
-  const canSend = useMemo(() => !disabled && (text.trim().length > 0 || files.length > 0), [disabled, text, files]);
+  const canSend = useMemo(
+    () => !disabled && !submitting && !pendingInput && (text.trim().length > 0 || files.length > 0),
+    [disabled, submitting, pendingInput, text, files]
+  );
   const hostedVoiceLive = hostedVoiceSupported && Boolean(voiceLive);
   // An empty composer has no send to offer; hand it to voice instead.
   const startVoiceFromEmpty =
@@ -166,16 +197,66 @@ export function Input({
 
   const handleSubmit = useCallback(() => {
     const t = text.trim();
-    if (!t && files.length === 0) {
+    if (disabled || sending.current || pendingInput || (!t && files.length === 0)) {
       return;
     }
-    onSubmit(t, files);
+    sending.current = true;
+    setSubmitting(true);
+    const inputId = uuidv4();
+    updateConversationDraft(draftId, {
+      text: '',
+      files: [],
+      error: undefined,
+      pendingInput: { id: inputId, text: t, files },
+    });
+    void Promise.resolve()
+      .then(() => flushConversationDrafts(draftId))
+      .then(() => onSubmit(t, files, inputId))
+      .then(() => updateConversationDraft(draftId, { pendingInput: undefined }, { inputId }))
+      .catch((cause: unknown) => {
+        const current = getConversationDraft(draftId);
+        updateConversationDraft(
+          draftId,
+          {
+            ...(current.text || current.files.length
+              ? { pendingInput: { id: inputId, text: t, files } }
+              : { text: t, files, pendingInput: undefined }),
+            error: cause instanceof Error ? cause.message : 'Message was not sent. Please retry.',
+          },
+          { inputId }
+        );
+      })
+      .finally(() => {
+        sending.current = false;
+        setSubmitting(false);
+      });
     setHistory((h) => (h.length && h[h.length - 1] === t ? h : [...h, t]));
     setHistoryIndex(0);
     setHistoryDraft('');
-    setText('');
-    setFiles([]);
-  }, [text, files, onSubmit]);
+  }, [text, files, onSubmit, disabled, draftId, pendingInput]);
+
+  const retryPrevious = useCallback(async () => {
+    if (!pendingInput || disabled || sending.current) {
+      return;
+    }
+    sending.current = true;
+    setSubmitting(true);
+    try {
+      await onSubmit(pendingInput.text, pendingInput.files, pendingInput.id);
+      updateConversationDraft(draftId, { pendingInput: undefined, error: undefined }, { inputId: pendingInput.id });
+    } catch (cause) {
+      updateConversationDraft(
+        draftId,
+        {
+          error: cause instanceof Error ? cause.message : 'Could not confirm the previous send.',
+        },
+        { inputId: pendingInput.id }
+      );
+    } finally {
+      sending.current = false;
+      setSubmitting(false);
+    }
+  }, [pendingInput, disabled, onSubmit, draftId]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -238,36 +319,42 @@ export function Input({
     [text, history, historyIndex, historyDraft, handleSubmit, insertNewlineAtCursor, thinking, onStop]
   );
 
-  const handlePaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) => {
-    const items = e.clipboardData?.items;
-    if (!items) {
-      return;
-    }
-    const imageFiles: File[] = [];
-    for (const item of items) {
-      if (item.type.startsWith('image/')) {
-        const file = item.getAsFile();
-        if (file) {
-          const ext = file.type.split('/')[1] || 'png';
-          const named = new File([file], `paste-${Date.now()}.${ext}`, { type: file.type });
-          imageFiles.push(named);
+  const handlePaste = useCallback(
+    (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+      const items = e.clipboardData?.items;
+      if (!items) {
+        return;
+      }
+      const imageFiles: File[] = [];
+      for (const item of items) {
+        if (item.type.startsWith('image/')) {
+          const file = item.getAsFile();
+          if (file) {
+            const ext = file.type.split('/')[1] || 'png';
+            const named = new File([file], `paste-${Date.now()}.${ext}`, { type: file.type });
+            imageFiles.push(named);
+          }
         }
       }
-    }
-    if (imageFiles.length > 0) {
-      e.preventDefault();
-      setFiles((prev) => [...prev, ...imageFiles]);
-    }
-  }, []);
+      if (imageFiles.length > 0) {
+        e.preventDefault();
+        setFiles((prev) => [...prev, ...imageFiles]);
+      }
+    },
+    [setFiles]
+  );
 
   const openFilePicker = useCallback(() => {
     fileInputRef.current?.click();
   }, []);
 
-  const handleFilesSelected = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const list = e.target.files ? Array.from(e.target.files) : [];
-    setFiles(list);
-  }, []);
+  const handleFilesSelected = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const list = e.target.files ? Array.from(e.target.files) : [];
+      setFiles(list);
+    },
+    [setFiles]
+  );
 
   return (
     <div className="chat-input-footer">
@@ -285,11 +372,7 @@ export function Input({
               {files.map((f, i) =>
                 f.type.startsWith('image/') ? (
                   <div key={i} className="relative group">
-                    <img
-                      src={URL.createObjectURL(f)}
-                      alt=""
-                      className="h-20 w-20 rounded-lg object-cover border border-border"
-                    />
+                    <AttachmentPreview file={f} />
                     <Button
                       type="button"
                       variant="outline"
@@ -340,6 +423,53 @@ export function Input({
             className="max-h-1/2"
             disabled={disabled}
           />
+          {getConversationDraft(draftId).otherDrafts?.map((copy) => (
+            <Alert key={copy.id}>
+              <AlertDescription>
+                <span>Other draft: {copy.text || copy.files.map((file) => file.name).join(', ')}</span>
+                {!!copy.text && !!copy.files.length && (
+                  <span>Attachments: {copy.files.map((file) => file.name).join(', ')}</span>
+                )}
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={
+                    disabled || submitting || !!pendingInput || !!getConversationDraft(draftId).pendingSubmission
+                  }
+                  onClick={() => restoreOtherConversationDraft(draftId, copy.id)}
+                >
+                  Restore other draft
+                </Button>
+              </AlertDescription>
+            </Alert>
+          ))}
+          {(error || storageState === 'unavailable' || (pendingInput && !submitting)) && (
+            <Alert variant={error ? 'destructive' : 'default'}>
+              <AlertDescription>
+                {error}
+                {storageState === 'unavailable' && (
+                  <span>Saved drafts could not be loaded. Local storage may be unavailable.</span>
+                )}
+                {pendingInput && !submitting && (
+                  <>
+                    <span>
+                      Previous message: {pendingInput.text || pendingInput.files.map((file) => file.name).join(', ')}
+                    </span>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={disabled}
+                      onClick={() => void retryPrevious()}
+                    >
+                      Retry previous message
+                    </Button>
+                  </>
+                )}
+              </AlertDescription>
+            </Alert>
+          )}
 
           <PromptInputActions className="flex items-center justify-between gap-1 sm:gap-2 pt-2 px-2">
             <div className="flex items-center gap-1 min-w-0 pr-1">
@@ -352,6 +482,7 @@ export function Input({
                 <input
                   ref={fileInputRef}
                   type="file"
+                  disabled={disabled}
                   multiple
                   onChange={handleFilesSelected}
                   className="hidden"
@@ -476,7 +607,7 @@ export function Input({
                 </Button>
               ) : null}
 
-              {thinking ? null : hostedVoiceLive && onVoiceEnd ? (
+              {!thinking && hostedVoiceLive && onVoiceEnd ? (
                 // Live call: the primary button hangs up. Typed text still
                 // goes into the session on Enter, so nothing is trapped.
                 <Button
@@ -490,7 +621,7 @@ export function Input({
                 >
                   <PhoneOffIcon className="pointer-events-none size-4" />
                 </Button>
-              ) : startVoiceFromEmpty ? (
+              ) : !thinking && startVoiceFromEmpty ? (
                 // Nothing to send, but there is something better to offer than
                 // a dead button.
                 <Button
@@ -511,7 +642,7 @@ export function Input({
                   onClick={handleSubmit}
                   className="rounded-full"
                   aria-label="Send"
-                  title="Send (Enter)"
+                  title={thinking ? 'Queue message (Enter)' : 'Send (Enter)'}
                 >
                   <ArrowUpIcon className="pointer-events-none size-4" />
                 </Button>

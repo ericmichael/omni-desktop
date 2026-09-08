@@ -620,6 +620,8 @@ export type StoreData = {
   dismissedHomeHints: string[];
   schemaVersion: number;
   codeTabs: CodeTab[];
+  /** Authority-owned removal outbox. Never writable through generic renderer settings. */
+  chatCleanupJobs?: CodeTab[];
   /**
    * Indexed agent conversations, newest-first. Project identity is retained
    * so the sidebar can group sessions beneath their project. Archived entries
@@ -1323,6 +1325,11 @@ export const schema: Schema<StoreData> = {
       },
       required: ['id', 'createdAt'],
     },
+  },
+  chatCleanupJobs: {
+    type: 'array',
+    default: [],
+    items: { type: 'object' },
   },
   chatConversations: {
     type: 'array',
@@ -2031,6 +2038,8 @@ export type CodeTabId = string;
 export type CodeLayoutMode = 'tile' | 'focus';
 
 export type CodeTab = {
+  /** Backend-owned runtime launcher identity; retained by removal jobs. */
+  runtimeOwner?: string;
   id: CodeTabId;
   projectId: ProjectId | null;
   ticketId?: TicketId;
@@ -2690,6 +2699,7 @@ export interface ContainerPullRequest {
 type StoreIpcEvents = Namespaced<
   'store',
   {
+    'chat-command': (command: import('./chat-commands').ChatCommand) => import('./chat-commands').ChatCommandResult;
     'get-key': <K extends keyof StoreData>(key: K) => StoreData[K];
     'set-key': <K extends keyof StoreData>(key: K, val: StoreData[K]) => void;
     get: () => StoreData;

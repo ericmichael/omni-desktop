@@ -596,10 +596,11 @@ describe('SupervisorOrchestrator integration', () => {
         expect.objectContaining({
           ticketId: 't1',
           runOverrides: expect.objectContaining({
-            safeToolOverrides: { safe_tool_patterns: ['.*'] },
+            approvalsReviewer: 'auto',
           }),
         })
       );
+      expect(ctx.bridge.startGoal.mock.calls[0]?.[0].runOverrides).not.toHaveProperty('safeToolOverrides');
     });
 
     it('passes the selected profile into code tab setup before starting', async () => {

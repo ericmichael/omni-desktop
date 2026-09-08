@@ -115,7 +115,7 @@ export const chatBootMachine = setup({
     // Placeholders — hook layer provides real implementations.
     waitForConnection: fromCallback<ChatBootEvent>(() => () => {}),
     bootstrap: fromCallback<ChatBootEvent>(() => () => {}),
-    loadSession: fromCallback<ChatBootEvent>(() => () => {}),
+    loadSession: fromCallback<ChatBootEvent, { sessionId?: string }>(() => () => {}),
   },
 }).createMachine({
   id: 'chatBoot',
@@ -176,7 +176,7 @@ export const chatBootMachine = setup({
     },
 
     loadingSession: {
-      invoke: { src: 'loadSession' },
+      invoke: { src: 'loadSession', input: ({ context }) => ({ sessionId: context.sessionId }) },
       on: {
         SESSION_LOADED: {
           target: 'ready',

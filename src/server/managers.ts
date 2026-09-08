@@ -22,6 +22,8 @@ import { uuidv4 } from '@/lib/uuid';
 import { AutomationManager, registerAutomationHandlers } from '@/main/automation-manager';
 import { listRepos as azureListRepos } from '@/main/azure-repos';
 import { type BrowserContext, buildBrowserContext, registerBrowserHandlers } from '@/main/browser-manager';
+import { ChatCleanupRunner, cleanupRemovedChat, completeChatRemoval } from '@/main/chat-removal';
+import { assertCleanupOwner, runtimeOwner } from '@/main/chat-runtime-journal';
 import { registerChatHandlers } from '@/main/chat-service';
 import {
   type CodexTokens,
@@ -66,7 +68,7 @@ import {
   suspendedSessionOwners,
 } from '@/main/sandbox-inventory';
 import { registerScheduledTaskHandlers, ScheduledTaskManager } from '@/main/scheduled-task-manager';
-import { protectedSnapshotsFromTabs, registerSnapshotHandlers } from '@/main/snapshot-manager';
+import { deleteSnapshot, protectedSnapshotsFromTabs, registerSnapshotHandlers } from '@/main/snapshot-manager';
 import { registerSupervisorHandlers } from '@/main/supervisor-handlers';
 import { getOmniConfigDir } from '@/main/util';
 import { WorkspaceSyncManager } from '@/main/workspace-sync-manager';
@@ -86,6 +88,7 @@ import type { ServerStore } from '@/server/store';
 import { registerTeamHandlers } from '@/server/team-handlers';
 import type { HandlerContext, WsHandler } from '@/server/ws-handler';
 import { DEFAULT_TENANT } from '@/server/ws-handler';
+import { applyChatCommand } from '@/shared/chat-commands';
 import { tokenLast4 } from '@/shared/git-credentials';
 import {
   registerConfigHandlers,
@@ -396,10 +399,16 @@ export const wireGlobalHandlers = async (arg: {
   // Teams activate under easyauth multi-tenant; PG-without-easyauth is one
   // 'local' team, SQLite/Electron has no teams.
   const teamsEnabled = !!(pgPool && process.env['OMNI_AUTH_MODE'] === 'easyauth');
+  if (teamsEnabled && controlPlane) {
+    wsHandler.setAuthorizer(async (teamId, principalId) =>
+      Boolean(await controlPlane.getMembershipRole(teamId, principalId))
+    );
+  }
 
   /** Per-(team, principal) settings: composite (team base + user overlay) in cloud, shared JSON locally. */
   type SettingsStore = ServerStore | CompositeSettingsStore;
   type TenantInstance = {
+    chatCleanup: ChatCleanupRunner;
     projectManager: ProjectManager;
     processManager: ProcessManager;
     scheduledTaskManager: ScheduledTaskManager;
@@ -432,6 +441,22 @@ export const wireGlobalHandlers = async (arg: {
       : (channel, ...args) => wsHandler.sendToTenant(teamId, channel, ...args);
     let ref: TenantInstance | undefined;
     const processManager = new ProcessManager({
+      runtimeJournalDir: join(configDir, 'chat-runtime-journal'),
+      claimChatRuntime: async (id) => {
+        if (settings instanceof CompositeSettingsStore) {
+          await settings.claimChatRuntime(id, runtimeOwner);
+        } else {
+          const tabs = settings.get('codeTabs') ?? [];
+          if (!tabs.some((tab) => tab.id === id)) {
+            throw new Error('This chat tab has been closed');
+          }
+          assertCleanupOwner(tabs.find((tab) => tab.id === id)?.runtimeOwner);
+          settings.set(
+            'codeTabs',
+            tabs.map((tab) => (tab.id === id ? { ...tab, runtimeOwner } : tab))
+          );
+        }
+      },
       sendToWindow: tenantSend,
       fetchFn: globalThis.fetch,
       getStoreData: () => ({
@@ -554,7 +579,8 @@ export const wireGlobalHandlers = async (arg: {
             wsHandler,
             machineRegistry,
             configDir,
-            Number.parseInt(process.env['PORT'] ?? '3001', 10)
+            Number.parseInt(process.env['PORT'] ?? '3001', 10),
+            principalId
           )
         : undefined,
     });
@@ -690,7 +716,39 @@ export const wireGlobalHandlers = async (arg: {
     // (enabledExtensions / browser profiles/tabs/history/bookmarks are per-user).
     const extension = new ExtensionManager({ store: settings as any, sendToWindow: tenantSend });
     const browser = buildBrowserContext(settings as any, tenantSend);
+    const chatCleanup = new ChatCleanupRunner({
+      read: async () => {
+        await processManager.recoverAbandonedRuntimes();
+        if (settings instanceof CompositeSettingsStore) {
+          await settings.whenReady;
+          await settings.reloadUser();
+        }
+        return settings.get('chatCleanupJobs') ?? [];
+      },
+      cleanup: async (tab) => {
+        assertCleanupOwner(tab.runtimeOwner);
+        await cleanupRemovedChat(tab, {
+          stop: (id) => processManager.retire(id),
+          deleteSnapshot,
+          isSnapshotProtected: (ref) =>
+            [...tenants.values()].some((t) =>
+              protectedSnapshotsFromTabs(t.settings.get('codeTabs') ?? []).some((claim) => claim.snapshotRef === ref)
+            ),
+        });
+      },
+      acknowledge: async (id) => {
+        if (settings instanceof CompositeSettingsStore) {
+          await settings.acknowledgeChatCleanup(id);
+        } else {
+          settings.set(
+            'chatCleanupJobs',
+            (settings.get('chatCleanupJobs') ?? []).filter((job) => job.id !== id)
+          );
+        }
+      },
+    });
     ref = {
+      chatCleanup,
       projectManager,
       processManager,
       scheduledTaskManager,
@@ -704,6 +762,7 @@ export const wireGlobalHandlers = async (arg: {
       configDir,
     };
     tenants.set(tenantKey(teamId, principalId), ref);
+    chatCleanup.start();
     return ref;
   };
 
@@ -964,6 +1023,38 @@ export const wireGlobalHandlers = async (arg: {
   // for brand-new tenants (empty cache is correct); cold-loading an existing
   // tenant's data on a fresh replica is a follow-up (await readiness in dispatch).
   const defaultTenant = getTenant(DEFAULT_TENANT);
+  // Recovery must not depend on the principal opening a browser after restart.
+  // Only instantiate principals with durable pending cleanup, not every user.
+  let discoveringCleanup = false;
+  let cleanupDiscoveryStopped = false;
+  const discoverCleanup = async () => {
+    if (!pgAdminPool || discoveringCleanup || cleanupDiscoveryStopped) {
+      return;
+    }
+    discoveringCleanup = true;
+    try {
+      const pending = await pgAdminPool.query<{ principal_id: string; team_id: string }>(`
+        SELECT u.principal_id, t.key AS team_id FROM user_settings_v2 u,
+        LATERAL jsonb_each(COALESCE(u.data->'byTeam', '{}'::jsonb)) t
+        WHERE jsonb_typeof(t.value->'chatCleanupJobs') = 'array'
+          AND t.value->'chatCleanupJobs' <> '[]'::jsonb`);
+      for (const row of pending.rows) {
+        if (cleanupDiscoveryStopped) {
+          break;
+        }
+        getTenant(row.team_id, row.principal_id);
+      }
+    } catch {
+      console.warn('[chat-cleanup] pending-job discovery will retry');
+    } finally {
+      discoveringCleanup = false;
+    }
+  };
+  const cleanupDiscoveryTimer = setInterval(() => {
+    void discoverCleanup();
+  }, 30_000);
+  cleanupDiscoveryTimer.unref();
+  void discoverCleanup();
   // Bridge handlers: register once on any bridge with a tenant resolver.
   defaultTenant.projectManager.bridge.registerIpc(ipc, (e) => tenantPM(e).bridge);
   defaultTenant.routineBridge.registerIpc(ipc, (e) => ctxTenant(e).routineBridge);
@@ -977,9 +1068,9 @@ export const wireGlobalHandlers = async (arg: {
   await ensureTenantReady(DEFAULT_TENANT);
 
   // Multi-replica cache coherence: LISTEN for Postgres change notifications and
-  // re-hydrate the affected tenant's projection + settings — but only for
-  // FOREIGN writes (other replicas / the MCP subprocess), since our own writes
-  // already updated the cache. Notifications are debounced per tenant so a
+  // re-hydrate the affected tenant's projection + settings, including sibling
+  // caches on this replica (one principal may have several team overlays).
+  // Notifications are debounced per tenant so a
   // burst collapses into one re-hydrate.
   let stopListener: (() => Promise<void>) | undefined;
   if (pgPool && dbUrl) {
@@ -1001,47 +1092,76 @@ export const wireGlobalHandlers = async (arg: {
         const principalId = sep >= 0 ? key.slice(sep + 2) : key;
         if (teams.includes(teamId)) {
           // Foreign project/team-base write: re-hydrate the projection + team layer.
-          void t.projectManager.refreshFromExternal();
+          void t.projectManager
+            .refreshFromExternal()
+            .catch((error: unknown) => console.error('Project refresh failed:', error));
           if (t.settings instanceof CompositeSettingsStore) {
-            void t.settings.reloadTeam().then(() => {
-              materializeTenant(teamId, principalId);
-              sendSnapshot(teamId, principalId);
-            });
+            void t.settings
+              .reloadTeam()
+              .then(() => {
+                materializeTenant(teamId, principalId);
+                sendSnapshot(teamId, principalId);
+              })
+              .catch((error: unknown) => console.error('Team settings refresh failed:', error));
           }
-        } else if (principals.includes(principalId) && t.settings instanceof CompositeSettingsStore) {
+        }
+        if (principals.includes(principalId) && t.settings instanceof CompositeSettingsStore) {
           // Foreign user-overlay write (same user, another replica/device).
-          void t.settings.reloadUser().then(() => sendSnapshot(teamId, principalId));
+          void t.settings
+            .reloadUser()
+            .then(() => sendSnapshot(teamId, principalId))
+            .catch((error: unknown) => console.error('User settings refresh failed:', error));
         }
       }
     };
-    stopListener = await createPgListener(dbUrl, 'omni_change', (payload) => {
-      try {
-        const { t, u, o, p } = JSON.parse(payload) as { t?: string; u?: string; o?: string; p?: string };
-        if (p && t) {
-          // Page-content change → push the new body to the team's editors.
-          // Emit unconditionally (no origin skip); the renderer drops an echo.
-          void new PgProjectsRepo(pgPool!, t)
-            .getPageContent(p)
-            .then((body) => wsHandler.sendToTenant(t, 'page:content-changed', p, body ?? ''))
-            .catch(() => {});
-          return;
-        }
-        if (o === replicaId) {
-          return; // our own write — cache is already current
-        }
-        if (t) {
-          pendingTeams.add(t);
-        }
-        if (u) {
-          pendingPrincipals.add(u);
-        }
-        if ((t || u) && !refreshTimer) {
-          refreshTimer = setTimeout(flushRefresh, 50);
-        }
-      } catch {
-        // ignore malformed payloads
+    const refreshAll = () => {
+      for (const key of tenants.keys()) {
+        const sep = key.indexOf('::');
+        pendingTeams.add(sep >= 0 ? key.slice(0, sep) : key);
+        pendingPrincipals.add(sep >= 0 ? key.slice(sep + 2) : key);
       }
-    });
+      if (!refreshTimer) {
+        refreshTimer = setTimeout(flushRefresh, 50);
+      }
+    };
+    const stop = await createPgListener(
+      dbUrl,
+      'omni_change',
+      (payload) => {
+        try {
+          const { t, u, p } = JSON.parse(payload) as { t?: string; u?: string; o?: string; p?: string };
+          if (p && t) {
+            // Page-content change → push the new body to the team's editors.
+            // Emit unconditionally (no origin skip); the renderer drops an echo.
+            void new PgProjectsRepo(pgPool!, t)
+              .getPageContent(p)
+              .then((body) => wsHandler.sendToTenant(t, 'page:content-changed', p, body ?? ''))
+              .catch(() => {});
+            return;
+          }
+          if (t) {
+            pendingTeams.add(t);
+          }
+          if (u) {
+            pendingPrincipals.add(u);
+          }
+          if ((t || u) && !refreshTimer) {
+            refreshTimer = setTimeout(flushRefresh, 50);
+          }
+        } catch {
+          // ignore malformed payloads
+        }
+      },
+      { onReconnect: refreshAll }
+    );
+    // Also repair a lost notification while the transport remained connected.
+    const reconcileTimer = setInterval(refreshAll, 30_000);
+    reconcileTimer.unref();
+    stopListener = async () => {
+      clearInterval(reconcileTimer);
+      await stop();
+      clearTimeout(refreshTimer);
+    };
     console.log(`[ProjectDb] Listening for cross-replica changes (replica ${replicaId})`);
   }
 
@@ -1140,27 +1260,61 @@ export const wireGlobalHandlers = async (arg: {
     }
     return getSettings(ctx.tenantId, ctx.principalId).get(k);
   });
-  ipc.handle('store:set-key', (ctx, key, value) => {
+  ipc.handle('store:chat-command', async (ctx, command) => {
+    const settings = getSettings(ctx.tenantId, ctx.principalId);
+    const finishRemoval = (result: unknown) =>
+      completeChatRemoval(command, result, (tab) => getTenant(ctx.tenantId, ctx.principalId).chatCleanup.runOne(tab));
+    if (settings instanceof CompositeSettingsStore) {
+      const result = await settings.chatCommand(command, getStoreSnapshot(ctx.tenantId, ctx.principalId));
+      sendSnapshot(ctx.tenantId, ctx.principalId);
+      await finishRemoval(result);
+      return result;
+    }
+    const { patch, result } = applyChatCommand(getStoreSnapshot(ctx.tenantId, ctx.principalId), command);
+    settings.set(patch);
+    sendSnapshot(ctx.tenantId, ctx.principalId);
+    await finishRemoval(result);
+    return result;
+  });
+  ipc.handle('store:set-key', async (ctx, key, value) => {
+    if (key === 'codeTabs' || key === 'chatConversations' || key === 'activeCodeTabId' || key === 'chatCleanupJobs') {
+      throw new Error('Use store:chat-command for chat state mutations');
+    }
     const k = key as keyof import('@/shared/types').StoreData;
     if (PROJECT_KEYS.has(k)) {
       throw new Error(
         `store:set-key for project key "${String(k)}" is not allowed when SQLite is active. Use ProjectManager APIs.`
       );
     }
-    getSettings(ctx.tenantId, ctx.principalId).set(k, value as never);
+    const settings = getSettings(ctx.tenantId, ctx.principalId);
+    settings.set(k, value as never);
+    if (settings instanceof CompositeSettingsStore) {
+      await settings.flush();
+    }
     sendSnapshot(ctx.tenantId, ctx.principalId);
   });
   ipc.handle('store:get', (ctx) => getStoreSnapshot(ctx.tenantId, ctx.principalId));
-  ipc.handle('store:set', (ctx, data) => {
+  ipc.handle('store:set', async (ctx, data) => {
+    if ('codeTabs' in data || 'chatConversations' in data || 'activeCodeTabId' in data || 'chatCleanupJobs' in data) {
+      throw new Error('Use store:chat-command for chat state mutations');
+    }
     const conflicts = [...PROJECT_KEYS].filter((k) => k in data);
     if (conflicts.length > 0) {
       throw new Error(`store:set with project keys [${conflicts.join(', ')}] is not allowed when SQLite is active.`);
     }
-    getSettings(ctx.tenantId, ctx.principalId).store = data;
+    const settings = getSettings(ctx.tenantId, ctx.principalId);
+    settings.store = data;
+    if (settings instanceof CompositeSettingsStore) {
+      await settings.flush();
+    }
     sendSnapshot(ctx.tenantId, ctx.principalId);
   });
-  ipc.handle('store:reset', (ctx) => {
-    getSettings(ctx.tenantId, ctx.principalId).clear();
+  ipc.handle('store:reset', async (ctx) => {
+    const settings = getSettings(ctx.tenantId, ctx.principalId);
+    settings.clear();
+    if (settings instanceof CompositeSettingsStore) {
+      await settings.flush();
+    }
     sendSnapshot(ctx.tenantId, ctx.principalId);
   });
 
@@ -1482,10 +1636,13 @@ export const wireGlobalHandlers = async (arg: {
       }
       const principalId = key.slice(teamId.length + 2);
       if (t.settings instanceof CompositeSettingsStore) {
-        void t.settings.reloadTeam().then(() => {
-          materializeTenant(teamId, principalId);
-          sendSnapshot(teamId, principalId);
-        });
+        void t.settings
+          .reloadTeam()
+          .then(() => {
+            materializeTenant(teamId, principalId);
+            sendSnapshot(teamId, principalId);
+          })
+          .catch((error: unknown) => console.error('Team settings refresh failed:', error));
       }
     }
   };
@@ -1749,11 +1906,14 @@ export const wireGlobalHandlers = async (arg: {
   });
 
   const cleanupGlobalManagers = async () => {
+    cleanupDiscoveryStopped = true;
+    clearInterval(cleanupDiscoveryTimer);
     unsubPlatform();
     if (stopListener) {
       await stopListener();
     }
     const tenantCleanups = [...tenants.values()].flatMap((t) => [
+      t.chatCleanup.dispose(),
       Promise.resolve(t.scheduledTaskManager.stop()),
       Promise.resolve(t.automationManager.stop()),
       Promise.resolve(t.pullRequestWatcher.stop()),

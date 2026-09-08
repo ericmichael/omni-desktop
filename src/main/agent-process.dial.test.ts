@@ -114,7 +114,7 @@ const startFakeServe = async () => {
         return;
       }
       if (msg.method === 'initialize') {
-        socket.send(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { protocol_version: '1.0.0' } }));
+        socket.send(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: guiInitializeResult() }));
         return;
       }
       if (msg.params.function) {
@@ -266,3 +266,4 @@ describe('AgentProcess dial auth (serve mode)', () => {
     expect(serve.connections[0]!.authorization).toBeUndefined();
   });
 });
+import { guiInitializeResult } from 'tests/unit/gui-initialize';

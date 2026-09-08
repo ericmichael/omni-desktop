@@ -22,6 +22,8 @@ import { uuidv4 } from '@/lib/uuid';
 const DEFAULT_TTL_SEC = 12 * 60 * 60; // 12h — comfortably longer than a session.
 
 export interface RuntimeTokenClaims {
+  /** Prevent sandbox credentials being used as full launcher credentials. */
+  purpose?: 'launcher' | 'runtime';
   /** Data-scope key — the active team id in teams mode (else principal/DEFAULT_TENANT). */
   tenantId: string;
   /** Authenticated principal that launched the agent (teams mode). Optional for back-compat. */
@@ -38,6 +40,7 @@ export interface RuntimeTokenClaims {
 }
 
 interface TokenPayload {
+  purpose?: 'launcher' | 'runtime';
   tid: string;
   /** Launching principal (teams mode). */
   pid?: string;
@@ -87,6 +90,7 @@ export function signRuntimeToken(
 ): string {
   const iat = Math.floor(now / 1000);
   const payload: TokenPayload = {
+    purpose: claims.purpose ?? 'runtime',
     tid: claims.tenantId,
     ...(claims.principalId ? { pid: claims.principalId } : {}),
     ...(claims.agentId ? { aid: claims.agentId } : {}),
@@ -124,11 +128,28 @@ export function verifyRuntimeToken(secret: string, token: string, now = Date.now
   } catch {
     return null;
   }
-  if (!payload.tid || !payload.sid || typeof payload.exp !== 'number') {
+  if (
+    !payload ||
+    typeof payload.tid !== 'string' ||
+    !payload.tid ||
+    typeof payload.sid !== 'string' ||
+    !payload.sid ||
+    typeof payload.exp !== 'number' ||
+    !Number.isFinite(payload.exp) ||
+    (payload.pid !== undefined && typeof payload.pid !== 'string') ||
+    (payload.aid !== undefined && typeof payload.aid !== 'string') ||
+    (payload.purpose !== 'launcher' && payload.purpose !== 'runtime')
+  ) {
     return null;
   }
   if (payload.exp * 1000 <= now) {
     return null;
   }
-  return { tenantId: payload.tid, principalId: payload.pid, agentId: payload.aid, sessionId: payload.sid };
+  return {
+    purpose: payload.purpose,
+    tenantId: payload.tid,
+    principalId: payload.pid,
+    agentId: payload.aid,
+    sessionId: payload.sid,
+  };
 }

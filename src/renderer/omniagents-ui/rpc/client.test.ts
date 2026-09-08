@@ -18,10 +18,11 @@ type InitializeRequest = {
 };
 
 const initializeResult = (request: InitializeRequest) => ({
-  protocol_version: '1.0.0',
+  protocol_version: '2.0.0',
   identity: { name: 'omniagents', version: '1.0.0' },
   platform: { os: 'linux', arch: 'x86_64' },
   capabilities: request.params.capabilities,
+  agent_host: { agent_host_id: 'test-host' },
 });
 
 class MockWebSocket {
@@ -102,6 +103,258 @@ describe('RPCClient GUI protocol handshake', () => {
     vi.unstubAllGlobals();
   });
 
+  it('cannot reopen a permanently retired client from late async work', async () => {
+    const { client, socket } = await connectedClient();
+    client.dispose();
+    await expect(client.connect()).rejects.toThrow('disposed');
+    await expect(client.connectAndWait()).rejects.toThrow('disposed');
+    await expect(client.getAgentInfo()).rejects.toThrow('not connected');
+    expect(socket.readyState).toBe(3);
+    expect(MockWebSocket.instances).toHaveLength(1);
+    expect(client.actor.getSnapshot().status).toBe('stopped');
+  });
+
+  it('retires a silent open socket without resending pending mutations', async () => {
+    vi.useFakeTimers();
+    const { client, socket } = await connectedClient();
+    try {
+      const pending = client.request('set_session_model', { session_id: 'A', model: 'model' }, { timeoutMs: null });
+      const rejected = expect(pending).rejects.toThrow();
+      await vi.advanceTimersByTimeAsync(40_001);
+      expect(client.isConnected).toBe(false);
+      expect(socket.readyState).toBe(3);
+      await rejected;
+      expect(socket.sent.filter((s) => JSON.parse(s).method === 'set_session_model')).toHaveLength(1);
+      expect(socket.sent.filter((s) => JSON.parse(s).method === 'get_agent_info')).toHaveLength(1);
+    } finally {
+      client.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('can check liveness even when every ordinary request slot is occupied', async () => {
+    vi.useFakeTimers();
+    const { client, socket } = await connectedClient();
+    try {
+      const pending = Array.from({ length: 100 }, () =>
+        client.request('get_agent_info', {}, { timeoutMs: null }).catch((error) => error)
+      );
+      await vi.advanceTimersByTimeAsync(40_001);
+      expect(client.isConnected).toBe(false);
+      expect(socket.readyState).toBe(3);
+      await Promise.all(pending);
+    } finally {
+      client.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([401, 403])('parks rejected credentials (%s) instead of retrying them forever', async (status) => {
+    vi.useFakeTimers();
+    const fetch = vi.fn().mockResolvedValue({ ok: false, status });
+    vi.stubGlobal('fetch', fetch);
+    const client = new RPCClient('ws://example.test/ws', 'expired');
+    try {
+      await expect(client.connect()).rejects.toThrow(`Authentication failed (${status})`);
+      expect(client.actor.getSnapshot().context.permanent).toBe(true);
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expect(MockWebSocket.instances).toHaveLength(0);
+    } finally {
+      client.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps temporary ticket-service failures retryable', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 503 }));
+    const client = new RPCClient('ws://example.test/ws', 'valid-token');
+    try {
+      await expect(client.connect()).rejects.toThrow('Authentication failed (503)');
+      expect(client.connectionState).toBe('reconnecting');
+      expect(client.actor.getSnapshot().context.permanent).toBe(false);
+    } finally {
+      client.dispose();
+    }
+  });
+
+  it('stops automatic recovery when credentials expire after a successful connection', async () => {
+    vi.useFakeTimers();
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ ticket: 'initial-ticket' }) })
+      .mockResolvedValue({ ok: false, status: 401 });
+    vi.stubGlobal('fetch', fetch);
+    const client = new RPCClient('ws://example.test/ws', 'expiring-token');
+    try {
+      const connected = client.connect();
+      await vi.advanceTimersByTimeAsync(0);
+      const socket = MockWebSocket.instances[0]!;
+      socket.open();
+      await connected;
+      socket.close();
+      socket.onclose?.({ code: 1006 });
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(fetch).toHaveBeenCalledTimes(2);
+      expect(MockWebSocket.instances).toHaveLength(1);
+      expect(client.connectionState).toBe('disconnected');
+      expect(client.actor.getSnapshot().context.permanent).toBe(true);
+    } finally {
+      client.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps a healthy idle connection and stops probes after disposal', async () => {
+    vi.useFakeTimers();
+    const { client, socket } = await connectedClient();
+    try {
+      await vi.advanceTimersByTimeAsync(30_000);
+      const probe = JSON.parse(socket.sent[0]!);
+      expect(probe.method).toBe('get_agent_info');
+      socket.receive({ jsonrpc: '2.0', id: probe.id, result: {} });
+      await vi.advanceTimersByTimeAsync(10_001);
+      expect(client.isConnected).toBe(true);
+      client.dispose();
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(socket.sent).toHaveLength(1);
+      expect(MockWebSocket.instances).toHaveLength(1);
+    } finally {
+      client.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps a slow application call pending when the liveness read succeeds', async () => {
+    vi.useFakeTimers();
+    const { client, socket } = await connectedClient();
+    try {
+      const pending = client.request('get_agent_info', {}, { timeoutMs: null });
+      const original = JSON.parse(socket.sent[0]!);
+      await vi.advanceTimersByTimeAsync(30_000);
+      const probe = JSON.parse(socket.sent[1]!);
+      socket.receive({ jsonrpc: '2.0', id: probe.id, result: {} });
+      await vi.advanceTimersByTimeAsync(10_001);
+      expect(client.isConnected).toBe(true);
+      expect(client.actor.getSnapshot().context.pendingCount).toBe(1);
+      socket.receive({ jsonrpc: '2.0', id: original.id, result: { name: 'late response' } });
+      await expect(pending).resolves.toEqual({ name: 'late response' });
+    } finally {
+      client.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not let an old probe timeout retire a replacement connection', async () => {
+    vi.useFakeTimers();
+    const { client } = await connectedClient();
+    try {
+      await vi.advanceTimersByTimeAsync(30_000);
+      client.disconnect();
+      const fresh = client.connect();
+      const socket = MockWebSocket.instances.at(-1)!;
+      socket.open();
+      await fresh;
+      await vi.advanceTimersByTimeAsync(10_001);
+      expect(client.isConnected).toBe(true);
+      expect(socket.readyState).toBe(1);
+    } finally {
+      client.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('aborts ticket acquisition and cannot open a socket after disposal', async () => {
+    let release!: (response: unknown) => void;
+    const fetch = vi.fn(
+      () =>
+        new Promise((resolve) => {
+          release = resolve;
+        })
+    );
+    vi.stubGlobal('fetch', fetch);
+    const client = new RPCClient('ws://example.test/ws', 'ordinary-token');
+    const pending = client.connect();
+    const rejection = expect(pending).rejects.toThrow('disconnected');
+    client.dispose();
+    await rejection;
+    expect((fetch.mock.calls[0] as any)[1].signal.aborted).toBe(true);
+    // A transport which ignores AbortSignal still must not resurrect a dial.
+    release({ ok: true, json: async () => ({ ticket: 'late-ticket' }) });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(MockWebSocket.instances).toHaveLength(0);
+  });
+
+  it('does not let a retired ticket attempt close its replacement', async () => {
+    let rejectOld!: (reason: Error) => void;
+    const fetch = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise((_, reject) => {
+            rejectOld = reject;
+          })
+      )
+      .mockResolvedValue({ ok: true, json: async () => ({ ticket: 'new-ticket' }) });
+    vi.stubGlobal('fetch', fetch);
+    const client = new RPCClient('ws://example.test/ws', 'ordinary-token');
+    const old = client.connect();
+    const rejection = expect(old).rejects.toThrow('disconnected');
+    client.disconnect();
+    const fresh = client.connect();
+    await vi.waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    const socket = MockWebSocket.instances[0]!;
+    socket.open();
+    await fresh;
+    await rejection;
+    rejectOld(new Error('old request failed late'));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(client.isConnected).toBe(true);
+    expect(socket.readyState).toBe(MockWebSocket.OPEN);
+    client.dispose();
+  });
+
+  it('coalesces a reentrant reconnect callback before starting its dial', async () => {
+    const { client } = await connectedClient();
+    client.actor.send({ type: 'WS_ERROR', error: 'temporary outage' });
+    expect(client.actor.getSnapshot().context.reconnectAttempt).toBeGreaterThan(0);
+    client.disconnect();
+    const pending = client.connect();
+    expect(MockWebSocket.instances).toHaveLength(2);
+    MockWebSocket.instances[1]!.open();
+    await pending;
+    expect(client.isConnected).toBe(true);
+    client.dispose();
+  });
+
+  it.each(['1.0.0', '3.0.0', 'invalid'])(
+    'rejects false-success %s before events, replay or initialized',
+    async (version) => {
+      MockWebSocket.autoInitialize = false;
+      const client = new RPCClient('ws://example.test/ws');
+      const event = vi.fn();
+      client.on('message_output', event);
+      const connection = client.connect();
+      const rejected = expect(connection).rejects.toMatchObject({ code: -32012 });
+      const socket = MockWebSocket.instances[0]!;
+      socket.open();
+      await vi.waitFor(() => expect(socket.sent).toHaveLength(1));
+      const request = JSON.parse(socket.sent[0]!) as InitializeRequest;
+      socket.receive({ jsonrpc: '2.0', method: 'message_output', params: { content: 'untrusted' } });
+      socket.receive({
+        jsonrpc: '2.0',
+        id: request.id,
+        result: { ...initializeResult(request), protocol_version: version },
+      });
+      await rejected;
+      expect(event).not.toHaveBeenCalled();
+      expect(client.initializeResult).toBeNull();
+      expect(client.actor.getSnapshot().context.permanent).toBe(true);
+      expect(socket.sent.map((frame) => JSON.parse(frame).method)).toEqual(['initialize']);
+      client.dispose();
+    }
+  );
+
   it('sends initialize then initialized before connect resolves', async () => {
     MockWebSocket.autoInitialize = false;
     const client = new RPCClient('ws://example.test/ws');
@@ -122,7 +375,7 @@ describe('RPCClient GUI protocol handshake', () => {
       id: 1,
       method: 'initialize',
       params: {
-        protocol_version: '1.0.0',
+        protocol_version: '2.0.0',
         identity: { name: 'omni-desktop', version: '1.0.0' },
         platform: { os: 'browser', arch: 'unknown' },
         capabilities: {
@@ -589,6 +842,20 @@ describe('RPCClient generated protocol integration', () => {
       error: 'credentials rejected',
     });
     expect(client.connectionState).toBe('disconnected');
+    client.dispose();
+  });
+
+  it.each([
+    [false, 'no longer pending'],
+    [null, 'did not confirm'],
+  ])('rejects an unaccepted client response (%s) instead of clearing the answer as sent', async (value, message) => {
+    const { client, socket } = await connectedClient();
+    const response = client.clientResponse('expired-question', true, { reply: 'keep this answer' });
+    const assertion = expect(response).rejects.toThrow(String(message));
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(1));
+    const frame = JSON.parse(socket.sent[0]!);
+    socket.receive({ jsonrpc: '2.0', id: frame.id, result: value });
+    await assertion;
     client.dispose();
   });
 

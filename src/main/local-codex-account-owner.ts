@@ -8,7 +8,7 @@
  * OAuth store is durable at host scope. No credential bytes are copied or
  * deleted by the migration itself.
  */
-import type { RpcMethodMap } from '@/generated/omniagents-gui-v1/gui-v1';
+import type { RpcMethodMap } from '@/generated/omniagents-gui-v2/gui-v2';
 import type { ManagementAdminRequest } from '@/shared/management-admin';
 import type { CodexAuthStatus, CodexDeviceCode } from '@/shared/types';
 

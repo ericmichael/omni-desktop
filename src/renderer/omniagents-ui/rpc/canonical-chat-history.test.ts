@@ -328,6 +328,23 @@ describe('canonical conversation item adapters', () => {
 });
 
 describe('canonical transcript pagination boundary', () => {
+  it('loads a large overlapping history without dropping revisions or reordering rows', async () => {
+    const items = Array.from({ length: 1500 }, (_, index) =>
+      item({ item_id: `item-${index}`, seq: index + 1, content: { text: `message ${index}` } })
+    );
+    const revised = { ...items[499]!, revision: 2, content: { text: 'revised boundary message' } };
+    const request = vi
+      .fn()
+      .mockResolvedValueOnce(page(items.slice(0, 500), 'p2', 1500))
+      .mockResolvedValueOnce(page([revised, ...items.slice(500, 999)], 'p3', 1500))
+      .mockResolvedValueOnce(page(items.slice(999, 1499), 'p4', 1500))
+      .mockResolvedValueOnce(page(items.slice(1499), null, 1500));
+    const loaded = await loadSessionTranscript({ request, getSessionHistory: vi.fn() } as never, 'thread-1');
+    expect(loaded.rawItemCount).toBe(1500);
+    expect(loaded.items.map((entry) => entry.canonical?.seq)).toEqual(items.map((entry) => entry.seq));
+    expect(loaded.items[499]).toMatchObject({ content: 'revised boundary message', canonical: { revision: 2 } });
+  });
+
   it('deduplicates page overlap by item_id/revision and orders by seq', () => {
     const old = item({ item_id: 'itm-2', seq: 2, revision: 0, updated_at: 2, content: { text: 'old' } });
     const revised = item({ item_id: 'itm-2', seq: 2, revision: 1, updated_at: 3, content: { text: 'new' } });

@@ -7,7 +7,7 @@ import {
   ShieldCheckIcon,
   SparklesIcon,
 } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo } from 'react';
 
 import { Button } from '@/renderer/ds/ui/button';
 import {
@@ -19,12 +19,16 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/renderer/ds/ui/dropdown-menu';
+import { getConversationDraft, updateConversationDraft } from '@/renderer/omniagents-ui/conversation-drafts';
+import { useSessionStoreField } from '@/renderer/omniagents-ui/hooks/use-chat-session';
 import {
+  type ListModelsResult,
   ModelCatalogClient,
   type ModelCatalogRpcTransport,
-  type ModelDescriptor,
   type ReasoningEffort,
 } from '@/renderer/omniagents-ui/rpc/model-catalog';
+import type { ConversationSession } from '@/renderer/omniagents-ui/session/conversation-session';
+import { SessionPanelStore } from '@/renderer/omniagents-ui/session/session-panels';
 
 const REASONING_EFFORTS = new Set<ReasoningEffort>(['low', 'medium', 'high', 'xhigh']);
 
@@ -65,8 +69,11 @@ function reasonMessage(reasons: Array<{ message: string }> | undefined, fallback
 /** Session-scoped model controls backed by the canonical v2 catalog RPCs. */
 export function ModelSessionControls({
   sessionId,
+  session,
   transport,
   disabled = false,
+  connected = true,
+  draftCatalog,
   approvalsSupported = false,
   onSetApprovalsReviewer,
   workflowSupported = false,
@@ -75,8 +82,11 @@ export function ModelSessionControls({
   onSetSandboxNetwork,
 }: {
   sessionId: string;
+  session?: ConversationSession;
   transport: ModelCatalogRpcTransport;
   disabled?: boolean;
+  connected?: boolean;
+  draftCatalog?: ListModelsResult;
   /** True only when the runtime negotiated the approvalReviewer feature. */
   approvalsSupported?: boolean;
   onSetApprovalsReviewer?: (reviewer: 'user' | 'auto') => Promise<unknown>;
@@ -89,99 +99,152 @@ export function ModelSessionControls({
   onGetSandboxNetwork?: () => Promise<SandboxNetworkState>;
   onSetSandboxNetwork?: (enabled: boolean) => Promise<SandboxNetworkState>;
 }) {
+  const localState = useMemo(() => new SessionPanelStore(), [sessionId]);
+  const state = session?.panels ?? localState;
   const catalog = useMemo(() => new ModelCatalogClient(transport), [transport]);
-  const [models, setModels] = useState<ModelDescriptor[]>([]);
-  const [activeModel, setActiveModel] = useState<string | null>(null);
-  const [reasoningEffort, setReasoningEffort] = useState<string | null>(null);
-  const [approvalsReviewer, setApprovalsReviewer] = useState<'user' | 'auto'>('user');
+  const [models, setModels] = useSessionStoreField(state, 'models');
+  const [activeModel, setActiveModel] = useSessionStoreField(state, 'activeModel');
+  const [reasoningEffort, setReasoningEffort] = useSessionStoreField(state, 'reasoningEffort');
+  const [approvalsReviewer, setApprovalsReviewer] = useSessionStoreField(state, 'approvalsReviewer');
   // 'guardian' is the config default (workflow.completion_reviewer); a null
   // session attribute means no override, so the control shows the default.
-  const [workflowReviewer, setWorkflowReviewer] = useState<WorkflowReviewer>('guardian');
-  const [loading, setLoading] = useState(true);
-  const [mutating, setMutating] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [workflowReviewer, setWorkflowReviewer] = useSessionStoreField(state, 'workflowReviewer');
+  const [loading, setLoading] = useSessionStoreField(state, 'modelLoading');
+  const [mutating, setMutating] = useSessionStoreField(state, 'modelMutating');
+  const [error, setError] = useSessionStoreField(state, 'modelError');
   // null = unsupported / unknown → no pill. Deliberately NOT gated on the
   // shared `locked`: pulling the sandbox offline mid-run is the point of a
   // live toggle, so only its own mutation locks it.
-  const [networkEnabled, setNetworkEnabled] = useState<boolean | null>(null);
-  const [networkMutating, setNetworkMutating] = useState(false);
+  const [networkEnabled, setNetworkEnabled] = useSessionStoreField(state, 'networkEnabled');
+  const [networkMutating, setNetworkMutating] = useSessionStoreField(state, 'networkMutating');
 
   useEffect(() => {
+    if (!connected) {
+      return;
+    }
     let current = true;
+    // A remote change invalidates only that selection, not the catalog or
+    // other settings. Otherwise a push during first load drops all options.
+    const freshModels = state.guardRead(['models']);
+    const freshModel = state.guardRead(['activeModel']);
+    const freshReasoning = state.guardRead(['reasoningEffort']);
+    const freshApprovals = state.guardRead(['approvalsReviewer']);
+    const freshWorkflow = state.guardRead(['workflowReviewer']);
     setLoading(true);
+    const latest = state.guardRead(['modelLoading']);
     setError(null);
-    void catalog
-      .listModels({ sessionId })
+    const draft = getConversationDraft(sessionId);
+    void (
+      draftCatalog
+        ? Promise.resolve({
+            ...draftCatalog,
+            session: {
+              session_id: sessionId,
+              active_model: draft.model ?? draftCatalog.default_model,
+              reasoning_effort: draft.reasoning ?? null,
+              approvals_reviewer: draft.approvals ?? 'user',
+              workflow_reviewer: draft.workflow ?? 'guardian',
+            },
+          })
+        : catalog.listModels({ sessionId })
+    )
       .then((result) => {
-        if (!current) {
+        if ((!current && !session) || !latest()) {
           return;
         }
-        setModels(
-          result.models.filter((model) => !model.hidden && model.availability.available && model.entitlement.entitled)
-        );
-        setActiveModel(result.session?.active_model ?? result.default_model);
-        setReasoningEffort(result.session?.reasoning_effort ?? null);
-        setApprovalsReviewer(result.session?.approvals_reviewer === 'auto' ? 'auto' : 'user');
-        const sessionWorkflowReviewer = result.session?.workflow_reviewer;
-        setWorkflowReviewer(isWorkflowReviewer(sessionWorkflowReviewer) ? sessionWorkflowReviewer : 'guardian');
+        if (freshModels()) {
+          setModels(
+            result.models.filter((model) => !model.hidden && model.availability.available && model.entitlement.entitled)
+          );
+        }
+        if (freshModel()) {
+          setActiveModel(result.session?.active_model ?? result.default_model);
+        }
+        if (freshReasoning()) {
+          setReasoningEffort(result.session?.reasoning_effort ?? null);
+        }
+        if (freshApprovals()) {
+          setApprovalsReviewer(result.session?.approvals_reviewer === 'auto' ? 'auto' : 'user');
+        }
+        if (freshWorkflow()) {
+          const sessionWorkflowReviewer = result.session?.workflow_reviewer;
+          setWorkflowReviewer(isWorkflowReviewer(sessionWorkflowReviewer) ? sessionWorkflowReviewer : 'guardian');
+        }
       })
       .catch((cause: unknown) => {
-        if (current) {
+        if ((current || session) && latest()) {
           setError(cause instanceof Error ? cause.message : String(cause));
         }
       })
       .finally(() => {
-        if (current) {
+        if ((current || session) && latest()) {
           setLoading(false);
         }
       });
     return () => {
       current = false;
     };
-  }, [catalog, sessionId]);
+  }, [catalog, sessionId, connected, draftCatalog, session, state]);
 
   useEffect(() => {
+    if (!connected) {
+      return;
+    }
     if (!onGetSandboxNetwork) {
       setNetworkEnabled(null);
       return;
     }
     let current = true;
+    const fresh = state.guardRead(['networkEnabled']);
     void onGetSandboxNetwork()
       .then((state) => {
-        if (current) {
+        if ((current || session) && fresh()) {
           setNetworkEnabled(state.ok && state.supported ? (state.enabled ?? true) : null);
         }
       })
       .catch(() => {
         // Older runtimes reject the unknown function; host environments
         // have no lifecycle controller. Both mean: no pill.
-        if (current) {
+        if ((current || session) && fresh()) {
           setNetworkEnabled(null);
         }
       });
     return () => {
       current = false;
     };
-  }, [onGetSandboxNetwork]);
+  }, [onGetSandboxNetwork, connected, session, state]);
 
-  const activeDescriptor = models.find((model) => model.id === activeModel) ?? null;
+  // A null server selection means "use the catalog default", not loading.
+  const activeDescriptor = models.find((model) => (activeModel ? model.id === activeModel : model.is_default)) ?? null;
   const reasoningOptions = (activeDescriptor?.reasoning.options ?? []).filter(isReasoningEffort);
-  const locked = disabled || loading || mutating;
+  const locked = disabled || !connected || loading || mutating;
 
   const chooseModel = async (model: string) => {
-    if (model === activeModel || locked) {
+    if (model === (activeModel ?? activeDescriptor?.id) || locked) {
+      return;
+    }
+    if (draftCatalog) {
+      updateConversationDraft(sessionId, { model, reasoning: undefined });
+      setActiveModel(model);
+      setReasoningEffort(null);
       return;
     }
     setMutating(true);
     setError(null);
+    const freshModel = state.guardRead(['activeModel']);
+    const freshReasoning = state.guardRead(['reasoningEffort']);
     try {
       const result = await catalog.setSessionModel(sessionId, model);
       if (!result.ok || !result.model) {
         setError(reasonMessage(result.reasons, 'Omniagents refused the model change.'));
         return;
       }
-      setActiveModel(result.model);
-      setReasoningEffort(result.reasoning_effort ?? null);
+      if (freshModel()) {
+        setActiveModel(result.model);
+      }
+      if (freshReasoning()) {
+        setReasoningEffort(result.reasoning_effort ?? null);
+      }
     } catch (cause: unknown) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -193,16 +256,25 @@ export function ModelSessionControls({
     if (!isReasoningEffort(effort) || effort === reasoningEffort || locked) {
       return;
     }
+    if (draftCatalog) {
+      updateConversationDraft(sessionId, { reasoning: effort });
+      setReasoningEffort(effort);
+      return;
+    }
     setMutating(true);
     setError(null);
+    const freshModel = state.guardRead(['activeModel']);
+    const freshReasoning = state.guardRead(['reasoningEffort']);
     try {
       const result = await catalog.setSessionReasoning(sessionId, effort);
       if (!result.ok || !result.reasoning_effort) {
         setError(reasonMessage(result.reasons, 'Omniagents refused the reasoning change.'));
         return;
       }
-      setReasoningEffort(result.reasoning_effort);
-      if (result.model) {
+      if (freshReasoning()) {
+        setReasoningEffort(result.reasoning_effort);
+      }
+      if (result.model && freshModel()) {
         setActiveModel(result.model);
       }
     } catch (cause: unknown) {
@@ -219,9 +291,12 @@ export function ModelSessionControls({
     }
     setMutating(true);
     setError(null);
+    const fresh = state.guardRead(['approvalsReviewer']);
     try {
       await onSetApprovalsReviewer(reviewer);
-      setApprovalsReviewer(reviewer);
+      if (fresh()) {
+        setApprovalsReviewer(reviewer);
+      }
     } catch (cause: unknown) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -235,9 +310,12 @@ export function ModelSessionControls({
     }
     setMutating(true);
     setError(null);
+    const fresh = state.guardRead(['workflowReviewer']);
     try {
       await onSetWorkflowReviewer(value);
-      setWorkflowReviewer(value);
+      if (fresh()) {
+        setWorkflowReviewer(value);
+      }
     } catch (cause: unknown) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -294,7 +372,10 @@ export function ModelSessionControls({
         </DropdownMenuTrigger>
         <DropdownMenuContent side="top" align="start" className="min-w-64">
           <DropdownMenuLabel>Conversation model</DropdownMenuLabel>
-          <DropdownMenuRadioGroup value={activeModel ?? undefined} onValueChange={(value) => void chooseModel(value)}>
+          <DropdownMenuRadioGroup
+            value={activeModel ?? activeDescriptor?.id}
+            onValueChange={(value) => void chooseModel(value)}
+          >
             {models.map((model) => (
               <DropdownMenuRadioItem key={model.id} value={model.id} disabled={model.deprecation.deprecated}>
                 <span className="flex min-w-0 flex-col">
@@ -406,7 +487,7 @@ export function ModelSessionControls({
               type="button"
               variant="ghost"
               size="sm"
-              disabled={networkMutating}
+              disabled={networkMutating || !connected}
               className="h-7 gap-1.5 px-2 text-xs font-normal"
               title="Sandbox internet access"
               data-testid="sandbox-network-control"

@@ -8,7 +8,10 @@ const proofViewport = { width: 1920, height: 1080 };
 
 export default defineConfig<E2eOptions>({
   testDir: './tests/e2e/specs',
-  timeout: 120_000,
+  // Playwright's final trace-writing slot uses the project timeout, not a
+  // test.setTimeout override. Sustained proof runs need time to flush video
+  // and trace artifacts after their workload has already completed.
+  timeout: Number(process.env.OMNI_CHAT_SOAK_MS ?? 0) > 0 ? 600_000 : 120_000,
   expect: {
     timeout: 10_000,
   },

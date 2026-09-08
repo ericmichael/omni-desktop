@@ -47,7 +47,8 @@ export class HostBridgePreparer implements IHostBridgePreparer {
     private readonly registry: MachineRegistry,
     private readonly configDir: string,
     /** Loopback origin of this launcher (where `omni serve` dials the relay). */
-    private readonly launcherPort: number
+    private readonly launcherPort: number,
+    private readonly principalId: string
   ) {}
 
   async prepare(
@@ -56,7 +57,7 @@ export class HostBridgePreparer implements IHostBridgePreparer {
     opts: { workspaceDir?: string }
   ): Promise<{ profilePath: string }> {
     const ws = this.registry.getActiveWs(machineId);
-    if (!ws) {
+    if (!ws || !this.registry.ownsActiveMachine(machineId, this.principalId)) {
       throw new HostBridgeUnavailableError('host-offline', machineId);
     }
 
@@ -86,7 +87,8 @@ export class HostBridgePreparer implements IHostBridgePreparer {
     // that satisfies the wildcard and lets the local-tunnel route win.
     const endpoint =
       `ws://127.0.0.1:${this.launcherPort}/proxy/local/` +
-      `${encodeURIComponent(machineId)}/${encodeURIComponent(sandboxKey)}/${result.execPort}/ws`;
+      `${encodeURIComponent(machineId)}/${encodeURIComponent(sandboxKey)}/${result.execPort}/ws` +
+      `?cap=${encodeURIComponent(this.registry.grantTunnel(machineId, sandboxKey, result.execPort))}`;
 
     // manifest.root is the laptop path the host reported; the host overrides it
     // anyway (it owns its own filesystem layout), but reporting it keeps the
@@ -114,11 +116,17 @@ export class HostBridgePreparer implements IHostBridgePreparer {
   }
 
   machineState(machineId: string): { online: boolean; label?: string } {
+    if (!this.registry.ownsActiveMachine(machineId, this.principalId)) {
+      return { online: false };
+    }
     return this.registry.machineState(machineId);
   }
 
   async release(machineId: string, sandboxKey: string): Promise<void> {
-    this.registry.releaseSession(machineId, sandboxKey);
+    this.registry.releaseSession(machineId, sandboxKey, this.principalId);
+    if (!this.registry.ownsActiveMachine(machineId, this.principalId)) {
+      return;
+    }
     const ws = this.registry.getActiveWs(machineId);
     if (!ws) {
       return;

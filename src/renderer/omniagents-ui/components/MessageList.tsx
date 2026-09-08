@@ -16,9 +16,10 @@ import {
   ThumbsDownIcon,
   ThumbsUpIcon,
 } from 'lucide-react';
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
+import { Alert, AlertDescription } from '@/renderer/ds/ui/alert';
 import { Button } from '@/renderer/ds/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/renderer/ds/ui/collapsible';
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '@/renderer/ds/ui/input-group';
@@ -115,7 +116,11 @@ export function MessageList({
   statusSpinner?: boolean;
   welcomeText?: string;
   suggestions?: ReadonlyArray<{ label: string; prompt: string }>;
-  onApprovalDecision?: (request_id: string, value: 'yes' | 'always' | 'no', kind?: 'function' | 'mcp') => void;
+  onApprovalDecision?: (
+    request_id: string,
+    value: 'yes' | 'always' | 'no',
+    kind?: 'function' | 'mcp'
+  ) => void | Promise<void>;
   pendingPlan?: PlanItem | null;
   onPlanDecision?: (approved: boolean) => void;
   statusItalic?: boolean;
@@ -1280,7 +1285,7 @@ export function ApprovalCard({
   queueTotal,
 }: {
   item: ApprovalItem;
-  onDecision?: (request_id: string, value: 'yes' | 'always' | 'no', kind?: 'function' | 'mcp') => void;
+  onDecision?: (request_id: string, value: 'yes' | 'always' | 'no', kind?: 'function' | 'mcp') => void | Promise<void>;
   queuePosition?: number;
   queueTotal?: number;
 }) {
@@ -1290,6 +1295,27 @@ export function ApprovalCard({
   const [expanded, setExpanded] = useState(false);
   const toggleExpanded = useCallback(() => setExpanded((v) => !v), []);
   const isMcp = item.kind === 'mcp';
+  const [decisionError, setDecisionError] = useState<string | null>(null);
+  const [deciding, setDeciding] = useState(false);
+  const decisionPending = useRef(false);
+  const decide = async (value: 'yes' | 'always' | 'no') => {
+    if (!onDecision || decisionPending.current) {
+      return;
+    }
+    decisionPending.current = true;
+    setDeciding(true);
+    setDecisionError(null);
+    try {
+      await onDecision(item.request_id, value, item.kind);
+    } catch (error) {
+      setDecisionError(
+        `Decision not confirmed. Please retry. ${error instanceof Error ? error.message : String(error)}`
+      );
+    } finally {
+      decisionPending.current = false;
+      setDeciding(false);
+    }
+  };
 
   // Header. MCP approvals identify the hosted server via ``server_label``
   // and have no ``always_approve`` affordance (omniagents 0.16 intentionally
@@ -1358,12 +1384,18 @@ export function ApprovalCard({
           <div className="text-xs text-muted-foreground">No parameters</div>
         )}
       </div>
+      {decisionError && (
+        <Alert variant="destructive" className="mt-3">
+          <AlertDescription>{decisionError}</AlertDescription>
+        </Alert>
+      )}
       <div className="mt-3 flex gap-2 justify-end">
         <Button
           variant="outline"
           size="sm"
           className="border-destructive text-destructive hover:bg-destructive/10 hover:text-destructive"
-          onClick={() => onDecision && onDecision(item.request_id, 'no', item.kind)}
+          disabled={deciding}
+          onClick={() => void decide('no')}
         >
           Reject
         </Button>
@@ -1375,12 +1407,13 @@ export function ApprovalCard({
             variant="outline"
             size="sm"
             className="border-primary text-primary"
-            onClick={() => onDecision && onDecision(item.request_id, 'always', item.kind)}
+            disabled={deciding}
+            onClick={() => void decide('always')}
           >
             Always
           </Button>
         )}
-        <Button size="sm" onClick={() => onDecision && onDecision(item.request_id, 'yes', item.kind)}>
+        <Button size="sm" disabled={deciding} onClick={() => void decide('yes')}>
           {isMcp ? 'Approve' : 'Approve Once'}
         </Button>
       </div>

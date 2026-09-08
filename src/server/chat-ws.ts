@@ -94,6 +94,23 @@ export function registerChatWsRoute(f: FastifyInstance, deps: ChatWsDeps): void 
       return;
     }
 
+    // Attach before the first await: clients may send immediately on open.
+    const buffered: unknown[] = [];
+    let bufferedBytes = 0;
+    const buffer = (raw: unknown): void => {
+      bufferedBytes += Buffer.byteLength(String(raw));
+      if (buffered.length >= 128 || bufferedBytes > 1024 * 1024) {
+        socket.close(1009, 'Startup buffer exceeded');
+        return;
+      }
+      buffered.push(raw);
+    };
+    socket.on('message', buffer);
+    socket.once('close', () => {
+      socket.off('message', buffer);
+      buffered.length = 0;
+    });
+
     void (async (): Promise<void> => {
       let resolved: Resolved;
       if (deps.bridgeKeys.length > 0 && constantTimeMatch(token, deps.bridgeKeys)) {
@@ -106,7 +123,7 @@ export function registerChatWsRoute(f: FastifyInstance, deps: ChatWsDeps): void 
         };
       } else {
         const claims = verifyRuntimeToken(deps.runtimeTokenSecret, token);
-        if (!claims) {
+        if (!claims || claims.purpose !== 'launcher') {
           socket.close(4401, 'Unauthorized');
           return;
         }
@@ -135,14 +152,44 @@ export function registerChatWsRoute(f: FastifyInstance, deps: ChatWsDeps): void 
         }
       }
 
+      const checkAccess = async (): Promise<boolean> => {
+        if (socket.readyState !== socket.OPEN) {
+          return false;
+        }
+        if (deps.teamsEnabled && !resolved.poster.bridge) {
+          try {
+            if ((await deps.resolveActiveTeam?.(resolved.principalId, resolved.tenantId)) !== resolved.tenantId) {
+              socket.close(4403, 'Team membership revoked');
+              return false;
+            }
+          } catch {
+            socket.close(1011, 'Authorization unavailable');
+            return false;
+          }
+        }
+        return socket.readyState === socket.OPEN;
+      };
+      if (!(await checkAccess())) {
+        return;
+      }
       const manager = deps.getResidentManager(resolved.tenantId, resolved.principalId);
       await manager.whenReady;
+      if (!(await checkAccess())) {
+        return;
+      }
       const service = new ChatService(manager);
 
+      let outbound = Promise.resolve();
       const send = (payload: unknown): void => {
-        if (socket.readyState === socket.OPEN) {
-          socket.send(JSON.stringify(payload));
-        }
+        // Snapshot now; preserve notification order across async checks.
+        const frame = JSON.stringify(payload);
+        outbound = outbound
+          .then(async () => {
+            if (await checkAccess()) {
+              socket.send(frame);
+            }
+          })
+          .catch(() => socket.close(1011, 'Delivery failed'));
       };
 
       // Fan the manager's chat events out as JSON-RPC notifications.
@@ -152,13 +199,20 @@ export function registerChatWsRoute(f: FastifyInstance, deps: ChatWsDeps): void 
       socket.on('close', unsubscribe);
 
       const methods = new Set<string>(CHAT_METHOD_NAMES);
-      socket.on('message', (raw) => {
+      const receive = (raw: unknown): void => {
         void (async (): Promise<void> => {
+          if (!(await checkAccess())) {
+            return;
+          }
           let msg: { jsonrpc?: string; id?: unknown; method?: unknown; params?: unknown };
           try {
             msg = JSON.parse(String(raw)) as typeof msg;
           } catch {
             send({ jsonrpc: '2.0', id: null, error: { code: PARSE_ERROR, message: 'Parse error' } });
+            return;
+          }
+          if (!msg || typeof msg !== 'object') {
+            send({ jsonrpc: '2.0', id: null, error: { code: INVALID_REQUEST, message: 'Invalid request' } });
             return;
           }
           const id = typeof msg.id === 'number' || typeof msg.id === 'string' ? msg.id : null;
@@ -183,8 +237,13 @@ export function registerChatWsRoute(f: FastifyInstance, deps: ChatWsDeps): void 
               error: { code: APP_ERROR, message, data: { kind: chatErrorKind(message) } },
             });
           }
-        })();
-      });
+        })().catch(() => socket.close(1011, 'Request failed'));
+      };
+      socket.off('message', buffer);
+      socket.on('message', receive);
+      for (const raw of buffered.splice(0)) {
+        receive(raw);
+      }
     })().catch((err: unknown) => {
       console.error('[chat-ws] connection setup failed:', err);
       socket.close(4500, 'Server error');

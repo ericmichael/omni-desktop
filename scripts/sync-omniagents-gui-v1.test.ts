@@ -89,6 +89,59 @@ const sourceFixture = async (prefix = 'omni-source-') => {
   return { directory, output, commit };
 };
 
+describe('GUI v2 source pinning', () => {
+  it('requires a clean source and verifies all artifacts against the pinned commit', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'omni-v2-source-'));
+    const output = await mkdtemp(join(tmpdir(), 'omni-v2-output-'));
+    const paths = [
+      ['gui-v2.ts', 'omniagents/backends/web/ui/src/protocol/generated/gui-v2.ts'],
+      ['canonical/manifest.json', 'protocol/openrpc/v2/manifest.json'],
+      ['canonical/omniagents-gui-v2.json', 'protocol/openrpc/v2/omniagents-gui-v2.json'],
+      ['canonical/gui-v2.schema.json', 'protocol/openrpc/v2/schemas/gui-v2.schema.json'],
+    ] as const;
+    for (const [local, source] of paths) {
+      await mkdir(resolve(directory, source, '..'), { recursive: true });
+      await writeFile(join(directory, source), await readFile(join(root, 'src/generated/omniagents-gui-v2', local)));
+    }
+    git(directory, 'init');
+    git(directory, 'config', 'user.email', 'fixture@example.com');
+    git(directory, 'config', 'user.name', 'Fixture');
+    git(directory, 'remote', 'add', 'origin', 'https://github.com/utrgv-software-engineering/omniagents.git');
+    git(directory, 'add', '.');
+    git(directory, 'commit', '-m', 'fixture');
+    const commit = git(directory, 'rev-parse', 'HEAD');
+    const args = [
+      '--major',
+      '2',
+      '--sync',
+      '--output-dir',
+      output,
+      '--source-ts',
+      join(directory, paths[0][1]),
+      '--source-manifest',
+      join(directory, paths[1][1]),
+      '--source-openrpc',
+      join(directory, paths[2][1]),
+      '--source-schema',
+      join(directory, paths[3][1]),
+      '--source-commit',
+      commit,
+    ];
+    const synced = run(...args);
+    expect(synced.status, synced.stderr).toBe(0);
+    const checked = run('--major', '2', '--check', '--output-dir', output);
+    expect(checked.status, checked.stderr).toBe(0);
+    const original = await readFile(join(output, 'gui-v2.ts'));
+    await writeFile(join(directory, paths[0][1]), 'changed');
+    expect(run(...args).status).not.toBe(0);
+    expect(await readFile(join(output, 'gui-v2.ts'))).toEqual(original);
+    git(directory, 'add', '.');
+    git(directory, 'commit', '-m', 'changed source');
+    expect(run(...args).status).not.toBe(0);
+    expect(await readFile(join(output, 'gui-v2.ts'))).toEqual(original);
+  });
+});
+
 describe('OmniAgents GUI protocol sync', () => {
   it('verifies the checked-in artifact and provenance', () => {
     const result = run('--check');

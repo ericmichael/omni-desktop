@@ -18,6 +18,8 @@ import { createAppControlManager } from '@/main/app-control-manager';
 import { AutomationManager, registerAutomationHandlers } from '@/main/automation-manager';
 import { listRepos as azureListRepos } from '@/main/azure-repos';
 import { createBrowserManager } from '@/main/browser-manager';
+import { ChatCleanupRunner, cleanupRemovedChat } from '@/main/chat-removal';
+import { assertCleanupOwner, runtimeOwner } from '@/main/chat-runtime-journal';
 import { registerChatHandlers } from '@/main/chat-service';
 import {
   getStatus as codexStatus,
@@ -75,6 +77,7 @@ import { registerScheduledTaskHandlers, ScheduledTaskManager } from '@/main/sche
 import { LocalSecretStore } from '@/main/secret-store';
 import {
   DEFAULT_CHAT_SNAPSHOT_TTL_MS,
+  deleteSnapshot,
   gcStaleSnapshots,
   protectedSnapshotsFromTabs,
   registerSnapshotHandlers,
@@ -315,6 +318,18 @@ const [omniInstall, cleanupOmniInstall] = createOmniInstallManager({
 let localMcpConfigOwner: LocalMcpConfigOwner;
 let localMcpOwnershipPromise: Promise<void> | null = null;
 const [processManager, cleanupProcessManager] = createProcessManager({
+  runtimeJournalDir: join(getOmniConfigDir(), 'chat-runtime-journal'),
+  claimChatRuntime: (id) => {
+    const tabs = store.get('codeTabs') ?? [];
+    if (!tabs.some((tab) => tab.id === id)) {
+      throw new Error('This chat tab has been closed');
+    }
+    assertCleanupOwner(tabs.find((tab) => tab.id === id)?.runtimeOwner);
+    store.set(
+      'codeTabs',
+      tabs.map((tab) => (tab.id === id ? { ...tab, runtimeOwner } : tab))
+    );
+  },
   ipc: main.ipc,
   sendToWindow: main.sendToWindow,
   fetchFn: (input, init) => net.fetch(input as string, init),
@@ -436,11 +451,35 @@ automationManager.start();
 // Create ConsoleManager — proxies terminal:* IPC into omni serve's
 // WebSocket. Constructed after ProcessManager because it needs the
 // agent process status to find the right WS URL per tab.
-const [, cleanupConsole] = createConsoleManager({
+const [consoleManager, cleanupConsole] = createConsoleManager({
   ipc: main.ipc,
   sendToWindow: main.sendToWindow,
   processManager,
 });
+
+const chatCleanup = new ChatCleanupRunner({
+  read: async () => {
+    await processManager.recoverAbandonedRuntimes();
+    return store.get('chatCleanupJobs') ?? [];
+  },
+  acknowledge: (id) =>
+    store.set(
+      'chatCleanupJobs',
+      (store.get('chatCleanupJobs') ?? []).filter((job) => job.id !== id)
+    ),
+  cleanup: async (tab) => {
+    assertCleanupOwner(tab.runtimeOwner);
+    await cleanupRemovedChat(tab, {
+      disposeTerminals: (id) => consoleManager.disposeAllForTab(id),
+      stop: (id) => processManager.retire(id),
+      deleteSnapshot,
+      isSnapshotProtected: (ref) =>
+        protectedSnapshotsFromTabs(store.get('codeTabs') ?? []).some((claim) => claim.snapshotRef === ref),
+    });
+  },
+});
+main.cleanupRemovedChat = (tab) => chatCleanup.runOne(tab);
+chatCleanup.start();
 
 // Protected set = the same open-tab snapshots as the GC keep set below; the
 // tab-close cascade persists the pruned codeTabs before its snapshot:delete,
@@ -695,6 +734,7 @@ async function cleanup() {
   await syncManager.dispose();
   const results = await Promise.allSettled([
     cleanupConsole(),
+    chatCleanup.dispose(),
     cleanupAppControl(),
     cleanupOmniInstall(),
     (async () => {

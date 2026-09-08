@@ -82,10 +82,12 @@ type PersistentSession = {
    * while we wait.
    */
   ready?: Promise<void>;
+  expiry?: ReturnType<typeof setTimeout>;
 };
 
-type EventInterceptor = (channel: string, args: unknown[]) => void;
-type ResultWrapper = (result: unknown, args: unknown[]) => unknown;
+export type DeliveryScope = { tenantId: string; principalId?: string };
+type EventInterceptor = (channel: string, args: unknown[], scope?: DeliveryScope) => void;
+type ResultWrapper = (result: unknown, args: unknown[], scope: DeliveryScope) => unknown;
 
 /**
  * WebSocket handler that bridges JSON-RPC-like messages to handler functions,
@@ -95,7 +97,7 @@ type ResultWrapper = (result: unknown, args: unknown[]) => unknown;
  * - Global handlers: shared across all clients (store, util, config)
  * - Per-session handlers: created per session, survive WebSocket reconnections
  *
- * Sessions persist until server restart. When a client disconnects and reconnects
+ * Sessions survive a bounded reconnect grace period. When a client reconnects
  * with the same session ID, it reattaches to its existing managers/containers.
  */
 type PendingReverse = {
@@ -119,6 +121,68 @@ export class WsHandler {
    *  but a single counter is fine — collisions matter only within one WS
    *  pending map, and the id space (Number.MAX_SAFE_INTEGER) is huge. */
   private nextReverseId = 1;
+  private cleanupJobs = new Set<Promise<void>>();
+
+  constructor(private readonly reconnectGraceMs = 60_000) {}
+
+  private authorize?: (teamId: string, principalId: string) => Promise<boolean>;
+  private outbound = new WeakMap<WebSocket, Promise<void>>();
+
+  /** Teams mode installs a fresh membership check, never a cached grant. */
+  setAuthorizer(authorize: (teamId: string, principalId: string) => Promise<boolean>): void {
+    this.authorize = authorize;
+  }
+
+  async checkAccess(ws: WebSocket): Promise<boolean> {
+    const session = this.wsSessions.get(ws);
+    if (!session || session.ws !== ws || ws.readyState !== 1) {
+      return false;
+    }
+    if (!this.authorize) {
+      return true;
+    }
+    let allowed: boolean;
+    try {
+      allowed = await this.authorize(session.tenantId, session.principalId);
+    } catch (error) {
+      console.error('Session authorization unavailable:', error);
+      ws.close(1011, 'Authorization unavailable');
+      return false;
+    }
+    if (this.wsSessions.get(ws) !== session || session.ws !== ws || ws.readyState !== 1) {
+      return false;
+    }
+    if (!allowed) {
+      this.wsSessions.delete(ws);
+      const key = `${session.tenantId}::${session.principalId}::${session.sessionId}`;
+      if (this.persistentSessions.get(key) === session) {
+        this.persistentSessions.delete(key);
+      }
+      clearTimeout(session.expiry);
+      session.ws = null;
+      this.cleanupSession(session);
+      ws.close(4403, 'Team membership revoked');
+    }
+    return allowed;
+  }
+
+  /** Preserve per-socket event order while checking access before delivery. */
+  private sendFrame(ws: WebSocket, message: string): void {
+    if (!this.authorize) {
+      if (ws.readyState === 1) {
+        ws.send(message);
+      }
+      return;
+    }
+    const next = (this.outbound.get(ws) ?? Promise.resolve())
+      .then(async () => {
+        if (await this.checkAccess(ws)) {
+          ws.send(message);
+        }
+      })
+      .catch((error: unknown) => console.error('Socket delivery failed:', error));
+    this.outbound.set(ws, next);
+  }
 
   /**
    * Register a global handler for a channel (shared across all clients).
@@ -163,9 +227,9 @@ export class WsHandler {
     this.resultWrappers.set(channel, wrapper);
   }
 
-  private runEventInterceptors(channel: string, args: unknown[]): void {
+  private runEventInterceptors(channel: string, args: unknown[], scope?: DeliveryScope): void {
     for (const interceptor of this.eventInterceptors) {
-      interceptor(channel, args);
+      interceptor(channel, args, scope);
     }
   }
 
@@ -178,7 +242,7 @@ export class WsHandler {
     const message = JSON.stringify({ type: 'event', channel, args: wireArgs });
     for (const session of this.wsSessions.values()) {
       if (session.ws && session.ws.readyState === 1 /* WebSocket.OPEN */) {
-        session.ws.send(message);
+        this.sendFrame(session.ws, message);
       }
     }
   }
@@ -192,11 +256,11 @@ export class WsHandler {
    */
   sendToTenant<T extends keyof IpcRendererEvents>(tenantId: string, channel: T, ...args: IpcRendererEvents[T]): void {
     const wireArgs = structuredClone(args);
-    this.runEventInterceptors(channel, wireArgs);
+    this.runEventInterceptors(channel, wireArgs, { tenantId });
     const message = JSON.stringify({ type: 'event', channel, args: wireArgs });
     for (const session of this.wsSessions.values()) {
       if (session.tenantId === tenantId && session.ws && session.ws.readyState === 1 /* WebSocket.OPEN */) {
-        session.ws.send(message);
+        this.sendFrame(session.ws, message);
       }
     }
   }
@@ -213,7 +277,7 @@ export class WsHandler {
     ...args: IpcRendererEvents[T]
   ): void {
     const wireArgs = structuredClone(args);
-    this.runEventInterceptors(channel, wireArgs);
+    this.runEventInterceptors(channel, wireArgs, { tenantId: teamId, principalId });
     const message = JSON.stringify({ type: 'event', channel, args: wireArgs });
     for (const session of this.wsSessions.values()) {
       if (
@@ -222,7 +286,7 @@ export class WsHandler {
         session.ws &&
         session.ws.readyState === 1 /* WebSocket.OPEN */
       ) {
-        session.ws.send(message);
+        this.sendFrame(session.ws, message);
       }
     }
   }
@@ -232,9 +296,9 @@ export class WsHandler {
    */
   sendTo<T extends keyof IpcRendererEvents>(ws: WebSocket, channel: T, ...args: IpcRendererEvents[T]): void {
     const wireArgs = structuredClone(args);
-    this.runEventInterceptors(channel, wireArgs);
+    this.runEventInterceptors(channel, wireArgs, this.wsSessions.get(ws));
     if (ws.readyState === 1 /* WebSocket.OPEN */) {
-      ws.send(JSON.stringify({ type: 'event', channel, args: wireArgs }));
+      this.sendFrame(ws, JSON.stringify({ type: 'event', channel, args: wireArgs }));
     }
   }
 
@@ -274,9 +338,12 @@ export class WsHandler {
     const existingSession = persistentKey ? this.persistentSessions.get(persistentKey) : undefined;
 
     if (existingSession) {
+      clearTimeout(existingSession.expiry);
+      existingSession.expiry = undefined;
       // Reattach: close stale WS if any, then bind the new one
       if (existingSession.ws) {
         this.wsSessions.delete(existingSession.ws);
+        existingSession.ws.close(1000, 'Session reattached');
       }
       existingSession.ws = ws;
       existingSession.ready = ready;
@@ -326,7 +393,12 @@ export class WsHandler {
       // synchronously, so messages that arrive during init are not dropped.
       const gate = this.wsSessions.get(ws)?.ready;
       if (gate) {
-        void gate.then(() => this.handleMessage(ws, raw));
+        void gate
+          .then(() => this.handleMessage(ws, raw))
+          .catch((error: unknown) => {
+            console.error('Session initialization failed:', error);
+            ws.close(1011, 'Session initialization failed');
+          });
       } else {
         void this.handleMessage(ws, raw);
       }
@@ -346,10 +418,19 @@ export class WsHandler {
       }
       const session = this.wsSessions.get(ws);
       if (session) {
-        // Only detach the WS — do NOT cleanup managers.
-        // The session stays alive in persistentSessions for reconnection.
+        // Preserve document resources briefly for a socket reconnect. A new
+        // document has its own ID and must not retain these resources forever.
         if (session.ws === ws) {
           session.ws = null;
+          const key = `${session.tenantId}::${session.principalId}::${session.sessionId}`;
+          session.expiry = setTimeout(() => {
+            if (session.ws || this.persistentSessions.get(key) !== session) {
+              return;
+            }
+            this.persistentSessions.delete(key);
+            this.cleanupSession(session);
+          }, this.reconnectGraceMs);
+          session.expiry.unref();
         }
         this.wsSessions.delete(ws);
         console.log(`[ws-handler] Session ${session.sessionId} detached (WS closed)`);
@@ -371,6 +452,23 @@ export class WsHandler {
     channel: string,
     args: unknown[],
     opts: { timeoutMs?: number } = {}
+  ): Promise<T> {
+    if (this.authorize) {
+      return this.checkAccess(ws).then((allowed) => {
+        if (!allowed) {
+          throw new Error('Socket authorization denied');
+        }
+        return this.invokeAuthorized<T>(ws, channel, args, opts);
+      });
+    }
+    return this.invokeAuthorized<T>(ws, channel, args, opts);
+  }
+
+  private invokeAuthorized<T>(
+    ws: WebSocket,
+    channel: string,
+    args: unknown[],
+    opts: { timeoutMs?: number }
   ): Promise<T> {
     return new Promise<T>((resolve, reject) => {
       if (ws.readyState !== 1 /* OPEN */) {
@@ -409,16 +507,27 @@ export class WsHandler {
   /**
    * Clean up all persistent sessions. Called on server shutdown.
    */
+  private cleanupSession(session: PersistentSession): void {
+    const job = Promise.resolve()
+      .then(() => session.cleanup?.())
+      .catch((error: unknown) => {
+        console.error('Error cleaning up session:', error);
+      });
+    this.cleanupJobs.add(job);
+    void job.then(() => this.cleanupJobs.delete(job));
+  }
+
   async cleanupAllSessions(): Promise<void> {
-    const results = await Promise.allSettled(
-      [...this.persistentSessions.values()].filter((s) => s.cleanup).map((s) => s.cleanup!())
-    );
-    const errors = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected').map((r) => r.reason);
-    if (errors.length > 0) {
-      console.error('Error cleaning up sessions:', errors);
+    const sessions = [...this.persistentSessions.values()];
+    for (const session of sessions) {
+      clearTimeout(session.expiry);
     }
     this.persistentSessions.clear();
     this.wsSessions.clear();
+    for (const session of sessions) {
+      this.cleanupSession(session);
+    }
+    await Promise.all(this.cleanupJobs);
   }
 
   private async handleMessage(ws: WebSocket, raw: unknown): Promise<void> {
@@ -426,6 +535,10 @@ export class WsHandler {
     try {
       msg = JSON.parse(String(raw)) as InboundMessage;
     } catch {
+      return;
+    }
+
+    if (this.authorize && !(await this.checkAccess(ws))) {
       return;
     }
 
@@ -456,6 +569,11 @@ export class WsHandler {
 
     // Check per-session handlers first, then fall back to global handlers
     const session = this.wsSessions.get(ws);
+    // Replaced/closed sockets must never fall back to the local tenant. This
+    // also rejects messages whose readiness gate completed after detachment.
+    if (!session || session.ws !== ws) {
+      return;
+    }
     const handler = session?.handlers.get(msg.channel) ?? this.globalHandlers.get(msg.channel);
 
     if (!handler) {
@@ -476,14 +594,31 @@ export class WsHandler {
 
     try {
       let result = await handler(ctx, ...(msg.args ?? []));
+      // Revocation may have happened while an asynchronous handler was running.
+      // Leaving/deleting a team may acknowledge its own successful revocation;
+      // those responses contain membership summaries, not the former team's data.
+      const revokesSelf = msg.channel === 'team:leave' || msg.channel === 'team:delete';
+      if (this.authorize && !revokesSelf && !(await this.checkAccess(ws))) {
+        return;
+      }
       const wrapper = this.resultWrappers.get(msg.channel);
       if (wrapper) {
-        result = wrapper(structuredClone(result), msg.args ?? []);
+        result = wrapper(structuredClone(result), msg.args ?? [], ctx);
       }
-      ws.send(JSON.stringify({ type: 'response', id: msg.id, result }));
+      if (ws.readyState === 1) {
+        ws.send(JSON.stringify({ type: 'response', id: msg.id, result }));
+      }
+      if (this.authorize && revokesSelf) {
+        void this.checkAccess(ws);
+      }
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
-      ws.send(JSON.stringify({ type: 'response', id: msg.id, error }));
+      if (this.authorize && !(await this.checkAccess(ws))) {
+        return;
+      }
+      if (ws.readyState === 1) {
+        ws.send(JSON.stringify({ type: 'response', id: msg.id, error }));
+      }
     }
   }
 }

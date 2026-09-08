@@ -151,6 +151,7 @@ export class SessionReplayCoordinator {
   private pendingRetry = new Set<string>();
   private needsResync = new Set<string>();
   private buffered = new Map<string, ReplayedEvent[]>();
+  private generations = new Map<string, number>();
   /** Server-provided cursor from the last ``-32030`` error data, adopted by
    *  ``completeResync`` when the host has no better cursor. */
   private resyncCursors = new Map<string, { streamId: string; lastSeq: number }>();
@@ -183,6 +184,8 @@ export class SessionReplayCoordinator {
 
   /** Stop reconnect recovery for a session the UI no longer owns. */
   unregisterSession(sessionId: string): void {
+    this.generations.set(sessionId, (this.generations.get(sessionId) ?? 0) + 1);
+    this.resuming.delete(sessionId);
     this.registered.delete(sessionId);
     this.trackers.delete(sessionId);
     this.pendingRetry.delete(sessionId);
@@ -202,6 +205,8 @@ export class SessionReplayCoordinator {
    * reset the transcript on every cycle.
    */
   completeResync(sessionId: string, streamId: string | null = null, lastSeq = 0): void {
+    this.generations.set(sessionId, (this.generations.get(sessionId) ?? 0) + 1);
+    this.resuming.delete(sessionId);
     const adopted = streamId === null ? this.resyncCursors.get(sessionId) : undefined;
     this.resyncCursors.delete(sessionId);
     const tracker = this.tracker(sessionId);
@@ -212,6 +217,14 @@ export class SessionReplayCoordinator {
     }
     this.needsResync.delete(sessionId);
     this.pendingRetry.delete(sessionId);
+    this.buffered.delete(sessionId);
+  }
+
+  /** Fence older replay reads while an authoritative snapshot is fetched. */
+  beginSnapshot(sessionId: string): void {
+    this.generations.set(sessionId, (this.generations.get(sessionId) ?? 0) + 1);
+    this.resuming.delete(sessionId);
+    this.needsResync.add(sessionId);
     this.buffered.delete(sessionId);
   }
 
@@ -299,14 +312,21 @@ export class SessionReplayCoordinator {
   }
 
   private async runResume(sessionId: string, tracker: ReplayTracker): Promise<void> {
+    const generation = this.generations.get(sessionId) ?? 0;
     let outcome: 'success' | 'retry' | 'resync' = 'success';
     try {
       const result = await this.resume(sessionId, tracker.streamId, tracker.lastSeq);
+      if (generation !== (this.generations.get(sessionId) ?? 0)) {
+        return;
+      }
       for (const event of tracker.applyResume(result)) {
         this.deliver(event.method, event.params);
       }
       this.pendingRetry.delete(sessionId);
     } catch (err) {
+      if (generation !== (this.generations.get(sessionId) ?? 0)) {
+        return;
+      }
       if ((err as { code?: unknown } | null)?.code === RESYNC_REQUIRED_CODE) {
         outcome = 'resync';
         // The error data names the server's current stream and its retained

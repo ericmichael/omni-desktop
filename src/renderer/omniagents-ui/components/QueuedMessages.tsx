@@ -1,5 +1,6 @@
+import { Alert, AlertDescription } from '@/renderer/ds/ui/alert';
 import { Button } from '@/renderer/ds/ui/button';
-import { Card } from '@/renderer/ds/ui/card';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/renderer/ds/ui/card';
 import type { QueuedMessage } from '@/renderer/omniagents-ui/rpc/client';
 
 type Props = {
@@ -27,32 +28,52 @@ export function QueuedMessages({ items, onCancel }: Props) {
   }
   return (
     <div className="px-3 pt-2">
-      <Card className="gap-0 rounded-md border-accent bg-accent/60 p-3 shadow-none">
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <span className="font-medium text-foreground">Up next</span>
-          <span aria-hidden>·</span>
-          <span>
-            <span className="text-primary">{items.length}</span> queued
-          </span>
-        </div>
-        <ul className="mt-2 space-y-1">
-          {items.map((item, idx) => (
-            <li key={item.id} className="flex items-start gap-2 text-xs leading-5">
-              <span className="mt-0.5 w-5 shrink-0 text-right tabular-nums text-muted-foreground">{idx + 1}</span>
-              <span className="min-w-0 flex-1 whitespace-pre-wrap break-words text-foreground">{item.content}</span>
-              <Button
-                variant="ghost"
-                size="icon-xs"
-                className="shrink-0 text-muted-foreground"
-                onClick={() => onCancel(item.id)}
-                aria-label="Cancel queued message"
-                title="Cancel"
-              >
-                ×
-              </Button>
-            </li>
-          ))}
-        </ul>
+      <Card className="gap-2 py-3">
+        <CardHeader className="gap-1 px-3">
+          <CardTitle>Up next</CardTitle>
+          <CardDescription>{items.length} queued</CardDescription>
+        </CardHeader>
+        <CardContent className="px-3">
+          <ul className="flex flex-col gap-2">
+            {items.map((item, idx) => (
+              <li key={item.id} className="flex items-start gap-2 text-xs leading-5">
+                <span className="mt-0.5 w-5 shrink-0 text-right tabular-nums text-muted-foreground">{idx + 1}</span>
+                <div className="min-w-0 flex-1">
+                  <p className="whitespace-pre-wrap break-words">{item.content}</p>
+                  {item.state === 'pending' && item.error && (
+                    <Alert className="mt-2">
+                      <AlertDescription>{item.error}</AlertDescription>
+                    </Alert>
+                  )}
+                  {item.state === 'dispatch_uncertain' && (
+                    <Alert className="mt-2">
+                      <AlertDescription>
+                        Dispatch outcome unknown. This message will not be sent again automatically. Later queued
+                        messages are paused.
+                      </AlertDescription>
+                    </Alert>
+                  )}
+                  {item.state === 'failed' && (
+                    <Alert variant="destructive" className="mt-2">
+                      <AlertDescription>Not started: {item.error ?? 'The run was rejected.'}</AlertDescription>
+                    </Alert>
+                  )}
+                </div>
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  className="shrink-0"
+                  disabled={item.state === 'dispatch_uncertain'}
+                  onClick={() => onCancel(item.id)}
+                  aria-label="Cancel queued message"
+                  title="Cancel"
+                >
+                  ×
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </CardContent>
       </Card>
     </div>
   );

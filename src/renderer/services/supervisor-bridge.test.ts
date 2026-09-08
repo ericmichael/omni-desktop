@@ -7,6 +7,7 @@ const setKey = vi.fn(() => Promise.resolve());
 const atomGet = vi.fn(() => ({ tickets: [] }));
 const addTabForTicket = vi.fn(() => Promise.resolve());
 const setTabProfile = vi.fn(() => Promise.resolve());
+const setActiveTab = vi.fn(() => Promise.resolve());
 
 vi.mock('@/renderer/services/ipc', () => ({
   emitter: { invoke },
@@ -22,7 +23,7 @@ vi.mock('@/renderer/services/store', () => ({
 }));
 
 vi.mock('@/renderer/features/Code/state', () => ({
-  codeApi: { addTabForTicket, setTabProfile },
+  codeApi: { addTabForTicket, setTabProfile, setActiveTab },
 }));
 
 const makeActor = (ticketId: string) => ({
@@ -47,6 +48,7 @@ describe('renderer supervisor bridge', () => {
     atomGet.mockReturnValue({ tickets: [] });
     addTabForTicket.mockClear();
     setTabProfile.mockClear();
+    setActiveTab.mockClear();
   });
 
   it('does not emit disconnected when an actor is replaced during effect churn', async () => {
@@ -119,6 +121,6 @@ describe('renderer supervisor bridge', () => {
 
     expect(setTabProfile).toHaveBeenCalledWith('tab-1', 'devbox');
     expect(addTabForTicket).not.toHaveBeenCalled();
-    expect(setKey).toHaveBeenCalledWith('activeCodeTabId', 'tab-1');
+    expect(setActiveTab).toHaveBeenCalledWith('tab-1');
   });
 });

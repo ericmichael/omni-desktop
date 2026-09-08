@@ -1,4 +1,4 @@
-import type { RpcMethodMap } from '@/generated/omniagents-gui-v1/gui-v1';
+import type { RpcMethodMap } from '@/generated/omniagents-gui-v2/gui-v2';
 
 type ConversationMethod = Extract<keyof RpcMethodMap, 'get_thread' | 'list_turns' | 'list_items' | 'get_item'>;
 

@@ -111,7 +111,7 @@ async function ensureColumn(request: Extract<SupervisorBridgeRequest, { kind: 'e
     if (request.profileName && existing.profileName !== request.profileName) {
       await codeApi.setTabProfile(existing.id, request.profileName);
     }
-    await persistedStoreApi.setKey('activeCodeTabId', existing.id);
+    await codeApi.setActiveTab(existing.id);
     await persistedStoreApi.setKey('layoutMode', 'chat');
     return;
   }

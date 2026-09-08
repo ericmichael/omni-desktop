@@ -89,13 +89,15 @@ export type ChatSessionEvent =
       stagedContext?: ReadonlyArray<StagedContextEntry>;
     }
   | { type: 'SELECT_SESSION'; id: string }
+  | { type: 'HYDRATE' }
   | { type: 'NEW_SESSION'; sessionId: string }
   | { type: 'STOP' }
+  | { type: 'STOP_FAILED'; run_id: string }
   | { type: 'APPROVAL_DECIDED'; request_id: string; value: 'yes' | 'always' | 'no' }
   // Server events
   | { type: 'RUN_STARTED'; run_id: string; session_id?: string; prompt?: string; prompt_role?: string }
-  | { type: 'RUN_END'; session_id?: string }
-  | { type: 'MESSAGE_OUTPUT'; content: string; session_id?: string }
+  | { type: 'RUN_END'; session_id?: string; run_id?: string }
+  | { type: 'MESSAGE_OUTPUT'; content: string; session_id?: string; message_id?: string; run_id?: string }
   | {
       type: 'TOOL_CALLED';
       call_id: string;
@@ -126,6 +128,7 @@ export type ChatSessionEvent =
   | { type: 'TOKEN'; session_id?: string }
   | {
       type: 'REQUEST_APPROVAL';
+      run_id?: string;
       request_id: string;
       tool: string;
       argumentsText?: string;
@@ -163,7 +166,7 @@ export type ChatSessionEvent =
     }
   | { type: 'SET_STATUS'; text?: string; showSpinner?: boolean; session_id?: string }
   // History loading
-  | { type: 'HISTORY_LOADED'; items: MessageItem[] }
+  | { type: 'HISTORY_LOADED'; items: MessageItem[]; active_run_id?: string }
   | { type: 'HISTORY_ERROR'; error: string }
   | { type: 'CANONICAL_ITEM_UPDATED'; item: MessageItem; session_id?: string }
   // Errors
@@ -237,6 +240,7 @@ export const chatSessionMachine = setup({
 
     /** Loose filter — only rejects when both sides have IDs that disagree. */
     acceptLoose: ({ context, event }) =>
+      !(event.type === 'RUN_END' && event.run_id && context.runId && event.run_id !== context.runId) &&
       acceptLooseEvent(
         { currentSessionId: context.sessionId, startingRun: false },
         sessionId(event as { session_id?: string })
@@ -327,7 +331,7 @@ export const chatSessionMachine = setup({
     appendAssistantMessage: assign(({ context, event }) => {
       const e = event as Extract<ChatSessionEvent, { type: 'MESSAGE_OUTPUT' }>;
       return {
-        items: appendAssistantMessageItem(context.items, e.content, context.runId),
+        items: appendAssistantMessageItem(context.items, e.content, e.run_id ?? context.runId, e.message_id),
         status: undefined,
         statusItalic: false,
       };
@@ -362,6 +366,7 @@ export const chatSessionMachine = setup({
       const e = event as Extract<ChatSessionEvent, { type: 'REQUEST_APPROVAL' }>;
       const item: ApprovalItem = {
         type: 'approval',
+        run_id: e.run_id ?? context.runId,
         request_id: e.request_id,
         tool: e.tool,
         argumentsText: e.argumentsText,
@@ -456,6 +461,14 @@ export const chatSessionMachine = setup({
     }),
 
     clearRunState: assign({
+      items: ({ context, event }) =>
+        event.type === 'RUN_END'
+          ? context.items.filter((item) => !(item.type === 'approval' && item.run_id && item.run_id === context.runId))
+          : context.items,
+      pendingApprovals: ({ context, event }) =>
+        event.type === 'RUN_END'
+          ? new Map([...context.pendingApprovals].filter(([, item]) => !item.run_id || item.run_id !== context.runId))
+          : context.pendingApprovals,
       runId: undefined,
       status: undefined,
       statusSpinner: false,
@@ -464,16 +477,29 @@ export const chatSessionMachine = setup({
     }),
 
     setHistoryItems: assign({
+      pendingApprovals: ({ context, event }) => {
+        const pending = new Map(context.pendingApprovals);
+        const e = event as Extract<ChatSessionEvent, { type: 'HISTORY_LOADED' }>;
+        for (const item of e.items) {
+          if (item.type === 'approval') {
+            pending.set(item.request_id, { ...item, run_id: item.run_id ?? e.active_run_id });
+          }
+        }
+        return pending;
+      },
       items: ({ context, event }) => {
         const e = event as Extract<ChatSessionEvent, { type: 'HISTORY_LOADED' }>;
+        const items = e.items.map((item) =>
+          item.type === 'approval' ? { ...item, run_id: item.run_id ?? e.active_run_id } : item
+        );
         // Merge any pending approvals that arrived during history loading
         if (context.pendingApprovals.size === 0) {
-          return e.items;
+          return items;
         }
         const approvalItems = [...context.pendingApprovals.values()].filter(
-          (a) => !e.items.some((it) => it.type === 'approval' && (it as ApprovalItem).request_id === a.request_id)
+          (a) => !items.some((it) => it.type === 'approval' && (it as ApprovalItem).request_id === a.request_id)
         );
-        return approvalItems.length ? [...e.items, ...approvalItems] : e.items;
+        return approvalItems.length ? [...items, ...approvalItems] : items;
       },
     }),
 
@@ -484,24 +510,30 @@ export const chatSessionMachine = setup({
         if (!incoming) {
           return context.items;
         }
-        // No live-item dedupe by request_id / task_id here on purpose:
-        // mid-session CANONICAL_ITEM_UPDATED can only carry plan / run_diff
-        // items. Server-side, omniagents pushes item_updated exclusively
-        // from finalize_plans, settle_run_diff, and the run-diff observer
-        // (recorder _append/_update/_revise never notify — see
-        // notify_item_updated in core/agents/service.py), and our own
-        // item_updated handler in use-chat-session.ts filters to those two
-        // kinds besides. Canonical approval / guardian / workflow items
+        // Provider-identified assistant output may arrive via persistence or
+        // streaming first. Merge only by stable identity, never by text.
+        // Other canonical updates have no legacy live counterpart.
+        // Canonical approval / guardian / workflow items
         // arrive only via HISTORY_LOADED, which replaces items wholesale —
         // so a canonical twin can never sit next to its live-appended
         // counterpart.
         const next = context.items.slice();
-        const index = next.findIndex((item) => item.canonical?.item_id === incoming.item_id);
+        const index = next.findIndex(
+          (item) =>
+            item.canonical?.item_id === incoming.item_id ||
+            (e.item.type === 'chat' &&
+              e.item.role === 'assistant' &&
+              e.item.message_id &&
+              item.type === 'chat' &&
+              item.role === 'assistant' &&
+              item.message_id === e.item.message_id)
+        );
         if (index >= 0) {
-          const current = next[index]!.canonical!;
+          const current = next[index]!.canonical;
           if (
-            incoming.revision < current.revision ||
-            (incoming.revision === current.revision && incoming.updated_at <= current.updated_at)
+            current &&
+            (incoming.revision < current.revision ||
+              (incoming.revision === current.revision && incoming.updated_at <= current.updated_at))
           ) {
             return context.items;
           }
@@ -634,6 +666,10 @@ export const chatSessionMachine = setup({
       target: '.initializing',
       actions: 'resetSessionState',
     },
+    HYDRATE: {
+      target: '.initializing',
+      actions: ['clearRunState', assign({ pendingApprovals: () => new Map<string, ApprovalItem>(), error: undefined })],
+    },
     NEW_SESSION: {
       target: '.ready.idle',
       actions: 'resetSessionState',
@@ -649,8 +685,20 @@ export const chatSessionMachine = setup({
     // -------------------------------------------------------------------
     initializing: {
       on: {
-        HISTORY_LOADED: { target: 'ready.idle', actions: 'setHistoryItems' },
-        HISTORY_ERROR: { target: 'initError' },
+        HISTORY_LOADED: [
+          {
+            guard: ({ event }) => !!event.active_run_id && event.items.some((item) => item.type === 'approval'),
+            target: 'ready.awaitingApproval',
+            actions: ['setHistoryItems', assign({ runId: ({ event }) => event.active_run_id })],
+          },
+          {
+            guard: ({ event }) => !!event.active_run_id,
+            target: 'ready.running',
+            actions: ['setHistoryItems', assign({ runId: ({ event }) => event.active_run_id })],
+          },
+          { target: 'ready.idle', actions: 'setHistoryItems' },
+        ],
+        HISTORY_ERROR: { target: 'initError', actions: assign({ error: ({ event }) => event.error }) },
       },
     },
 
@@ -705,6 +753,7 @@ export const chatSessionMachine = setup({
             RUN_END: {
               guard: 'acceptLoose',
               target: 'idle',
+              actions: 'clearRunState',
             },
             MESSAGE_OUTPUT: {
               guard: 'acceptStrictOrStarting',
@@ -748,6 +797,7 @@ export const chatSessionMachine = setup({
 
         awaitingApproval: {
           on: {
+            STOP: { target: 'stopping' },
             APPROVAL_DECIDED: [
               // Stay in awaitingApproval if more approvals are still queued
               { guard: 'hasMoreApprovals', actions: 'removeApproval' },
@@ -773,6 +823,13 @@ export const chatSessionMachine = setup({
 
         stopping: {
           on: {
+            STOP_FAILED: [
+              {
+                guard: ({ context, event }) => context.runId === event.run_id && context.pendingApprovals.size > 0,
+                target: 'awaitingApproval',
+              },
+              { guard: ({ context, event }) => context.runId === event.run_id, target: 'running' },
+            ],
             RUN_END: {
               guard: 'acceptLoose',
               target: 'idle',

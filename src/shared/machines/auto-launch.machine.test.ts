@@ -56,6 +56,16 @@ function runningSnap() {
 }
 
 describe('autoLaunchMachine', () => {
+  it('relaunches a lost runtime without reviving an intentionally stopped or unused surface', () => {
+    for (const snap of [startingSnap(), runningSnap()]) {
+      const recovered = next(snap, { type: 'SANDBOX_LOST' });
+      expect(recovered.value).toBe('checking');
+      expect(recovered.context.hasLaunched).toBe(false);
+      expect(next(next(recovered, { type: 'RUNTIME_READY' }), { type: 'CONFIG_OK' }).value).toBe('starting');
+    }
+    expect(next(idleSnap(), { type: 'SANDBOX_LOST' }).value).toBe('idle');
+    expect(next(next(runningSnap(), { type: 'SANDBOX_EXITED' }), { type: 'SANDBOX_LOST' }).value).toBe('idle');
+  });
   // -----------------------------------------------------------------------
   // Initial state
   // -----------------------------------------------------------------------

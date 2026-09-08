@@ -57,11 +57,11 @@ export function LocalVoiceButton({ onSubmit }: { onSubmit: (text: string) => voi
     await cap.start().catch(() => {});
     if (pendingStopRef.current) {
       pendingStopRef.current = false;
-      await stopAndSend();
+      await stopAndSend(true);
     }
   };
-  const stopAndSend = async () => {
-    if (!cap.recording) {
+  const stopAndSend = async (started = false) => {
+    if (!started && !cap.recording) {
       pendingStopRef.current = true; // release arrived before start finished
       return;
     }

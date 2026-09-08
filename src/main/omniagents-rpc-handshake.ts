@@ -1,4 +1,6 @@
-import type { InitializeResult, RpcMethodMap } from '@/generated/omniagents-gui-v1/gui-v1';
+import type { InitializeResult, RpcMethodMap } from '@/generated/omniagents-gui-v2/gui-v2';
+import { GUI_PROTOCOL_VERSION } from '@/generated/omniagents-gui-v2/gui-v2';
+import { guiInitializationError, validateGuiInitialization } from '@/shared/omniagents-protocol';
 
 type InitializeParams = RpcMethodMap['initialize']['params'];
 export type OmniagentsRpcCapabilities = InitializeParams['capabilities'];
@@ -20,7 +22,7 @@ export function mainRpcInitializeParams(
   capabilities: Partial<OmniagentsRpcCapabilities> = {}
 ): InitializeParams {
   return {
-    protocol_version: '1.0.0',
+    protocol_version: GUI_PROTOCOL_VERSION,
     identity: { name, version: '1.0.0' },
     platform: { os: process.platform, arch: process.arch },
     capabilities: { ...BASE_CAPABILITIES, ...capabilities },
@@ -38,10 +40,11 @@ export async function initializeMainRpcConnection(options: {
   request: (method: 'initialize', params: InitializeParams) => Promise<unknown>;
   notify: (method: 'initialized', params: Record<string, never>) => void | Promise<void>;
 }): Promise<InitializeResult> {
-  const initialized = (await options.request(
-    'initialize',
-    mainRpcInitializeParams(options.name, options.capabilities)
-  )) as InitializeResult;
+  const initialized = validateGuiInitialization(
+    await options.request('initialize', mainRpcInitializeParams(options.name, options.capabilities)).catch((error) => {
+      throw guiInitializationError(error);
+    })
+  );
   await options.notify('initialized', {});
   return initialized;
 }

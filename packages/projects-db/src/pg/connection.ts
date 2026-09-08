@@ -51,27 +51,82 @@ function pgConnectConfig(connectionString: string): {
 export async function createPgListener(
   connectionString: string,
   channel: string,
-  onNotify: (payload: string) => void
+  onNotify: (payload: string) => void,
+  options: { onReconnect?: () => void; retryDelayMs?: number } = {}
 ): Promise<() => Promise<void>> {
+  if (!/^[a-z_][a-z0-9_]*$/i.test(channel)) {
+    throw new Error('Invalid LISTEN channel');
+  }
   const conn = pgConnectConfig(connectionString);
-  const client = new Client(conn);
-  await client.connect();
-  client.on('notification', (msg) => {
-    if (msg.channel === channel && msg.payload) {
-      onNotify(msg.payload);
+  let client: Client | undefined;
+  let stopped = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let connecting: Promise<void> | undefined;
+  let attempts = 0;
+  const schedule = (): void => {
+    if (stopped || timer) {
+      return;
     }
-  });
-  // Auto-recover the listener if the connection drops.
-  client.on('error', (err) => {
-    console.error('[pg-listener] connection error:', err.message);
-  });
-  await client.query(`LISTEN ${channel}`);
-  return async () => {
+    const delay = Math.min(30_000, (options.retryDelayMs ?? 1000) * 2 ** Math.min(attempts++, 5));
+    timer = setTimeout(() => {
+      timer = undefined;
+      connecting = connect().catch(() => schedule());
+    }, delay);
+    timer.unref?.();
+  };
+  const connect = async (): Promise<void> => {
+    if (stopped) {
+      return;
+    }
+    const next = new Client({ ...conn, connectionTimeoutMillis: 10_000 });
+    const previous = client;
+    client = next;
+    await previous?.end().catch(() => undefined);
+    next.on('notification', (msg) => {
+      if (!stopped && client === next && msg.channel === channel && msg.payload) {
+        try {
+          onNotify(msg.payload);
+        } catch (err) {
+          console.error('[pg-listener] notification failed:', err);
+        }
+      }
+    });
+    const lost = (): void => {
+      if (client === next) {
+        schedule();
+      }
+    };
+    next.on('error', lost);
+    next.on('end', lost);
     try {
-      await client.end();
-    } catch {
-      // already closed
+      await next.connect();
+      if (stopped) {
+        await next.end();
+        return;
+      }
+      await next.query(`LISTEN ${channel}`);
+      attempts = 0;
+      // NOTIFY is not durable. Re-subscribe BEFORE refreshing authoritative
+      // state, so writes missed while disconnected cannot leave stale caches.
+      options.onReconnect?.();
+    } catch (error) {
+      await next.end().catch(() => undefined);
+      throw error;
     }
+  };
+  try {
+    connecting = connect();
+    await connecting;
+  } catch (error) {
+    stopped = true;
+    clearTimeout(timer);
+    throw error;
+  }
+  return async () => {
+    stopped = true;
+    clearTimeout(timer);
+    await connecting?.catch(() => undefined);
+    await client?.end().catch(() => undefined);
   };
 }
 

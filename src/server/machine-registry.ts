@@ -19,6 +19,8 @@
  * the principal in the WS context is the principal we attribute the machine
  * to. No second approval step.
  */
+import { randomUUID } from 'node:crypto';
+
 import type { MachineRow, MachinesRepo } from 'omni-projects-db';
 import type { WebSocket } from 'ws';
 
@@ -50,6 +52,36 @@ export type MachineRegistryEvents = {
 };
 
 export class MachineRegistry {
+  private readonly tunnelGrants = new Map<
+    string,
+    { machineId: string; sessionId: string; port: string; principalId: string }
+  >();
+
+  grantTunnel(machineId: string, sessionId: string, port: number): string {
+    const active = this.active.get(machineId);
+    if (!active) {
+      throw new Error('host-offline');
+    }
+    for (const [key, grant] of this.tunnelGrants) {
+      if (grant.machineId === machineId && grant.sessionId === sessionId) {
+        this.tunnelGrants.delete(key);
+      }
+    }
+    const token = randomUUID();
+    this.tunnelGrants.set(token, { machineId, sessionId, port: String(port), principalId: active.principalId });
+    return token;
+  }
+
+  authorizeTunnel(machineId: string, sessionId: string, port: string, token: string): boolean {
+    const grant = this.tunnelGrants.get(token);
+    return (
+      !!grant &&
+      grant.machineId === machineId &&
+      grant.sessionId === sessionId &&
+      grant.port === port &&
+      this.active.get(machineId)?.principalId === grant.principalId
+    );
+  }
   /** Active by machineId — only one entry per id; last bind wins. */
   private readonly active = new Map<string, Active>();
   /** Reverse: ws → machineId, so disconnect can clean up. */
@@ -151,6 +183,10 @@ export class MachineRegistry {
     return this.active.get(machineId)?.ws ?? null;
   }
 
+  ownsActiveMachine(machineId: string, principalId: string): boolean {
+    return this.active.get(machineId)?.principalId === principalId;
+  }
+
   /** True iff the machine is registered AND has a live WS bound right now. */
   isOnline(machineId: string): boolean {
     return this.active.has(machineId);
@@ -169,8 +205,20 @@ export class MachineRegistry {
   }
 
   /** Untrack a session — call on stop / adopt-failed / migrate. */
-  releaseSession(machineId: string, sessionId: string): void {
-    this.active.get(machineId)?.sessionsAnchored.delete(sessionId);
+  releaseSession(machineId: string, sessionId: string, principalId?: string): void {
+    const active = this.active.get(machineId);
+    if (!principalId || active?.principalId === principalId) {
+      active?.sessionsAnchored.delete(sessionId);
+    }
+    for (const [key, grant] of this.tunnelGrants) {
+      if (
+        grant.machineId === machineId &&
+        grant.sessionId === sessionId &&
+        (!principalId || grant.principalId === principalId)
+      ) {
+        this.tunnelGrants.delete(key);
+      }
+    }
   }
 
   /** sessionIds the cloud thinks are still running on *machineId*. */
@@ -199,6 +247,11 @@ export class MachineRegistry {
 
   /** Remove a machine entirely (PG row + drop active binding if any). */
   async remove(principalId: string, machineId: string): Promise<void> {
+    for (const [key, grant] of this.tunnelGrants) {
+      if (grant.machineId === machineId && grant.principalId === principalId) {
+        this.tunnelGrants.delete(key);
+      }
+    }
     const entry = this.active.get(machineId);
     if (entry && entry.principalId === principalId) {
       this.active.delete(machineId);

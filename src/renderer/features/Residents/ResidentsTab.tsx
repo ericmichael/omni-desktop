@@ -1134,7 +1134,7 @@ function ResidentVoiceSurface({ sessionId, onClose }: { sessionId: string; onClo
   // No realtime URL: this surface owns the voice channel already, and the
   // boot probe would open a second one just to ask if voice exists.
   const client = useRPCClient();
-  const chat = useChatSession(client);
+  const chat = useChatSession(client, sessionId);
   useChatBoot({ client, chatSession: chat, sessionId });
   const approvals = useSelector(chat.actor, (s) =>
     s.context.items.filter((it): it is ApprovalItem => it.type === 'approval')

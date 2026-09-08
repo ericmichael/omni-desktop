@@ -3,20 +3,17 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 
 const root = resolve(import.meta.dirname, '..');
 const expectedRepository = 'https://github.com/utrgv-software-engineering/omniagents.git';
-const openRpcPath = 'protocol/openrpc/omniagents-gui-v1.json';
-const schemaPath = 'protocol/openrpc/schemas/gui-v1.schema.json';
 const transportManifestPath = 'canonical/manifest.json';
-const transportOpenRpcPath = 'canonical/omniagents-gui-v1.json';
-const transportSchemaPath = 'canonical/gui-v1.schema.json';
 const sha256 = (content) => createHash('sha256').update(content).digest('hex');
 
 const { values } = parseArgs({
   options: {
+    major: { type: 'string', default: '1' },
     sync: { type: 'boolean' },
     check: { type: 'boolean' },
     'verify-source': { type: 'boolean' },
@@ -30,10 +27,20 @@ const { values } = parseArgs({
   },
 });
 
+const major = values.major;
+if (!['1', '2'].includes(major)) throw new Error('--major must be 1 or 2');
+const sourceDir = major === '1' ? 'protocol/openrpc' : 'protocol/openrpc/v2';
+const sourceArtifactPath = `omniagents/backends/web/ui/src/protocol/generated/gui-v${major}.ts`;
+const sourceManifestPath = `${sourceDir}/manifest.json`;
+const openRpcPath = `${sourceDir}/omniagents-gui-v${major}.json`;
+const schemaPath = `${sourceDir}/schemas/gui-v${major}.schema.json`;
+const transportOpenRpcPath = `canonical/omniagents-gui-v${major}.json`;
+const transportSchemaPath = `canonical/gui-v${major}.schema.json`;
+
 const outputDir = values['output-dir']
   ? resolve(values['output-dir'])
-  : resolve(root, 'src/generated/omniagents-gui-v1');
-const artifactPath = resolve(outputDir, 'gui-v1.ts');
+  : resolve(root, `src/generated/omniagents-gui-v${major}`);
+const artifactPath = resolve(outputDir, `gui-v${major}.ts`);
 const provenancePath = resolve(outputDir, 'provenance.json');
 const transportedManifestPath = resolve(outputDir, transportManifestPath);
 const transportedOpenRpcPath = resolve(outputDir, transportOpenRpcPath);
@@ -77,8 +84,8 @@ const readLocal = async () => {
   }
   const expectedPaths = {
     source_repository: expectedRepository,
-    source_artifact: 'omniagents/backends/web/ui/src/protocol/generated/gui-v1.ts',
-    source_manifest: 'protocol/openrpc/manifest.json',
+    source_artifact: sourceArtifactPath,
+    source_manifest: sourceManifestPath,
     source_openrpc: openRpcPath,
     source_schema: schemaPath,
     transport_manifest: transportManifestPath,
@@ -110,6 +117,12 @@ const readLocal = async () => {
     }
   }
   const manifest = JSON.parse(transportedManifest.toString('utf8'));
+  if (
+    manifest.protocol_version?.split('.')[0] !== major ||
+    JSON.parse(transportedOpenRpc).info?.version !== manifest.protocol_version
+  ) {
+    throw new Error('Protocol major does not match the selected contract');
+  }
   for (const field of ['protocol_version', 'canonical_sha256', 'generator', 'generator_version']) {
     if (JSON.stringify(manifest[field]) !== JSON.stringify(provenance[field])) {
       throw new Error(`Protocol provenance ${field} does not match the transported manifest`);
@@ -207,6 +220,27 @@ if (values.sync) {
   const sourceOpenRpc = await readFile(resolve(values['source-openrpc']));
   const sourceSchema = await readFile(resolve(values['source-schema']));
   const sourceManifest = JSON.parse(sourceManifestBytes.toString('utf8'));
+  if (
+    sourceManifest.protocol_version?.split('.')[0] !== major ||
+    JSON.parse(sourceOpenRpc).info?.version !== sourceManifest.protocol_version
+  ) {
+    throw new Error('Protocol major does not match the selected contract');
+  }
+  if (major === '2') {
+    const sourceRoot = git(dirname(resolve(values['source-ts'])), ['rev-parse', '--show-toplevel']).trim();
+    if (!sourceRepositoryMatches(sourceRoot)) throw new Error('Unexpected protocol source repository');
+    if (git(sourceRoot, ['status', '--porcelain']).trim()) throw new Error('V2 sync requires a clean source checkout');
+    for (const [path, bytes] of [
+      [sourceArtifactPath, sourceArtifact],
+      [sourceManifestPath, sourceManifestBytes],
+      [openRpcPath, sourceOpenRpc],
+      [schemaPath, sourceSchema],
+    ]) {
+      if (!Buffer.from(gitShow(sourceRoot, values['source-commit'], path, null)).equals(bytes)) {
+        throw new Error(`Protocol source does not match the pinned commit: ${path}`);
+      }
+    }
+  }
   const canonicalDigest = sha256(Buffer.concat([canonicalBytes(sourceOpenRpc), canonicalBytes(sourceSchema)]));
   if (canonicalDigest !== sourceManifest.canonical_sha256) {
     throw new Error('Source canonical digest does not match its OpenRPC and schema bytes');
@@ -217,8 +251,8 @@ if (values.sync) {
     generated_typescript_sha256: sha256(sourceArtifact),
     source_repository: expectedRepository,
     source_commit: values['source-commit'],
-    source_artifact: 'omniagents/backends/web/ui/src/protocol/generated/gui-v1.ts',
-    source_manifest: 'protocol/openrpc/manifest.json',
+    source_artifact: sourceArtifactPath,
+    source_manifest: sourceManifestPath,
     source_openrpc: openRpcPath,
     source_schema: schemaPath,
     transport_manifest: transportManifestPath,

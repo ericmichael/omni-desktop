@@ -20,6 +20,85 @@ let onConnectImpl: OnConnect | undefined;
 // Track all client sockets created so we can close them in afterEach
 const openClients: WebSocket[] = [];
 
+it('denies an already-connected revoked member before dispatch', async () => {
+  let allowed = true;
+  handler.setAuthorizer(async () => allowed);
+  const dispatch = vi.fn(() => 'private');
+  handler.handle('audit:read', dispatch);
+  const ws = await connectClient('revoked', 'team');
+  expect((await invoke(ws, 1, 'audit:read')).result).toBe('private');
+  allowed = false;
+  const closed = new Promise<number>((resolve) => ws.once('close', resolve));
+  ws.send(JSON.stringify({ type: 'invoke', id: 2, channel: 'audit:read', args: [] }));
+  expect(await closed).toBe(4403);
+  expect(dispatch).toHaveBeenCalledTimes(1);
+});
+
+it('does not send team updates or an in-flight result after revocation', async () => {
+  let allowed = true;
+  handler.setAuthorizer(async () => allowed);
+  let finish!: (value: string) => void;
+  let started = false;
+  handler.handle('audit:slow', () => {
+    started = true;
+    return new Promise<string>((resolve) => {
+      finish = resolve;
+    });
+  });
+  const ws = await connectClient('inflight', 'team');
+  const frames: string[] = [];
+  ws.on('message', (raw) => frames.push(String(raw)));
+  ws.send(JSON.stringify({ type: 'invoke', id: 1, channel: 'audit:slow', args: [] }));
+  await vi.waitFor(() => expect(started).toBe(true));
+  allowed = false;
+  const closed = new Promise<number>((resolve) => ws.once('close', resolve));
+  handler.sendToTenant('team', 'store:changed', undefined);
+  finish('private-after-revocation');
+  expect(await closed).toBe(4403);
+  expect(frames).toEqual([]);
+});
+
+it('fails closed when membership verification is unavailable', async () => {
+  handler.setAuthorizer(async () => {
+    throw new Error('database unavailable');
+  });
+  const ws = await connectClient('unavailable');
+  const dispatch = vi.fn();
+  handler.handle('audit:read', dispatch);
+  const closed = new Promise<number>((resolve) => ws.once('close', resolve));
+  ws.send(JSON.stringify({ type: 'invoke', id: 1, channel: 'audit:read', args: [] }));
+  expect(await closed).toBe(1011);
+  expect(dispatch).not.toHaveBeenCalled();
+});
+
+it('does not send reverse operations to a revoked socket', async () => {
+  handler.setAuthorizer(async () => false);
+  const ws = await connectClient('reverse-revoked');
+  const serverSocket = [...wss.clients][0]!;
+  const frames: string[] = [];
+  ws.on('message', (raw) => frames.push(String(raw)));
+  const closed = new Promise<number>((resolve) => ws.once('close', resolve));
+  await expect(handler.invokeOnWs(serverSocket, 'compute:start-session', [])).rejects.toThrow('authorization denied');
+  expect(await closed).toBe(4403);
+  expect(frames).toEqual([]);
+});
+
+it('expires disconnected documents, but preserves reattached and active sessions', async () => {
+  handler = new WsHandler(80);
+  const cleanup = vi.fn(async () => {});
+  onConnectImpl = (session) => session.setCleanup(cleanup);
+  const abandoned = await connectClient('abandoned');
+  const reconnecting = await connectClient('reconnecting');
+  await connectClient('active');
+  abandoned.close();
+  reconnecting.close();
+  await Promise.all([abandoned, reconnecting].map((ws) => new Promise<void>((resolve) => ws.once('close', resolve))));
+  await connectClient('reconnecting');
+  await vi.waitFor(() => expect(cleanup).toHaveBeenCalledTimes(1));
+  await handler.cleanupAllSessions();
+  expect(cleanup).toHaveBeenCalledTimes(3);
+});
+
 beforeEach(async () => {
   handler = new WsHandler();
   onConnectImpl = undefined;
@@ -188,6 +267,42 @@ describe('WsHandler - handler routing', () => {
 });
 
 describe('WsHandler - session persistence', () => {
+  it('does not dispatch a gated message after its socket has detached', async () => {
+    let release!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    wss.removeAllListeners('connection');
+    wss.on('connection', (ws) => handler.addClient(ws, undefined, 'gated', 'tenant-a', ready));
+    const dispatch = vi.fn();
+    handler.handle('test:gated', dispatch);
+    const ws = await connectClient();
+    const serverSocket = [...wss.clients][0]!;
+    const received = new Promise<void>((resolve) => serverSocket.once('message', () => resolve()));
+    ws.send(JSON.stringify({ type: 'invoke', id: 1, channel: 'test:gated', args: [] }));
+    await received;
+    const detached = new Promise<void>((resolve) => serverSocket.once('close', () => resolve()));
+    await closeClient(ws);
+    await detached;
+    release();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it('closes a replaced socket while keeping the session on the replacement', async () => {
+    const created = vi.fn();
+    onConnectImpl = (session) => {
+      created();
+      session.handle('test:who', () => 'owned-session');
+    };
+    const old = await connectClient('replaced', 'tenant-a');
+    const closed = new Promise<void>((resolve) => old.once('close', () => resolve()));
+    const replacement = await connectClient('replaced', 'tenant-a');
+    await closed;
+    expect((await invoke(replacement, 1, 'test:who')).result).toBe('owned-session');
+    expect(created).toHaveBeenCalledTimes(1);
+  });
+
   it('reuses persistent session when reconnecting with same sessionId', async () => {
     let onConnectCalls = 0;
     onConnectImpl = (session) => {
@@ -314,7 +429,7 @@ describe('WsHandler - event interceptors', () => {
     const eventPromise = waitForEvent(ws, 'some:event');
     (handler.sendToAll as unknown as (channel: string, ...args: unknown[]) => void)('some:event', { data: 1 });
     await eventPromise;
-    expect(interceptor).toHaveBeenCalledWith('some:event', [{ data: 1 }]);
+    expect(interceptor).toHaveBeenCalledWith('some:event', [{ data: 1 }], undefined);
   });
 
   it("interceptor cannot mutate caller's original args", async () => {

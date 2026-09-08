@@ -7,7 +7,11 @@ const SECRET = 'test-secret-at-least-16-chars-long';
 describe('runtime token', () => {
   it('round-trips claims', () => {
     const token = signRuntimeToken(SECRET, { tenantId: 'tenant-a', sessionId: 'sess-1' });
-    expect(verifyRuntimeToken(SECRET, token)).toEqual({ tenantId: 'tenant-a', sessionId: 'sess-1' });
+    expect(verifyRuntimeToken(SECRET, token)).toEqual({
+      purpose: 'runtime',
+      tenantId: 'tenant-a',
+      sessionId: 'sess-1',
+    });
   });
 
   it('rejects a token signed with a different secret (unforgeable across secrets)', () => {

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { ElicitationResponseParams } from '@/generated/omniagents-gui-v1/gui-v1';
+import type { ElicitationResponseParams } from '@/generated/omniagents-gui-v2/gui-v2';
 
 import {
   decodeElicitationRequested,

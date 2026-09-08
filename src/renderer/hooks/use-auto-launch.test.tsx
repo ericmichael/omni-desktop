@@ -129,6 +129,11 @@ beforeEach(() => {
   switchSandbox.mockResolvedValue({ ok: true });
   stop.mockResolvedValue(undefined);
   start.mockResolvedValue(undefined);
+  clearStatus.mockImplementation((id: string) => {
+    const next = { ...$agentStatuses.get() };
+    delete next[id];
+    $agentStatuses.set(next);
+  });
 });
 
 afterEach(() => {
@@ -140,6 +145,58 @@ afterEach(() => {
 });
 
 describe('useAutoLaunch sandbox profile override switching', () => {
+  it('does not let a delayed status seed overwrite a newer runtime endpoint', async () => {
+    await renderHook({ processId: 'tile-a', workspaceDir: '/workspace/a' });
+    let resolve!: (value: WithTimestamp<AgentProcessStatus>) => void;
+    invoke.mockImplementation((channel: string) =>
+      channel === 'agent-process:get-status'
+        ? new Promise((done) => {
+            resolve = done;
+          })
+        : Promise.resolve()
+    );
+    const oldStatus = runningStatus();
+    await act(async () => {
+      $agentStatuses.setKey('tile-a', oldStatus);
+    });
+    const newStatus = {
+      ...runningStatus(),
+      data: { uiUrl: 'http://new-runtime.test' },
+    } as WithTimestamp<AgentProcessStatus>;
+    await act(async () => {
+      $agentStatuses.setKey('tile-a', newStatus);
+      resolve(oldStatus);
+      await flushEffects();
+    });
+    expect($agentStatuses.get()['tile-a']).toBe(newStatus);
+  });
+  it('recovers an authoritatively missing runtime with the same conversation and workspace', async () => {
+    const props = {
+      processId: 'tile-a',
+      workspaceDir: '/workspace/a',
+      sessionId: 'session-a',
+      snapshotRef: 'snapshot-a',
+      profileNameOverride: 'host',
+    };
+    await renderHook(props);
+    await act(async () => {
+      $agentStatuses.setKey('tile-a', runningStatus());
+      await flushEffects();
+    });
+    start.mockClear();
+    await act(async () => {
+      $agentStatuses.setKey('tile-a', { type: 'uninitialized', timestamp: Date.now() });
+      await flushEffects();
+    });
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(start).toHaveBeenCalledWith('tile-a', {
+      workspaceDir: '/workspace/a',
+      sessionId: 'session-a',
+      snapshotRef: 'snapshot-a',
+      profileNameOverride: 'host',
+    });
+    expect(stop).not.toHaveBeenCalled();
+  });
   it('labels lifecycle logs with the tab-selected profile instead of the global default', async () => {
     (persistedStoreApi.$atom as unknown as { set: (value: Partial<StoreData>) => void }).set({
       defaultProfileName: 'devbox',

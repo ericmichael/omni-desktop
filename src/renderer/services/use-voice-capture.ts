@@ -6,7 +6,7 @@
  * Audio path mirrors the realtime voice capture (AudioWorklet → 24 kHz → Int16) but
  * is self-contained and routes to the local sidecar instead of the realtime WS.
  */
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { persistedStoreApi } from '@/renderer/services/store';
 import { getVoiceClient } from '@/renderer/services/voice-client';
@@ -69,6 +69,9 @@ export function useVoiceCapture(): VoiceCapture {
   const chunksRef = useRef<Float32Array[]>([]);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const levelRafRef = useRef<number>(0);
+  const mounted = useRef(true);
+  const generation = useRef(0);
+  const phase = useRef<'idle' | 'starting' | 'recording' | 'transcribing'>('idle');
 
   const cleanup = useCallback(() => {
     cancelAnimationFrame(levelRafRef.current);
@@ -83,60 +86,98 @@ export function useVoiceCapture(): VoiceCapture {
     streamRef.current = null;
   }, []);
 
-  const start = useCallback(async () => {
+  const invalidate = useCallback(() => {
+    generation.current++;
+    phase.current = 'idle';
     chunksRef.current = [];
-    const audioPrefs = persistedStoreApi.$atom.get().audioSettings;
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        deviceId: audioPrefs.inputDeviceId ? { exact: audioPrefs.inputDeviceId } : undefined,
-        channelCount: 1,
-        echoCancellation: audioPrefs.echoCancellation,
-        noiseSuppression: audioPrefs.noiseSuppression,
-        autoGainControl: audioPrefs.autoGainControl,
-      },
-    });
-    streamRef.current = stream;
-    const ctx = new (
-      window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
-    )();
-    ctxRef.current = ctx;
-    const source = ctx.createMediaStreamSource(stream);
+    cleanup();
+  }, [cleanup]);
 
-    // ScriptProcessor is deprecated but universally available and adequate for
-    // push-to-talk capture (no realtime constraint). Keeps this dependency-free.
-    const node = ctx.createScriptProcessor(4096, 1, 1);
-    node.onaudioprocess = (e) => {
-      chunksRef.current.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      invalidate();
     };
-    source.connect(node);
-    node.connect(ctx.destination);
-    nodeRef.current = node;
+  }, [invalidate]);
 
-    // Live level metering for the reactive glow (separate from capture).
-    const analyser = ctx.createAnalyser();
-    analyser.fftSize = 256;
-    analyser.smoothingTimeConstant = 0.6;
-    source.connect(analyser);
-    analyserRef.current = analyser;
-    const data = new Uint8Array(analyser.fftSize);
-    const measure = () => {
-      analyser.getByteTimeDomainData(data);
-      let sum = 0;
-      for (let i = 0; i < data.length; i++) {
-        const v = ((data[i] ?? 128) - 128) / 128;
-        sum += v * v;
+  const start = useCallback(async () => {
+    if (!mounted.current || phase.current !== 'idle') {
+      return;
+    }
+    phase.current = 'starting';
+    const token = ++generation.current;
+    try {
+      chunksRef.current = [];
+      const audioPrefs = persistedStoreApi.$atom.get().audioSettings;
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          deviceId: audioPrefs.inputDeviceId ? { exact: audioPrefs.inputDeviceId } : undefined,
+          channelCount: 1,
+          echoCancellation: audioPrefs.echoCancellation,
+          noiseSuppression: audioPrefs.noiseSuppression,
+          autoGainControl: audioPrefs.autoGainControl,
+        },
+      });
+      if (!mounted.current || generation.current !== token) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
       }
-      const rms = Math.sqrt(sum / data.length);
-      // Gain + soft clamp so normal speech swings across most of 0..1.
-      voiceLevel.current = Math.min(1, rms * 3.5);
-      levelRafRef.current = requestAnimationFrame(measure);
-    };
-    levelRafRef.current = requestAnimationFrame(measure);
+      streamRef.current = stream;
+      const ctx = new (
+        window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
+      )();
+      ctxRef.current = ctx;
+      const source = ctx.createMediaStreamSource(stream);
 
-    setRecording(true);
-  }, []);
+      // ScriptProcessor is deprecated but universally available and adequate for
+      // push-to-talk capture (no realtime constraint). Keeps this dependency-free.
+      const node = ctx.createScriptProcessor(4096, 1, 1);
+      node.onaudioprocess = (e) => {
+        chunksRef.current.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+      };
+      source.connect(node);
+      node.connect(ctx.destination);
+      nodeRef.current = node;
+
+      // Live level metering for the reactive glow (separate from capture).
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 256;
+      analyser.smoothingTimeConstant = 0.6;
+      source.connect(analyser);
+      analyserRef.current = analyser;
+      const data = new Uint8Array(analyser.fftSize);
+      const measure = () => {
+        analyser.getByteTimeDomainData(data);
+        let sum = 0;
+        for (let i = 0; i < data.length; i++) {
+          const v = ((data[i] ?? 128) - 128) / 128;
+          sum += v * v;
+        }
+        const rms = Math.sqrt(sum / data.length);
+        // Gain + soft clamp so normal speech swings across most of 0..1.
+        voiceLevel.current = Math.min(1, rms * 3.5);
+        levelRafRef.current = requestAnimationFrame(measure);
+      };
+      levelRafRef.current = requestAnimationFrame(measure);
+
+      phase.current = 'recording';
+      setRecording(true);
+    } catch (error) {
+      if (generation.current === token) {
+        cleanup();
+        phase.current = 'idle';
+      }
+      throw error;
+    }
+  }, [cleanup]);
 
   const stop = useCallback(async (): Promise<string> => {
+    if (!mounted.current || phase.current !== 'recording') {
+      return '';
+    }
+    const token = generation.current;
+    phase.current = 'transcribing';
     setRecording(false);
     const inRate = ctxRef.current?.sampleRate ?? 48000;
     const chunks = chunksRef.current;
@@ -145,6 +186,7 @@ export function useVoiceCapture(): VoiceCapture {
 
     const total = chunks.reduce((n, c) => n + c.length, 0);
     if (!total) {
+      phase.current = 'idle';
       return '';
     }
     const merged = new Float32Array(total);
@@ -156,17 +198,23 @@ export function useVoiceCapture(): VoiceCapture {
     const pcm = toBase64(floatTo16LE(resampleTo24k(merged, inRate)));
     setBusy(true);
     try {
-      return await getVoiceClient().transcribe(pcm, TARGET_RATE);
+      const text = await getVoiceClient().transcribe(pcm, TARGET_RATE);
+      return mounted.current && generation.current === token ? text : '';
     } finally {
-      setBusy(false);
+      if (mounted.current && generation.current === token) {
+        phase.current = 'idle';
+        setBusy(false);
+      }
     }
   }, [cleanup]);
 
   const cancel = useCallback(() => {
-    setRecording(false);
-    chunksRef.current = [];
-    cleanup(); // stops stream + analyser + meter loop and resets the level
-  }, [cleanup]);
+    invalidate();
+    if (mounted.current) {
+      setRecording(false);
+      setBusy(false);
+    }
+  }, [invalidate]);
 
   return { recording, busy, start, stop, cancel };
 }

@@ -26,13 +26,10 @@ import type { WsHandler } from '@/server/ws-handler';
 
 type ActiveTunnel = {
   clientSocket: WebSocket;
+  laptopWs: WebSocket;
 };
 
 /** Per-cloud-process tunnel registry, keyed by the cloud-minted tunnelId. */
-const tunnels = new Map<string, ActiveTunnel>();
-
-let listenerWired = false;
-
 const newTunnelId = (): string => `tn-${uuidv4()}`;
 
 export const setupLocalTunnelProxy = (
@@ -40,10 +37,11 @@ export const setupLocalTunnelProxy = (
   wsHandler: WsHandler,
   registry: MachineRegistry
 ): void => {
-  if (!listenerWired) {
+  const tunnels = new Map<string, ActiveTunnel>();
+  {
     // Receive laptop → cloud inbound tunnel frames. Route by tunnelId to the
     // awaiting client socket; close + cleanup on `close: true`.
-    wsHandler.handleCtx('tunnel:incoming', async (_ctx, raw: unknown) => {
+    wsHandler.handleCtx('tunnel:incoming', async (ctx, raw: unknown) => {
       const evt = (raw ?? {}) as {
         tunnelId: string;
         dataBase64: string;
@@ -51,7 +49,7 @@ export const setupLocalTunnelProxy = (
         close?: boolean;
       };
       const tunnel = tunnels.get(evt.tunnelId);
-      if (!tunnel) {
+      if (!tunnel || ctx.ws !== tunnel.laptopWs) {
         return;
       } // unknown / late frame
       if (evt.close) {
@@ -69,10 +67,22 @@ export const setupLocalTunnelProxy = (
       const buf = Buffer.from(evt.dataBase64, 'base64');
       tunnel.clientSocket.send(evt.binary ? buf : buf.toString('utf-8'));
     });
-    listenerWired = true;
   }
 
   void fastify.register(async function localTunnelRoutes(f) {
+    f.addHook('preHandler', async (request, reply) => {
+      const { machineId, sessionId, port } = request.params as { machineId: string; sessionId: string; port: string };
+      const url = new URL(request.url, 'http://localhost');
+      const token = url.searchParams.get('cap') ?? '';
+      const laptopWs = registry.getActiveWs(machineId);
+      if (
+        !registry.authorizeTunnel(machineId, sessionId, port, token) ||
+        !laptopWs ||
+        !(await wsHandler.checkAccess(laptopWs))
+      ) {
+        return reply.code(403).send({ error: 'Forbidden: invalid tunnel capability' });
+      }
+    });
     // HTTP + WS share the same path. WS upgrades go to `wsHandler`; everything
     // else is a request/response round-trip relayed via reverse-RPC.
     f.route({
@@ -82,7 +92,7 @@ export const setupLocalTunnelProxy = (
         return handleHttp(request, reply, wsHandler, registry);
       },
       wsHandler: (clientSocket, request) => {
-        handleWs(clientSocket, request, wsHandler, registry);
+        handleWs(clientSocket, request, wsHandler, registry, tunnels);
       },
     });
     const methods = ['POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'] as const;
@@ -105,12 +115,18 @@ export const setupLocalTunnelProxy = (
  * `tunnel-handler` on the laptop dials `127.0.0.1:<port>`.
  */
 const resolveUpstream = (port: string, subPath: string, query: string): string | null => {
-  const n = Number.parseInt(port, 10);
+  const n = /^\d+$/.test(port) ? Number(port) : NaN;
   if (!Number.isInteger(n) || n <= 0 || n > 65535) {
     return null;
   }
   return `http://127.0.0.1:${n}/${subPath}${query}`;
 };
+
+function upstreamQuery(request: FastifyRequest): string {
+  const url = new URL(request.url, 'http://localhost');
+  url.searchParams.delete('cap');
+  return url.search;
+}
 
 async function handleHttp(
   request: FastifyRequest,
@@ -120,7 +136,7 @@ async function handleHttp(
 ): Promise<void> {
   const { machineId, port } = request.params as { machineId: string; port: string };
   const wildcard = (request.params as { '*': string })['*'] ?? '';
-  const query = request.url.includes('?') ? `?${request.url.split('?')[1]}` : '';
+  const query = upstreamQuery(request);
   const url = resolveUpstream(port, wildcard, query);
   if (!url) {
     reply.code(502).send({ error: 'Invalid local tunnel port' });
@@ -134,7 +150,7 @@ async function handleHttp(
   // Strip hop-by-hop / sensitive headers; the laptop's fetch will set its own.
   const headers: Record<string, string> = {};
   for (const [k, v] of Object.entries(request.headers)) {
-    if (k === 'host' || k === 'connection' || k === 'keep-alive') {
+    if (['host', 'connection', 'keep-alive', 'authorization', 'cookie'].includes(k) || k.startsWith('x-ms-')) {
       continue;
     }
     if (typeof v === 'string') {
@@ -154,6 +170,10 @@ async function handleHttp(
       headers: Record<string, string>;
       bodyBase64: string;
     }>(ws, 'compute:tunnel-http', [{ url, method: request.method, headers, body }]);
+    if (!(await wsHandler.checkAccess(ws))) {
+      reply.code(403).send({ error: 'Tunnel authorization revoked' });
+      return;
+    }
     reply.status(envelope.status);
     for (const [k, v] of Object.entries(envelope.headers ?? {})) {
       if (k === 'transfer-encoding' || k === 'content-encoding' || k === 'content-length') {
@@ -171,11 +191,12 @@ function handleWs(
   clientSocket: WebSocket,
   request: FastifyRequest,
   wsHandler: WsHandler,
-  registry: MachineRegistry
+  registry: MachineRegistry,
+  tunnels: Map<string, ActiveTunnel>
 ): void {
   const { machineId, port } = request.params as { machineId: string; port: string };
   const wildcard = (request.params as { '*': string })['*'] ?? '';
-  const query = request.url.includes('?') ? `?${request.url.split('?')[1]}` : '';
+  const query = upstreamQuery(request);
   const url = resolveUpstream(port, wildcard, query);
   if (!url) {
     clientSocket.close(4502, 'Invalid local tunnel port');
@@ -189,7 +210,7 @@ function handleWs(
     return;
   }
   const tunnelId = newTunnelId();
-  tunnels.set(tunnelId, { clientSocket });
+  tunnels.set(tunnelId, { clientSocket, laptopWs });
 
   const closeClient = (code: number, reason?: string): void => {
     try {
@@ -203,7 +224,7 @@ function handleWs(
   const closeLaptop = (): void => {
     // Best-effort tell the laptop to release its half.
     const liveWs = registry.getActiveWs(machineId);
-    if (!liveWs) {
+    if (liveWs !== laptopWs) {
       return;
     }
     void wsHandler.invokeOnWs(liveWs, 'compute:tunnel-ws-close', [{ tunnelId }]).catch(() => {});
@@ -220,7 +241,7 @@ function handleWs(
 
   const writeFrame = (b64: string, binary: boolean): void => {
     const liveWs = registry.getActiveWs(machineId);
-    if (!liveWs) {
+    if (liveWs !== laptopWs) {
       closeClient(4503, 'host-offline');
       return;
     }
@@ -234,6 +255,10 @@ function handleWs(
   void wsHandler
     .invokeOnWs(laptopWs, 'compute:tunnel-ws-open', [{ tunnelId, url: wsUrl }])
     .then(() => {
+      if (clientSocket.readyState !== 1) {
+        closeLaptop();
+        return;
+      }
       opened = true;
       const queued = pending.splice(0);
       for (const f of queued) {

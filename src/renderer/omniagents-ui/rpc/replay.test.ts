@@ -258,4 +258,26 @@ describe('SessionReplayCoordinator', () => {
 
     expect(resumed).toEqual([]);
   });
+
+  it('ignores an old replay failure after adopting a newer snapshot boundary', async () => {
+    let reject!: (reason: unknown) => void;
+    const resyncs: string[] = [];
+    const coordinator = new SessionReplayCoordinator(
+      () =>
+        new Promise((_resolve, fail) => {
+          reject = fail;
+        }),
+      () => {},
+      (id) => resyncs.push(id)
+    );
+    coordinator.registerSession('s');
+    const pending = coordinator.resumeAll();
+    coordinator.beginSnapshot('s');
+    coordinator.completeResync('s', 'new-stream', 50);
+    reject({ code: RESYNC_REQUIRED_CODE, data: { stream_id: 'old-stream', retained_last_seq: 20 } });
+    await pending;
+    expect(resyncs).toEqual([]);
+    expect(coordinator.tracker('s').streamId).toBe('new-stream');
+    expect(coordinator.tracker('s').lastSeq).toBe(50);
+  });
 });

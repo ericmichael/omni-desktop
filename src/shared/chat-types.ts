@@ -45,6 +45,8 @@ export type ChatMessage = {
   type: 'chat';
   role: 'user' | 'assistant' | 'system';
   content: string;
+  /** Provider identity shared by live output and its persisted canonical item. */
+  message_id?: string;
   /**
    * Realtime conversation item id, stamped by the voice-session machine on
    * live voice turns. Live items carry no canonical envelope, so this is the
@@ -93,6 +95,7 @@ export type ToolItem = {
 
 export type ApprovalItem = {
   type: 'approval';
+  run_id?: string;
   // ``request_id`` is the model-minted identifier we echo back on the
   // decision RPC. For ``kind: 'function'`` it's the tool ``call_id``
   // (omniagents 0.16 ``tool_approval_requested``). For ``kind: 'mcp'``

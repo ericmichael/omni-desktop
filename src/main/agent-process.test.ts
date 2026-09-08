@@ -564,6 +564,19 @@ describe('AgentProcess (serve mode)', () => {
     expect(h.child.kill.mock.calls.map(([signal]) => signal)).toEqual(['SIGTERM', 'SIGKILL']);
   });
 
+  it('retains an unconfirmed killed child for a real shutdown retry', async () => {
+    const h = makeHarness({ processStopTimeoutMs: 5 });
+    h.child.kill.mockImplementation(() => false);
+    await h.proc.start({ profileName: 'host', sources: [localSource('/ws')] });
+    await expect(h.proc.stop()).rejects.toThrow('exit was not confirmed');
+    h.child.kill.mockImplementation((signal) => {
+      setImmediate(() => h.child.emitClose(0, signal));
+      return true;
+    });
+    await expect(h.proc.stop()).resolves.toMatchObject({ shutdown: 'graceful' });
+    expect(h.child.kill).toHaveBeenCalledTimes(3);
+  });
+
   it('stops a newly materialized environment when thread binding fails', async () => {
     const h = makeHarness();
     const arg: AgentProcessStartArg = {
@@ -865,5 +878,10 @@ describe('AgentProcess (platform compute mode)', () => {
       expect(running.data.uiUrl).not.toContain('token');
       expect(JSON.stringify(running.data)).not.toContain('admin');
     }
+    vi.mocked(computeClient.stopSession).mockRejectedValueOnce(new Error('remote stop unavailable'));
+    await expect(proc.stop()).rejects.toThrow('remote stop unavailable');
+    await expect(proc.stop()).resolves.toMatchObject({ scope: 'compute', shutdown: 'graceful' });
+    expect(computeClient.stopSession).toHaveBeenNthCalledWith(1, 'platform-session-1');
+    expect(computeClient.stopSession).toHaveBeenNthCalledWith(2, 'platform-session-1');
   });
 });

@@ -2,6 +2,7 @@ import { memo, useCallback, useEffect, useRef, useState } from 'react';
 
 import type { ClientToolCallHandler } from './App';
 import { ChatShell, type PendingMessage } from './ChatShell';
+import { ConversationComposerProvider } from './components/ConversationComposer';
 import { getGreeting } from './greeting';
 import { OmniAgentsApp } from './LauncherApp';
 
@@ -86,46 +87,49 @@ export const OmniAgentsHostApp = memo(
             : ('loading' as const);
 
     return (
-      <div className="w-full h-full relative">
-        {/* Shell layer — visible until App has painted */}
-        {(!isReady || !appMounted) && (
-          <div className="absolute inset-0 z-0">
-            <ChatShell
-              greeting={greeting}
-              phase={shellPhase}
-              error={state.type === 'error' ? state.error : undefined}
-              onRetry={state.type === 'error' ? state.onRetry : undefined}
-              onLaunch={state.type === 'idle' ? state.onLaunch : undefined}
-              launchDisabled={state.type === 'idle' ? state.disabled : undefined}
-              onSubmit={handleShellSubmit}
-              pendingMessages={pendingMessages}
-            />
-          </div>
-        )}
+      <ConversationComposerProvider>
+        <div className="w-full h-full relative">
+          {/* Shell layer — visible until App has painted */}
+          {(!isReady || !appMounted) && (
+            <div className="absolute inset-0 z-0">
+              <ChatShell
+                conversationId={sessionId}
+                greeting={greeting}
+                phase={shellPhase}
+                error={state.type === 'error' ? state.error : undefined}
+                onRetry={state.type === 'error' ? state.onRetry : undefined}
+                onLaunch={state.type === 'idle' ? state.onLaunch : undefined}
+                launchDisabled={state.type === 'idle' ? state.disabled : undefined}
+                onSubmit={handleShellSubmit}
+                pendingMessages={pendingMessages}
+              />
+            </div>
+          )}
 
-        {/* App layer — mounted on top once ready */}
-        {isReady && (
-          <div className="absolute inset-0 z-10">
-            <OmniAgentsApp
-              connection={{ baseUrl: state.uiUrl }}
-              variables={variables}
-              greeting={greeting}
-              sessionId={sessionId}
-              onSessionChange={onSessionChange}
-              onReady={() => {
-                handleAppMounted();
-                onReady?.();
-              }}
-              headerActionsTargetId={headerActionsTargetId}
-              headerActionsCompact={headerActionsCompact}
-              pendingMessages={pendingForApp}
-              onClientToolCall={onClientToolCall}
-              pendingPlan={pendingPlan}
-              onPlanDecision={onPlanDecision}
-            />
-          </div>
-        )}
-      </div>
+          {/* App layer — mounted on top once ready */}
+          {isReady && (
+            <div className="absolute inset-0 z-10">
+              <OmniAgentsApp
+                connection={{ baseUrl: state.uiUrl }}
+                variables={variables}
+                greeting={greeting}
+                sessionId={sessionId}
+                onSessionChange={onSessionChange}
+                onReady={() => {
+                  handleAppMounted();
+                  onReady?.();
+                }}
+                headerActionsTargetId={headerActionsTargetId}
+                headerActionsCompact={headerActionsCompact}
+                pendingMessages={pendingForApp}
+                onClientToolCall={onClientToolCall}
+                pendingPlan={pendingPlan}
+                onPlanDecision={onPlanDecision}
+              />
+            </div>
+          )}
+        </div>
+      </ConversationComposerProvider>
     );
   }
 );

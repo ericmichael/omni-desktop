@@ -263,9 +263,9 @@ describe('PlatformClient instance', () => {
 
   // --- stopSession ---
 
-  it('stopSession does not throw on non-ok response', async () => {
+  it('stopSession rejects a failed shutdown so callers retain their cleanup job', async () => {
     fetchFn.mockResolvedValueOnce(new Response(null, { status: 500 }));
-    await expect(client.stopSession('s1')).resolves.toBeUndefined();
+    await expect(client.stopSession('s1')).rejects.toThrow('HTTP 500');
   });
 
   // --- execInSession ---

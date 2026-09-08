@@ -15,6 +15,7 @@ import {
   ConversationProtocolError,
   type ConversationRpcTransport,
 } from './conversation';
+import { mcpArtifact } from './mcp-artifact';
 
 const PAGE_SIZE = 500;
 const MAX_PAGES = 10_000;
@@ -157,6 +158,7 @@ export function adaptCanonicalConversationItem(item: ConversationItem): MessageI
         type: 'chat',
         role: role(item.role, 'assistant'),
         content: stringValue(content.text) ?? '',
+        message_id: stringValue(content.message_id),
         canonical,
       };
     case 'reasoning':
@@ -473,6 +475,25 @@ function isUnrecordedCanonicalThread(error: unknown): boolean {
   return (error.data as Record<string, unknown>).kind === 'thread_not_found';
 }
 
+/** Tool-backed MCP surfaces are derived views of durable tool metadata. */
+export function adaptCanonicalConversationItems(items: ConversationItem[]): MessageItem[] {
+  return items.flatMap((item) => {
+    const adapted = adaptCanonicalConversationItem(item);
+    const artifact =
+      item.kind === 'tool_call'
+        ? mcpArtifact({
+            sessionId: item.thread_id,
+            runId: stringValue(item.source_ref.run_id) ?? item.turn_id ?? undefined,
+            callId: stringValue(item.content.call_id) ?? stringValue(item.source_ref.call_id),
+            tool: stringValue(item.content.tool) ?? '',
+            output: stringify(item.content.output),
+            metadata: metadata(item.content),
+          })
+        : undefined;
+    return artifact ? [adapted, artifact] : [adapted];
+  });
+}
+
 /** Canonical items are authoritative; legacy history is old-runtime fallback only. */
 export async function loadSessionTranscript(
   transport: CanonicalHistoryTransport,
@@ -481,7 +502,7 @@ export async function loadSessionTranscript(
   try {
     const canonical = await listAllCanonicalConversationItems(transport, sessionId);
     return {
-      items: canonical.map(adaptCanonicalConversationItem),
+      items: adaptCanonicalConversationItems(canonical),
       source: 'canonical',
       rawItemCount: canonical.length,
     };

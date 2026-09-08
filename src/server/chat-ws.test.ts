@@ -57,7 +57,9 @@ beforeEach(async () => {
       bridgeKeys: [BRIDGE_KEY],
     });
   });
-  await fastify.listen({ port: 0 });
+  // Bind the same address the client uses. localhost can resolve to multiple
+  // interfaces with different ephemeral ports during parallel test runs.
+  await fastify.listen({ port: 0, host: '127.0.0.1' });
   const address = fastify.server.address();
   baseUrl = `ws://127.0.0.1:${typeof address === 'object' && address ? address.port : 0}`;
 });
@@ -78,7 +80,7 @@ afterEach(async () => {
 });
 
 const mintToken = (): string =>
-  signRuntimeToken(SECRET, { tenantId: 'local', principalId: 'local', sessionId: 's1' }, 300);
+  signRuntimeToken(SECRET, { purpose: 'launcher', tenantId: 'local', principalId: 'local', sessionId: 's1' }, 300);
 
 type Rpc = {
   ws: WebSocket;
@@ -145,6 +147,11 @@ const closedWith = (token: string): Promise<number> => {
 };
 
 describe('auth', () => {
+  it('does not promote a sandbox runtime credential into a human chat connection', async () => {
+    expect(
+      await closedWith(signRuntimeToken(SECRET, { tenantId: 'local', principalId: 'local', sessionId: 'runtime' }))
+    ).toBe(4401);
+  });
   it('closes 4401 without a token or with a forged one', async () => {
     expect(await closedWith('')).toBe(4401);
     expect(await closedWith('not-a-real-token')).toBe(4401);

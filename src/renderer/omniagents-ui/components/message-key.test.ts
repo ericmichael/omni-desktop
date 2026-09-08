@@ -38,6 +38,7 @@ describe('messageKey', () => {
   it('keys tools by call_id so a card keeps its own expansion', () => {
     const item: MessageItem = { type: 'tool', tool: 'bash', call_id: 'call_1', status: 'called' };
     expect(messageKey(item, 0)).toBe('tool:call_1');
+    expect(messageKey({ ...item, runId: 'first' }, 0)).not.toBe(messageKey({ ...item, runId: 'second' }, 0));
   });
 
   it('covers the id-bearing card types', () => {

@@ -24,6 +24,8 @@ import { $pendingPlan, resolvePlanApproval } from '@/renderer/features/Tickets/p
 import { useSessionWorkspaceDir } from '@/renderer/hooks/use-session-workspace-dir';
 import type { ClientToolCallHandler } from '@/renderer/omniagents-ui/App';
 import { ChatShell, type PendingMessage } from '@/renderer/omniagents-ui/ChatShell';
+import { ConversationComposerProvider } from '@/renderer/omniagents-ui/components/ConversationComposer';
+import { DraftSessionControls } from '@/renderer/omniagents-ui/components/DraftSessionControls';
 import { getGreeting } from '@/renderer/omniagents-ui/greeting';
 import { buildProfileLabel } from '@/renderer/omniagents-ui/sandbox-label';
 import { configApi } from '@/renderer/services/config';
@@ -541,99 +543,113 @@ export const CodeTabContent = memo(
         $hoveredVoiceScope.set(null);
       }
     }, [tab.id]);
+    useEffect(() => () => onColumnMouseLeave(), [onColumnMouseLeave]);
     const voiceVariables = useMemo(
       () => (localVoice ? buildSessionVariables({ ...baseSessionArgs, voice: true, personaInstructions }) : undefined),
       [baseSessionArgs, localVoice, personaInstructions]
     );
 
     return (
-      <div
-        className={cn('w-full h-full relative', !isVisible && 'hidden')}
-        onMouseEnter={onColumnMouseEnter}
-        onMouseLeave={onColumnMouseLeave}
-      >
-        <SessionStatusBanner status={sandboxStatus} />
-        {sandboxUrls ? (
-          <VoiceScopeContext.Provider value={tab.id}>
-            <CodeRunningView
-              sandboxUrls={sandboxUrls}
-              executionTarget={executionTarget}
-              sessionId={tab.sessionId}
-              onSessionChange={handleSessionChange}
-              variables={clientToolVariables}
-              voiceVariables={voiceVariables}
-              activeApp={activeApp}
-              onActiveAppChange={onActiveAppChange}
-              onReady={() => {}}
-              uiMinimal={uiMinimal}
-              headerActionsTargetId={headerActionsTargetId}
-              headerActionsCompact={headerActionsCompact}
-              sandboxLabel={sandboxLabel}
-              sandboxOptions={sandboxOptions}
-              currentSandboxProfile={profileName}
-              onSandboxChange={handleProfileChange}
-              composerExtras={composerExtras}
-              onClientToolCall={handleClientToolCall}
-              tabId={tab.id}
-              agentWorkspaceDir={agentWorkspaceDir}
-              workspaceRootPrefix={workspaceRootPrefix}
-              workspaceMounts={sandboxUrls?.mounts}
-              filesHost={filesHost}
-              gitHost={gitHost}
-              reviewHost={reviewHost}
-              ticketId={tab.ticketId as TicketId | undefined}
-              routineId={tab.routineId}
-              switching={sandboxStatus?.type === 'running' && !!sandboxStatus.data.switching}
-              greeting={chatMode ? greeting : undefined}
-              suggestions={chatMode ? CHAT_SUGGESTIONS : COLUMN_SUGGESTIONS}
-              pendingMessages={chatMode ? pendingMessages : undefined}
-              onPendingMessagesFlushed={chatMode ? handlePendingMessagesFlushed : undefined}
-            />
-          </VoiceScopeContext.Provider>
-        ) : chatMode ? (
-          /* Chat pre-launch / launching / error — the greeting shell. The
+      <VoiceScopeContext.Provider value={tab.id}>
+        <ConversationComposerProvider>
+          <div
+            className={cn('w-full h-full relative', !isVisible && 'invisible pointer-events-none')}
+            inert={!isVisible}
+            aria-hidden={!isVisible}
+            data-voice-scope={tab.id}
+            onMouseEnter={onColumnMouseEnter}
+            onMouseLeave={onColumnMouseLeave}
+          >
+            <SessionStatusBanner status={sandboxStatus} />
+            {sandboxUrls ? (
+              <VoiceScopeContext.Provider value={tab.id}>
+                <CodeRunningView
+                  sandboxUrls={sandboxUrls}
+                  executionTarget={executionTarget}
+                  sessionId={tab.sessionId}
+                  onSessionChange={handleSessionChange}
+                  variables={clientToolVariables}
+                  voiceVariables={voiceVariables}
+                  activeApp={activeApp}
+                  onActiveAppChange={onActiveAppChange}
+                  onReady={() => {}}
+                  uiMinimal={uiMinimal}
+                  headerActionsTargetId={headerActionsTargetId}
+                  headerActionsCompact={headerActionsCompact}
+                  sandboxLabel={sandboxLabel}
+                  sandboxOptions={sandboxOptions}
+                  currentSandboxProfile={profileName}
+                  onSandboxChange={handleProfileChange}
+                  composerExtras={composerExtras}
+                  onClientToolCall={handleClientToolCall}
+                  tabId={tab.id}
+                  agentWorkspaceDir={agentWorkspaceDir}
+                  workspaceRootPrefix={workspaceRootPrefix}
+                  workspaceMounts={sandboxUrls?.mounts}
+                  filesHost={filesHost}
+                  gitHost={gitHost}
+                  reviewHost={reviewHost}
+                  ticketId={tab.ticketId as TicketId | undefined}
+                  routineId={tab.routineId}
+                  switching={sandboxStatus?.type === 'running' && !!sandboxStatus.data.switching}
+                  greeting={chatMode ? greeting : undefined}
+                  suggestions={chatMode ? CHAT_SUGGESTIONS : COLUMN_SUGGESTIONS}
+                  pendingMessages={chatMode ? pendingMessages : undefined}
+                  onPendingMessagesFlushed={chatMode ? handlePendingMessagesFlushed : undefined}
+                />
+              </VoiceScopeContext.Provider>
+            ) : chatMode ? (
+              /* Chat pre-launch / launching / error — the greeting shell. The
              composer is live the whole time: the first submit activates the
              column (lazy launch) and queues the message; queued messages
              flush into the session once the sandbox connects. */
-          <ChatShell
-            greeting={greeting}
-            phase={phase === 'error' ? 'error' : phase === 'idle' && !tab.activatedAt ? 'idle' : 'loading'}
-            error={phase === 'error' ? (allLaunchErrors[tab.id] ?? undefined) : undefined}
-            onRetry={phase === 'error' ? retry : undefined}
-            onSubmit={handlePrelaunchSubmit}
-            pendingMessages={pendingMessages}
-            suggestions={!tab.activatedAt ? CHAT_SUGGESTIONS : undefined}
-            sandboxLabel={sandboxLabel}
-            sandboxOptions={!tab.activatedAt ? sandboxOptions : undefined}
-            currentSandboxProfile={profileName}
-            onSandboxChange={handleProfileChange}
-            composerExtras={composerExtras}
-            workspaceReady={Boolean(store.workspaceDir)}
-            onOpenWorkspaceSettings={() => openSettingsTab('Workspace')}
-          />
-        ) : phase === 'error' ? (
-          <CodeErrorView tabId={tab.id} retry={retry} />
-        ) : (
-          /* idle / checking / installing / ready / starting / connecting —
+              <ChatShell
+                conversationId={tab.sessionId}
+                sessionControls={
+                  tab.sessionId ? (
+                    <DraftSessionControls sessionId={tab.sessionId} disabled={Boolean(tab.activatedAt)} />
+                  ) : undefined
+                }
+                greeting={greeting}
+                phase={phase === 'error' ? 'error' : phase === 'idle' && !tab.activatedAt ? 'idle' : 'loading'}
+                error={phase === 'error' ? (allLaunchErrors[tab.id] ?? undefined) : undefined}
+                onRetry={phase === 'error' ? retry : undefined}
+                onSubmit={handlePrelaunchSubmit}
+                pendingMessages={pendingMessages}
+                suggestions={!tab.activatedAt ? CHAT_SUGGESTIONS : undefined}
+                sandboxLabel={sandboxLabel}
+                sandboxOptions={!tab.activatedAt ? sandboxOptions : undefined}
+                currentSandboxProfile={profileName}
+                onSandboxChange={handleProfileChange}
+                composerExtras={composerExtras}
+                workspaceReady={Boolean(store.workspaceDir)}
+                onOpenWorkspaceSettings={() => openSettingsTab('Workspace')}
+              />
+            ) : phase === 'error' ? (
+              <CodeErrorView tabId={tab.id} retry={retry} />
+            ) : (
+              /* idle / checking / installing / ready / starting / connecting —
              at this point we already have a project or Routine session
              workspace (we passed the early return above), so auto-launch will
              drive the machine to ``running`` shortly. The in-composer sandbox
              picker handles profile changes; no pre-launch picker needed here. */
-          <div className="w-full h-full flex items-center justify-center">
-            <motion.div
-              className="inline-flex items-center gap-2 rounded-full bg-card pl-5 pr-5 pt-2 pb-2"
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3, ease: 'easeOut' }}
-            >
-              <Spinner className="text-muted-foreground" />
-              <span className="text-sm text-muted-foreground">
-                {phase === 'idle' ? 'Restarting sandbox…' : 'Connecting…'}
-              </span>
-            </motion.div>
+              <div className="w-full h-full flex items-center justify-center">
+                <motion.div
+                  className="inline-flex items-center gap-2 rounded-full bg-card pl-5 pr-5 pt-2 pb-2"
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.3, ease: 'easeOut' }}
+                >
+                  <Spinner className="text-muted-foreground" />
+                  <span className="text-sm text-muted-foreground">
+                    {phase === 'idle' ? 'Restarting sandbox…' : 'Connecting…'}
+                  </span>
+                </motion.div>
+              </div>
+            )}
           </div>
-        )}
-      </div>
+        </ConversationComposerProvider>
+      </VoiceScopeContext.Provider>
     );
   }
 );

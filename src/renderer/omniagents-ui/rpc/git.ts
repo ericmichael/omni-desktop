@@ -1,4 +1,4 @@
-import type { GitOperationProgressParams, RpcMethodMap } from '@/generated/omniagents-gui-v1/gui-v1';
+import type { GitOperationProgressParams, RpcMethodMap } from '@/generated/omniagents-gui-v2/gui-v2';
 import { OmniagentsRpcError } from '@/shared/omniagents-rpc';
 import type { ExecutionTarget } from '@/shared/types';
 

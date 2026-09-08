@@ -4,7 +4,7 @@ import { map } from 'nanostores';
 
 import { DEFAULT_XTERM_OPTIONS } from '@/renderer/constants';
 import { toast } from '@/renderer/features/Toast/state';
-import { emitter, ipc } from '@/renderer/services/ipc';
+import { emitter, ipc, wsEmitter } from '@/renderer/services/ipc';
 import type {
   AgentProcessStartOptions,
   AgentProcessStatus,
@@ -149,15 +149,26 @@ const listen = () => {
 
 listen();
 
+// A reconnected launcher may be a fresh process with no knowledge of the
+// runtimes cached by this document. Reconcile even `running` entries; the
+// ordinary polling fast path deliberately skips them. A socket outage alone
+// is not evidence that a runtime was lost and must never trigger a restart.
+let connectionRevision = 0;
+
 /** Poll status for a specific processId. Exported for Code/state.ts to call for its tabs. */
-export const pollProcessStatus = async (processId: string): Promise<void> => {
+export const pollProcessStatus = async (processId: string, reconcile = false): Promise<void> => {
   const current = $agentStatuses.get()[processId];
-  if (current?.type === 'running') {
+  if (!reconcile && current?.type === 'running') {
     return;
   }
+  const revision = connectionRevision;
   try {
     const status = await emitter.invoke('agent-process:get-status', processId);
-    if (!status || status.type === 'uninitialized') {
+    // A push, stop/reset, or another connection supersedes this observation.
+    if (revision !== connectionRevision || $agentStatuses.get()[processId] !== current) {
+      return;
+    }
+    if (!status || (!reconcile && status.type === 'uninitialized')) {
       return;
     }
     const old = $agentStatuses.get()[processId];
@@ -168,3 +179,12 @@ export const pollProcessStatus = async (processId: string): Promise<void> => {
     // ignore
   }
 };
+
+wsEmitter?.onStateChange(() => {
+  connectionRevision++;
+});
+wsEmitter?.onConnect(() => {
+  for (const processId of Object.keys($agentStatuses.get())) {
+    void pollProcessStatus(processId, true);
+  }
+});

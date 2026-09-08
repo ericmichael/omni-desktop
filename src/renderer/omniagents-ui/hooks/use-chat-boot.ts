@@ -13,6 +13,7 @@ import { useActorRef, useSelector } from '@xstate/react';
 import { useCallback, useEffect, useMemo } from 'react';
 import { fromCallback } from 'xstate';
 
+import { probeRealtimeCapabilities } from '@/renderer/omniagents-ui/realtime-capabilities';
 import type { RPCClient } from '@/renderer/omniagents-ui/rpc/client';
 import {
   type ChatBootCapabilities,
@@ -52,8 +53,9 @@ export type UseChatBootOptions = {
  * effect. Returns the resolved capabilities. Any failure here throws; the
  * invoker wrapper catches and dispatches BOOTSTRAP_FAILED.
  */
-async function runBootstrap(opts: UseChatBootOptions): Promise<ChatBootCapabilities> {
+async function runBootstrap(opts: UseChatBootOptions, signal: AbortSignal): Promise<ChatBootCapabilities> {
   const { client, executionTarget, wsRealtimeUrl, token } = opts;
+  signal.throwIfAborted();
 
   // 1. Register client-callable functions the server can invoke.
   // ``ui.request_tool_approval`` is gone: omniagents 0.16 moved
@@ -66,6 +68,7 @@ async function runBootstrap(opts: UseChatBootOptions): Promise<ChatBootCapabilit
   }
 
   // 2. Agent name + welcome text.
+  signal.throwIfAborted();
   let agentName = 'OmniAgent';
   let welcomeText: string | undefined;
   try {
@@ -81,10 +84,12 @@ async function runBootstrap(opts: UseChatBootOptions): Promise<ChatBootCapabilit
   }
 
   // 3. Workspace support — depends on the agent exposing the fs tools.
+  signal.throwIfAborted();
   let workspaceSupported = false;
   let workspacePath: string | undefined;
   try {
     const funcs = await client.listServerFunctions();
+    signal.throwIfAborted();
     const names = new Set(funcs.map((f) => f.name));
     if (executionTarget && names.has('fs_list_dir') && names.has('fs_get_workspace_root')) {
       workspaceSupported = true;
@@ -106,23 +111,17 @@ async function runBootstrap(opts: UseChatBootOptions): Promise<ChatBootCapabilit
   }
 
   // Probe via capabilities() not startSession(): the latter creates an empty trace per boot.
+  signal.throwIfAborted();
   let voiceEnabled = false;
   if (wsRealtimeUrl) {
     try {
-      const { RealtimeRPCClient } = await import('@/renderer/omniagents-ui/rpc/realtime');
-      const rtc = new RealtimeRPCClient(wsRealtimeUrl, token);
-      await rtc.connect();
-      try {
-        const caps = await rtc.capabilities();
-        voiceEnabled = !!caps?.enabled;
-      } finally {
-        rtc.disconnect();
-      }
+      voiceEnabled = await probeRealtimeCapabilities(wsRealtimeUrl, token, signal);
     } catch {
       /* ignore */
     }
   }
 
+  signal.throwIfAborted();
   return {
     agentName,
     welcomeText,
@@ -193,7 +192,8 @@ export function useChatBoot(opts: UseChatBootOptions) {
         // Runs the bootstrap capability calls and dispatches the result.
         bootstrap: fromCallback<ChatBootEvent>(({ sendBack }) => {
           let cancelled = false;
-          runBootstrap({ client, chatSession, executionTarget, sessionId, wsRealtimeUrl, token })
+          const controller = new AbortController();
+          runBootstrap({ client, chatSession, executionTarget, sessionId, wsRealtimeUrl, token }, controller.signal)
             .then((capabilities) => {
               if (!cancelled) {
                 sendBack({ type: 'BOOTSTRAP_OK', capabilities });
@@ -209,6 +209,7 @@ export function useChatBoot(opts: UseChatBootOptions) {
             });
           return () => {
             cancelled = true;
+            controller.abort();
           };
         }),
 
@@ -217,11 +218,11 @@ export function useChatBoot(opts: UseChatBootOptions) {
         // this invoker down via its cleanup function — any in-flight fetch
         // is abandoned and its late-arriving result is ignored by the
         // `cancelled` flag.
-        loadSession: fromCallback<ChatBootEvent>(({ sendBack }) => {
+        loadSession: fromCallback<ChatBootEvent, { sessionId?: string }>(({ sendBack, input }) => {
           let cancelled = false;
           chatSession
-            .loadSession(sessionId)
-            .then(() => {
+            .loadSession(input.sessionId)
+            .then(async (resolvedId) => {
               if (cancelled) {
                 return;
               }
@@ -241,6 +242,9 @@ export function useChatBoot(opts: UseChatBootOptions) {
                   error: String(snap.context.error || 'Failed to load session'),
                 });
               } else {
+                if (cancelled) {
+                  return;
+                }
                 sendBack({ type: 'SESSION_LOADED' });
               }
             })
@@ -259,8 +263,8 @@ export function useChatBoot(opts: UseChatBootOptions) {
         }),
       },
     });
-    // We intentionally omit `sessionId` from deps — it's read inside the
-    // invokers via closure and propagated via SET_SESSION_ID events. If
+    // We intentionally omit `sessionId` from deps — the load invoker reads
+    // machine input propagated via SET_SESSION_ID events, not a stale closure. If
     // we re-created the machine on every sessionId change, the boot state
     // would reset.
   }, [client, chatSession, executionTarget, wsRealtimeUrl, token]);
@@ -300,8 +304,14 @@ export function useChatBoot(opts: UseChatBootOptions) {
 
   // ---- Actions ----
   const retry = useCallback(() => {
+    // Clear the previous permanent transport failure before the new boot
+    // invoker samples RPC state. Otherwise it immediately replays that old
+    // failure and unsubscribes before the replacement connection succeeds.
+    if (actor.getSnapshot().matches('connectionError')) {
+      void client.connect().catch(() => {});
+    }
     actor.send({ type: 'RETRY' });
-  }, [actor]);
+  }, [actor, client]);
 
   return {
     actor,

@@ -181,6 +181,12 @@ export const destroyAllTerminalsForTab = async (tabId: string): Promise<void> =>
   }
 
   await emitter.invoke('terminal:dispose-all-for-tab', tabId);
+  forgetTerminalsForTab(tabId);
+};
+
+/** Renderer-only cleanup; authoritative chat removal owns remote shutdown. */
+export const forgetTerminalsForTab = (tabId: string): void => {
+  const list = $terminalsByTab.get()[tabId] ?? [];
   for (const t of list) {
     t.xterm.dispose();
   }

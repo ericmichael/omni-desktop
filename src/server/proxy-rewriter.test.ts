@@ -49,6 +49,36 @@ afterEach(() => {
   resetProxyRegistrationsForTests();
 });
 
+it('gives identical process names distinct owner-bound opaque routes and rejects revoked owners', async () => {
+  const app = Fastify();
+  await app.register(fastifyWebsocket);
+  const authorize = vi.fn(async () => true);
+  setupProxyRewriter(
+    app,
+    { addEventInterceptor: vi.fn(), addResultWrapper: vi.fn() } as unknown as WsHandler,
+    () => true,
+    authorize
+  );
+  const a = { uiUrl: 'http://127.0.0.1:8001/ui' };
+  const b = { uiUrl: 'http://127.0.0.1:8002/ui' };
+  rewriteStatusUrls(a, 'management', undefined, { tenantId: 'team-a', principalId: 'alice' });
+  rewriteStatusUrls(b, 'management', undefined, { tenantId: 'team-b', principalId: 'bob' });
+  expect(a.uiUrl).not.toBe(b.uiUrl);
+  expect(a.uiUrl).toMatch(/^\/proxy\/internal-[a-f0-9]{64}\//);
+  const fetch = vi.fn(async (_input: unknown) => new Response('owner a'));
+  vi.stubGlobal('fetch', fetch);
+  try {
+    expect((await app.inject(a.uiUrl)).statusCode).toBe(200);
+    expect(fetch.mock.calls[0]?.[0]).toBe('http://127.0.0.1:8001/ui');
+    expect(authorize).toHaveBeenCalledWith({ tenantId: 'team-a', principalId: 'alice' });
+    authorize.mockResolvedValue(false);
+    expect((await app.inject(a.uiUrl)).statusCode).toBe(403);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  } finally {
+    await app.close();
+  }
+});
+
 // ---------------------------------------------------------------------------
 // escapeForRegex
 // ---------------------------------------------------------------------------

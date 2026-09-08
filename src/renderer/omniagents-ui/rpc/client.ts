@@ -9,8 +9,9 @@ import type {
   RpcClientNotificationMap,
   RpcMethodMap,
   RpcNotificationMap,
-} from '@/generated/omniagents-gui-v1/gui-v1';
-import { withConnectTicket } from '@/renderer/omniagents-ui/rpc/ws-ticket';
+} from '@/generated/omniagents-gui-v2/gui-v2';
+import { GUI_PROTOCOL_VERSION } from '@/generated/omniagents-gui-v2/gui-v2';
+import { withConnectTicket, WsTicketError } from '@/renderer/omniagents-ui/rpc/ws-ticket';
 import {
   classifyCloseCode,
   classifyRpcErrorCode,
@@ -26,12 +27,15 @@ import {
   rpcClientMachine,
   WS_CONNECT_TIMEOUT_MS,
 } from '@/shared/machines/rpc-client.machine';
+import { guiInitializationError, validateGuiInitialization } from '@/shared/omniagents-protocol';
 import { OmniagentsRpcError } from '@/shared/omniagents-rpc';
 import type { ExecutionTarget } from '@/shared/types';
 
+import { ClientRequestNotPendingError } from './client-response-error';
 import { ElicitationQueue } from './elicitation';
 import { McpManagementClient } from './mcp-management';
 import { type ResumeResult, SessionReplayCoordinator } from './replay';
+import { decodeSessionSnapshot } from './session-snapshot';
 
 type JSONRPCResponse = {
   jsonrpc: '2.0';
@@ -78,6 +82,9 @@ export type RequestOptions = {
  * event journal, so batching them per session is always safe.
  */
 export const ACK_DEBOUNCE_MS = 500;
+
+export const LIVENESS_IDLE_MS = 30_000;
+export const LIVENESS_TIMEOUT_MS = 10_000;
 
 /**
  * Workspace operations are one negotiated surface: requests and their
@@ -152,6 +159,8 @@ export const EXPERIMENTAL_FEATURE_MANIFESTS = {
   // approvalReviewer — a toggle without the transcript chip would hide why a
   // completion was rejected.
   workflowReviewer: ['set_session_workflow', 'plan_completion_reviewed'],
+  // Hydration must know whether a run is active before enabling submission.
+  sessionRunState: ['queue_status'],
 } as const;
 
 export type ExperimentalFeature = keyof typeof EXPERIMENTAL_FEATURE_MANIFESTS;
@@ -170,6 +179,7 @@ export const WORKSPACE_EXPERIMENTAL_OPERATIONS = [
   ...EXPERIMENTAL_FEATURE_MANIFESTS.plansAndDiffs,
   ...EXPERIMENTAL_FEATURE_MANIFESTS.approvalReviewer,
   ...EXPERIMENTAL_FEATURE_MANIFESTS.workflowReviewer,
+  ...EXPERIMENTAL_FEATURE_MANIFESTS.sessionRunState,
 ] as const;
 
 const requestedCapabilities = (experimentalOperations: readonly string[]): Capabilities => ({
@@ -223,6 +233,9 @@ export class RPCClient {
   private disposed = false;
   private reconnectSub: { unsubscribe(): void } | null = null;
   private connectInFlight: Promise<void> | null = null;
+  private activeConnect: { controller: AbortController; socket: WebSocket | null } | null = null;
+  private livenessTimer: ReturnType<typeof setTimeout> | null = null;
+  private lastReceivedAt = 0;
   private negotiatedInitialization: InitializeResult | null = null;
   private unavailableExperimentalOperations = new Set<string>();
   private replay: SessionReplayCoordinator;
@@ -346,6 +359,18 @@ export class RPCClient {
       this.teardownSocket(this.ws);
     }
 
+    const attempt = { controller: new AbortController(), socket: null as WebSocket | null };
+    let begin!: () => void;
+    const connectPromise = new Promise<void>((resolve, reject) => {
+      begin = () => {
+        void this.connectImpl(attempt).then(resolve, reject);
+      };
+    });
+    // Publish ownership before notifying synchronous machine subscribers.
+    // Reentrant connect calls must join this attempt, not open another one.
+    this.connectInFlight = connectPromise;
+    this.activeConnect = attempt;
+
     // Emit CONNECT only when we're actually leaving `disconnected`. When
     // this is triggered by the machine's own reconnect delay (via the
     // reconnectSub subscription), the machine has already moved itself
@@ -355,8 +380,7 @@ export class RPCClient {
       this.send({ type: 'CONNECT' });
     }
 
-    const connectPromise = this.connectImpl();
-    this.connectInFlight = connectPromise;
+    begin();
     // Swallow the rejection on this bookkeeping chain — without the catch,
     // the promise derived by .finally() is unhandled and every benign
     // "WebSocket replaced" rejection surfaces as a console error even when
@@ -371,29 +395,30 @@ export class RPCClient {
     return connectPromise;
   }
 
-  private async connectImpl(): Promise<void> {
-    const controller = new AbortController();
-    let timeout: ReturnType<typeof setTimeout> | undefined;
-    const deadline = new Promise<never>((_, reject) => {
-      timeout = setTimeout(() => {
-        controller.abort();
-        reject(new RpcTimeoutError('initialize', WS_CONNECT_TIMEOUT_MS));
-      }, WS_CONNECT_TIMEOUT_MS);
+  private async connectImpl(attempt: { controller: AbortController; socket: WebSocket | null }): Promise<void> {
+    const { controller } = attempt;
+    let onAbort!: () => void;
+    const interrupted = new Promise<never>((_, reject) => {
+      onAbort = () => reject(controller.signal.reason);
+      controller.signal.addEventListener('abort', onAbort, { once: true });
+      if (controller.signal.aborted) {
+        onAbort();
+      }
     });
+    const timeout = setTimeout(() => {
+      controller.abort(new RpcTimeoutError('initialize', WS_CONNECT_TIMEOUT_MS));
+    }, WS_CONNECT_TIMEOUT_MS);
 
     try {
-      await Promise.race([this.connectAttempt(controller.signal), deadline]);
+      await Promise.race([this.connectAttempt(attempt), interrupted]);
     } catch (error) {
-      // A failed attempt must never leave its socket behind: an OPEN-but-
-      // unhandshaken `this.ws` makes every later connect() no-op (see the
-      // OPEN check in connect()) while the machine retries forever.
-      // `connectInFlight` serializes attempts, so any socket present here
-      // belongs to this failed attempt.
-      const failedSocket = this.ws;
+      // A disconnected attempt can settle after its replacement has begun.
+      // Close only its own socket; never tear down the new connection.
+      const failedSocket = attempt.socket;
       if (failedSocket) {
         this.teardownSocket(failedSocket);
       }
-      if (controller.signal.aborted) {
+      if (this.activeConnect === attempt && error instanceof RpcTimeoutError) {
         this.rejectAllPending(new RpcTimeoutError('initialize', WS_CONNECT_TIMEOUT_MS));
         this.send({
           type: 'WS_ERROR',
@@ -402,14 +427,19 @@ export class RPCClient {
       }
       throw error;
     } finally {
-      if (timeout) {
-        clearTimeout(timeout);
+      clearTimeout(timeout);
+      controller.signal.removeEventListener('abort', onAbort);
+      if (this.activeConnect === attempt) {
+        this.activeConnect = null;
       }
     }
   }
 
   /** Detach handlers, close, and clear `this.ws` if it still points at the socket. */
   private teardownSocket(socket: WebSocket): void {
+    if (this.ws === socket) {
+      this.stopLiveness();
+    }
     socket.onmessage = null;
     socket.onclose = null;
     socket.onerror = null;
@@ -422,7 +452,9 @@ export class RPCClient {
   }
 
   /** One complete ticket + socket + initialize + replay-registration attempt. */
-  private async connectAttempt(signal: AbortSignal): Promise<void> {
+  private async connectAttempt(attempt: { controller: AbortController; socket: WebSocket | null }): Promise<void> {
+    const signal = attempt.controller.signal;
+    signal.throwIfAborted();
     if (this.disposed) {
       throw new Error('RPCClient is disposed');
     }
@@ -447,20 +479,27 @@ export class RPCClient {
     let wsUrl = this.url;
     if (this.token) {
       try {
-        wsUrl = await withConnectTicket(this.url, this.token);
-        if (signal.aborted) {
-          throw new RpcTimeoutError('initialize', WS_CONNECT_TIMEOUT_MS);
-        }
+        wsUrl = await withConnectTicket(this.url, this.token, signal);
+        signal.throwIfAborted();
       } catch (err) {
         // A failed exchange must still drive the machine out of `connecting` —
         // otherwise the reconnect loop wedges on a state with no pending dial.
-        if (!signal.aborted) {
-          this.send({ type: 'WS_ERROR', error: (err as Error).message || 'ticket exchange failed' });
+        if (!signal.aborted && this.activeConnect === attempt) {
+          this.send({
+            type: 'WS_ERROR',
+            error: (err as Error).message || 'ticket exchange failed',
+            permanent: err instanceof WsTicketError && err.permanent,
+          });
         }
         throw err;
       }
     }
+    signal.throwIfAborted();
+    if (this.disposed || this.activeConnect !== attempt) {
+      throw new ConnectionClosedError('Connection attempt retired');
+    }
     const ws = new WebSocket(wsUrl);
+    attempt.socket = ws;
     this.ws = ws;
 
     await new Promise<void>((resolve, reject) => {
@@ -470,6 +509,7 @@ export class RPCClient {
       const onOpen = () => {
         cleanup();
         if (isStale()) {
+          reject(new Error('WebSocket replaced'));
           return;
         }
         resolve();
@@ -494,7 +534,7 @@ export class RPCClient {
       };
       const onAbort = () => {
         cleanup();
-        reject(new RpcTimeoutError('initialize', WS_CONNECT_TIMEOUT_MS));
+        reject(signal.reason);
       };
       const cleanup = () => {
         ws.removeEventListener('open', onOpen);
@@ -508,7 +548,7 @@ export class RPCClient {
       signal.addEventListener('abort', onAbort, { once: true });
     });
 
-    if (!this.ws) {
+    if (this.ws !== ws || signal.aborted) {
       throw new Error('WebSocket disconnected');
     }
 
@@ -531,6 +571,7 @@ export class RPCClient {
       const respBytes = profile && typeof rawData === 'string' ? rawData.length : -1;
       try {
         const msg = JSON.parse(rawData) as JSONRPCResponse | JSONRPCNotification;
+        this.lastReceivedAt = Date.now();
         const tParsed = profile ? performance.now() : 0;
         if ('id' in msg) {
           const pending = this.pending.get(msg.id);
@@ -555,6 +596,9 @@ export class RPCClient {
             }
           }
         } else {
+          if (!this.negotiatedInitialization) {
+            return;
+          }
           const evt = msg as JSONRPCNotification;
           // Single notification dispatch point. The replay coordinator
           // drops duplicate deliveries (so replays never create duplicate
@@ -586,6 +630,7 @@ export class RPCClient {
       const code = event?.code;
       const reason = event?.reason;
       const failureClass = classifyCloseCode(code);
+      this.stopLiveness();
       this.rejectAllPending(
         new ConnectionClosedError(reason || 'WebSocket connection closed', {
           permanent: failureClass === 'permanent',
@@ -644,6 +689,49 @@ export class RPCClient {
     // lifecycle machine and resolve connect() after initialize was accepted,
     // initialized was sent, and registered sessions finished replay setup.
     this.send({ type: 'WS_OPEN' });
+    if (this.ws === attachedWs && this.isConnected) {
+      this.lastReceivedAt = Date.now();
+      this.scheduleLiveness(attachedWs);
+    }
+  }
+
+  private stopLiveness(): void {
+    if (this.livenessTimer !== null) {
+      clearTimeout(this.livenessTimer);
+      this.livenessTimer = null;
+    }
+  }
+
+  /** An idle socket needs an application round trip: proxy/browser ping-pong
+   * alone does not prove the RPC path is alive. This read is session-free and
+   * never starts work. A slow mutation is not itself a transport failure. */
+  private scheduleLiveness(socket: WebSocket): void {
+    this.stopLiveness();
+    this.livenessTimer = setTimeout(async () => {
+      this.livenessTimer = null;
+      if (this.ws !== socket || !this.isConnected) {
+        return;
+      }
+      if (Date.now() - this.lastReceivedAt >= LIVENESS_IDLE_MS) {
+        try {
+          await this.callWithOptions('get_agent_info', {}, { timeoutMs: LIVENESS_TIMEOUT_MS }, true);
+        } catch (error) {
+          if (this.ws !== socket || !this.isConnected) {
+            return;
+          }
+          // An RPC error is still a successful round trip.
+          if (error instanceof RpcTimeoutError) {
+            this.teardownSocket(socket);
+            this.rejectAllPending(new ConnectionClosedError('Connection liveness check timed out'));
+            this.send({ type: 'WS_ERROR', error: 'Connection liveness check timed out' });
+            return;
+          }
+        }
+      }
+      if (this.ws === socket && this.isConnected) {
+        this.scheduleLiveness(socket);
+      }
+    }, LIVENESS_IDLE_MS);
   }
 
   private async initializeConnection(socket: WebSocket): Promise<void> {
@@ -654,7 +742,7 @@ export class RPCClient {
     while (true) {
       try {
         const result = await this.call('initialize', {
-          protocol_version: '1.0.0',
+          protocol_version: GUI_PROTOCOL_VERSION,
           identity: { name: 'omni-desktop', version: '1.0.0' },
           platform: { os: 'browser', arch: 'unknown' },
           capabilities: requestedCapabilities(requestedExperimental),
@@ -662,13 +750,13 @@ export class RPCClient {
         if (this.ws !== socket) {
           throw new Error('WebSocket replaced during GUI protocol handshake');
         }
-        this.negotiatedInitialization = result;
+        this.negotiatedInitialization = validateGuiInitialization(result);
         this.notify('initialized', {});
         return;
       } catch (error) {
         const unsupported = unsupportedExperimentalCapabilities(error);
         if (!unsupported) {
-          throw error;
+          throw guiInitializationError(error);
         }
         const unsupportedSet = new Set(unsupported);
         const reduced = requestedExperimental.filter((operation) => !unsupportedSet.has(operation));
@@ -684,6 +772,10 @@ export class RPCClient {
   }
 
   disconnect(): void {
+    this.stopLiveness();
+    const attempt = this.activeConnect;
+    this.activeConnect = null;
+    attempt?.controller.abort(new ConnectionClosedError('Client disconnected'));
     this.rejectAllPending('Client disconnected');
     this.connectInFlight = null;
     if (this.ws) {
@@ -916,12 +1008,15 @@ export class RPCClient {
   private async callWithOptions<Method extends keyof RpcMethodMap>(
     method: Method,
     params: RpcMethodMap[Method]['params'] | undefined,
-    options: RequestOptions = {}
+    options: RequestOptions = {},
+    livenessProbe = false
   ): Promise<RpcMethodMap[Method]['result']> {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       throw new ConnectionClosedError('WebSocket not connected');
     }
-    if (this.pending.size >= MAX_PENDING_CALLS) {
+    // The single serialized liveness probe has a reserved slot. Saturated
+    // application calls (including deadline-free waits) cannot disable recovery.
+    if (this.pending.size >= MAX_PENDING_CALLS && !livenessProbe) {
       throw new Error(`RPC pending queue full (max ${MAX_PENDING_CALLS})`);
     }
 
@@ -1021,7 +1116,8 @@ export class RPCClient {
     environmentSelection: EnvironmentSelection,
     sessionId?: string,
     variables?: Record<string, unknown>,
-    content?: unknown
+    content?: unknown,
+    submissionId?: string
   ): Promise<{ run_id: string; session_id: string }> {
     const params: RpcMethodMap['start_run']['params'] = {
       prompt,
@@ -1029,6 +1125,9 @@ export class RPCClient {
     };
     if (sessionId) {
       params.session_id = sessionId;
+    }
+    if (submissionId) {
+      params.submission_id = submissionId;
     }
     if (variables) {
       // Extract safe_tool_overrides / approvals_reviewer — top-level
@@ -1050,6 +1149,12 @@ export class RPCClient {
     return this.call('start_run', params);
   }
 
+  async getSessionSnapshot(sessionId: string): Promise<any> {
+    this.replay.beginSnapshot(sessionId);
+    const result = await this.call('queue_status', { session_id: sessionId, include_snapshot: true });
+    return decodeSessionSnapshot(result, sessionId);
+  }
+
   /** Set the session's approval reviewer ("user" | "auto"). */
   async setSessionApprovals(sessionId: string, reviewer: 'user' | 'auto'): Promise<Record<string, unknown>> {
     return this.call('set_session_approvals', { session_id: sessionId, reviewer });
@@ -1059,7 +1164,7 @@ export class RPCClient {
    * Set the session's workflow completion reviewer ("off" | "guardian" |
    * "user") — the per-session override of `workflow.completion_reviewer`.
    * `set_session_workflow` ships in the omniagents contract alongside the
-   * `plan_completion_reviewed` broadcast; the generated gui-v1 method map
+   * `plan_completion_reviewed` broadcast; the generated gui-v2 method map
    * predates it, hence the local widening until the schema is regenerated.
    */
   async setSessionWorkflow(sessionId: string, reviewer: 'off' | 'guardian' | 'user'): Promise<Record<string, unknown>> {
@@ -1140,7 +1245,13 @@ export class RPCClient {
     if (error) {
       params.error = error;
     }
-    await this.call('client_response', params);
+    const accepted = await this.call('client_response', params);
+    if (accepted === false) {
+      throw new ClientRequestNotPendingError();
+    }
+    if (accepted !== true) {
+      throw new Error('The server did not confirm this response. Retry to confirm its outcome.');
+    }
   }
 
   /**
@@ -1169,7 +1280,7 @@ export class RPCClient {
   /**
    * Respond to an ``mcp_approval_requested`` event (omniagents 0.16+
    * hosted-MCP interruption flow). Parallel to ``toolApprovalResponse``
-   * but keyed by ``request_id`` (the model's ``McpApprovalRequest.id``)
+   * but keyed by ``request_id`` (the server-issued approval token)
    * — intentionally no ``always_approve`` flag on this path.
    */
   async mcpApprovalResponse(
@@ -1314,9 +1425,17 @@ export class RPCClient {
       variables?: Record<string, unknown>;
       safeToolOverrides?: Record<string, unknown>;
       source?: string;
+      inputContent?: Record<string, unknown>[];
+      submissionId?: string;
     }
   ): Promise<{ ok: boolean; id?: string; depth?: number; reason?: string; session_id?: string; enqueued_at?: number }> {
     const params: RpcMethodMap['enqueue_message']['params'] = { session_id: sessionId, content };
+    if (opts?.submissionId) {
+      params.submission_id = opts.submissionId;
+    }
+    if (opts?.inputContent !== undefined) {
+      params.input_content = opts.inputContent;
+    }
     if (opts?.role) {
       params.role = opts.role;
     }
@@ -1369,6 +1488,8 @@ export class RPCClient {
  * notification — matches ``QueuedItem.to_dict()`` on the server.
  */
 export type QueuedMessage = {
+  state?: 'pending' | 'failed' | 'dispatch_uncertain';
+  error?: string | null;
   id: string;
   content: string;
   role: string;

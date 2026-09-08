@@ -72,6 +72,7 @@ export const SETTINGS_LAYERS: Partial<Record<StoreKey, KeyClass>> = {
   // ---- user, per-(user, team) workspace state ----
   // (chat session identity rides the reserved ``codeTabs`` entry since v26)
   codeTabs: { layer: 'user', scope: 'team' },
+  chatCleanupJobs: { layer: 'user', scope: 'team' },
   activeCodeTabId: { layer: 'user', scope: 'team' },
   activeTicketId: { layer: 'user', scope: 'team' },
   wipLimit: { layer: 'user', scope: 'team' },

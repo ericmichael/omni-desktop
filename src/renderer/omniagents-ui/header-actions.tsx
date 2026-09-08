@@ -1,6 +1,6 @@
 import { PanelLeft } from 'lucide-react';
 import type { ReactNode } from 'react';
-import { createContext, useContext, useMemo } from 'react';
+import { createContext, useCallback, useContext, useMemo, useRef, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 
 import { Button } from '@/renderer/ds/ui/button';
@@ -58,8 +58,39 @@ export const OmniAgentsHeaderActions = ({ compact = false }: { compact?: boolean
   );
 };
 
+const targets = new Map<string, HTMLDivElement>();
+const targetListeners = new Set<() => void>();
+const subscribeTargets = (listener: () => void) => {
+  targetListeners.add(listener);
+  return () => {
+    targetListeners.delete(listener);
+  };
+};
+
+/** Header lifetime is independent of the persistent chat portal's lifetime. */
+export function OmniAgentsHeaderActionsSlot({ id }: { id: string }) {
+  const current = useRef<HTMLDivElement | null>(null);
+  const register = useCallback(
+    (element: HTMLDivElement | null) => {
+      if (element) {
+        targets.set(id, element);
+      } else if (targets.get(id) === current.current) {
+        targets.delete(id);
+      }
+      current.current = element;
+      targetListeners.forEach((listener) => listener());
+    },
+    [id]
+  );
+  return <div id={id} ref={register} />;
+}
+
 export const OmniAgentsHeaderActionsPortal = ({ targetId, compact }: { targetId: string; compact?: boolean }) => {
-  const target = typeof document !== 'undefined' ? document.getElementById(targetId) : null;
+  const target = useSyncExternalStore(
+    subscribeTargets,
+    () => targets.get(targetId) ?? null,
+    () => null
+  );
   if (!target) {
     return null;
   }

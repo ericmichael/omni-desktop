@@ -1,6 +1,6 @@
 import { createContext, type ReactNode, useContext, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 
-import { emitter } from '@/renderer/services/ipc';
+import { emitter, wsEmitter } from '@/renderer/services/ipc';
 import type {
   ManagementMutationCapabilities,
   ManagementRuntimeConnection,
@@ -17,6 +17,7 @@ export type ProductManagementBootstrapStatus = 'starting' | 'connecting' | 'read
 export interface ProductManagementClient extends ManagementTransport {
   connect(): Promise<void>;
   disconnect(): void;
+  dispose?(): void;
 }
 
 export type ProductManagementClientFactory = (url: string, token?: string) => ProductManagementClient;
@@ -99,14 +100,44 @@ export const ProductManagementProvider = ({
     let repository: ManagementRepository | null = null;
     let unsubscribeConnection: (() => void) | null = null;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    let revision = 0;
+    let connectionKey: string | null = null;
+
+    const releaseClient = () => {
+      unsubscribeConnection?.();
+      repository?.stop();
+      if (client?.dispose) {
+        client.dispose();
+      } else {
+        client?.disconnect();
+      }
+      unsubscribeConnection = null;
+      repository = null;
+      client = null;
+      connectionKey = null;
+    };
 
     const boot = (): void => {
+      const attempt = ++revision;
+      if (retryTimer) {
+        clearTimeout(retryTimer);
+        retryTimer = null;
+      }
       void ensureConnection()
         .then((connection) => {
-          if (!active) {
+          if (!active || attempt !== revision) {
             return;
           }
           const config = resolveUiConfig(connection);
+          const key = JSON.stringify([config.wsBaseUrl, config.token, connection.mutationCapabilities]);
+          // A transient launcher disconnect need not disturb an unchanged
+          // runtime. A new backend, however, returns a new endpoint/lease;
+          // reconnecting the old RPC URL forever cannot recover that lease.
+          if (key === connectionKey) {
+            return;
+          }
+          releaseClient();
+          connectionKey = key;
           client = createClient(config.wsBaseUrl, config.token);
           repository = new ManagementRepository(client);
           repository.start();
@@ -144,7 +175,7 @@ export const ProductManagementProvider = ({
           return client.connect();
         })
         .catch((error: unknown) => {
-          if (!active) {
+          if (!active || attempt !== revision) {
             return;
           }
           setValue((current) => ({
@@ -156,23 +187,30 @@ export const ProductManagementProvider = ({
           }));
           // A fresh install or onboarding credential write can make the
           // targetless runtime available without remounting the product root.
-          // Retry only bootstrap failures; once a client exists its own
-          // lifecycle machine owns reconnect backoff.
-          if (!repository) {
-            retryTimer = setTimeout(boot, retryDelayMs);
-          }
+          // Retry lease acquisition even if a previous client exists: its
+          // reconnect loop cannot replace a dead backend's endpoint.
+          retryTimer = setTimeout(boot, retryDelayMs);
         });
     };
     boot();
+    let initialConnection = true;
+    const unsubscribeLauncher = wsEmitter?.onConnect(() => {
+      // The initial boot already queues its ensure on the first connection.
+      if (initialConnection) {
+        initialConnection = false;
+        return;
+      }
+      boot();
+    });
 
     return () => {
       active = false;
+      revision++;
       if (retryTimer) {
         clearTimeout(retryTimer);
       }
-      unsubscribeConnection?.();
-      repository?.stop();
-      client?.disconnect();
+      unsubscribeLauncher?.();
+      releaseClient();
     };
   }, [createClient, ensureConnection, retryDelayMs]);
 

@@ -45,6 +45,7 @@ export const DEFAULTS: StoreData = {
   tickets: [],
   schemaVersion: 0,
   codeTabs: [],
+  chatCleanupJobs: [],
   chatConversations: [],
   activeCodeTabId: null,
   codeLayoutMode: 'focus',
@@ -80,24 +81,24 @@ export class ServerStore {
   private data: StoreData;
   private changeCallbacks = new Set<ChangeCallback>();
 
-  constructor() {
+  constructor(private readonly storePath = STORE_PATH) {
     this.data = this.load();
   }
 
   private load(): StoreData {
-    if (!existsSync(STORE_PATH)) {
+    if (!existsSync(this.storePath)) {
       return { ...DEFAULTS };
     }
     try {
-      const raw = readFileSync(STORE_PATH, 'utf-8');
+      const raw = readFileSync(this.storePath, 'utf-8');
       return { ...DEFAULTS, ...(JSON.parse(raw) as Partial<StoreData>) };
     } catch (err) {
       // Don't silently discard a corrupted store — back it up under a
       // timestamped name so the operator can recover by hand and we leave
       // a loud breadcrumb instead of pretending all user state vanished.
-      const backupPath = `${STORE_PATH}.corrupt-${Date.now()}`;
+      const backupPath = `${this.storePath}.corrupt-${Date.now()}`;
       try {
-        renameSync(STORE_PATH, backupPath);
+        renameSync(this.storePath, backupPath);
         console.error(`[store] corrupted config.json backed up to ${backupPath}:`, err);
       } catch (backupErr) {
         console.error('[store] failed to back up corrupted config.json:', backupErr);
@@ -106,19 +107,23 @@ export class ServerStore {
     }
   }
 
-  private persist(): void {
+  private persist(data: StoreData): void {
     // Atomic write: serialize to a temp file, then rename. A crash mid-write
     // leaves the original config.json intact instead of leaving the user with
     // a half-written file that load() would treat as corrupted.
-    mkdirSync(dirname(STORE_PATH), { recursive: true });
-    const tmpPath = `${STORE_PATH}.tmp`;
-    writeFileSync(tmpPath, JSON.stringify(this.data, null, 2), 'utf-8');
-    renameSync(tmpPath, STORE_PATH);
+    mkdirSync(dirname(this.storePath), { recursive: true });
+    const tmpPath = `${this.storePath}.tmp`;
+    writeFileSync(tmpPath, JSON.stringify(data, null, 2), 'utf-8');
+    renameSync(tmpPath, this.storePath);
   }
 
   private notify(): void {
     for (const cb of this.changeCallbacks) {
-      cb(this.data);
+      try {
+        cb(this.data);
+      } catch {
+        console.error('[store] subscriber failed after commit');
+      }
     }
   }
 
@@ -127,8 +132,8 @@ export class ServerStore {
   }
 
   set store(data: StoreData) {
+    this.persist(data);
     this.data = data;
-    this.persist();
     this.notify();
   }
 
@@ -140,25 +145,17 @@ export class ServerStore {
   set<K extends keyof StoreData>(key: K, value: StoreData[K]): void;
   set(data: Partial<StoreData>): void;
   set<K extends keyof StoreData>(keyOrData: K | Partial<StoreData>, value?: StoreData[K]): void {
-    if (typeof keyOrData === 'string') {
-      (this.data as Record<string, unknown>)[keyOrData] = value;
-    } else {
-      Object.assign(this.data, keyOrData);
-    }
-    this.persist();
-    this.notify();
+    this.store = { ...this.data, ...(typeof keyOrData === 'string' ? { [keyOrData]: value } : keyOrData) };
   }
 
   delete<K extends keyof StoreData>(key: K): void {
-    delete (this.data as Record<string, unknown>)[key];
-    this.persist();
-    this.notify();
+    const next = { ...this.data };
+    delete (next as Record<string, unknown>)[key];
+    this.store = next;
   }
 
   clear(): void {
-    this.data = { ...DEFAULTS };
-    this.persist();
-    this.notify();
+    this.store = { ...DEFAULTS };
   }
 
   onDidAnyChange(callback: ChangeCallback): () => void {

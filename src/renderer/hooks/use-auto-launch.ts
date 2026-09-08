@@ -201,18 +201,25 @@ export const useAutoLaunch = (opts: UseAutoLaunchOptions) => {
         let lastSentType: string | null = null;
 
         // Seed with current server-side status
+        const watchedProcessId = processIdRef.current;
+        const seededFrom = $agentStatuses.get()[watchedProcessId];
         emitter
-          .invoke('agent-process:get-status', processIdRef.current)
+          .invoke('agent-process:get-status', watchedProcessId)
           .then((status) => {
-            if (cancelled || !status || status.type === 'uninitialized') {
+            if (
+              cancelled ||
+              !status ||
+              status.type === 'uninitialized' ||
+              $agentStatuses.get()[watchedProcessId] !== seededFrom
+            ) {
               return;
             }
-            $agentStatuses.setKey(processIdRef.current, status);
+            $agentStatuses.setKey(watchedProcessId, status);
           })
           .catch(() => {});
 
         const unsub = $agentStatuses.subscribe((allStatuses) => {
-          const status = allStatuses[processIdRef.current];
+          const status = allStatuses[watchedProcessId];
           if (!status) {
             return;
           }
@@ -226,6 +233,11 @@ export const useAutoLaunch = (opts: UseAutoLaunchOptions) => {
             sendBack({ type: 'SANDBOX_ERROR', error: status.error.message });
           } else if (status.type === 'exited') {
             sendBack({ type: 'SANDBOX_EXITED' });
+          } else if (status.type === 'uninitialized') {
+            // Only authoritative reconnect reconciliation publishes this
+            // status for a previously live process. Preserve the user's
+            // launch intent, but discard the old runtime identity.
+            sendBack({ type: 'SANDBOX_LOST' });
           }
         });
         return () => {

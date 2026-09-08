@@ -1,4 +1,4 @@
-import type { RpcMethodMap } from '@/generated/omniagents-gui-v1/gui-v1';
+import type { RpcMethodMap } from '@/generated/omniagents-gui-v2/gui-v2';
 
 type ModelCatalogMethod = Extract<
   keyof RpcMethodMap,

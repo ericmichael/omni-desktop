@@ -55,7 +55,7 @@ const startFakeServe = async (): Promise<FakeServe> => {
         return;
       }
       if (msg.method === 'initialize') {
-        socket.send(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { protocol_version: '1.0.0' } }));
+        socket.send(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: guiInitializeResult() }));
         return;
       }
       const fn = msg.params.function;
@@ -185,3 +185,4 @@ describe('TerminalProxy dials', () => {
     expect(serve.connections.every((c) => c.authorization === undefined)).toBe(true);
   });
 });
+import { guiInitializeResult } from 'tests/unit/gui-initialize';

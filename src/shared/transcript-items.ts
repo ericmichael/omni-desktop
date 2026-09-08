@@ -46,28 +46,36 @@ export type ToolResultFields = {
  * run arrives — matching what a reload rebuilds from canonical history
  * (agent_message items with a turn_id).
  *
- * Dedupe on (runId, content): resync replay / reconnect can deliver the
- * same message_output twice — the message has no call_id, so identity is
- * the run plus the exact text (the spirit of `upsertToolCall`'s call_id
- * upsert).
+ * Prefer provider message identity, including when canonical persistence
+ * arrives first. Older ID-less producers retain the (runId, content) fallback.
  */
 export function appendAssistantMessage(
   items: MessageItem[],
   content: string,
-  runId: string | undefined
+  runId: string | undefined,
+  messageId?: string
 ): MessageItem[] {
   const dup = items.some(
-    (it) => it.type === 'chat' && it.role === 'assistant' && it.runId === runId && it.content === content
+    (it) =>
+      it.type === 'chat' &&
+      it.role === 'assistant' &&
+      (messageId ? it.message_id === messageId : it.runId === runId && it.content === content)
   );
   if (dup) {
     return items;
   }
-  const msg: ChatMessage = { type: 'chat', role: 'assistant', content, runId };
+  const msg: ChatMessage = {
+    type: 'chat',
+    role: 'assistant',
+    content,
+    runId,
+    ...(messageId ? { message_id: messageId } : {}),
+  };
   return [...items, msg];
 }
 
 /**
- * Upsert by call_id: a live tool_called can arrive after the same call was
+ * Upsert by run + call_id: a live tool_called can arrive after the same call was
  * already rehydrated from the canonical transcript (late attach, post-resync
  * replay) — appending blindly would duplicate it.
  */
@@ -83,7 +91,10 @@ export function upsertToolCall(items: MessageItem[], e: ToolCalledFields, runId:
     metadata: e.metadata,
     runId,
   };
-  const idx = items.findIndex((it) => it.type === 'tool' && it.call_id === e.call_id);
+  const idx = items.findIndex((it) => it.type === 'tool' && it.call_id === e.call_id && it.runId === runId);
+  if (idx >= 0 && (items[idx] as ToolItem).status === 'result') {
+    return items;
+  }
   const next = idx >= 0 ? items.slice() : [...items, item];
   if (idx >= 0) {
     next[idx] = { ...(next[idx] as ToolItem), ...item };
@@ -97,10 +108,13 @@ export function upsertToolCall(items: MessageItem[], e: ToolCalledFields, runId:
  * its own rather than vanishing.
  */
 export function applyToolResult(items: MessageItem[], e: ToolResultFields, runId: string | undefined): MessageItem[] {
-  const idx = items.findIndex((it) => it.type === 'tool' && it.call_id === e.call_id);
+  const idx = items.findIndex((it) => it.type === 'tool' && it.call_id === e.call_id && it.runId === runId);
   const next = items.slice();
   if (idx >= 0) {
     const prev = next[idx] as ToolItem;
+    if (prev.status === 'result') {
+      return items;
+    }
     next[idx] = {
       ...prev,
       output: e.output,

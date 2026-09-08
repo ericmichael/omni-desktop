@@ -72,6 +72,7 @@ export const ConversationScrollButton = ({ className, ...props }: ConversationSc
           className
         )}
         onClick={handleScrollToBottom}
+        aria-label="Jump to latest message"
         size="icon"
         type="button"
         variant="outline"

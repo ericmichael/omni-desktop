@@ -1,4 +1,4 @@
-import type { RpcMethodMap } from '@/generated/omniagents-gui-v1/gui-v1';
+import type { RpcMethodMap } from '@/generated/omniagents-gui-v2/gui-v2';
 import { isCanonicalConversationUnsupported } from '@/renderer/omniagents-ui/rpc/canonical-chat-history';
 import {
   ConversationOrganizationClient,
@@ -35,7 +35,7 @@ export interface CanonicalSessionListTransport {
   ): Promise<RpcMethodMap[Method]['result']>;
   on<Event extends 'thread_updated'>(
     event: Event,
-    handler: (payload: import('@/generated/omniagents-gui-v1/gui-v1').RpcNotificationMap[Event]) => void
+    handler: (payload: import('@/generated/omniagents-gui-v2/gui-v2').RpcNotificationMap[Event]) => void
   ): () => void;
   listSessions(options?: { limit?: number }): Promise<CanonicalSessionSummary[]>;
 }

@@ -661,7 +661,7 @@ export class WslBackendManager {
     if (!this.secret) {
       throw new Error('WSL daemon is not running');
     }
-    return signRuntimeToken(this.secret, { tenantId: DEFAULT_TENANT, sessionId: uuidv4() });
+    return signRuntimeToken(this.secret, { purpose: 'launcher', tenantId: DEFAULT_TENANT, sessionId: uuidv4() });
   }
 
   dispose(): void {

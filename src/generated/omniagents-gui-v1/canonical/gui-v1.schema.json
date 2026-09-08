@@ -737,6 +737,13 @@
         "content": {
           "type": "string"
         },
+        "input_content": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "type": "array"
+        },
         "role": {
           "type": "string"
         },
@@ -747,6 +754,9 @@
           "type": "string"
         },
         "source": {
+          "type": "string"
+        },
+        "submission_id": {
           "type": "string"
         },
         "trigger_run": {
@@ -2442,6 +2452,9 @@
         "session_id": {
           "type": "string"
         },
+        "source_request_id": {
+          "type": "string"
+        },
         "stream_id": {
           "type": "string"
         },
@@ -2888,7 +2901,13 @@
     "queue_status": {
       "additionalProperties": false,
       "properties": {
+        "include_snapshot": {
+          "type": "boolean"
+        },
         "session_id": {
+          "type": "string"
+        },
+        "submission_id": {
           "type": "string"
         }
       },
@@ -3323,7 +3342,18 @@
           "type": "string"
         },
         "content": {
-          "type": "string"
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "items": {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              "type": "array"
+            }
+          ]
         },
         "context": {
           "type": "object"
@@ -3390,6 +3420,9 @@
           "type": "object"
         },
         "session_id": {
+          "type": "string"
+        },
+        "submission_id": {
           "type": "string"
         },
         "variables": {
@@ -3522,6 +3555,9 @@
           "type": "integer"
         },
         "session_id": {
+          "type": "string"
+        },
+        "source_call_id": {
           "type": "string"
         },
         "stream_id": {

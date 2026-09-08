@@ -20,7 +20,7 @@ import { CODEX_REFRESH_PATH, registerCodexRefreshRoute } from '@/server/codex-re
 import { setupLocalTunnelProxy } from '@/server/local-tunnel-proxy';
 import { wireClientManagers, wireGlobalHandlers } from '@/server/managers';
 import { MCP_PROJECTS_PATH, registerMcpHttpRoute } from '@/server/mcp-http';
-import { setupProxyRewriter } from '@/server/proxy-rewriter';
+import { redactProxyUrlForLog, setupProxyRewriter } from '@/server/proxy-rewriter';
 import { resolveRuntimeTokenSecret, signRuntimeToken, verifyRuntimeToken } from '@/server/runtime-token';
 import { ServerStore } from '@/server/store';
 import { registerVoiceRoutes, VOICE_HTTP_PREFIX } from '@/server/voice-http';
@@ -148,7 +148,13 @@ function buildTokenAllowList(): { check: (addr: string) => boolean; describe: ()
 }
 
 const main = async () => {
-  const fastify = Fastify({ logger: true });
+  const fastify = Fastify({
+    logger: {
+      serializers: {
+        req: (request) => ({ method: request.method, url: redactProxyUrlForLog(request.url ?? '') }),
+      },
+    },
+  });
 
   // Hoisted from wireGlobalHandlers so /api/ws-token + /ws can both reach it.
   // Tokens minted at /api/ws-token are signed with this secret and verified
@@ -231,7 +237,11 @@ const main = async () => {
     // Short TTL (5 min) — the renderer fetches a fresh one on each connect/
     // reconnect, so we don't need long-lived tokens floating around.
     reply.send({
-      token: signRuntimeToken(runtimeTokenSecret, { tenantId: principalId, principalId, sessionId: uuidv4() }, 5 * 60),
+      token: signRuntimeToken(
+        runtimeTokenSecret,
+        { purpose: 'launcher', tenantId: principalId, principalId, sessionId: uuidv4() },
+        5 * 60
+      ),
     });
   });
 
@@ -241,7 +251,6 @@ const main = async () => {
 
   // Set up reverse proxy URL rewriting for internal services (chat, sandbox, etc.).
   // Share the ws-token allowlist so /proxy/_register honors OMNI_TRUSTED_CIDRS too.
-  setupProxyRewriter(fastify, wsHandler, tokenAllowList.check);
 
   // Wire global (shared) IPC handlers — store, util, config, project, code, chat, sandbox, install
   const {
@@ -251,6 +260,7 @@ const main = async () => {
     getTenantRepo,
     getMcpContext,
     teamsEnabled,
+    controlPlane,
     ensureUserBootstrapped,
     resolveActiveTeam,
     pgSecret,
@@ -261,6 +271,15 @@ const main = async () => {
     store,
     runtimeTokenSecret,
   });
+  setupProxyRewriter(
+    fastify,
+    wsHandler,
+    tokenAllowList.check,
+    teamsEnabled
+      ? async (scope) =>
+          Boolean(scope.principalId && (await controlPlane?.getMembershipRole(scope.tenantId, scope.principalId)))
+      : undefined
+  );
 
   // Cloud-relayed tunnel routes for computer-as-sandbox (Phase 3). The route
   // is `/proxy/local/:machineId/:sessionId/*` and bytes flow over the
@@ -275,6 +294,19 @@ const main = async () => {
   // doesn't use it; it's harmless when no sandbox calls it.
   registerMcpHttpRoute(fastify, {
     runtimeTokenSecret,
+    authorize: async (claims) => {
+      if (!teamsEnabled) {
+        return true;
+      }
+      // Residents act as team-owned agents, not as the human who launched them.
+      if (claims.agentId) {
+        const residents = await getTenantRepo(claims.tenantId).listResidents();
+        return residents.some((resident) => resident.id === claims.agentId && resident.enabled === 1);
+      }
+      return Boolean(
+        claims.principalId && (await controlPlane?.getMembershipRole(claims.tenantId, claims.principalId))
+      );
+    },
     getTenantRepo,
     getContext: (claims) => getMcpContext(claims.tenantId, claims.principalId ?? claims.tenantId, claims.agentId),
   });
@@ -292,7 +324,14 @@ const main = async () => {
   // OAuth tokens here after rotation so PgSecretStore stays current and the
   // next spawn pre-materializes a non-stale refresh token.
   if (pgSecret) {
-    registerCodexRefreshRoute(fastify, { runtimeTokenSecret, pgSecret });
+    registerCodexRefreshRoute(fastify, {
+      runtimeTokenSecret,
+      pgSecret,
+      // This route writes a HUMAN credential, even for a resident runtime.
+      authorize: async (claims) =>
+        !teamsEnabled ||
+        Boolean(claims.principalId && (await controlPlane?.getMembershipRole(claims.tenantId, claims.principalId))),
+    });
     console.log(`[codex-refresh] callback registered at ${CODEX_REFRESH_PATH}`);
   }
 
@@ -308,7 +347,7 @@ const main = async () => {
       // /api/ws-token, which embeds the EasyAuth-derived identity. A
       // forged/expired token fails verification.
       const claims = token ? verifyRuntimeToken(runtimeTokenSecret, token) : null;
-      if (!claims) {
+      if (!claims || claims.purpose !== 'launcher') {
         socket.close(4401, 'Unauthorized');
         return;
       }
@@ -354,15 +393,28 @@ const main = async () => {
 
       // Teams mode: buffer frames until (team, principal) is resolved.
       const buffered: unknown[] = [];
+      let bufferedBytes = 0;
       const buffer = (raw: unknown): void => {
+        bufferedBytes += Buffer.byteLength(String(raw));
+        if (buffered.length >= 128 || bufferedBytes > 1024 * 1024) {
+          socket.close(1009, 'Startup buffer exceeded');
+          return;
+        }
         buffered.push(raw);
       };
       socket.on('message', buffer);
+      socket.once('close', () => {
+        socket.off('message', buffer);
+        buffered.length = 0;
+      });
       void (async () => {
         try {
           const claims = principalClaims(request.headers);
           await ensureUserBootstrapped(principal, claims);
           const teamId = await resolveActiveTeam(principal, requestedTeam);
+          if (socket.readyState !== 1) {
+            return;
+          }
           if (teamId === null) {
             socket.close(4403, 'Forbidden: not a member of the requested team');
             return;

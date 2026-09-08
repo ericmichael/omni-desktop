@@ -14,11 +14,11 @@ export type ApprovalDecisionValue = 'yes' | 'always' | 'no';
 export type ApprovalResponder = Pick<RPCClient, 'toolApprovalResponse' | 'mcpApprovalResponse'>;
 
 /**
- * ``request_id`` is the model-minted identifier stored on the
+ * ``request_id`` is the opaque server-issued approval token stored on the
  * ApprovalItem when the approval event arrived (see use-chat-session.ts):
  *
- *   - kind 'function' → tool call_id             → tool_approval_response RPC
- *   - kind 'mcp'      → McpApprovalRequest id    → mcp_approval_response RPC
+ *   - kind 'function' → event call_id    → tool_approval_response RPC
+ *   - kind 'mcp'      → event request_id → mcp_approval_response RPC
  *
  * Both take ``decision: "approve" | "reject"``; only the function path
  * honors ``always_approve``.
@@ -31,21 +31,13 @@ export async function respondToApproval(
 ): Promise<void> {
   const decision = value === 'no' ? 'reject' : 'approve';
   const alwaysApprove = value === 'always';
-  const failureMessage = (e: unknown) => String((e as Error)?.message || 'failed');
-  try {
-    if (kind === 'mcp') {
-      await client.mcpApprovalResponse(request_id, decision);
-    } else {
-      await client.toolApprovalResponse(request_id, decision, alwaysApprove);
-    }
-  } catch (e) {
-    // Best-effort fallback: reject with the underlying error so the run
-    // (or the paused voice turn) unblocks instead of hanging on the
-    // approval future.
-    const reject =
-      kind === 'mcp'
-        ? client.mcpApprovalResponse(request_id, 'reject', failureMessage(e))
-        : client.toolApprovalResponse(request_id, 'reject', false, failureMessage(e));
-    await reject.catch(() => {});
+  // An uncertain acknowledgement is not permission to reverse the user's
+  // decision. Leave the card pending so replay or an explicit retry resolves it.
+  const accepted =
+    kind === 'mcp'
+      ? await client.mcpApprovalResponse(request_id, decision)
+      : await client.toolApprovalResponse(request_id, decision, alwaysApprove);
+  if (accepted !== true) {
+    throw new Error('This approval is no longer pending. Refresh the conversation to reconcile its status.');
   }
 }

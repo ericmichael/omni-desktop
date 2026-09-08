@@ -3,7 +3,7 @@ import type {
   FsRescanRequiredParams,
   RpcMethodMap,
   RpcNotificationMap,
-} from '@/generated/omniagents-gui-v1/gui-v1';
+} from '@/generated/omniagents-gui-v2/gui-v2';
 import type { ExecutionTarget } from '@/shared/types';
 
 import type { RPCConnectionState } from './client';

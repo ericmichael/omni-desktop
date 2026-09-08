@@ -6,9 +6,19 @@ import { describe, expect, it, vi } from 'vitest';
 import { initializeMainRpcConnection, mainRpcInitializeParams } from './omniagents-rpc-handshake';
 
 describe('main-process OmniAgents RPC handshake', () => {
+  it.each([null, { protocol_version: '1.0.0' }, { protocol_version: '2.0.0' }])(
+    'does not initialize after an invalid successful response %j',
+    async (result) => {
+      const notify = vi.fn();
+      await expect(
+        initializeMainRpcConnection({ name: 'test', request: async () => result, notify })
+      ).rejects.toThrow();
+      expect(notify).not.toHaveBeenCalled();
+    }
+  );
   it('builds a fail-closed capability declaration with explicit overrides', () => {
     expect(mainRpcInitializeParams('test-client', { terminal: true })).toMatchObject({
-      protocol_version: '1.0.0',
+      protocol_version: '2.0.0',
       identity: { name: 'test-client', version: '1.0.0' },
       capabilities: {
         terminal: true,
@@ -23,7 +33,7 @@ describe('main-process OmniAgents RPC handshake', () => {
     const request = vi.fn(async () => {
       order.push('initialize');
       return {
-        protocol_version: '1.0.0',
+        protocol_version: '2.0.0',
         identity: { name: 'test-server', version: '1.0.0' },
         platform: { os: 'linux', arch: 'x64' },
         capabilities: mainRpcInitializeParams('test-server').capabilities,
@@ -35,7 +45,7 @@ describe('main-process OmniAgents RPC handshake', () => {
     });
 
     await expect(initializeMainRpcConnection({ name: 'test-client', request, notify })).resolves.toMatchObject({
-      protocol_version: '1.0.0',
+      protocol_version: '2.0.0',
       agent_host: { agent_host_id: 'host-1' },
     });
     expect(order).toEqual(['initialize', 'initialized']);
@@ -55,7 +65,9 @@ describe('main-process OmniAgents RPC handshake', () => {
       .flatMap(productionTypescript)
       .filter((file) => {
         const source = readFileSync(file, 'utf8');
-        return source.includes("jsonrpc: '2.0'") && /from ['"]ws['"]/.test(source);
+        // Inbound JSON-RPC servers (such as /ws/chat) have their own contract;
+        // this invariant covers clients that actually dial an agent socket.
+        return source.includes("jsonrpc: '2.0'") && /new WebSocket\(/.test(source) && /from ['"]ws['"]/.test(source);
       });
     const unguarded = clients
       .filter((file) => !readFileSync(file, 'utf8').includes('initializeMainRpcConnection'))

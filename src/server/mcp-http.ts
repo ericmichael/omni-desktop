@@ -26,11 +26,12 @@ import type { FastifyInstance } from 'fastify';
 import type { IProjectsRepo } from 'omni-projects-db';
 import { createServer, type ProjectsMcpContext } from 'omni-projects-mcp';
 
-import { verifyRuntimeToken } from '@/server/runtime-token';
+import { type RuntimeTokenClaims, verifyRuntimeToken } from '@/server/runtime-token';
 
 export interface McpHttpDeps {
   /** Secret the runtime token was signed with (see runtime-token.ts). */
   runtimeTokenSecret: string;
+  authorize?: (claims: RuntimeTokenClaims) => Promise<boolean>;
   /** Resolve a tenant-scoped repo from the verified token's tenant. */
   getTenantRepo: (tenantId: string) => IProjectsRepo;
   /** Resolve option-discovery providers from the verified token claims. */
@@ -62,12 +63,16 @@ export function registerMcpHttpRoute(fastify: FastifyInstance, deps: McpHttpDeps
 
     const token = bearer(request.headers['authorization']);
     const claims = token ? verifyRuntimeToken(deps.runtimeTokenSecret, token) : null;
-    if (!claims) {
+    if (!claims || claims.purpose !== 'runtime') {
       reply.code(401).send({
         jsonrpc: '2.0',
         error: { code: -32001, message: 'Unauthorized: missing or invalid runtime token' },
         id: null,
       });
+      return;
+    }
+    if (deps.authorize && !(await deps.authorize(claims))) {
+      reply.code(403).send({ error: 'Forbidden: runtime authorization revoked' });
       return;
     }
 

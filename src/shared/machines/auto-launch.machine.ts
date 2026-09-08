@@ -43,6 +43,7 @@ export type AutoLaunchEvent =
   | { type: 'SANDBOX_RUNNING' }
   | { type: 'SANDBOX_ERROR'; error: string }
   | { type: 'SANDBOX_EXITED' }
+  | { type: 'SANDBOX_LOST' }
   | { type: 'RETRY' }
   | { type: 'RELAUNCH' }
   | { type: 'RESET' };
@@ -160,6 +161,7 @@ export const autoLaunchMachine = setup({
     starting: {
       invoke: [{ src: 'watchProcessStatus' }, { src: 'startProcess' }],
       on: {
+        SANDBOX_LOST: { target: 'checking', actions: ['clearError', 'clearLaunched'] },
         SANDBOX_RUNNING: 'running',
         SANDBOX_ERROR: {
           target: 'error',
@@ -176,6 +178,7 @@ export const autoLaunchMachine = setup({
     running: {
       invoke: { src: 'watchProcessStatus' },
       on: {
+        SANDBOX_LOST: { target: 'checking', actions: ['clearError', 'clearLaunched'] },
         // No-op handler: the status watcher re-seeds after re-invoke on
         // state transitions (the invoker's subscription fires synchronously
         // with the current value, which is still 'running'). Acknowledge

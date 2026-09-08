@@ -3,6 +3,8 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ModelCatalogRpcTransport } from '@/renderer/omniagents-ui/rpc/model-catalog';
+import { SessionRegistry } from '@/renderer/omniagents-ui/session/session-registry';
+import { deferred, fakeSessionClient } from '@/renderer/omniagents-ui/session/session-test-support';
 
 import { ModelSessionControls } from './ModelSessionControls';
 
@@ -10,6 +12,7 @@ Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
 let container: HTMLDivElement;
 let root: Root;
+let registry: SessionRegistry | undefined;
 
 const model = (id: string, label: string) => ({
   id,
@@ -40,11 +43,160 @@ beforeEach(() => {
 
 afterEach(() => {
   act(() => root.unmount());
+  registry?.dispose();
+  registry = undefined;
   container.remove();
   document.body.querySelectorAll('[data-radix-popper-content-wrapper]').forEach((element) => element.remove());
 });
 
 describe('ModelSessionControls', () => {
+  it('shows the catalog default when a remote update clears the explicit model override', async () => {
+    registry = new SessionRegistry(fakeSessionClient().client);
+    const session = registry.get('A');
+    session.panels.set('models', [model('model-1', 'Model One'), model('model-2', 'Model Two')]);
+    session.panels.set('activeModel', 'model-2');
+    session.panels.set('modelLoading', false);
+    const transport = { request: vi.fn() } as unknown as ModelCatalogRpcTransport;
+    await act(async () =>
+      root.render(<ModelSessionControls sessionId="A" session={session} transport={transport} connected={false} />)
+    );
+    await act(async () => session.panels.set('activeModel', null));
+    expect(container.textContent).toContain('Model One');
+    expect(container.textContent).not.toContain('Loading models');
+  });
+  it('loads catalog options and untouched fields when a remote selection arrives during the read', async () => {
+    registry = new SessionRegistry(fakeSessionClient().client);
+    const session = registry.get('A');
+    const response = deferred<any>();
+    const transport = { request: vi.fn(() => response.promise) } as unknown as ModelCatalogRpcTransport;
+    await act(async () => root.render(<ModelSessionControls sessionId="A" session={session} transport={transport} />));
+    await act(async () => {
+      session.panels.set('activeModel', 'model-2');
+      response.resolve({
+        models: [model('model-1', 'Model One'), model('model-2', 'Model Two')],
+        default_model: 'model-1',
+        voice_default_model: null,
+        errors: [],
+        reasons: [],
+        session: {
+          session_id: 'A',
+          active_model: 'model-1',
+          reasoning_effort: 'high',
+          approvals_reviewer: 'auto',
+          workflow_reviewer: 'off',
+        },
+      });
+    });
+    expect(session.panels.state.get()).toMatchObject({
+      activeModel: 'model-2',
+      reasoningEffort: 'high',
+      approvalsReviewer: 'auto',
+      workflowReviewer: 'off',
+      modelLoading: false,
+    });
+    expect(session.panels.state.get().models).toHaveLength(2);
+    expect(container.textContent).toContain('Model Two');
+  });
+  it('does not surface an old catalog failure after a newer reconnect read succeeds', async () => {
+    registry = new SessionRegistry(fakeSessionClient().client);
+    const session = registry.get('A');
+    const oldRead = deferred<any>();
+    const newRead = deferred<any>();
+    const request = vi.fn().mockReturnValueOnce(oldRead.promise).mockReturnValueOnce(newRead.promise);
+    const transport = { request } as unknown as ModelCatalogRpcTransport;
+    await act(async () => root.render(<ModelSessionControls sessionId="A" session={session} transport={transport} />));
+    await act(async () =>
+      root.render(<ModelSessionControls sessionId="A" session={session} transport={transport} connected={false} />)
+    );
+    await act(async () => root.render(<ModelSessionControls sessionId="A" session={session} transport={transport} />));
+    await act(async () =>
+      newRead.resolve({
+        models: [model('model-2', 'Model Two')],
+        default_model: 'model-2',
+        voice_default_model: null,
+        errors: [],
+        reasons: [],
+        session: { session_id: 'A', active_model: 'model-2', reasoning_effort: 'high' },
+      })
+    );
+    await act(async () => oldRead.reject(new Error('stale connection failed')));
+    expect(session.panels.state.get().modelError).toBeNull();
+    expect(session.panels.state.get().modelLoading).toBe(false);
+    expect(container.textContent).toContain('Model Two');
+  });
+  it('keeps session-owned selections across view unmounts and rejects a stale catalog read', async () => {
+    registry = new SessionRegistry(fakeSessionClient().client);
+    const session = registry.get('A');
+    const response = deferred<any>();
+    const transport = { request: vi.fn(() => response.promise) } as unknown as ModelCatalogRpcTransport;
+    await act(async () => root.render(<ModelSessionControls sessionId="A" session={session} transport={transport} />));
+    await act(async () => {
+      session.panels.set('models', [model('model-1', 'Model One'), model('model-2', 'Model Two')]);
+      session.panels.set('activeModel', 'model-2');
+      response.resolve({
+        models: [model('model-1', 'Model One')],
+        default_model: 'model-1',
+        voice_default_model: null,
+        errors: [],
+        reasons: [],
+        session: { session_id: 'A', active_model: 'model-1', reasoning_effort: 'low' },
+      });
+    });
+    expect(container.textContent).toContain('Model Two');
+    await act(async () => root.render(null));
+    await act(async () =>
+      root.render(<ModelSessionControls sessionId="A" session={session} transport={transport} connected={false} />)
+    );
+    expect(container.textContent).toContain('Model Two');
+  });
+
+  it('renders the same settings in two views of one session', async () => {
+    registry = new SessionRegistry(fakeSessionClient().client);
+    const session = registry.get('A');
+    session.panels.set('models', [model('model-1', 'Model One'), model('model-2', 'Model Two')]);
+    session.panels.set('activeModel', 'model-1');
+    session.panels.set('modelLoading', false);
+    const transport = { request: vi.fn() } as unknown as ModelCatalogRpcTransport;
+    await act(async () =>
+      root.render(
+        <>
+          <ModelSessionControls sessionId="A" session={session} transport={transport} connected={false} />
+          <ModelSessionControls sessionId="A" session={session} transport={transport} connected={false} />
+        </>
+      )
+    );
+    await act(async () => session.panels.set('activeModel', 'model-2'));
+    expect(
+      [...container.querySelectorAll('[data-testid="model-session-controls"]')].map((element) => element.textContent)
+    ).toEqual([expect.stringContaining('Model Two'), expect.stringContaining('Model Two')]);
+  });
+  it('keeps the selected model visible while disconnected and refreshes on reconnect', async () => {
+    const request = vi.fn(async () => ({
+      models: [model('model-1', 'Model One')],
+      default_model: 'model-1',
+      voice_default_model: null,
+      errors: [],
+      reasons: [],
+      session: { session_id: 'reconnect', active_model: 'model-1', reasoning_effort: 'medium' },
+    }));
+    const transport = { request } as unknown as ModelCatalogRpcTransport;
+    await act(async () => {
+      root.render(<ModelSessionControls sessionId="reconnect" transport={transport} />);
+    });
+    const button = container.querySelector('button')!;
+    await act(async () => {
+      root.render(<ModelSessionControls sessionId="reconnect" transport={transport} connected={false} />);
+    });
+    expect(container.textContent).toContain('Model One');
+    expect(container.querySelector('button')).toBe(button);
+    expect(button.disabled).toBe(true);
+    expect(request).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      root.render(<ModelSessionControls sessionId="reconnect" transport={transport} connected />);
+    });
+    expect(button.disabled).toBe(false);
+    expect(request).toHaveBeenCalledTimes(2);
+  });
   it('loads the session-scoped catalog and exposes model and reasoning controls', async () => {
     const request = vi.fn(async (method: string) => {
       if (method !== 'list_models') {

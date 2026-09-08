@@ -2,11 +2,21 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { RpcMethodMap, RpcNotificationMap } from '@/generated/omniagents-gui-v1/gui-v1';
+import type { RpcMethodMap, RpcNotificationMap } from '@/generated/omniagents-gui-v2/gui-v2';
 
+const launcherConnect = vi.hoisted(() => ({ callback: null as (() => void) | null }));
 vi.mock('@/renderer/services/ipc', () => ({
   emitter: { invoke: vi.fn() },
   serverOrigin: () => 'http://launcher.test',
+  wsEmitter: {
+    onConnect: (callback: () => void) => {
+      launcherConnect.callback = callback;
+      callback();
+      return () => {
+        launcherConnect.callback = null;
+      };
+    },
+  },
 }));
 
 import {
@@ -30,6 +40,7 @@ class FakeClient implements ProductManagementClient {
     }
   });
   readonly disconnect = vi.fn();
+  readonly dispose = vi.fn(() => this.disconnect());
   private readonly connectionHandlers = new Set<(state: RPCConnectionState) => void>();
 
   async request<Method extends keyof RpcMethodMap>(
@@ -111,6 +122,77 @@ describe('ProductManagementProvider', () => {
     await vi.waitFor(() => expect(container.textContent).toBe('ready:ready:true:true'));
     expect(ensureConnection).toHaveBeenCalledOnce();
     expect(createClient).toHaveBeenCalledWith('ws://runtime.test/ws', 'ordinary-token');
+  });
+
+  it('keeps an unchanged runtime on reconnect but replaces a lost backend lease', async () => {
+    const oldClient = new FakeClient();
+    const newClient = new FakeClient();
+    const connection = {
+      baseUrl: 'http://old.test',
+      authToken: 'ordinary-token',
+      mutationCapabilities: { validateConfig: true, writeConfig: true },
+    };
+    const ensureConnection = vi.fn(async () => connection);
+    const createClient = vi.fn().mockReturnValueOnce(oldClient).mockReturnValueOnce(newClient);
+    await act(async () => {
+      root.render(
+        <ProductManagementProvider ensureConnection={ensureConnection} createClient={createClient}>
+          ready
+        </ProductManagementProvider>
+      );
+    });
+    await act(async () => {
+      launcherConnect.callback!();
+    });
+    expect(createClient).toHaveBeenCalledTimes(1);
+    expect(oldClient.disconnect).not.toHaveBeenCalled();
+    ensureConnection.mockResolvedValue({ ...connection, baseUrl: 'http://new.test' });
+    await act(async () => {
+      launcherConnect.callback!();
+    });
+    expect(oldClient.disconnect).toHaveBeenCalledOnce();
+    expect(oldClient.dispose).toHaveBeenCalledOnce();
+    expect(newClient.connect).toHaveBeenCalledOnce();
+    expect(createClient).toHaveBeenLastCalledWith('ws://new.test/ws', 'ordinary-token');
+  });
+
+  it('ignores an old bootstrap reply after a newer launcher connection has won', async () => {
+    const connection = {
+      baseUrl: 'http://new.test',
+      authToken: 'ordinary-token',
+      mutationCapabilities: { validateConfig: true, writeConfig: true },
+    };
+    let resolveOld!: (value: typeof connection) => void;
+    const ensureConnection = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveOld = resolve;
+          })
+      )
+      .mockResolvedValue(connection);
+    const client = new FakeClient();
+    const createClient = vi.fn(() => client);
+    await act(async () => {
+      root.render(
+        <ProductManagementProvider ensureConnection={ensureConnection} createClient={createClient}>
+          ready
+        </ProductManagementProvider>
+      );
+    });
+    await act(async () => {
+      launcherConnect.callback!();
+    });
+    await act(async () => {
+      resolveOld({ ...connection, baseUrl: 'http://old.test' });
+    });
+    expect(createClient).toHaveBeenCalledOnce();
+    expect(createClient).toHaveBeenCalledWith('ws://new.test/ws', 'ordinary-token');
+    expect(client.disconnect).not.toHaveBeenCalled();
+    act(() => root.render(null));
+    expect(launcherConnect.callback).toBeNull();
+    expect(client.disconnect).toHaveBeenCalledOnce();
   });
 });
 

@@ -1,0 +1,4253 @@
+{
+  "$defs": {
+    "account_changed": {
+      "additionalProperties": false,
+      "properties": {
+        "account": {
+          "type": "object"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "seq": {
+          "type": "integer"
+        },
+        "stream_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "provider",
+        "reason"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "account_login_cancel": {
+      "additionalProperties": false,
+      "properties": {
+        "login_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "login_id"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "account_login_complete": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "login_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "login_id"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "account_login_start": {
+      "additionalProperties": false,
+      "properties": {
+        "api_key": {
+          "type": "string"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "redirect_uri": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "provider",
+        "mode"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "account_logout": {
+      "additionalProperties": false,
+      "properties": {
+        "provider": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "provider"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "account_refresh": {
+      "additionalProperties": false,
+      "properties": {
+        "provider": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "provider"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "account_select": {
+      "additionalProperties": false,
+      "properties": {
+        "provider": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "provider"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "account_status": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "account_usage": {
+      "additionalProperties": false,
+      "properties": {
+        "provider": {
+          "type": "string"
+        }
+      },
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "ack_events": {
+      "additionalProperties": false,
+      "properties": {
+        "seq": {
+          "type": "integer"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "stream_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "stream_id",
+        "seq"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "agentHost": {
+      "additionalProperties": false,
+      "properties": {
+        "agent_host_id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "default_environment_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "default_workspace_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "agent_host_id"
+      ],
+      "type": "object"
+    },
+    "agent_host_bind_thread": {
+      "additionalProperties": false,
+      "properties": {
+        "binding": {
+          "additionalProperties": false,
+          "properties": {
+            "environment_selection": {
+              "oneOf": [
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "mode": {
+                      "const": "none"
+                    }
+                  },
+                  "required": [
+                    "mode"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "mode": {
+                      "const": "automatic"
+                    },
+                    "profile_id": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "mode",
+                    "profile_id"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "environment_generation": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "environment_id": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "mode": {
+                      "const": "existing"
+                    }
+                  },
+                  "required": [
+                    "mode",
+                    "environment_id"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            "workspace_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "workspace_id",
+            "environment_selection"
+          ],
+          "type": "object"
+        },
+        "thread_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "thread_id",
+        "binding"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "agent_host_list_resources": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "agent_host_materialize_environment": {
+      "additionalProperties": false,
+      "properties": {
+        "profile_id": {
+          "type": "string"
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "workspace_id",
+        "profile_id"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "agent_host_register_profile": {
+      "additionalProperties": false,
+      "properties": {
+        "definition": {
+          "oneOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "const": "default"
+                },
+                "project_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "const": "path"
+                },
+                "path": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "path"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "owner_user_id": {
+          "type": "string"
+        },
+        "profile_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "profile_id",
+        "definition"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "agent_host_register_workspace": {
+      "additionalProperties": false,
+      "properties": {
+        "materialization_path": {
+          "type": "string"
+        },
+        "owner_user_id": {
+          "type": "string"
+        },
+        "snapshot_ref": {
+          "type": "string"
+        },
+        "sources": {
+          "items": {
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "workspace_id",
+        "materialization_path"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "agent_host_stop_environment": {
+      "additionalProperties": false,
+      "properties": {
+        "environment_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "environment_id"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "archive_session": {
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "cancel_queued_message": {
+      "additionalProperties": false,
+      "properties": {
+        "item_id": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "item_id"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "capabilities": {
+      "additionalProperties": false,
+      "properties": {
+        "approvals": {
+          "type": "boolean"
+        },
+        "artifacts": {
+          "type": "boolean"
+        },
+        "client_functions": {
+          "type": "boolean"
+        },
+        "disabled_notifications": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "experimental_operations": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "mcp_apps": {
+          "type": "boolean"
+        },
+        "realtime": {
+          "type": "boolean"
+        },
+        "replay": {
+          "type": "boolean"
+        },
+        "terminal": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "realtime",
+        "mcp_apps",
+        "client_functions",
+        "approvals",
+        "artifacts",
+        "replay",
+        "terminal",
+        "experimental_operations",
+        "disabled_notifications"
+      ],
+      "type": "object"
+    },
+    "client_functions": {
+      "additionalProperties": false,
+      "properties": {
+        "functions": {
+          "items": {},
+          "type": "array"
+        },
+        "version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "functions"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "client_request": {
+      "additionalProperties": false,
+      "properties": {
+        "args": {
+          "type": "object"
+        },
+        "function": {
+          "type": "string"
+        },
+        "idempotency_key": {
+          "type": "string"
+        },
+        "request_id": {
+          "type": "string"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "seq": {
+          "type": "integer"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "stream_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "function",
+        "args"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "client_request_resolved": {
+      "additionalProperties": false,
+      "properties": {
+        "reason": {
+          "type": "string"
+        },
+        "request_id": {
+          "type": "string"
+        },
+        "seq": {
+          "type": "integer"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "stream_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "client_response": {
+      "additionalProperties": false,
+      "properties": {
+        "error": {
+          "type": "object"
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "request_id": {
+          "type": "string"
+        },
+        "result": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "request_id",
+        "ok"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "delete_session": {
+      "additionalProperties": false,
+      "properties": {
+        "cascade": {
+          "type": "boolean"
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "disable_mcp_server": {
+      "additionalProperties": false,
+      "properties": {
+        "server_name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "server_name"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "disable_tool": {
+      "additionalProperties": false,
+      "properties": {
+        "tool_name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "tool_name"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "elicitation_requested": {
+      "additionalProperties": false,
+      "properties": {
+        "elicitation_id": {
+          "type": "string"
+        },
+        "expires_at": {
+          "type": "string"
+        },
+        "input_schema": {
+          "type": "object"
+        },
+        "item_id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "options": {
+          "items": {},
+          "type": "array"
+        },
+        "persist_response": {
+          "type": "boolean"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "seq": {
+          "type": "integer"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "stream_id": {
+          "type": "string"
+        },
+        "timeout_ms": {
+          "type": "integer"
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "elicitation_id",
+        "kind",
+        "message"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "elicitation_resolved": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "elicitation_id": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "seq": {
+          "type": "integer"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "stream_id": {
+          "type": "string"
+        },
+        "value": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "elicitation_id",
+        "status"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "elicitation_response": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "elicitation_id": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "value": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "elicitation_id",
+        "action"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "enqueue_message": {
+      "additionalProperties": false,
+      "properties": {
+        "content": {
+          "type": "string"
+        },
+        "input_content": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "role": {
+          "type": "string"
+        },
+        "safe_tool_overrides": {
+          "type": "object"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "submission_id": {
+          "type": "string"
+        },
+        "trigger_run": {
+          "type": "boolean"
+        },
+        "variables": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "session_id",
+        "content"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "enqueue_notification": {
+      "additionalProperties": false,
+      "properties": {
+        "content": {
+          "type": "string"
+        },
+        "safe_tool_overrides": {
+          "type": "object"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "content"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "export_session": {
+      "additionalProperties": false,
+      "properties": {
+        "redact": {
+          "type": "boolean"
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "export_thread": {
+      "additionalProperties": false,
+      "properties": {
+        "cursor": {
+          "type": "string"
+        },
+        "include_descendants": {
+          "type": "boolean"
+        },
+        "limit": {
+          "type": "integer"
+        },
+        "thread_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "thread_id"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "fork_session": {
+      "additionalProperties": false,
+      "properties": {
+        "from_item_id": {
+          "type": "string"
+        },
+        "from_turn_id": {
+          "type": "string"
+        },
+        "new_session_id": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "fs_delete": {
+      "additionalProperties": false,
+      "properties": {
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "recursive": {
+          "type": "boolean"
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "environment_id",
+        "path"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "fs_download_close": {
+      "additionalProperties": false,
+      "properties": {
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
+          "type": "string"
+        },
+        "transfer_id": {
+          "type": "string"
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "environment_id",
+        "transfer_id"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "fs_download_open": {
+      "additionalProperties": false,
+      "properties": {
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "environment_id",
+        "path"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "fs_download_read": {
+      "additionalProperties": false,
+      "properties": {
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
+          "type": "string"
+        },
+        "length": {
+          "type": "integer"
+        },
+        "offset": {
+          "type": "integer"
+        },
+        "transfer_id": {
+          "type": "string"
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "environment_id",
+        "transfer_id"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "fs_events": {
+      "additionalProperties": false,
+      "properties": {
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
+          "type": "string"
+        },
+        "events": {
+          "items": {},
+          "type": "array"
+        },
+        "seq": {
+          "type": "integer"
+        },
+        "stream_id": {
+          "type": "string"
+        },
+        "watch_id": {
+          "type": "string"
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "environment_id",
+        "watch_id",
+        "events"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "fs_list": {
+      "additionalProperties": false,
+      "properties": {
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "recursive": {
+          "type": "boolean"
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "environment_id",
+        "path"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "fs_mkdir": {
+      "additionalProperties": false,
+      "properties": {
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "environment_id",
+        "path"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "fs_rename": {
+      "additionalProperties": false,
+      "properties": {
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "environment_id",
+        "path",
+        "to"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "fs_rescan_required": {
+      "additionalProperties": false,
+      "properties": {
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "seq": {
+          "type": "integer"
+        },
+        "stream_id": {
+          "type": "string"
+        },
+        "watch_id": {
+          "type": "string"
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "environment_id",
+        "watch_id",
+        "reason"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "fs_stat": {
+      "additionalProperties": false,
+      "properties": {
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "environment_id",
+        "path"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "fs_transfer_progress": {
+      "additionalProperties": false,
+      "properties": {
+        "direction": {
+          "type": "string"
+        },
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
+          "type": "string"
+        },
+        "seq": {
+          "type": "integer"
+        },
+        "stream_id": {
+          "type": "string"
+        },
+        "total": {
+          "type": "integer"
+        },
+        "transfer_id": {
+          "type": "string"
+        },
+        "transferred": {
+          "type": "integer"
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "environment_id",
+        "transfer_id",
+        "direction",
+        "transferred",
+        "total"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "fs_unwatch": {
+      "additionalProperties": false,
+      "properties": {
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
+          "type": "string"
+        },
+        "watch_id": {
+          "type": "string"
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "environment_id",
+        "watch_id"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "fs_upload_abort": {
+      "additionalProperties": false,
+      "properties": {
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
+          "type": "string"
+        },
+        "transfer_id": {
+          "type": "string"
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "environment_id",
+        "transfer_id"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "fs_upload_chunk": {
+      "additionalProperties": false,
+      "properties": {
+        "data": {
+          "type": "string"
+        },
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
+          "type": "string"
+        },
+        "offset": {
+          "type": "integer"
+        },
+        "transfer_id": {
+          "type": "string"
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "environment_id",
+        "transfer_id",
+        "offset",
+        "data"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "fs_upload_commit": {
+      "additionalProperties": false,
+      "properties": {
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
+          "type": "string"
+        },
+        "transfer_id": {
+          "type": "string"
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "environment_id",
+        "transfer_id"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "fs_upload_open": {
+      "additionalProperties": false,
+      "properties": {
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
+          "type": "string"
+        },
+        "expected_sha256": {
+          "pattern": "^[0-9a-fA-F]{64}$",
+          "type": "string"
+        },
+        "overwrite": {
+          "type": "boolean"
+        },
+        "path": {
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-fA-F]{64}$",
+          "type": "string"
+        },
+        "size": {
+          "type": "integer"
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "environment_id",
+        "path",
+        "size"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "fs_watch": {
+      "additionalProperties": false,
+      "properties": {
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "poll_interval_ms": {
+          "type": "integer"
+        },
+        "recursive": {
+          "type": "boolean"
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "environment_id",
+        "path"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "get_agent_info": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "get_config": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "get_item": {
+      "additionalProperties": false,
+      "properties": {
+        "item_id": {
+          "type": "string"
+        },
+        "thread_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "thread_id",
+        "item_id"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "get_model": {
+      "additionalProperties": false,
+      "properties": {
+        "model": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "model"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "get_plan": {
+      "additionalProperties": false,
+      "properties": {
+        "scope": {
+          "type": "string"
+        },
+        "thread_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "thread_id"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "get_run_diff": {
+      "additionalProperties": false,
+      "properties": {
+        "thread_id": {
+          "type": "string"
+        },
+        "turn_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "thread_id"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "get_session_history": {
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "get_thread": {
+      "additionalProperties": false,
+      "properties": {
+        "thread_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "thread_id"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "get_user_history": {
+      "additionalProperties": false,
+      "properties": {
+        "include_archived": {
+          "type": "boolean"
+        },
+        "limit": {
+          "type": "integer"
+        }
+      },
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "git_checkout": {
+      "additionalProperties": false,
+      "properties": {
+        "branch": {
+          "type": "string"
+        },
+        "confirmation_token": {
+          "type": "string"
+        },
+        "create": {
+          "type": "boolean"
+        },
+        "detach": {
+          "type": "boolean"
+        },
+        "discard_changes": {
+          "type": "boolean"
+        },
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
+          "type": "string"
+        },
+        "repo": {
+          "type": "string"
+        },
+        "start_point": {
+          "type": "string"
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "environment_id",
+        "repo",
+        "branch"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "git_commit": {
+      "additionalProperties": false,
+      "properties": {
+        "allow_empty": {
+          "type": "boolean"
+        },
+        "amend": {
+          "type": "boolean"
+        },
+        "author": {
+          "type": "string"
+        },
+        "confirmation_token": {
+          "type": "string"
+        },
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "repo": {
+          "type": "string"
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "environment_id",
+        "repo",
+        "message"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "git_conflicts": {
+      "additionalProperties": false,
+      "properties": {
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
+          "type": "string"
+        },
+        "paths": {
+          "items": {},
+          "type": "array"
+        },
+        "repo": {
+          "type": "string"
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "environment_id",
+        "repo"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "git_diff": {
+      "additionalProperties": false,
+      "properties": {
+        "context_lines": {
+          "type": "integer"
+        },
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
+          "type": "string"
+        },
+        "from_rev": {
+          "type": "string"
+        },
+        "include_untracked": {
+          "type": "boolean"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "paths": {
+          "items": {},
+          "type": "array"
+        },
+        "repo": {
+          "type": "string"
+        },
+        "to_rev": {
+          "type": "string"
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "environment_id",
+        "repo"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "git_discard": {
+      "additionalProperties": false,
+      "properties": {
+        "confirmation_token": {
+          "type": "string"
+        },
+        "context_lines": {
+          "type": "integer"
+        },
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
+          "type": "string"
+        },
+        "hunks": {
+          "items": {},
+          "type": "array"
+        },
+        "paths": {
+          "items": {},
+          "type": "array"
+        },
+        "repo": {
+          "type": "string"
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "environment_id",
+        "repo"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "git_fetch": {
+      "additionalProperties": false,
+      "properties": {
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
+          "type": "string"
+        },
+        "prune": {
+          "type": "boolean"
+        },
+        "refspec": {
+          "type": "string"
+        },
+        "remote": {
+          "type": "string"
+        },
+        "repo": {
+          "type": "string"
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "environment_id",
+        "repo"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "git_list_branches": {
+      "additionalProperties": false,
+      "properties": {
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
+          "type": "string"
+        },
+        "include_remote": {
+          "type": "boolean"
+        },
+        "repo": {
+          "type": "string"
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "environment_id",
+        "repo"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "git_list_repositories": {
+      "additionalProperties": false,
+      "properties": {
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
+          "type": "string"
+        },
+        "max_depth": {
+          "type": "integer"
+        },
+        "path": {
+          "type": "string"
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "environment_id"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "git_list_worktrees": {
+      "additionalProperties": false,
+      "properties": {
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
+          "type": "string"
+        },
+        "repo": {
+          "type": "string"
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "environment_id",
+        "repo"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "git_log": {
+      "additionalProperties": false,
+      "properties": {
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
+          "type": "string"
+        },
+        "max_count": {
+          "type": "integer"
+        },
+        "paths": {
+          "items": {},
+          "type": "array"
+        },
+        "repo": {
+          "type": "string"
+        },
+        "rev": {
+          "type": "string"
+        },
+        "skip": {
+          "type": "integer"
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "environment_id",
+        "repo"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "git_operation_progress": {
+      "additionalProperties": false,
+      "properties": {
+        "detail": {
+          "type": "object"
+        },
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
+          "type": "string"
+        },
+        "operation": {
+          "type": "string"
+        },
+        "operation_id": {
+          "type": "string"
+        },
+        "phase": {
+          "type": "string"
+        },
+        "repo": {
+          "type": "string"
+        },
+        "seq": {
+          "type": "integer"
+        },
+        "stream_id": {
+          "type": "string"
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "environment_id",
+        "operation_id",
+        "repo",
+        "operation",
+        "phase"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "git_pull": {
+      "additionalProperties": false,
+      "properties": {
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
+          "type": "string"
+        },
+        "rebase": {
+          "type": "boolean"
+        },
+        "refspec": {
+          "type": "string"
+        },
+        "remote": {
+          "type": "string"
+        },
+        "repo": {
+          "type": "string"
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "environment_id",
+        "repo"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "git_push": {
+      "additionalProperties": false,
+      "properties": {
+        "confirmation_token": {
+          "type": "string"
+        },
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
+          "type": "string"
+        },
+        "force": {
+          "type": "boolean"
+        },
+        "force_with_lease": {
+          "type": "boolean"
+        },
+        "refspec": {
+          "type": "string"
+        },
+        "remote": {
+          "type": "string"
+        },
+        "repo": {
+          "type": "string"
+        },
+        "set_upstream": {
+          "type": "boolean"
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "environment_id",
+        "repo"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "git_reset": {
+      "additionalProperties": false,
+      "properties": {
+        "confirmation_token": {
+          "type": "string"
+        },
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
+          "type": "string"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "paths": {
+          "items": {},
+          "type": "array"
+        },
+        "repo": {
+          "type": "string"
+        },
+        "rev": {
+          "type": "string"
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "environment_id",
+        "repo"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "git_stage": {
+      "additionalProperties": false,
+      "properties": {
+        "context_lines": {
+          "type": "integer"
+        },
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
+          "type": "string"
+        },
+        "hunks": {
+          "items": {},
+          "type": "array"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "paths": {
+          "items": {},
+          "type": "array"
+        },
+        "repo": {
+          "type": "string"
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "environment_id",
+        "repo"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "git_status": {
+      "additionalProperties": false,
+      "properties": {
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
+          "type": "string"
+        },
+        "include_ignored": {
+          "type": "boolean"
+        },
+        "include_untracked": {
+          "type": "boolean"
+        },
+        "paths": {
+          "items": {},
+          "type": "array"
+        },
+        "repo": {
+          "type": "string"
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "environment_id",
+        "repo"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "git_status_changed": {
+      "additionalProperties": false,
+      "properties": {
+        "digest": {
+          "type": "string"
+        },
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
+          "type": "string"
+        },
+        "repo": {
+          "type": "string"
+        },
+        "seq": {
+          "type": "integer"
+        },
+        "stream_id": {
+          "type": "string"
+        },
+        "watch_id": {
+          "type": "string"
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "environment_id",
+        "repo",
+        "watch_id",
+        "digest"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "git_status_unwatch": {
+      "additionalProperties": false,
+      "properties": {
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
+          "type": "string"
+        },
+        "watch_id": {
+          "type": "string"
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "environment_id",
+        "watch_id"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "git_status_watch": {
+      "additionalProperties": false,
+      "properties": {
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
+          "type": "string"
+        },
+        "poll_interval_ms": {
+          "type": "integer"
+        },
+        "repo": {
+          "type": "string"
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "environment_id",
+        "repo"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "git_unstage": {
+      "additionalProperties": false,
+      "properties": {
+        "context_lines": {
+          "type": "integer"
+        },
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
+          "type": "string"
+        },
+        "hunks": {
+          "items": {},
+          "type": "array"
+        },
+        "paths": {
+          "items": {},
+          "type": "array"
+        },
+        "repo": {
+          "type": "string"
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "environment_id",
+        "repo"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "identity": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "version"
+      ],
+      "type": "object"
+    },
+    "initialize": {
+      "additionalProperties": false,
+      "properties": {
+        "capabilities": {
+          "$ref": "#/$defs/capabilities"
+        },
+        "identity": {
+          "$ref": "#/$defs/identity"
+        },
+        "platform": {
+          "$ref": "#/$defs/platform"
+        },
+        "protocol_version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "protocol_version",
+        "identity",
+        "platform",
+        "capabilities"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "initializeResult": {
+      "additionalProperties": false,
+      "properties": {
+        "agent_host": {
+          "$ref": "#/$defs/agentHost"
+        },
+        "capabilities": {
+          "$ref": "#/$defs/capabilities"
+        },
+        "identity": {
+          "$ref": "#/$defs/identity"
+        },
+        "platform": {
+          "$ref": "#/$defs/platform"
+        },
+        "protocol_version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "protocol_version",
+        "identity",
+        "platform",
+        "capabilities",
+        "agent_host"
+      ],
+      "type": "object"
+    },
+    "initialized": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "item_updated": {
+      "additionalProperties": false,
+      "properties": {
+        "content": {
+          "type": "object"
+        },
+        "item_id": {
+          "type": "string"
+        },
+        "item_seq": {
+          "type": "integer"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "seq": {
+          "type": "integer"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "stream_id": {
+          "type": "string"
+        },
+        "thread_id": {
+          "type": "string"
+        },
+        "turn_id": {
+          "type": "string"
+        },
+        "updated_at": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "session_id",
+        "thread_id",
+        "item_id",
+        "kind",
+        "status",
+        "revision",
+        "item_seq",
+        "content"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "jsonRpcError": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "integer"
+        },
+        "data": {},
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "type": "object"
+    },
+    "list_items": {
+      "additionalProperties": false,
+      "properties": {
+        "cursor": {
+          "type": "string"
+        },
+        "kinds": {
+          "items": {},
+          "type": "array"
+        },
+        "limit": {
+          "type": "integer"
+        },
+        "order": {
+          "type": "string"
+        },
+        "thread_id": {
+          "type": "string"
+        },
+        "turn_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "thread_id"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "list_models": {
+      "additionalProperties": false,
+      "properties": {
+        "include_hidden": {
+          "type": "boolean"
+        },
+        "modality": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "list_providers": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "list_queue": {
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "list_server_functions": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "list_sessions": {
+      "additionalProperties": false,
+      "properties": {
+        "limit": {
+          "type": "integer"
+        },
+        "offset": {
+          "type": "integer"
+        }
+      },
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "list_thread_descendants": {
+      "additionalProperties": false,
+      "properties": {
+        "limit": {
+          "type": "integer"
+        },
+        "max_depth": {
+          "type": "integer"
+        },
+        "thread_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "thread_id"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "list_threads": {
+      "additionalProperties": false,
+      "properties": {
+        "created_after": {
+          "type": "number"
+        },
+        "created_before": {
+          "type": "number"
+        },
+        "cursor": {
+          "type": "string"
+        },
+        "limit": {
+          "type": "integer"
+        },
+        "model": {
+          "type": "string"
+        },
+        "order": {
+          "type": "string"
+        },
+        "parent_thread_id": {
+          "type": "string"
+        },
+        "pinned": {
+          "type": "boolean"
+        },
+        "source": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "updated_after": {
+          "type": "number"
+        },
+        "updated_before": {
+          "type": "number"
+        }
+      },
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "list_turns": {
+      "additionalProperties": false,
+      "properties": {
+        "cursor": {
+          "type": "string"
+        },
+        "limit": {
+          "type": "integer"
+        },
+        "order": {
+          "type": "string"
+        },
+        "thread_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "thread_id"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "mcp_approval_requested": {
+      "additionalProperties": false,
+      "properties": {
+        "arguments": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "request_id": {
+          "type": "string"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "seq": {
+          "type": "integer"
+        },
+        "server_label": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "source_request_id": {
+          "type": "string"
+        },
+        "stream_id": {
+          "type": "string"
+        },
+        "tool_name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "request_id",
+        "server_label",
+        "tool_name",
+        "arguments"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "mcp_approval_resolved": {
+      "additionalProperties": false,
+      "properties": {
+        "reason": {
+          "type": "string"
+        },
+        "request_id": {
+          "type": "string"
+        },
+        "seq": {
+          "type": "integer"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "stream_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "mcp_approval_response": {
+      "additionalProperties": false,
+      "properties": {
+        "decision": {
+          "type": "string"
+        },
+        "rejection_message": {
+          "type": "string"
+        },
+        "request_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "decision"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "mcp_auth_cancel": {
+      "additionalProperties": false,
+      "properties": {
+        "auth_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "auth_id"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "mcp_auth_complete": {
+      "additionalProperties": false,
+      "properties": {
+        "auth_id": {
+          "type": "string"
+        },
+        "code": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "auth_id",
+        "code"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "mcp_auth_start": {
+      "additionalProperties": false,
+      "properties": {
+        "redirect_uri": {
+          "type": "string"
+        },
+        "server_name": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "server_name"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "mcp_call_tool": {
+      "additionalProperties": false,
+      "properties": {
+        "args": {
+          "type": "object"
+        },
+        "server_name": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "tool_name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "server_name",
+        "tool_name",
+        "session_id"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "mcp_create_server": {
+      "additionalProperties": false,
+      "properties": {
+        "params": {
+          "type": "object"
+        },
+        "server_name": {
+          "type": "string"
+        },
+        "server_options": {
+          "type": "object"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "server_name",
+        "type",
+        "params"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "mcp_delete_server": {
+      "additionalProperties": false,
+      "properties": {
+        "server_name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "server_name"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "mcp_get_prompt": {
+      "additionalProperties": false,
+      "properties": {
+        "args": {
+          "type": "object"
+        },
+        "prompt_name": {
+          "type": "string"
+        },
+        "server_name": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "server_name",
+        "prompt_name"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "mcp_get_server": {
+      "additionalProperties": false,
+      "properties": {
+        "refresh": {
+          "type": "boolean"
+        },
+        "server_name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "server_name"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "mcp_list_servers": {
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "mcp_read_resource": {
+      "additionalProperties": false,
+      "properties": {
+        "server_name": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "uri": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "server_name",
+        "uri"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "mcp_reload_server": {
+      "additionalProperties": false,
+      "properties": {
+        "server_name": {
+          "type": "string"
+        }
+      },
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "mcp_server_status_changed": {
+      "additionalProperties": false,
+      "properties": {
+        "at": {
+          "type": "string"
+        },
+        "auth_state": {
+          "type": "string"
+        },
+        "previous_status": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "reason_code": {
+          "type": "string"
+        },
+        "seq": {
+          "type": "integer"
+        },
+        "server_name": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "stream_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "server_name",
+        "status"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "mcp_update_server": {
+      "additionalProperties": false,
+      "properties": {
+        "params": {
+          "type": "object"
+        },
+        "server_name": {
+          "type": "string"
+        },
+        "server_options": {
+          "type": "object"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "server_name"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "message_output": {
+      "additionalProperties": false,
+      "properties": {
+        "content": {
+          "type": "string"
+        },
+        "is_final": {
+          "type": "boolean"
+        },
+        "message_id": {
+          "type": "string"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "seq": {
+          "type": "integer"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "stream_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id",
+        "session_id",
+        "content"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "plan_completion_reviewed": {
+      "additionalProperties": false,
+      "properties": {
+        "outcome": {
+          "type": "string"
+        },
+        "rationale": {
+          "type": "string"
+        },
+        "reviewer": {
+          "type": "string"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "seq": {
+          "type": "integer"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "stream_id": {
+          "type": "string"
+        },
+        "subject": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "task_id",
+        "outcome",
+        "reviewer"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "platform": {
+      "additionalProperties": false,
+      "properties": {
+        "arch": {
+          "type": "string"
+        },
+        "os": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "os",
+        "arch"
+      ],
+      "type": "object"
+    },
+    "purge_threads": {
+      "additionalProperties": false,
+      "properties": {
+        "dry_run": {
+          "type": "boolean"
+        },
+        "retention_days": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "retention_days"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "queue_changed": {
+      "additionalProperties": false,
+      "properties": {
+        "depth": {
+          "type": "integer"
+        },
+        "items": {
+          "items": {},
+          "type": "array"
+        },
+        "seq": {
+          "type": "integer"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "stream_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "depth",
+        "items"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "queue_status": {
+      "additionalProperties": false,
+      "properties": {
+        "include_snapshot": {
+          "type": "boolean"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "submission_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "report_incident": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "disable_mcp_servers": {
+          "items": {},
+          "type": "array"
+        },
+        "disable_tools": {
+          "items": {},
+          "type": "array"
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "description"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "result": {},
+    "resume_session": {
+      "additionalProperties": false,
+      "properties": {
+        "after_seq": {
+          "type": "integer"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "stream_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "run_end": {
+      "additionalProperties": false,
+      "properties": {
+        "end_reason": {
+          "type": "string"
+        },
+        "error": {
+          "type": "object"
+        },
+        "max_input_tokens": {
+          "type": "integer"
+        },
+        "max_output_tokens": {
+          "type": "integer"
+        },
+        "model": {
+          "type": "string"
+        },
+        "model_ref": {
+          "type": "string"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "seq": {
+          "type": "integer"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "stream_id": {
+          "type": "string"
+        },
+        "truncation": {
+          "type": "string"
+        },
+        "usage": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "run_id",
+        "session_id",
+        "end_reason"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "run_started": {
+      "additionalProperties": false,
+      "properties": {
+        "prompt": {
+          "type": "string"
+        },
+        "prompt_role": {
+          "type": "string"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "seq": {
+          "type": "integer"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "stream_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id",
+        "session_id"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "run_status": {
+      "additionalProperties": false,
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "message": {
+          "type": "string"
+        },
+        "next_delay": {
+          "type": "integer"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "seq": {
+          "type": "integer"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "stream_id": {
+          "type": "string"
+        },
+        "total": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "run_id",
+        "session_id",
+        "status",
+        "message"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "search_threads": {
+      "additionalProperties": false,
+      "properties": {
+        "created_after": {
+          "type": "number"
+        },
+        "created_before": {
+          "type": "number"
+        },
+        "cursor": {
+          "type": "string"
+        },
+        "limit": {
+          "type": "integer"
+        },
+        "model": {
+          "type": "string"
+        },
+        "parent_thread_id": {
+          "type": "string"
+        },
+        "pinned": {
+          "type": "boolean"
+        },
+        "query": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "updated_after": {
+          "type": "number"
+        },
+        "updated_before": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "send_user_message": {
+      "additionalProperties": false,
+      "properties": {
+        "content": {
+          "type": "string"
+        },
+        "run_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id",
+        "content"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "server_call": {
+      "additionalProperties": false,
+      "properties": {
+        "args": {
+          "type": "object"
+        },
+        "environment_generation": {
+          "type": "integer"
+        },
+        "environment_id": {
+          "type": "string"
+        },
+        "function": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "function"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "session_forked": {
+      "additionalProperties": false,
+      "properties": {
+        "from_item_id": {
+          "type": "string"
+        },
+        "new_session_id": {
+          "type": "string"
+        },
+        "seq": {
+          "type": "integer"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "stream_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "new_session_id"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "session_variables_changed": {
+      "additionalProperties": false,
+      "properties": {
+        "changed": {
+          "items": {},
+          "type": "array"
+        },
+        "seq": {
+          "type": "integer"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "stream_id": {
+          "type": "string"
+        },
+        "variables": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "session_id",
+        "changed",
+        "variables"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "set_client_status": {
+      "additionalProperties": false,
+      "properties": {
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "set_session_approvals": {
+      "additionalProperties": false,
+      "properties": {
+        "reviewer": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "reviewer"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "set_session_hold": {
+      "additionalProperties": false,
+      "properties": {
+        "hold": {
+          "type": "boolean"
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "hold"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "set_session_model": {
+      "additionalProperties": false,
+      "properties": {
+        "model": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "model"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "set_session_reasoning": {
+      "additionalProperties": false,
+      "properties": {
+        "effort": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "effort"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "set_session_workflow": {
+      "additionalProperties": false,
+      "properties": {
+        "reviewer": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "reviewer"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "set_voice_model": {
+      "additionalProperties": false,
+      "properties": {
+        "model": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "model"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "start_run": {
+      "additionalProperties": false,
+      "properties": {
+        "approvals_reviewer": {
+          "type": "string"
+        },
+        "content": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "items": {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              "type": "array"
+            }
+          ]
+        },
+        "context": {
+          "type": "object"
+        },
+        "environment_selection": {
+          "oneOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "mode": {
+                  "const": "inherit"
+                }
+              },
+              "required": [
+                "mode"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "mode": {
+                  "const": "none"
+                }
+              },
+              "required": [
+                "mode"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "environment_generation": {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "environment_id": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "mode": {
+                  "const": "explicit"
+                }
+              },
+              "required": [
+                "mode",
+                "environment_id"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "group_id": {
+          "type": "string"
+        },
+        "prompt": {
+          "type": "string"
+        },
+        "prompt_role": {
+          "type": "string"
+        },
+        "safe_tool_overrides": {
+          "type": "object"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "submission_id": {
+          "type": "string"
+        },
+        "variables": {
+          "type": "object"
+        },
+        "workflow_name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "prompt",
+        "environment_selection"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "stop_run": {
+      "additionalProperties": false,
+      "properties": {
+        "run_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "thread_updated": {
+      "additionalProperties": false,
+      "properties": {
+        "cascaded_thread_ids": {
+          "items": {},
+          "type": "array"
+        },
+        "changed": {
+          "items": {},
+          "type": "array"
+        },
+        "seq": {
+          "type": "integer"
+        },
+        "stream_id": {
+          "type": "string"
+        },
+        "thread": {
+          "type": "object"
+        },
+        "thread_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "thread_id",
+        "changed",
+        "thread"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "token": {
+      "additionalProperties": false,
+      "properties": {
+        "delta": {
+          "type": "object"
+        },
+        "max_input_tokens": {
+          "type": "integer"
+        },
+        "max_output_tokens": {
+          "type": "integer"
+        },
+        "model": {
+          "type": "string"
+        },
+        "model_ref": {
+          "type": "string"
+        },
+        "response_id": {
+          "type": "string"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "seq": {
+          "type": "integer"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "stream_id": {
+          "type": "string"
+        },
+        "totals": {
+          "type": "object"
+        },
+        "truncation": {
+          "type": "string"
+        },
+        "turn": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "run_id",
+        "session_id",
+        "delta",
+        "totals"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "tool_approval_requested": {
+      "additionalProperties": false,
+      "properties": {
+        "arguments": {
+          "type": "string"
+        },
+        "call_id": {
+          "type": "string"
+        },
+        "metadata": {
+          "type": "object"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "seq": {
+          "type": "integer"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "source_call_id": {
+          "type": "string"
+        },
+        "stream_id": {
+          "type": "string"
+        },
+        "tool_name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "call_id",
+        "tool_name",
+        "arguments"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "tool_approval_resolved": {
+      "additionalProperties": false,
+      "properties": {
+        "call_id": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "seq": {
+          "type": "integer"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "stream_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "call_id"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "tool_approval_response": {
+      "additionalProperties": false,
+      "properties": {
+        "always_approve": {
+          "type": "boolean"
+        },
+        "call_id": {
+          "type": "string"
+        },
+        "decision": {
+          "type": "string"
+        },
+        "rejection_message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "call_id",
+        "decision"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "tool_approval_reviewed": {
+      "additionalProperties": false,
+      "properties": {
+        "call_id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "outcome": {
+          "type": "string"
+        },
+        "rationale": {
+          "type": "string"
+        },
+        "reviewer": {
+          "type": "string"
+        },
+        "risk_level": {
+          "type": "string"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "seq": {
+          "type": "integer"
+        },
+        "server_label": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "stream_id": {
+          "type": "string"
+        },
+        "tool_name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "call_id",
+        "tool_name",
+        "outcome",
+        "reviewer"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "tool_called": {
+      "additionalProperties": false,
+      "properties": {
+        "call_id": {
+          "type": "string"
+        },
+        "input": {
+          "type": "string"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "seq": {
+          "type": "integer"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "stream_id": {
+          "type": "string"
+        },
+        "tool": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id",
+        "session_id",
+        "tool",
+        "input",
+        "call_id"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "tool_result": {
+      "additionalProperties": false,
+      "properties": {
+        "call_id": {
+          "type": "string"
+        },
+        "metadata": {
+          "type": "object"
+        },
+        "output": {
+          "type": "string"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "seq": {
+          "type": "integer"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "stream_id": {
+          "type": "string"
+        },
+        "tool": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id",
+        "session_id",
+        "tool",
+        "output",
+        "call_id"
+      ],
+      "type": "object",
+      "x-omni-stability": "stable"
+    },
+    "update_session_variables": {
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "type": "string"
+        },
+        "updates": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "session_id",
+        "updates"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "update_thread": {
+      "additionalProperties": false,
+      "properties": {
+        "metadata": {
+          "type": "object"
+        },
+        "pinned": {
+          "type": "boolean"
+        },
+        "status": {
+          "type": "string"
+        },
+        "thread_id": {
+          "type": "string"
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "thread_id"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "validate_config": {
+      "additionalProperties": false,
+      "properties": {
+        "updates": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "updates"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    },
+    "write_config": {
+      "additionalProperties": false,
+      "properties": {
+        "updates": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "updates"
+      ],
+      "type": "object",
+      "x-omni-stability": "experimental"
+    }
+  },
+  "$id": "https://omniagents.dev/protocol/gui/v2/schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/initialize"
+    },
+    {
+      "$ref": "#/$defs/start_run"
+    },
+    {
+      "$ref": "#/$defs/stop_run"
+    },
+    {
+      "$ref": "#/$defs/send_user_message"
+    },
+    {
+      "$ref": "#/$defs/get_session_history"
+    },
+    {
+      "$ref": "#/$defs/list_sessions"
+    },
+    {
+      "$ref": "#/$defs/archive_session"
+    },
+    {
+      "$ref": "#/$defs/delete_session"
+    },
+    {
+      "$ref": "#/$defs/get_user_history"
+    },
+    {
+      "$ref": "#/$defs/get_agent_info"
+    },
+    {
+      "$ref": "#/$defs/tool_approval_response"
+    },
+    {
+      "$ref": "#/$defs/mcp_approval_response"
+    },
+    {
+      "$ref": "#/$defs/client_functions"
+    },
+    {
+      "$ref": "#/$defs/client_response"
+    },
+    {
+      "$ref": "#/$defs/list_server_functions"
+    },
+    {
+      "$ref": "#/$defs/server_call"
+    },
+    {
+      "$ref": "#/$defs/enqueue_message"
+    },
+    {
+      "$ref": "#/$defs/list_queue"
+    },
+    {
+      "$ref": "#/$defs/cancel_queued_message"
+    },
+    {
+      "$ref": "#/$defs/resume_session"
+    },
+    {
+      "$ref": "#/$defs/ack_events"
+    },
+    {
+      "$ref": "#/$defs/list_models"
+    },
+    {
+      "$ref": "#/$defs/get_model"
+    },
+    {
+      "$ref": "#/$defs/list_providers"
+    },
+    {
+      "$ref": "#/$defs/set_session_model"
+    },
+    {
+      "$ref": "#/$defs/set_session_reasoning"
+    },
+    {
+      "$ref": "#/$defs/set_voice_model"
+    },
+    {
+      "$ref": "#/$defs/account_status"
+    },
+    {
+      "$ref": "#/$defs/account_login_start"
+    },
+    {
+      "$ref": "#/$defs/account_login_complete"
+    },
+    {
+      "$ref": "#/$defs/account_login_cancel"
+    },
+    {
+      "$ref": "#/$defs/account_logout"
+    },
+    {
+      "$ref": "#/$defs/account_refresh"
+    },
+    {
+      "$ref": "#/$defs/account_usage"
+    },
+    {
+      "$ref": "#/$defs/account_select"
+    },
+    {
+      "$ref": "#/$defs/elicitation_response"
+    },
+    {
+      "$ref": "#/$defs/mcp_list_servers"
+    },
+    {
+      "$ref": "#/$defs/mcp_get_server"
+    },
+    {
+      "$ref": "#/$defs/mcp_create_server"
+    },
+    {
+      "$ref": "#/$defs/mcp_update_server"
+    },
+    {
+      "$ref": "#/$defs/mcp_delete_server"
+    },
+    {
+      "$ref": "#/$defs/mcp_reload_server"
+    },
+    {
+      "$ref": "#/$defs/mcp_auth_start"
+    },
+    {
+      "$ref": "#/$defs/mcp_auth_complete"
+    },
+    {
+      "$ref": "#/$defs/mcp_auth_cancel"
+    },
+    {
+      "$ref": "#/$defs/get_thread"
+    },
+    {
+      "$ref": "#/$defs/list_turns"
+    },
+    {
+      "$ref": "#/$defs/list_items"
+    },
+    {
+      "$ref": "#/$defs/get_item"
+    },
+    {
+      "$ref": "#/$defs/set_session_approvals"
+    },
+    {
+      "$ref": "#/$defs/set_session_workflow"
+    },
+    {
+      "$ref": "#/$defs/agent_host_register_workspace"
+    },
+    {
+      "$ref": "#/$defs/agent_host_register_profile"
+    },
+    {
+      "$ref": "#/$defs/agent_host_bind_thread"
+    },
+    {
+      "$ref": "#/$defs/agent_host_list_resources"
+    },
+    {
+      "$ref": "#/$defs/agent_host_materialize_environment"
+    },
+    {
+      "$ref": "#/$defs/agent_host_stop_environment"
+    },
+    {
+      "$ref": "#/$defs/fork_session"
+    },
+    {
+      "$ref": "#/$defs/set_session_hold"
+    },
+    {
+      "$ref": "#/$defs/queue_status"
+    },
+    {
+      "$ref": "#/$defs/enqueue_notification"
+    },
+    {
+      "$ref": "#/$defs/update_session_variables"
+    },
+    {
+      "$ref": "#/$defs/set_client_status"
+    },
+    {
+      "$ref": "#/$defs/disable_tool"
+    },
+    {
+      "$ref": "#/$defs/disable_mcp_server"
+    },
+    {
+      "$ref": "#/$defs/report_incident"
+    },
+    {
+      "$ref": "#/$defs/export_session"
+    },
+    {
+      "$ref": "#/$defs/get_config"
+    },
+    {
+      "$ref": "#/$defs/validate_config"
+    },
+    {
+      "$ref": "#/$defs/write_config"
+    },
+    {
+      "$ref": "#/$defs/mcp_read_resource"
+    },
+    {
+      "$ref": "#/$defs/mcp_call_tool"
+    },
+    {
+      "$ref": "#/$defs/mcp_get_prompt"
+    },
+    {
+      "$ref": "#/$defs/fs_watch"
+    },
+    {
+      "$ref": "#/$defs/fs_unwatch"
+    },
+    {
+      "$ref": "#/$defs/fs_list"
+    },
+    {
+      "$ref": "#/$defs/fs_stat"
+    },
+    {
+      "$ref": "#/$defs/fs_download_open"
+    },
+    {
+      "$ref": "#/$defs/fs_download_read"
+    },
+    {
+      "$ref": "#/$defs/fs_download_close"
+    },
+    {
+      "$ref": "#/$defs/fs_upload_open"
+    },
+    {
+      "$ref": "#/$defs/fs_upload_chunk"
+    },
+    {
+      "$ref": "#/$defs/fs_upload_commit"
+    },
+    {
+      "$ref": "#/$defs/fs_upload_abort"
+    },
+    {
+      "$ref": "#/$defs/fs_delete"
+    },
+    {
+      "$ref": "#/$defs/fs_rename"
+    },
+    {
+      "$ref": "#/$defs/fs_mkdir"
+    },
+    {
+      "$ref": "#/$defs/git_list_repositories"
+    },
+    {
+      "$ref": "#/$defs/git_status"
+    },
+    {
+      "$ref": "#/$defs/git_diff"
+    },
+    {
+      "$ref": "#/$defs/git_log"
+    },
+    {
+      "$ref": "#/$defs/git_list_branches"
+    },
+    {
+      "$ref": "#/$defs/git_list_worktrees"
+    },
+    {
+      "$ref": "#/$defs/git_conflicts"
+    },
+    {
+      "$ref": "#/$defs/git_stage"
+    },
+    {
+      "$ref": "#/$defs/git_unstage"
+    },
+    {
+      "$ref": "#/$defs/git_discard"
+    },
+    {
+      "$ref": "#/$defs/git_commit"
+    },
+    {
+      "$ref": "#/$defs/git_checkout"
+    },
+    {
+      "$ref": "#/$defs/git_reset"
+    },
+    {
+      "$ref": "#/$defs/git_fetch"
+    },
+    {
+      "$ref": "#/$defs/git_pull"
+    },
+    {
+      "$ref": "#/$defs/git_push"
+    },
+    {
+      "$ref": "#/$defs/git_status_watch"
+    },
+    {
+      "$ref": "#/$defs/git_status_unwatch"
+    },
+    {
+      "$ref": "#/$defs/list_threads"
+    },
+    {
+      "$ref": "#/$defs/search_threads"
+    },
+    {
+      "$ref": "#/$defs/update_thread"
+    },
+    {
+      "$ref": "#/$defs/list_thread_descendants"
+    },
+    {
+      "$ref": "#/$defs/export_thread"
+    },
+    {
+      "$ref": "#/$defs/purge_threads"
+    },
+    {
+      "$ref": "#/$defs/get_plan"
+    },
+    {
+      "$ref": "#/$defs/get_run_diff"
+    },
+    {
+      "$ref": "#/$defs/initialized"
+    },
+    {
+      "$ref": "#/$defs/run_started"
+    },
+    {
+      "$ref": "#/$defs/run_status"
+    },
+    {
+      "$ref": "#/$defs/tool_called"
+    },
+    {
+      "$ref": "#/$defs/tool_result"
+    },
+    {
+      "$ref": "#/$defs/message_output"
+    },
+    {
+      "$ref": "#/$defs/token"
+    },
+    {
+      "$ref": "#/$defs/run_end"
+    },
+    {
+      "$ref": "#/$defs/tool_approval_requested"
+    },
+    {
+      "$ref": "#/$defs/tool_approval_resolved"
+    },
+    {
+      "$ref": "#/$defs/mcp_approval_requested"
+    },
+    {
+      "$ref": "#/$defs/mcp_approval_resolved"
+    },
+    {
+      "$ref": "#/$defs/client_request"
+    },
+    {
+      "$ref": "#/$defs/client_request_resolved"
+    },
+    {
+      "$ref": "#/$defs/queue_changed"
+    },
+    {
+      "$ref": "#/$defs/account_changed"
+    },
+    {
+      "$ref": "#/$defs/elicitation_requested"
+    },
+    {
+      "$ref": "#/$defs/elicitation_resolved"
+    },
+    {
+      "$ref": "#/$defs/mcp_server_status_changed"
+    },
+    {
+      "$ref": "#/$defs/tool_approval_reviewed"
+    },
+    {
+      "$ref": "#/$defs/plan_completion_reviewed"
+    },
+    {
+      "$ref": "#/$defs/session_forked"
+    },
+    {
+      "$ref": "#/$defs/session_variables_changed"
+    },
+    {
+      "$ref": "#/$defs/fs_events"
+    },
+    {
+      "$ref": "#/$defs/fs_rescan_required"
+    },
+    {
+      "$ref": "#/$defs/fs_transfer_progress"
+    },
+    {
+      "$ref": "#/$defs/git_operation_progress"
+    },
+    {
+      "$ref": "#/$defs/git_status_changed"
+    },
+    {
+      "$ref": "#/$defs/thread_updated"
+    },
+    {
+      "$ref": "#/$defs/item_updated"
+    }
+  ]
+}

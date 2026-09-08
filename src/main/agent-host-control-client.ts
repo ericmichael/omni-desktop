@@ -1,6 +1,6 @@
 import { WebSocket } from 'ws';
 
-import type { JsonRpcError, RpcMethodMap } from '@/generated/omniagents-gui-v1/gui-v1';
+import type { JsonRpcError, RpcMethodMap } from '@/generated/omniagents-gui-v2/gui-v2';
 import { wsAuthOptions } from '@/lib/ws-auth';
 import { initializeMainRpcConnection } from '@/main/omniagents-rpc-handshake';
 import { OmniagentsRpcError } from '@/shared/omniagents-rpc';

@@ -1,10 +1,11 @@
+import { createHmac, randomBytes } from 'node:crypto';
 import { Readable } from 'node:stream';
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { WebSocket as WsWebSocket } from 'ws';
 
 import { uuidv4 } from '@/lib/uuid';
-import type { WsHandler } from '@/server/ws-handler';
+import type { DeliveryScope, WsHandler } from '@/server/ws-handler';
 
 const DYNAMIC_PROXY_TTL_MS = 30 * 60 * 1000;
 const REDACTED_QUERY_VALUE = '[REDACTED]';
@@ -18,7 +19,7 @@ const HOP_BY_HOP_HEADERS = new Set([
   'transfer-encoding',
   'upgrade',
 ]);
-const SENSITIVE_QUERY_PARAM_RE = /(?:^|[-_])(token|secret|password|passwd|key|auth|code|sig|signature)(?:$|[-_])/i;
+const SENSITIVE_QUERY_PARAM_RE = /(?:^|[-_])(token|secret|password|passwd|key|auth|code|sig|signature|cap)(?:$|[-_])/i;
 const HTML_URL_ATTR_RE =
   /(\s(?:href|src|action|formaction|poster|data|srcset)\s*=\s*)(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/gi;
 const META_ATTR_RE = /(\s(?:http-equiv|content)\s*=\s*)(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/gi;
@@ -41,7 +42,10 @@ type ProxyEntry = {
   createdAt: number;
   lastUsedAt: number;
   expiresAt?: number;
+  scope?: DeliveryScope;
 };
+
+const proxySecret = randomBytes(32);
 
 /** Map from proxy prefix (e.g. "chat-uiUrl") to upstream metadata. */
 const upstreamMap = new Map<string, ProxyEntry>();
@@ -73,7 +77,7 @@ export const registerProxyUpstream = (proxyName: string, upstreamOrigin: string)
 export const cleanupExpiredProxyRegistrations = (now: number = Date.now()): number => {
   let deleted = 0;
   for (const [proxyName, entry] of upstreamMap.entries()) {
-    if (entry.kind === 'dynamic' && entry.expiresAt !== undefined && entry.expiresAt <= now) {
+    if (entry.expiresAt !== undefined && entry.expiresAt <= now) {
       upstreamMap.delete(proxyName);
       deleted += 1;
     }
@@ -133,7 +137,7 @@ const getProxyEntry = (
     return null;
   }
   const now = Date.now();
-  if (entry.kind === 'dynamic' && entry.expiresAt !== undefined && entry.expiresAt <= now) {
+  if (entry.expiresAt !== undefined && entry.expiresAt <= now) {
     upstreamMap.delete(proxyName);
     return null;
   }
@@ -147,7 +151,7 @@ const getProxyEntry = (
     }
   }
   entry.lastUsedAt = now;
-  if (entry.kind === 'dynamic') {
+  if (entry.kind === 'dynamic' || entry.scope) {
     entry.expiresAt = now + DYNAMIC_PROXY_TTL_MS;
   }
   return entry;
@@ -164,8 +168,12 @@ const getProxyEntry = (
 export const setupProxyRewriter = (
   fastify: FastifyInstance,
   wsHandler: WsHandler,
-  isTrusted: (remoteAddress: string) => boolean = defaultIsTrusted
+  isTrusted: (remoteAddress: string) => boolean = defaultIsTrusted,
+  authorize?: (scope: DeliveryScope) => Promise<boolean>
 ): void => {
+  const expiryTimer = setInterval(cleanupExpiredProxyRegistrations, 60_000);
+  expiryTimer.unref();
+  fastify.addHook('onClose', async () => clearInterval(expiryTimer));
   // --- Combined HTTP + WebSocket proxy ---
   // Register inside a plugin so GET can handle both HTTP and WS upgrades on the same path.
   void fastify.register(async function proxyRoutes(f) {
@@ -173,17 +181,28 @@ export const setupProxyRewriter = (
     f.addContentTypeParser('*', { parseAs: 'buffer' }, (_request, body, done) => {
       done(null, body);
     });
+    // Covers HTTP and WS upgrades; possession of an opaque path is a bearer
+    // capability, but its owner's grant must still be current.
+    f.addHook('preHandler', async (request, reply) => {
+      if (!authorize) {
+        return;
+      }
+      const entry = upstreamMap.get((request.params as { proxyName: string }).proxyName);
+      if (entry?.kind === 'trusted-internal' && (!entry.scope || !(await authorize(entry.scope)))) {
+        return reply.code(403).send({ error: 'Proxy authorization revoked' });
+      }
+    });
 
     // GET handles both normal HTTP GET and WebSocket upgrades via full declaration syntax
     f.route({
       method: 'GET',
       url: '/proxy/:proxyName/*',
       handler: async (request, reply) => {
-        return handleHttpProxy(request, reply);
+        return handleHttpProxy(request, reply, authorize);
       },
       wsHandler: (clientSocket, request) => {
         const upstreamPath = `/${(request.params as { '*': string })['*']}`;
-        handleWsProxy(clientSocket, request, upstreamPath);
+        handleWsProxy(clientSocket, request, upstreamPath, authorize);
       },
     });
 
@@ -194,7 +213,7 @@ export const setupProxyRewriter = (
         method,
         url: '/proxy/:proxyName/*',
         handler: async (request, reply) => {
-          return handleHttpProxy(request, reply);
+          return handleHttpProxy(request, reply, authorize);
         },
       });
     }
@@ -245,13 +264,13 @@ export const setupProxyRewriter = (
 
   // --- URL rewriting via event interceptor ---
   // Intercepts all outgoing events (both sendToAll and sendTo) to rewrite URLs.
-  wsHandler.addEventInterceptor((channel, args) => {
+  wsHandler.addEventInterceptor((channel, args, scope) => {
     if (channel === 'agent-process:status') {
       const processId = args[0] as string;
       const status = args[1] as Record<string, unknown> | undefined;
       if (status && (status.type === 'running' || status.type === 'connecting') && status.data) {
         const proxyPrefix = processId === 'chat' ? 'chat' : `code-${processId}`;
-        rewriteStatusUrls(status.data as Record<string, string | undefined>, proxyPrefix, processId);
+        rewriteStatusUrls(status.data as Record<string, string | undefined>, proxyPrefix, processId, scope);
       }
     }
 
@@ -259,39 +278,44 @@ export const setupProxyRewriter = (
       const taskId = args[0] as string;
       const status = args[1] as Record<string, unknown> | undefined;
       if (status && (status.type === 'running' || status.type === 'connecting') && status.data) {
-        rewriteStatusUrls(status.data as Record<string, string | undefined>, `project-${taskId}`, taskId);
+        rewriteStatusUrls(status.data as Record<string, string | undefined>, `project-${taskId}`, taskId, scope);
       }
     }
   });
 
   // --- URL rewriting for invoke responses via result wrappers ---
   // Result wrappers receive a structuredClone from WsHandler, safe to mutate directly.
-  wsHandler.addResultWrapper('agent-process:get-status', (result, args) => {
+  wsHandler.addResultWrapper('agent-process:get-status', (result, args, scope) => {
     const processId = args[0] as string;
     const status = result as Record<string, unknown> | undefined;
     if (status && (status.type === 'running' || status.type === 'connecting') && status.data) {
       const proxyPrefix = processId === 'chat' ? 'chat' : `code-${processId}`;
-      rewriteStatusUrls(status.data as Record<string, string | undefined>, proxyPrefix, processId);
+      rewriteStatusUrls(status.data as Record<string, string | undefined>, proxyPrefix, processId, scope);
     }
     return result;
   });
 
-  wsHandler.addResultWrapper('management-runtime:ensure', (result) => {
+  wsHandler.addResultWrapper('management-runtime:ensure', (result, _args, scope) => {
     const connection = result as { baseUrl?: unknown } | undefined;
     if (connection && typeof connection.baseUrl === 'string') {
       const data: Record<string, string | undefined> = { uiUrl: connection.baseUrl };
-      rewriteStatusUrls(data, 'management');
+      rewriteStatusUrls(data, 'management', undefined, scope);
       connection.baseUrl = data.uiUrl;
     }
     return result;
   });
 
-  wsHandler.addResultWrapper('project:get-tasks', (result) => {
+  wsHandler.addResultWrapper('project:get-tasks', (result, _args, scope) => {
     const tasks = result as Array<{ id: string; status: Record<string, unknown> }> | undefined;
     if (Array.isArray(tasks)) {
       for (const task of tasks) {
         if (task.status && task.status.type === 'running' && task.status.data) {
-          rewriteStatusUrls(task.status.data as Record<string, string | undefined>, `project-${task.id}`);
+          rewriteStatusUrls(
+            task.status.data as Record<string, string | undefined>,
+            `project-${task.id}`,
+            undefined,
+            scope
+          );
         }
       }
     }
@@ -565,6 +589,7 @@ export function redactProxyUrlForLog(url: string): string {
   try {
     const isRelative = url.startsWith('/');
     const parsed = new URL(url, 'http://omni.invalid');
+    parsed.pathname = parsed.pathname.replace(/\/proxy\/internal-[a-f0-9]{64}/g, '/proxy/[REDACTED]');
     for (const key of Array.from(parsed.searchParams.keys())) {
       if (SENSITIVE_QUERY_PARAM_RE.test(key)) {
         parsed.searchParams.set(key, REDACTED_QUERY_VALUE);
@@ -672,6 +697,7 @@ async function* readResponseBodyStream(body: ReadableStream<Uint8Array>): AsyncG
       }
     }
   } finally {
+    await reader.cancel().catch(() => undefined);
     reader.releaseLock();
   }
 }
@@ -679,7 +705,11 @@ async function* readResponseBodyStream(body: ReadableStream<Uint8Array>): AsyncG
 /**
  * Proxy an HTTP request to the upstream service.
  */
-async function handleHttpProxy(request: FastifyRequest, reply: FastifyReply): Promise<FastifyReply | void> {
+async function handleHttpProxy(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  authorize?: (scope: DeliveryScope) => Promise<boolean>
+): Promise<FastifyReply | void> {
   const { proxyName } = request.params as { proxyName: string; '*': string };
   const wildcard = (request.params as { '*': string })['*'];
   const entry = getProxyEntry(request, proxyName);
@@ -715,6 +745,10 @@ async function handleHttpProxy(request: FastifyRequest, reply: FastifyReply): Pr
     }
 
     const response = await globalThis.fetch(targetUrl, fetchInit);
+    if (authorize && entry.scope && !(await authorize(entry.scope))) {
+      await response.body?.cancel();
+      return reply.code(403).send({ error: 'Proxy authorization revoked' });
+    }
 
     const contentType = response.headers.get('content-type') ?? '';
     const normalizedContentType = contentType.toLowerCase();
@@ -754,6 +788,9 @@ async function handleHttpProxy(request: FastifyRequest, reply: FastifyReply): Pr
 
     if (isHtml && response.body) {
       let html = await response.text();
+      if (authorize && entry.scope && !(await authorize(entry.scope))) {
+        return reply.code(403).send();
+      }
 
       // --- Server-side URL rewriting (primary mechanism) ---
       html = rewriteHtmlUrls(html, upstream, proxyName);
@@ -780,11 +817,27 @@ async function handleHttpProxy(request: FastifyRequest, reply: FastifyReply): Pr
     }
 
     if (isCss && response.body) {
-      return reply.send(rewriteCssUrls(await response.text(), upstream, proxyName));
+      const css = await response.text();
+      if (authorize && entry.scope && !(await authorize(entry.scope))) {
+        return reply.code(403).send();
+      }
+      return reply.send(rewriteCssUrls(css, upstream, proxyName));
     }
 
     if (response.body) {
-      return reply.send(Readable.from(readResponseBodyStream(response.body as ReadableStream<Uint8Array>)));
+      const body = response.body;
+      return reply.send(
+        Readable.from(
+          (async function* () {
+            for await (const chunk of readResponseBodyStream(body as ReadableStream<Uint8Array>)) {
+              if (authorize && entry.scope && !(await authorize(entry.scope))) {
+                throw new Error('Proxy authorization revoked');
+              }
+              yield chunk;
+            }
+          })()
+        )
+      );
     }
     return reply.send();
   } catch (error) {
@@ -799,7 +852,8 @@ async function handleHttpProxy(request: FastifyRequest, reply: FastifyReply): Pr
 function handleWsProxy(
   clientSocket: import('ws').WebSocket,
   request: import('fastify').FastifyRequest,
-  upstreamPath: string
+  upstreamPath: string,
+  authorize?: (scope: DeliveryScope) => Promise<boolean>
 ): void {
   const proxyName = (request.params as { proxyName: string }).proxyName;
   const entry = getProxyEntry(request, proxyName);
@@ -823,8 +877,34 @@ function handleWsProxy(
   const query = request.url.includes('?') ? `?${request.url.split('?')[1]}` : '';
   const targetUrl = `${wsUpstream}${upstreamPath}${query}`;
 
-  console.log(`[ws-proxy] ${proxyName}: client → upstream ${redactProxyUrlForLog(targetUrl)}`);
+  console.log(`[ws-proxy] client → upstream ${redactProxyUrlForLog(targetUrl)}`);
   const upstreamSocket = new WsWebSocket(targetUrl, { handshakeTimeout: 10_000 });
+
+  const forward = (target: import('ws').WebSocket) => {
+    let chain = Promise.resolve();
+    return (data: string | Buffer): void => {
+      chain = chain
+        .then(async () => {
+          if (clientSocket.readyState !== 1 || target.readyState !== 1) {
+            return;
+          }
+          if (authorize && entry.scope && !(await authorize(entry.scope))) {
+            clientSocket.close(4403, 'Proxy authorization revoked');
+            upstreamSocket.close();
+            return;
+          }
+          if (clientSocket.readyState === 1 && target.readyState === 1) {
+            target.send(data);
+          }
+        })
+        .catch(() => {
+          clientSocket.close(1011, 'Authorization unavailable');
+          upstreamSocket.close();
+        });
+    };
+  };
+  const toUpstream = forward(upstreamSocket);
+  const toClient = forward(clientSocket);
 
   // Buffer client messages until upstream is ready
   const pendingMessages: (string | Buffer)[] = [];
@@ -833,23 +913,23 @@ function handleWsProxy(
     // Preserve frame type: binary for VNC/noVNC, text for JSON-RPC chat
     const msg: string | Buffer = isBinary ? Buffer.from(data as ArrayBuffer) : String(data);
     if (upstreamSocket.readyState === WsWebSocket.OPEN) {
-      upstreamSocket.send(msg);
+      toUpstream(msg);
     } else {
       pendingMessages.push(msg);
     }
   });
 
   upstreamSocket.on('open', () => {
-    console.log(`[ws-proxy] ${proxyName}: upstream connected`);
+    console.log('[ws-proxy] upstream connected');
     for (const msg of pendingMessages) {
-      upstreamSocket.send(msg);
+      toUpstream(msg);
     }
     pendingMessages.length = 0;
   });
 
   upstreamSocket.on('message', (data, isBinary) => {
     if (clientSocket.readyState === 1 /* OPEN */) {
-      clientSocket.send(isBinary ? data : String(data));
+      toClient(isBinary ? Buffer.from(data as ArrayBuffer) : String(data));
     }
   });
 
@@ -870,13 +950,13 @@ function handleWsProxy(
     safeClose(upstreamSocket);
   });
 
-  upstreamSocket.on('close', (code, reason) => {
-    console.log(`[ws-proxy] ${proxyName}: upstream closed code=${code} reason=${String(reason)}`);
+  upstreamSocket.on('close', (code) => {
+    console.log(`[ws-proxy] upstream closed code=${code}`);
     safeClose(clientSocket);
   });
 
   upstreamSocket.on('error', (err) => {
-    console.error(`[ws-proxy] ${proxyName}: upstream error:`, err.message);
+    console.error('[ws-proxy] upstream error:', err.message);
     safeClose(clientSocket, 4502, 'Upstream WebSocket error');
   });
 
@@ -938,7 +1018,8 @@ function consoleCapture(): string {
 export const rewriteStatusUrls = (
   data: Record<string, string | Record<string, string> | undefined>,
   proxyName: string,
-  _processId?: string
+  _processId?: string,
+  scope?: DeliveryScope
 ): void => {
   const urlFields = ['uiUrl', 'wsUrl', 'sandboxUrl', 'codeServerUrl', 'noVncUrl'];
 
@@ -947,7 +1028,7 @@ export const rewriteStatusUrls = (
     if (typeof url !== 'string' || !url) {
       continue;
     }
-    const proxyPath = registerAndRewrite(url, `${proxyName}-${field}`);
+    const proxyPath = registerAndRewrite(url, `${proxyName}-${field}`, scope);
     if (proxyPath) {
       data[field] = proxyPath;
     }
@@ -962,7 +1043,7 @@ export const rewriteStatusUrls = (
       if (typeof url !== 'string' || !url) {
         continue;
       }
-      const proxyPath = registerAndRewrite(url, `${proxyName}-svc-${name}`);
+      const proxyPath = registerAndRewrite(url, `${proxyName}-svc-${name}`, scope);
       if (proxyPath) {
         services[name] = proxyPath;
       }
@@ -975,22 +1056,28 @@ export const rewriteStatusUrls = (
  * relative ``/proxy/<key>/...`` path. Returns ``null`` if the value is already
  * proxied or isn't a valid URL.
  */
-function registerAndRewrite(url: string, proxyKey: string): string | null {
+function registerAndRewrite(url: string, proxyKey: string, scope?: DeliveryScope): string | null {
   try {
     if (url.includes('/proxy/')) {
       return null;
     }
     const parsed = new URL(url);
     const upstream = `${parsed.protocol}//${parsed.host}`;
+    if (scope) {
+      const key = JSON.stringify([scope.tenantId, scope.principalId, proxyKey, upstream]);
+      proxyKey = `internal-${createHmac('sha256', proxySecret).update(key).digest('hex')}`;
+    }
     const now = Date.now();
     upstreamMap.set(proxyKey, {
       upstream,
       kind: 'trusted-internal',
       createdAt: now,
       lastUsedAt: now,
+      scope,
+      ...(scope ? { expiresAt: now + DYNAMIC_PROXY_TTL_MS } : {}),
     });
     const proxyPath = `/proxy/${proxyKey}${parsed.pathname}${parsed.search}`;
-    console.log(`[proxy-rewrite] ${proxyKey}: ${redactProxyUrlForLog(url)} → ${proxyPath} (upstream: ${upstream})`);
+    // The path itself is a capability. Do not log it or its token query.
     return proxyPath;
   } catch {
     return null;

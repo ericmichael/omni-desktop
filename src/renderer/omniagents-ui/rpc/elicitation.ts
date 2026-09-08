@@ -1,4 +1,4 @@
-import type { ElicitationResponseParams, RpcMethodMap, RpcNotificationMap } from '@/generated/omniagents-gui-v1/gui-v1';
+import type { ElicitationResponseParams, RpcMethodMap, RpcNotificationMap } from '@/generated/omniagents-gui-v2/gui-v2';
 
 export type ElicitationKind = 'question' | 'confirm' | 'select' | 'form' | 'url';
 export type ElicitationAction = 'accept' | 'decline' | 'cancel';

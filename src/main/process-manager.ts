@@ -16,6 +16,7 @@ import {
   type AgentProcessStartArg,
   type FetchFn,
 } from '@/main/agent-process';
+import { ChatRuntimeJournal } from '@/main/chat-runtime-journal';
 import { hasDurableHostCodexMutation, isDurableCodexAccountRequest } from '@/main/local-codex-account-owner';
 import {
   hasDurableHostMcpMutation,
@@ -130,6 +131,23 @@ export class ProcessManager {
   private consumerWorkspaceIdentities = new Map<string, string>();
   private pendingStarts = new Map<string, { identity: string; promise: Promise<void> }>();
   private pendingStops = new Map<string, Promise<AgentProcessStopResult>>();
+  // Detach from host selection immediately, but retain the exact cleanup target
+  // until shutdown succeeds. A failed stop must remain retryable, and new tabs
+  // must never attach to a host whose final consumer is shutting it down.
+  private detachedStops = new Map<
+    string,
+    { proc: AgentProcess; runtime?: AgentHostConsumerRuntime; lastConsumer: boolean }
+  >();
+  private retiredConsumers = new Set<string>();
+  private runtimeJournal?: ChatRuntimeJournal;
+  private claimChatRuntime?: (id: string) => void | Promise<void>;
+  private runtimeRecovery: Promise<void> = Promise.resolve();
+  recoverAbandonedRuntimes = (): Promise<void> => {
+    this.runtimeRecovery = this.runtimeRecovery
+      .catch(() => undefined)
+      .then(() => this.runtimeJournal?.recoverAbandoned());
+    return this.runtimeRecovery;
+  };
   private pendingManagementConnection: Promise<ManagementRuntimeConnection> | null = null;
   /** Monotonic consumer intent; async results may publish only if their epoch still wins. */
   private consumerEpochs = new Map<string, number>();
@@ -221,8 +239,17 @@ export class ProcessManager {
     prepareLocalMcpOwnership?: (status: Record<string, unknown>) => void | Promise<void>;
     /** Run local ownership transfer after the management host is ready. */
     onManagementReady?: (proc: AgentProcess) => void | Promise<void>;
+    runtimeJournalDir?: string;
+    claimChatRuntime?: (id: string) => void | Promise<void>;
   }) {
     this.sendToWindow = arg.sendToWindow;
+    if (arg.runtimeJournalDir) {
+      this.runtimeJournal = new ChatRuntimeJournal(arg.runtimeJournalDir, (profile) =>
+        this.resolveComputeClient(profile)
+      );
+      this.runtimeRecovery = this.runtimeJournal.recoverAbandoned();
+    }
+    this.claimChatRuntime = arg.claimChatRuntime;
     this.fetchFn = arg.fetchFn ?? globalThis.fetch;
     this.getStoreData =
       arg.getStoreData ??
@@ -359,6 +386,18 @@ export class ProcessManager {
     const attachment = this.agentHosts.attach(processId, compatibilityKey, () => {
       proc = new AgentProcess({
         mode,
+        recordCompute: this.runtimeJournal
+          ? (profile, sessionId) => this.runtimeJournal!.recordCompute(processId, profile, sessionId)
+          : undefined,
+        recordConsumer: this.runtimeJournal
+          ? async (claim) => {
+              if (isResidentProcessId(claim.consumerId)) {
+                return;
+              }
+              this.runtimeJournal!.record(claim);
+              await this.claimChatRuntime?.(claim.consumerId);
+            }
+          : undefined,
         ipcRawOutput: (data) => {
           for (const consumerId of this.agentHosts.consumersForHost(proc)) {
             this.sendToWindow('agent-process:raw-output', consumerId, data);
@@ -851,6 +890,12 @@ export class ProcessManager {
   }
 
   start = (processId: string, opts: AgentProcessStartOptions): Promise<void> => {
+    if (this.retiredConsumers.has(processId)) {
+      return Promise.reject(new Error('This chat tab has been closed'));
+    }
+    if (this.pendingStops.has(processId) || this.detachedStops.has(processId)) {
+      return Promise.reject(new Error('This chat runtime is still stopping; retry stopping it before starting'));
+    }
     const identity = ProcessManager.launchIdentity(opts);
     const pending = this.pendingStarts.get(processId);
     if (pending) {
@@ -1060,6 +1105,16 @@ export class ProcessManager {
   };
 
   private startConsumer = async (processId: string, opts: AgentProcessStartOptions, epoch: number): Promise<void> => {
+    await this.runtimeRecovery;
+    if (!isResidentProcessId(processId)) {
+      await this.claimChatRuntime?.(processId);
+      if (!this.processes.has(processId)) {
+        await this.runtimeJournal?.retire(processId);
+      }
+      if (!this.isCurrentConsumerEpoch(processId, epoch)) {
+        return;
+      }
+    }
     // Adopt an already-live process rather than restarting it. A renderer that
     // just (re)connected has an empty status map — its auto-launch guard reads
     // that map *before* `watchProcessStatus` seeds it — so a browser reload or
@@ -1209,43 +1264,116 @@ export class ProcessManager {
     return operation;
   };
 
+  /** Closing a tab is permanent for its unique consumer ID. A delayed start
+   * from another renderer must not recreate an invisible runtime. */
+  retire = async (processId: string): Promise<AgentProcessStopResult> => {
+    this.retiredConsumers.add(processId);
+    try {
+      const result = await this.stop(processId, { discardSnapshot: true });
+      await this.runtimeJournal?.retire(processId);
+      return result;
+    } finally {
+      this.lastStartArgs.delete(processId);
+    }
+  };
+
   private emptyStopResult = (): AgentProcessStopResult => ({
     scope: 'none',
     shutdown: 'not-applicable',
   });
 
   private stopConsumer = async (processId: string, opts?: AgentProcessStopOptions): Promise<AgentProcessStopResult> => {
-    const proc = this.processes.get(processId);
-    if (!proc) {
-      return this.emptyStopResult();
+    let target = this.detachedStops.get(processId);
+    if (!target) {
+      const proc = this.processes.get(processId);
+      if (!proc) {
+        return this.emptyStopResult();
+      }
+      const detached = this.agentHosts.detach(processId);
+      target = { proc, runtime: this.consumerRuntimes.get(processId), lastConsumer: detached?.lastConsumer ?? false };
+      this.detachedStops.set(processId, target);
     }
     this.mirrorSources.delete(processId);
-    const runtime = this.consumerRuntimes.get(processId);
-    const detached = this.agentHosts.detach(processId);
-    try {
-      if (opts?.discardSnapshot && runtime) {
-        await proc.discardConsumerSnapshot(runtime).catch(() => {});
-      }
-      if (detached?.lastConsumer) {
-        return await proc.stop();
-      } else if (detached && runtime) {
-        return await proc.stopConsumerEnvironment(runtime);
-      }
-      return this.emptyStopResult();
-    } finally {
-      this.consumerRuntimes.delete(processId);
-      this.consumerWorkspaceIds.delete(processId);
-      this.consumerWorkspaceIdentities.delete(processId);
-      this.processes.delete(processId);
-      const machineId = this.localSandboxKeys.get(processId);
-      if (machineId && this.hostBridge) {
-        this.localSandboxKeys.delete(processId);
-        void this.hostBridge.release(machineId, processId).catch(() => {});
+    const { proc, runtime, lastConsumer } = target;
+    if (!lastConsumer) {
+      // A neighboring consumer may have started closing the entire host while
+      // this environment's stop was failing. Its control client disappears at
+      // the start of host shutdown, not at confirmed process exit. Join that
+      // shutdown (or retry its failure) before acknowledging this environment.
+      const hostStop = [...this.detachedStops].find(
+        ([id, other]) => id !== processId && other.proc === proc && other.lastConsumer
+      );
+      if (hostStop) {
+        await this.stop(hostStop[0]);
       }
     }
+    if (opts?.discardSnapshot && runtime) {
+      await proc.discardConsumerSnapshot(runtime).catch(() => {});
+    }
+    const result = lastConsumer
+      ? await proc.stop()
+      : runtime
+        ? await proc.stopConsumerEnvironment(runtime)
+        : this.emptyStopResult();
+    // No finally: failed shutdown retains both the runtime and its cleanup
+    // target. A second stop must not turn an earlier failure into a no-op.
+    this.detachedStops.delete(processId);
+    this.consumerRuntimes.delete(processId);
+    this.consumerWorkspaceIds.delete(processId);
+    this.consumerWorkspaceIdentities.delete(processId);
+    this.processes.delete(processId);
+    const machineId = this.localSandboxKeys.get(processId);
+    if (machineId && this.hostBridge) {
+      this.localSandboxKeys.delete(processId);
+      void this.hostBridge.release(machineId, processId).catch(() => {});
+    }
+    return result;
   };
 
-  rebuild = async (processId: string, opts: AgentProcessStartOptions): Promise<void> => {
+  /** All materializing operations share the same per-consumer lane as start.
+   * Stop waits for this lane before retiring its final environment. */
+  private mutateConsumer = <R>(processId: string, mutate: () => Promise<R>): Promise<R> => {
+    if (this.retiredConsumers.has(processId)) {
+      return Promise.reject(new Error('This chat tab has been closed'));
+    }
+    if (this.pendingStops.has(processId) || this.detachedStops.has(processId)) {
+      return Promise.reject(new Error('This chat runtime is still stopping'));
+    }
+    const previous = this.pendingStarts.get(processId)?.promise;
+    const epoch = this.advanceConsumerEpoch(processId);
+    const task = Promise.resolve(previous)
+      .catch(() => undefined)
+      .then(async () => {
+        if (!this.isCurrentConsumerEpoch(processId, epoch)) {
+          throw new Error('Runtime operation was superseded');
+        }
+        if (!isResidentProcessId(processId)) {
+          await this.claimChatRuntime?.(processId);
+        }
+        return mutate();
+      });
+    const promise = task.then(() => undefined);
+    this.pendingStarts.set(processId, { identity: `mutation:${epoch}`, promise });
+    const clear = () => {
+      if (this.pendingStarts.get(processId)?.promise === promise) {
+        this.pendingStarts.delete(processId);
+      }
+    };
+    void promise.then(clear, clear);
+    return task;
+  };
+
+  rebuild = (processId: string, opts: AgentProcessStartOptions): Promise<void> =>
+    this.mutateConsumer(processId, () => this.rebuildConsumer(processId, opts));
+
+  private rebuildConsumer = async (processId: string, opts: AgentProcessStartOptions): Promise<void> => {
+    const epoch = this.consumerEpochs.get(processId)!;
+    if (this.retiredConsumers.has(processId)) {
+      throw new Error('This chat tab has been closed');
+    }
+    if (this.pendingStops.has(processId) || this.detachedStops.has(processId)) {
+      throw new Error('This chat runtime is still stopping; retry stopping it before rebuilding');
+    }
     const lastOpts = this.lastStartArgs.get(processId);
     const merged: AgentProcessStartOptions = {
       workspaceDir: opts.workspaceDir || lastOpts?.workspaceDir || '',
@@ -1272,7 +1400,6 @@ export class ProcessManager {
       startArg.explicitProfilePath = profilePath;
     }
     const mode = this.resolveMode(startArg.profileName);
-    const client = this.resolveComputeClient(startArg.profileName);
     if (mode === 'serve') {
       await this.waitForRuntimeInstall?.();
     }
@@ -1295,11 +1422,11 @@ export class ProcessManager {
         // retire the current environment or materialization is a no-op.
         // Withdrawing it from the consumer map also prevents stale runtime
         // metadata from being reported during the replacement window.
-        this.consumerRuntimes.delete(processId);
-        this.sendToWindow('agent-process:status', processId, this.getStatus(processId));
         if (currentRuntime) {
           await previous.stopConsumerEnvironment(currentRuntime);
         }
+        this.consumerRuntimes.delete(processId);
+        this.sendToWindow('agent-process:status', processId, this.getStatus(processId));
         const runtime = await previous.configureConsumer(processId, workspaceId, startArg);
         this.consumerRuntimes.set(processId, runtime);
         this.consumerWorkspaceIds.set(processId, workspaceId);
@@ -1310,18 +1437,13 @@ export class ProcessManager {
         return;
       }
     }
-    const { proc, created } = this.getOrCreate(processId, compatibilityKey, mode, client);
-    this.trackMirrorSources(processId, startArg.sources);
-    if (created || proc !== previous) {
-      const statusType = proc.getStatus().type;
-      if (!['starting', 'connecting', 'running'].includes(statusType)) {
-        proc.start(startArg);
-      } else {
-        this.sendToWindow('agent-process:status', processId, this.getStatus(processId));
-      }
+    // A replacement host is targetless until the consumer is configured. Use
+    // the full awaited start transaction, not a fire-and-forget host spawn.
+    await this.stopConsumer(processId);
+    if (!this.isCurrentConsumerEpoch(processId, epoch)) {
       return;
     }
-    await proc.rebuild(startArg);
+    await this.startConsumer(processId, merged, epoch);
   };
 
   getStatus = (processId: string): WithTimestamp<AgentProcessStatus> => {
@@ -1455,6 +1577,17 @@ export class ProcessManager {
   };
 
   switchSandbox = async (processId: string, profileName: string): Promise<SandboxSwitchResult> => {
+    try {
+      return await this.mutateConsumer(processId, () => this.switchSandboxConsumer(processId, profileName));
+    } catch (error) {
+      return { ok: false, reason: (error as Error).message };
+    }
+  };
+
+  private switchSandboxConsumer = async (processId: string, profileName: string): Promise<SandboxSwitchResult> => {
+    if (this.retiredConsumers.has(processId) || this.pendingStops.has(processId) || this.detachedStops.has(processId)) {
+      return { ok: false, reason: 'This chat runtime is closed or still stopping' };
+    }
     const proc = this.processes.get(processId);
     if (!proc) {
       return { ok: false, reason: 'process not found' };
@@ -1653,6 +1786,7 @@ export class ProcessManager {
   };
 
   cleanup = async (): Promise<void> => {
+    await this.runtimeRecovery.catch(() => undefined);
     if (this.mirrorTimer) {
       clearInterval(this.mirrorTimer);
       this.mirrorTimer = null;
@@ -1665,7 +1799,8 @@ export class ProcessManager {
     }
     await Promise.allSettled([...this.pendingStarts.values()].map((entry) => entry.promise));
     await Promise.allSettled([...this.pendingStops.values()]);
-    const exits = this.agentHosts.clear().map((p) => p.exit());
+    const hosts = new Set([...this.agentHosts.clear(), ...[...this.detachedStops.values()].map((t) => t.proc)]);
+    const exits = [...hosts].map((p) => p.exit());
     await Promise.allSettled(exits);
     this.processes.clear();
     this.lastStartArgs.clear();
@@ -1674,6 +1809,7 @@ export class ProcessManager {
     this.consumerWorkspaceIdentities.clear();
     this.pendingStarts.clear();
     this.pendingStops.clear();
+    this.detachedStops.clear();
     this.pendingManagementConnection = null;
     this.consumerEpochs.clear();
   };
@@ -1720,6 +1856,8 @@ export const createProcessManager = (arg: {
   durableLocalMcpMutations?: boolean;
   prepareLocalMcpOwnership?: (status: Record<string, unknown>) => void | Promise<void>;
   onManagementReady?: (proc: AgentProcess) => void | Promise<void>;
+  runtimeJournalDir?: string;
+  claimChatRuntime?: (id: string) => void | Promise<void>;
 }) => {
   const {
     ipc,
@@ -1736,6 +1874,8 @@ export const createProcessManager = (arg: {
   } = arg;
 
   const processManager = new ProcessManager({
+    runtimeJournalDir: arg.runtimeJournalDir,
+    claimChatRuntime: arg.claimChatRuntime,
     sendToWindow,
     fetchFn,
     getStoreData,

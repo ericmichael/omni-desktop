@@ -2,7 +2,9 @@ import type { MachineRow, MachinesRepo } from 'omni-projects-db';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WebSocket } from 'ws';
 
+import { HostBridgePreparer } from '@/server/host-bridge-preparer';
 import { MachineRegistry } from '@/server/machine-registry';
+import type { WsHandler } from '@/server/ws-handler';
 
 const stubWs = (): WebSocket => ({ readyState: 1 }) as unknown as WebSocket;
 
@@ -57,6 +59,25 @@ describe('MachineRegistry', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it('binds tunnel capabilities to one owner, machine, session and port and revokes on release', async () => {
+    await registry.bindFromWs(stubWs(), 'alice', { machineId: 'm-1', label: 'Mac', platform: 'darwin' });
+    const token = registry.grantTunnel('m-1', 'chat-a', 1234);
+    expect(registry.authorizeTunnel('m-1', 'chat-a', '1234', token)).toBe(true);
+    expect(registry.authorizeTunnel('m-1', 'chat-b', '1234', token)).toBe(false);
+    expect(registry.authorizeTunnel('m-1', 'chat-a', '9999', token)).toBe(false);
+    expect(registry.authorizeTunnel('m-1', 'chat-a', '1234', '')).toBe(false);
+    registry.releaseSession('m-1', 'chat-a');
+    expect(registry.authorizeTunnel('m-1', 'chat-a', '1234', token)).toBe(false);
+  });
+
+  it('does not let another principal prepare a sandbox on an owned machine', async () => {
+    await registry.bindFromWs(stubWs(), 'alice', { machineId: 'm-1', label: 'Mac', platform: 'darwin' });
+    const invokeOnWs = vi.fn();
+    const preparer = new HostBridgePreparer({ invokeOnWs } as unknown as WsHandler, registry, '/unused', 3001, 'bob');
+    await expect(preparer.prepare('m-1', 'foreign', {})).rejects.toThrow('host-offline');
+    expect(invokeOnWs).not.toHaveBeenCalled();
   });
 
   it('binds a WS and upserts the PG row', async () => {

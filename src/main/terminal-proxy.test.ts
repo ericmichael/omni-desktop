@@ -109,10 +109,7 @@ const completeCreate = async (
   rpcWs.serverOpen();
   await settle();
   const initializeFrame = JSON.parse(rpcWs.sent[0]!) as { id: number };
-  rpcWs.emit(
-    'message',
-    JSON.stringify({ jsonrpc: '2.0', id: initializeFrame.id, result: { protocol_version: '1.0.0' } })
-  );
+  rpcWs.emit('message', JSON.stringify({ jsonrpc: '2.0', id: initializeFrame.id, result: guiInitializeResult() }));
   await settle();
   const ensureFrame = JSON.parse(rpcWs.sent[2]!) as { id: number };
   rpcWs.emit('message', JSON.stringify({ jsonrpc: '2.0', id: ensureFrame.id, result: { session_id: 'sess-1' } }));
@@ -244,3 +241,4 @@ describe('TerminalProxy lifecycle', () => {
     expect(settled).toBe(true);
   });
 });
+import { guiInitializeResult } from 'tests/unit/gui-initialize';

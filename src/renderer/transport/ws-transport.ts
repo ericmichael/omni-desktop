@@ -5,6 +5,8 @@ import {
   DEFAULT_LIFECYCLE_POLICY,
   type LifecyclePolicy,
   ReconnectController,
+  WS_CLOSE_FORBIDDEN,
+  WS_CLOSE_UNAUTHENTICATED,
 } from '@/shared/lifecycle';
 import type { TransportEmitter, TransportListener } from '@/shared/transport';
 import type { IpcEvents, IpcRendererEvents } from '@/shared/types';
@@ -65,20 +67,10 @@ const LOCAL_LIFECYCLE_POLICY: LifecyclePolicy = {
   reconnectMaxAttempts: Number.POSITIVE_INFINITY,
 };
 
-const SESSION_ID_KEY = 'omni-session-id';
 /** Active team id (teams/cloud mode); sent as ?team= so the server scopes the session. */
 const ACTIVE_TEAM_KEY = 'omni-active-team';
 
 import { uuidv4 } from '@/lib/uuid';
-
-function getOrCreateSessionId(): string {
-  let id = localStorage.getItem(SESSION_ID_KEY);
-  if (!id) {
-    id = uuidv4();
-    localStorage.setItem(SESSION_ID_KEY, id);
-  }
-  return id;
-}
 
 /** Persisted active team, or null until the user picks one (defaults to their personal team). */
 export function getActiveTeamId(): string | null {
@@ -134,7 +126,13 @@ export class WsTransportEmitter implements TransportEmitter {
    * terminal close rejects both.
    */
   private messageQueue: { data: string; id?: number }[] = [];
-  private sessionId = getOrCreateSessionId();
+  // Transport ownership belongs to this window/emitter, not the origin's
+  // localStorage (shared by every tab, and sessionStorage can be cloned).
+  // Keep the ID across socket reconnects; a new document rehydrates durable
+  // chat state through a new transport instead of stealing another window.
+  private sessionId = uuidv4();
+  // Shared storage chooses the scope of a NEW document, never a reconnect.
+  private readonly teamId = getActiveTeamId();
   private authToken: string | null = null;
   private readonly cloud: WsTransportConfig | null;
   private readonly wsHost: string;
@@ -187,6 +185,12 @@ export class WsTransportEmitter implements TransportEmitter {
     }
     const res = await fetch('/api/ws-token', { credentials: 'same-origin' });
     if (!res.ok) {
+      if (res.status === 401 || res.status === 403) {
+        throw new ConnectionClosedError('Sign in again to reconnect', {
+          permanent: true,
+          closeCode: res.status === 401 ? WS_CLOSE_UNAUTHENTICATED : WS_CLOSE_FORBIDDEN,
+        });
+      }
       throw new Error(`Failed to fetch WS auth token: ${res.status} ${res.statusText}`);
     }
     const data = (await res.json()) as { token?: string };
@@ -199,7 +203,7 @@ export class WsTransportEmitter implements TransportEmitter {
 
   private getWsUrl(token: string): string {
     const protocol = this.isHttps() ? 'wss:' : 'ws:';
-    const team = getActiveTeamId();
+    const team = this.teamId;
     const teamParam = team ? `&team=${encodeURIComponent(team)}` : '';
     return `${protocol}//${this.wsHost}/ws?sessionId=${encodeURIComponent(this.sessionId)}&token=${encodeURIComponent(token)}${teamParam}`;
   }
@@ -213,6 +217,12 @@ export class WsTransportEmitter implements TransportEmitter {
       token = await this.fetchAuthToken();
     } catch (err) {
       console.error('[ws-transport]', err);
+      // Unlike an expired short-lived WS token, an explicit rejection of
+      // the credential used to obtain a fresh token needs reauthentication.
+      if (err instanceof ConnectionClosedError && err.permanent) {
+        this.enterTerminalState(err.closeCode, err.message);
+        return;
+      }
       this.handleConnectionFailure(undefined, 'failed to fetch WS auth token');
       return;
     }
@@ -266,7 +276,7 @@ export class WsTransportEmitter implements TransportEmitter {
           }
         }
       } else if (msg.type === 'reverse-invoke') {
-        void this.dispatchReverseInvoke(msg);
+        void this.dispatchReverseInvoke(ws, msg);
       }
     };
 
@@ -476,15 +486,15 @@ export class WsTransportEmitter implements TransportEmitter {
     }
   }
 
-  private async dispatchReverseInvoke(msg: ReverseInvokeMessage): Promise<void> {
+  private async dispatchReverseInvoke(origin: WebSocket, msg: ReverseInvokeMessage): Promise<void> {
     const handler = this.reverseHandlers.get(msg.channel);
     const respond = (payload: { result?: unknown; error?: string }): void => {
       const out = JSON.stringify({ type: 'reverse-response', id: msg.id, ...payload });
       // Send only when the WS is still open — closing mid-flight is the
       // cloud's problem to recover from (it'll time out and surface
       // host-offline).
-      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-        this.ws.send(out);
+      if (this.ws === origin && origin.readyState === WebSocket.OPEN) {
+        origin.send(out);
       }
     };
     if (!handler) {

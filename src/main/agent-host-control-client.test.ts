@@ -67,7 +67,7 @@ describe('AgentHostControlClient', () => {
             result:
               message['method'] === 'initialize'
                 ? {
-                    protocol_version: '1.0.0',
+                    protocol_version: '2.0.0',
                     identity: { name: 'test-server', version: '1.0.0' },
                     platform: { os: 'linux', arch: 'x64' },
                     capabilities: (message['params'] as { capabilities: unknown }).capabilities,
@@ -112,7 +112,7 @@ describe('AgentHostControlClient', () => {
       socket.on('message', (raw) => {
         const message = JSON.parse(String(raw)) as Record<string, unknown>;
         if (message['method'] === 'initialize') {
-          socket.send(JSON.stringify({ jsonrpc: '2.0', id: message['id'], result: { protocol_version: '1.0.0' } }));
+          socket.send(JSON.stringify({ jsonrpc: '2.0', id: message['id'], result: guiInitializeResult() }));
           return;
         }
         if (message['method'] === 'initialized') {
@@ -140,3 +140,4 @@ describe('AgentHostControlClient', () => {
     client.close();
   });
 });
+import { guiInitializeResult } from 'tests/unit/gui-initialize';

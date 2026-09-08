@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import type { RpcMethodMap, RpcNotificationMap } from '@/generated/omniagents-gui-v1/gui-v1';
+import type { RpcMethodMap, RpcNotificationMap } from '@/generated/omniagents-gui-v2/gui-v2';
 
 import { McpManagementClient, McpManagementProtocolError, type McpManagementTransport } from './mcp-management';
 

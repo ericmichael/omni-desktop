@@ -7,7 +7,7 @@
  * host stores, protects the launcher-managed server name, and reports a
  * redacted snapshot equivalent to the file Desktop just materialized.
  */
-import type { RpcMethodMap } from '@/generated/omniagents-gui-v1/gui-v1';
+import type { RpcMethodMap } from '@/generated/omniagents-gui-v2/gui-v2';
 import { type ManagedMcpEntry, MCP_ENTRY_NAME, mergeManagedMcpEntry } from '@/shared/mcp-entry';
 import type { McpConfig, McpServerEntry } from '@/shared/types';
 

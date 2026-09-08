@@ -147,6 +147,10 @@ export const selectWorkspaceDir = async () => {
  * consumed. The app should wait for this atom to be `true` before allowing user interaction.
  */
 export const $initialized = atom(false);
+export const $initializationError = atom<string | null>(null);
+const initializationFailed = (error: unknown) => {
+  $initializationError.set(error instanceof Error ? error.message : 'Startup failed. Please reload.');
+};
 
 /**
  * An atom that holds the operating system of the user. This is fetched from the main process when the app starts.
@@ -154,7 +158,7 @@ export const $initialized = atom(false);
 export const $operatingSystem = atom<OperatingSystem | undefined>(undefined);
 
 // Fetch the operating system from the main process and set it in the store when the app starts
-emitter.invoke('util:get-os').then($operatingSystem.set);
+void emitter.invoke('util:get-os').then($operatingSystem.set).catch(initializationFailed);
 
 /**
  * Initialize the store: sync with main process, apply convention defaults for any unset values, then mark as ready.
@@ -217,4 +221,4 @@ const init = async () => {
   $initialized.set(true);
 };
 
-init();
+void init().catch(initializationFailed);

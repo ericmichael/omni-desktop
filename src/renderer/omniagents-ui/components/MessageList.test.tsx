@@ -11,7 +11,7 @@ import type {
   WorkflowReviewItem,
 } from '@/shared/chat-types';
 
-import { MessageList } from './MessageList';
+import { ApprovalCard, MessageList } from './MessageList';
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
@@ -50,6 +50,52 @@ const envelope = (id: string, overrides: Partial<CanonicalItemEnvelope> = {}): C
   content: {},
   source_ref: {},
   ...overrides,
+});
+
+it('keeps approval failure local, blocks duplicate clicks, and permits retry', async () => {
+  let fail!: (error: Error) => void;
+  const a = vi.fn(
+    () =>
+      new Promise<void>((_, reject) => {
+        fail = reject;
+      })
+  );
+  const b = vi.fn();
+  await act(async () =>
+    root.render(
+      <>
+        <section id="approval-A">
+          <ApprovalCard
+            item={{ type: 'approval', request_id: 'A', tool: 'tool-A', argumentsText: '{}' }}
+            onDecision={a}
+          />
+        </section>
+        <section id="approval-B">
+          <ApprovalCard
+            item={{ type: 'approval', request_id: 'B', tool: 'tool-B', argumentsText: '{}' }}
+            onDecision={b}
+          />
+        </section>
+      </>
+    )
+  );
+  const approve = [...container.querySelectorAll<HTMLButtonElement>('#approval-A button')].find(
+    (button) => button.textContent === 'Approve Once'
+  )!;
+  act(() => {
+    approve.click();
+    approve.click();
+  });
+  expect(a).toHaveBeenCalledOnce();
+  expect(approve.disabled).toBe(true);
+  await act(async () => fail(new Error('connection lost')));
+  expect(container.querySelector('#approval-A [role="alert"]')?.textContent).toContain('Please retry');
+  expect(container.querySelector('#approval-B [role="alert"]')).toBeNull();
+  expect(b).not.toHaveBeenCalled();
+  a.mockResolvedValueOnce(undefined);
+  await act(async () => approve.click());
+  expect(a).toHaveBeenCalledTimes(2);
+  expect(container.querySelector('#approval-A [role="alert"]')).toBeNull();
 });
 
 const workflowReview = (overrides: Partial<WorkflowReviewItem> = {}): WorkflowReviewItem => ({

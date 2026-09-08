@@ -80,6 +80,36 @@ describe('RealtimeRPCClient lifecycle', () => {
     vi.unstubAllGlobals();
   });
 
+  it('retries a temporary ticket outage instead of reporting rejected credentials', async () => {
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: false, status: 503 })
+      .mockResolvedValue({ ok: true, json: async () => ({ ticket: 'recovered' }) });
+    vi.stubGlobal('fetch', fetch);
+    const client = new RealtimeRPCClient('ws://localhost/ws/realtime', 'token', false, policy);
+    const pending = client.connect();
+    const outcome = pending.catch((error) => error);
+    try {
+      await vi.advanceTimersByTimeAsync(500);
+      expect(fetch).toHaveBeenCalledTimes(2);
+      FakeWebSocket.instances[0]!.open();
+      expect(await outcome).toBeUndefined();
+    } finally {
+      client.disconnect();
+    }
+  });
+
+  it('immediately settles and clears the deadline when a connecting socket is retired', async () => {
+    const client = new RealtimeRPCClient('ws://localhost/ws/realtime', undefined, false, policy);
+    const { promise, socket } = await beginConnect(client);
+    const rejection = expect(promise).rejects.toThrow('closed by client');
+    client.disconnect();
+    await rejection;
+    expect(socket.readyState).toBe(FakeWebSocket.CLOSED);
+    expect(vi.getTimerCount()).toBe(0);
+    expect(FakeWebSocket.instances).toHaveLength(1);
+  });
+
   it('bounds RPC calls with the shared default deadline and preserves timeout metadata', async () => {
     const client = new RealtimeRPCClient('ws://localhost/ws/realtime', undefined, false, policy);
     const { promise: connecting, socket } = await beginConnect(client);
