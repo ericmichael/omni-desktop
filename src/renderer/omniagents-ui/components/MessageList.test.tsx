@@ -89,7 +89,9 @@ it('keeps approval failure local, blocks duplicate clicks, and permits retry', a
   expect(a).toHaveBeenCalledOnce();
   expect(approve.disabled).toBe(true);
   await act(async () => fail(new Error('connection lost')));
-  expect(container.querySelector('#approval-A [role="alert"]')?.textContent).toContain('Please retry');
+  // No message: the card simply becomes actionable again.
+  expect(container.querySelector('#approval-A [role="alert"]')).toBeNull();
+  expect(approve.disabled).toBe(false);
   expect(container.querySelector('#approval-B [role="alert"]')).toBeNull();
   expect(b).not.toHaveBeenCalled();
   a.mockResolvedValueOnce(undefined);

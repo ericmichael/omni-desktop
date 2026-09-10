@@ -53,7 +53,9 @@ for (const crash of [false, true]) {
     await expect.soft(approve).toHaveCount(0);
     if (await approve.isVisible()) {
       await approve.click();
-      await expect(restoredA.getByRole('alert')).toContainText('Decision not confirmed');
+      // The decision cannot land; the card stays actionable and says nothing.
+      await expect(approve).toBeEnabled();
+      await expect(restoredA.getByRole('alert')).toHaveCount(0);
       await attachProofPng(testInfo, 'orphan approval cannot be resolved', await app.captureScreenshot());
     }
   });

@@ -7,19 +7,20 @@ import {
   publishSubagentEvent,
   publishSubagentsSnapshot,
 } from '@/renderer/omniagents-ui/activity-store';
-import {
-  draftsReady,
-  flushConversationDrafts,
-  getConversationDraft,
-  updateConversationDraft,
-} from '@/renderer/omniagents-ui/conversation-drafts';
 import { prepareConversation } from '@/renderer/omniagents-ui/prepare-conversation';
-import {
-  adaptCanonicalConversationItems,
-  loadSessionTranscript,
-} from '@/renderer/omniagents-ui/rpc/canonical-chat-history';
+import { adaptCanonicalConversationItems } from '@/renderer/omniagents-ui/rpc/canonical-chat-history';
 import type { RPCClient } from '@/renderer/omniagents-ui/rpc/client';
 import { ClientRequestNotPendingError } from '@/renderer/omniagents-ui/rpc/client-response-error';
+import {
+  findSlashCommand,
+  normalizeSlashCommand,
+  parseSlashArgs,
+  parseSlashLine,
+  type SlashCommand,
+  unknownCommandMessage,
+  slashResultMessage,
+} from '@/renderer/omniagents-ui/rpc/slash';
+import { ConnectionClosedError, RpcTimeoutError } from '@/shared/lifecycle';
 import { type ChatSessionEvent, chatSessionMachine } from '@/shared/machines/chat-session.machine';
 import { createMachineLogger } from '@/shared/machines/machine-logger';
 import type { ExecutionTarget, RunOverrides } from '@/shared/types';
@@ -27,6 +28,9 @@ import type { ExecutionTarget, RunOverrides } from '@/shared/types';
 import { encodeMessage } from './encode-message';
 import { SessionPanelStore } from './session-panels';
 import { wireSessionTranscript } from './session-transcript';
+
+/** How long a lost-reply receipt lookup waits for the socket to come back. */
+const RECEIPT_LOOKUP_TIMEOUT_MS = 15_000;
 
 type Listener = (payload: any) => void;
 export type SessionToolHandler = (
@@ -51,15 +55,12 @@ export class ConversationSession {
   readonly actor = createActor(chatSessionMachine, { inspect: createMachineLogger('chatSession') }).start();
   readonly panels = new SessionPanelStore();
   disposed = false;
-  private environmentRevision = 0;
   private reconnectRevision = 0;
   private stops = new Map<string, Promise<void>>();
   private listeners = new Map<string, Set<Listener>>();
   private transcript: ReturnType<typeof wireSessionTranscript>;
   private loading?: Promise<string>;
   private registered = false;
-  private runRevision = 0;
-  private transcriptRevision = 0;
   private workersRevision = 0;
   private submission: Promise<unknown> = Promise.resolve();
   private pendingSubmissions = 0;
@@ -108,20 +109,6 @@ export class ConversationSession {
       }
       this.snapshotCursor.seq = payload.seq;
     }
-    if (
-      [
-        'message_output',
-        'tool_called',
-        'tool_result',
-        'item_updated',
-        'tool_approval_requested',
-        'tool_approval_resolved',
-        'mcp_approval_requested',
-        'mcp_approval_resolved',
-      ].includes(method)
-    ) {
-      this.transcriptRevision++;
-    }
     if (method === 'queue_changed') {
       this.panels.set('queuedMessages', Array.isArray(payload?.items) ? payload.items : []);
     }
@@ -139,9 +126,6 @@ export class ConversationSession {
     }
   }
 
-  noteRunEvent() {
-    this.runRevision++;
-  }
   claimIntent(key: string) {
     if (this.intents.has(key)) {
       return false;
@@ -323,9 +307,10 @@ export class ConversationSession {
     ack();
   }
 
-  /** Coalesced hydration. Ready is published only after history, active-run
-   * status and draft settings have all been reconciled. */
-  load(options: { force?: boolean; authoritativeResync?: boolean } = {}): Promise<string> {
+  /** Coalesced hydration. Ready is published only after the atomic snapshot
+   * (history, queue, pending requests, active-run status) and draft settings
+   * have all been reconciled. */
+  load(options: { force?: boolean } = {}): Promise<string> {
     if (this.disposed) {
       return Promise.reject(new Error('Conversation connection was closed'));
     }
@@ -341,103 +326,54 @@ export class ConversationSession {
         this.registered = true;
         await this.client.registerSession(this.id);
         await this.transcript.recover();
-        if (typeof this.client.getSessionSnapshot === 'function') {
-          await prepareConversation(this.client, this.id);
-          this.snapshotEvents = [];
-          const result = await this.client.getSessionSnapshot(this.id);
-          if (this.disposed) {
-            throw new Error('Conversation connection was closed');
-          }
-          const snapshot = result.snapshot;
-          const items = adaptCanonicalConversationItems(snapshot.items);
-          this.panels.set('queuedMessages', snapshot.queue);
-          this.panels.set('escalation', null);
-          if (items.length || result.run_active || snapshot.queue.length) {
-            this.panels.set('workspaceLocked', true);
-          }
-          this.snapshotCursor = { stream: snapshot.stream_id, seq: snapshot.last_seq };
-          this.actor.send({
-            type: 'HISTORY_LOADED',
-            items,
-            active_run_id: result.run_active ? result.active_run_id : undefined,
-          });
-          const buffered = this.snapshotEvents;
-          this.snapshotEvents = undefined;
-          for (const event of snapshot.state_events ?? []) {
-            if (event.method === 'run_status') {
-              this.receive({
-                type: 'RUN_STATUS',
-                text: [event.params.status, event.params.message].filter(Boolean).join(': '),
-                session_id: this.id,
-              });
-            } else if (event.method === 'client_request') {
-              // These are display snapshots, not live waiters. Apply even if
-              // the original request was acknowledged, without answering again.
-              this.handleClientRequest({ ...event.params, request_id: undefined });
-            }
-          }
-          // Pending requests are part of the snapshot even when their event
-          // predates its watermark. They must not wait for a future replay.
-          for (const payload of snapshot.pending_requests) {
-            this.handleClientRequest(payload);
-          }
-          for (const event of buffered) {
-            if (typeof event.payload?.seq === 'number') {
-              this.dispatch(event.method, event.payload);
-            }
-          }
-          await this.client.completeSessionResync(this.id, snapshot.stream_id, snapshot.last_seq);
-          return this.id;
+        if (typeof this.client.getSessionSnapshot !== 'function') {
+          throw new Error('Internal error: this connection cannot read conversation snapshots.');
         }
-        // The transcript protocol has no atomic history/event watermark.
-        // Re-read if transcript events raced the snapshot instead of erasing
-        // them with an older history response. Never declare uncertain state ready.
-        for (let attempt = 0; ; attempt++) {
-          const revision = this.transcriptRevision;
-          const runRevision = this.runRevision;
-          const queueFresh = this.panels.guardRead(['queuedMessages']);
-          const [history, queue, queued] = await Promise.all([
-            loadSessionTranscript(this.client, this.id),
-            this.client.request('queue_status', { session_id: this.id }),
-            this.client.listQueue(this.id),
-          ]);
-          if (this.disposed) {
-            throw new Error('Conversation connection was closed');
-          }
-          if (revision !== this.transcriptRevision || runRevision !== this.runRevision) {
-            if (attempt >= 4) {
-              throw new Error('Conversation is changing while loading. Please retry synchronization.');
-            }
-            continue;
-          }
-          await prepareConversation(this.client, this.id);
-          if (revision !== this.transcriptRevision || runRevision !== this.runRevision) {
-            if (attempt >= 4) {
-              throw new Error('Conversation is changing while loading. Please retry synchronization.');
-            }
-            continue;
-          }
-          if (this.disposed) {
-            throw new Error('Conversation connection was closed');
-          }
-          if (queueFresh()) {
-            this.panels.set('queuedMessages', queued.items);
-          }
-          if (history.items.length || queue.run_active || queued.items.length) {
-            this.panels.set('workspaceLocked', true);
-          }
-          this.loading = undefined;
-          this.actor.send({
-            type: 'HISTORY_LOADED',
-            items: history.items,
-            active_run_id:
-              queue.run_active && typeof queue.active_run_id === 'string' ? queue.active_run_id : undefined,
-          });
-          break;
+        await prepareConversation(this.client, this.id);
+        this.snapshotEvents = [];
+        const result = await this.client.getSessionSnapshot(this.id);
+        if (this.disposed) {
+          throw new Error('Conversation connection was closed');
         }
-        if (options.authoritativeResync) {
-          await this.client.completeSessionResync(this.id);
+        const snapshot = result.snapshot;
+        const items = adaptCanonicalConversationItems(snapshot.items);
+        this.panels.set('queuedMessages', snapshot.queue);
+        this.panels.set('escalation', null);
+        if (items.length || result.run_active || snapshot.queue.length) {
+          this.panels.set('workspaceLocked', true);
         }
+        this.snapshotCursor = { stream: snapshot.stream_id, seq: snapshot.last_seq };
+        this.actor.send({
+          type: 'HISTORY_LOADED',
+          items,
+          active_run_id: result.run_active ? result.active_run_id : undefined,
+        });
+        const buffered = this.snapshotEvents;
+        this.snapshotEvents = undefined;
+        for (const event of snapshot.state_events ?? []) {
+          if (event.method === 'run_status') {
+            this.receive({
+              type: 'RUN_STATUS',
+              text: [event.params.status, event.params.message].filter(Boolean).join(': '),
+              session_id: this.id,
+            });
+          } else if (event.method === 'client_request') {
+            // These are display snapshots, not live waiters. Apply even if
+            // the original request was acknowledged, without answering again.
+            this.handleClientRequest({ ...event.params, request_id: undefined });
+          }
+        }
+        // Pending requests are part of the snapshot even when their event
+        // predates its watermark. They must not wait for a future replay.
+        for (const payload of snapshot.pending_requests) {
+          this.handleClientRequest(payload);
+        }
+        for (const event of buffered) {
+          if (typeof event.payload?.seq === 'number') {
+            this.dispatch(event.method, event.payload);
+          }
+        }
+        await this.client.completeSessionResync(this.id, snapshot.stream_id, snapshot.last_seq);
         return this.id;
       } catch (error) {
         this.receive({ type: 'HISTORY_ERROR', error: error instanceof Error ? error.message : String(error) });
@@ -471,13 +407,6 @@ export class ConversationSession {
   }
 
   async refreshPanels(target?: ExecutionTarget, workspaceSupported = false) {
-    if (
-      this.panelTarget?.environmentId !== target?.environmentId ||
-      this.panelTarget?.environmentGeneration !== target?.environmentGeneration ||
-      this.panelTarget?.workspaceId !== target?.workspaceId
-    ) {
-      this.environmentRevision++;
-    }
     this.panelTarget = target;
     this.panelWorkspaceSupported = workspaceSupported;
     this.panelsInitialized = true;
@@ -506,13 +435,8 @@ export class ConversationSession {
    * cannot both decide A is idle and start competing runs. */
   send(text: string, files?: File[], options: SendOptions = {}): Promise<{ runId: string } | undefined> {
     this.pendingSubmissions++;
-    const environmentRevision = this.environmentRevision;
-    // The composer persists this identity before encoding. Another window may
-    // finish a retry while our encoding is still pending, clearing shared state.
-    // Keep the admitted identity through that await instead of minting a new one.
-    const inputId = options.inputId;
     const task = this.submission
-      .then(() => this.sendNow(text, files, options, environmentRevision, inputId))
+      .then(() => this.sendNow(text, files, options))
       .finally(() => this.pendingSubmissions--);
     this.submission = task.catch(() => {});
     return task;
@@ -542,14 +466,7 @@ export class ConversationSession {
     );
   }
 
-  private assertReady(environmentRevision: number, inputId?: string) {
-    const pendingInput = getConversationDraft(this.id).pendingInput;
-    if (pendingInput?.id && pendingInput.id !== inputId) {
-      throw new Error('Another message is pending in this conversation. Review it before sending a different message.');
-    }
-    if (environmentRevision !== this.environmentRevision) {
-      throw new Error('The execution environment changed. Your message has been kept; review it before retrying.');
-    }
+  private assertReady() {
     if (this.panels.state.get().modelMutating) {
       throw new Error('Model settings are still updating. Your message has been kept; please retry.');
     }
@@ -558,105 +475,77 @@ export class ConversationSession {
     }
   }
 
-  private async sendNow(
-    text: string,
-    files: File[] | undefined,
-    options: SendOptions,
-    environmentRevision: number,
-    inputId?: string
-  ) {
-    this.assertReady(environmentRevision, inputId);
-    await draftsReady;
-    this.assertReady(environmentRevision, inputId);
-    const pendingResponse = getConversationDraft(this.id).pendingSubmission;
+  private async sendNow(text: string, files: File[] | undefined, options: SendOptions) {
+    this.assertReady();
     const escalation = this.panels.state.get().escalation;
-    if ((pendingResponse?.responseId || (escalation && !pendingResponse)) && !text.startsWith('/')) {
+    if (escalation && !text.startsWith('/')) {
       const { content } = await encodeMessage(text, files);
-      this.assertReady(environmentRevision, inputId);
-      const signature = JSON.stringify([text, content]);
-      if (pendingResponse?.responseId && pendingResponse.signature !== signature) {
-        throw new Error(
-          'Retry the original answer first to confirm its outcome. It will not be sent as a new message.'
-        );
-      }
-      const responseId = pendingResponse?.responseId ?? escalation!.request_id;
-      // Retry the original identity even if it disappeared from the pending
-      // snapshot: only its receipt can distinguish acceptance from cancellation.
-      updateConversationDraft(this.id, { pendingSubmission: { id: responseId, responseId, signature, queued: false } });
-      await flushConversationDrafts(this.id);
-      this.assertReady(environmentRevision, inputId);
+      this.assertReady();
+      const requestId = escalation.request_id;
+      // The question id is the answer's identity: the server keeps a receipt
+      // per request, so an exact resend of the same answer is acknowledged
+      // without being consumed twice. A transport failure is reported as is;
+      // the composer keeps the text and the user decides whether to resend.
       try {
-        await this.client.clientResponse(responseId, true, {
+        await this.client.clientResponse(requestId, true, {
           reply: text,
           ...(content ? { input_content: content } : {}),
         });
       } catch (error) {
-        if (error instanceof ClientRequestNotPendingError) {
-          updateConversationDraft(this.id, { pendingSubmission: undefined }, { submissionId: responseId });
-          if (this.panels.state.get().escalation?.request_id === responseId) {
-            this.panels.set('escalation', null);
-          }
+        if (
+          error instanceof ClientRequestNotPendingError &&
+          this.panels.state.get().escalation?.request_id === requestId
+        ) {
+          this.panels.set('escalation', null);
         }
         throw error;
       }
-      updateConversationDraft(
-        this.id,
-        { pendingSubmission: undefined, pendingInput: undefined, error: undefined },
-        { submissionId: responseId }
-      );
-      if (this.panels.state.get().escalation?.request_id === responseId) {
+      if (this.panels.state.get().escalation?.request_id === requestId) {
         this.panels.set('escalation', null);
       }
       return undefined;
     }
-    if (text.startsWith('/') && !files?.length) {
-      const command = text.trim().split(/\s+/)[0]!.slice(1);
-      const functions = await this.client.listServerFunctions();
-      const found = functions.find((fn) => fn.name.toLowerCase() === command.toLowerCase());
-      if (found) {
-        const raw = text.slice(command.length + 1).trim();
-        let args: Record<string, unknown> = {};
-        if (raw) {
-          try {
-            const parsed: unknown = JSON.parse(raw);
-            args = Array.isArray(parsed)
-              ? { args: parsed }
-              : parsed && typeof parsed === 'object'
-                ? (parsed as Record<string, unknown>)
-                : typeof parsed === 'string'
-                  ? { text: parsed }
-                  : { value: parsed };
-          } catch {
-            args = { text: raw };
-          }
-        }
-        this.assertReady(environmentRevision, inputId);
-        const apply = async () => {
-          const result = await this.client.serverCall(found.name, args, this.id, options.executionTarget);
-          if (command.toLowerCase() === 'recap') {
-            const recap = (result as { text?: unknown })?.text;
-            return typeof recap === 'string' ? { text: recap, timestamp: Date.now() } : this.panels.state.get().recap;
-          }
-          const formatted = JSON.stringify(result, null, 2);
-          this.receive({
-            type: 'APPEND_RESPONSE',
-            content: formatted == null || formatted === 'null' ? 'Done.' : formatted,
-          });
-          return null;
-        };
-        if (command.toLowerCase() === 'recap') {
-          await this.panels.refresh('recap', apply);
-        } else {
-          await apply();
-        }
-        return undefined;
+    const slash = files?.length ? null : parseSlashLine(text);
+    if (slash) {
+      // The catalog is the server's typeable subset; an unknown name is
+      // refused here (the composer keeps the text), never sent to the model.
+      const rows = (await this.client.listSlashCommands())
+        .map(normalizeSlashCommand)
+        .filter((row): row is SlashCommand => row !== null);
+      const command = findSlashCommand(rows, slash.name);
+      if (!command) {
+        throw new Error(unknownCommandMessage(slash.name));
       }
+      const parsedArgs = parseSlashArgs(command.args, slash.rest);
+      if (parsedArgs.ok === false) {
+        throw new Error(
+          `/${command.name}: ${parsedArgs.error}${command.usage ? ` Usage: /${command.name} ${command.usage}` : ''}`
+        );
+      }
+      if (!command.during_run && !this.actor.getSnapshot().matches({ ready: 'idle' })) {
+        throw new Error(`/${command.name} can't run while a response is in progress. Stop it first.`);
+      }
+      const functionName = command.function ?? command.name;
+      this.assertReady();
+      const apply = async () => {
+        const result = await this.client.serverCall(functionName, parsedArgs.args, this.id, options.executionTarget);
+        if (command.name === 'recap') {
+          const recap = (result as { text?: unknown })?.text;
+          return typeof recap === 'string' ? { text: recap, timestamp: Date.now() } : this.panels.state.get().recap;
+        }
+        this.receive({ type: 'APPEND_RESPONSE', content: slashResultMessage(result) });
+        return null;
+      };
+      if (command.name === 'recap') {
+        await this.panels.refresh('recap', apply);
+      } else {
+        await apply();
+      }
+      return undefined;
     }
     const { content: encodedContent, attachments } = await encodeMessage(text, files);
-    this.assertReady(environmentRevision, inputId);
-    const staged =
-      getConversationDraft(this.id).pendingSubmission?.stagedContext ??
-      this.actor.getSnapshot().context.stagedContext.slice();
+    this.assertReady();
+    const staged = this.actor.getSnapshot().context.stagedContext.slice();
     const prompt = text || (files?.length ? `Attached files: ${files.map((file) => file.name).join(', ')}` : '');
     const agentPrompt = staged.length ? `${staged.map((entry) => entry.text).join('\n\n')}\n\n${prompt}` : prompt;
     // Structured content replaces prompt at the model boundary. Include the
@@ -681,98 +570,23 @@ export class ConversationSession {
           ...(overrides.approvalsReviewer ? { approvals_reviewer: overrides.approvalsReviewer } : {}),
         }
       : base;
-    await draftsReady;
-    let pending = getConversationDraft(this.id).pendingSubmission;
-    const signature = JSON.stringify([agentPrompt, content]);
-    let submissionVariables = variables;
-    let submissionTarget = options.executionTarget;
-    let recovered: any;
-    let retryFailedSubmission = false;
-    if (!pending && inputId) {
-      // Another window may have completed and cleared the durable checkpoint
-      // while this attempt was encoding. Do not append optimistic UI for an
-      // already accepted run: its cached reply produces no new run events.
-      const status: any = await this.client.request('queue_status', { session_id: this.id, submission_id: inputId });
-      if (status.submission?.status === 'completed') {
-        recovered = status.submission.result;
-      }
-      retryFailedSubmission = status.submission?.status === 'failed';
-    }
-    if (pending) {
-      const status: any = await this.client.request('queue_status', { session_id: this.id, submission_id: pending.id });
-      const receipt = status.submission;
-      if (receipt?.status === 'failed') {
-        retryFailedSubmission = true;
-        updateConversationDraft(this.id, { pendingSubmission: undefined }, { submissionId: pending.id });
-        pending = undefined;
-      } else if (pending.signature !== signature) {
-        if (receipt?.status === 'completed') {
-          updateConversationDraft(this.id, { pendingSubmission: undefined }, { submissionId: pending.id });
-          throw new Error(
-            'The previous message was accepted. Review your edited draft before sending it as a new message.'
-          );
-        } else {
-          throw new Error(
-            'The previous send is still unresolved. Retry its original text and attachments before sending a different message.'
-          );
-        }
-      } else if (receipt?.status === 'completed') {
-        recovered = receipt.result;
-      } else if (receipt) {
-        submissionVariables = pending.variables;
-        submissionTarget = pending.executionTarget;
-      }
-    }
     const queued =
-      pending?.queued ??
-      (!this.actor.getSnapshot().matches({ ready: 'idle' }) || this.panels.state.get().queuedMessages.length > 0);
-    const submissionId = pending?.id ?? (retryFailedSubmission ? undefined : inputId) ?? uuidv4();
-    if (recovered) {
-      if (recovered.ok === false) {
-        updateConversationDraft(this.id, { pendingSubmission: undefined }, { submissionId });
-        throw new Error(recovered.reason ?? 'Message was not queued.');
-      }
-      await this.load({ force: true });
-      updateConversationDraft(
-        this.id,
-        { pendingSubmission: undefined, pendingInput: undefined, error: undefined },
-        { submissionId }
-      );
-      this.clearSentContext(staged);
-      return { runId: String(recovered.run_id ?? '') };
-    }
-    updateConversationDraft(this.id, {
-      pendingSubmission: {
-        id: submissionId,
-        signature,
-        queued,
-        variables: submissionVariables,
-        executionTarget: submissionTarget,
-        stagedContext: staged,
-      },
-    });
-    await flushConversationDrafts(this.id);
-    this.assertReady(environmentRevision, inputId);
+      !this.actor.getSnapshot().matches({ ready: 'idle' }) || this.panels.state.get().queuedMessages.length > 0;
+    const submissionId = options.inputId ?? uuidv4();
     if (queued) {
-      const result =
-        recovered ??
-        (await this.client.enqueueMessage(this.id, agentPrompt, {
+      const result = await this.submitOnce(submissionId, () =>
+        this.client.enqueueMessage(this.id, agentPrompt, {
           triggerRun: true,
           role: 'user',
-          variables: submissionVariables,
+          variables,
           source: 'ui',
           inputContent: content,
           submissionId,
-        }));
+        })
+      );
       if (!result.ok) {
-        updateConversationDraft(this.id, { pendingSubmission: undefined }, { submissionId });
         throw new Error(result.reason ?? 'Message was not queued. Please retry.');
       }
-      updateConversationDraft(
-        this.id,
-        { pendingSubmission: undefined, pendingInput: undefined, error: undefined },
-        { submissionId }
-      );
       this.clearSentContext(staged);
       if (options.workspaceSupported) {
         this.panels.set('workspaceLocked', true);
@@ -781,10 +595,9 @@ export class ConversationSession {
     }
     this.receive({ type: 'SUBMIT', text, attachments, stagedContext: staged });
     try {
-      const target = submissionTarget;
-      const result =
-        recovered ??
-        (await this.client.startRun(
+      const target = options.executionTarget;
+      const result = await this.submitOnce(submissionId, () =>
+        this.client.startRun(
           agentPrompt,
           target
             ? {
@@ -794,14 +607,10 @@ export class ConversationSession {
               }
             : { mode: 'none' },
           this.id,
-          submissionVariables,
+          variables,
           content,
           submissionId
-        ));
-      updateConversationDraft(
-        this.id,
-        { pendingSubmission: undefined, pendingInput: undefined, error: undefined },
-        { submissionId }
+        )
       );
       this.clearSentContext(staged);
       if (options.workspaceSupported) {
@@ -811,6 +620,44 @@ export class ConversationSession {
     } catch (error) {
       this.receive({ type: 'SUBMIT_ERROR', error: error instanceof Error ? error.message : String(error) });
       throw error;
+    }
+  }
+
+  /**
+   * At-most-once delivery. One attempt is made. If the transport fails before
+   * a reply arrives, the server is asked once for the receipt of that
+   * submission id: a completed receipt means the message landed, so its result
+   * is adopted and the transcript reloaded. Anything else is reported as the
+   * original failure and the composer puts the text back; a resend is a new
+   * submission, while the server's receipt still dedupes a retry of this id.
+   */
+  private async submitOnce<T>(submissionId: string, attempt: () => Promise<T>): Promise<T> {
+    try {
+      return await attempt();
+    } catch (error) {
+      if (!(error instanceof ConnectionClosedError || error instanceof RpcTimeoutError)) {
+        throw error;
+      }
+      let receipt: { status?: string; result?: unknown } | undefined;
+      try {
+        if (!this.client.isConnected) {
+          await this.client.connectAndWait(RECEIPT_LOOKUP_TIMEOUT_MS);
+        }
+        const status: any = await this.client.request('queue_status', {
+          session_id: this.id,
+          submission_id: submissionId,
+        });
+        receipt = status?.submission;
+      } catch {
+        throw error;
+      }
+      if (this.disposed || receipt?.status !== 'completed') {
+        throw error;
+      }
+      // The message is in the transcript now. A failed reload is a hydration
+      // problem with its own retry, not a failed send.
+      await this.load({ force: true }).catch(() => {});
+      return receipt.result as T;
     }
   }
 

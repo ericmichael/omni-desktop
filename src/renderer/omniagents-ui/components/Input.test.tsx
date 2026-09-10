@@ -96,62 +96,6 @@ describe('Input ArrowDown history', () => {
 });
 
 describe('conversation draft lifecycle', () => {
-  it('restores a conflict copy without submitting or discarding the current draft', async () => {
-    const submit = vi.fn();
-    const file = new File(['saved bytes'], 'saved.txt');
-    act(() => {
-      updateConversationDraft('conflicts', {
-        text: 'current draft',
-        otherDrafts: [{ id: 'saved', text: 'saved draft', files: [file] }],
-      });
-      root.render(<Input conversationId="conflicts" onSubmit={submit} />);
-    });
-    const restore = [...container.querySelectorAll('button')].find(
-      (button) => button.textContent === 'Restore other draft'
-    )!;
-    await act(async () => restore.click());
-    expect(submit).not.toHaveBeenCalled();
-    expect(getConversationDraft('conflicts')).toMatchObject({
-      text: 'saved draft',
-      files: [file],
-      otherDrafts: [expect.objectContaining({ text: 'current draft' })],
-    });
-  });
-  it.each(['success', 'failure'])('ignores late %s from a replaced input attempt', async (outcome) => {
-    let resolve!: () => void;
-    let reject!: (error: Error) => void;
-    const result = new Promise<void>((yes, no) => {
-      resolve = yes;
-      reject = no;
-    });
-    act(() => {
-      updateConversationDraft('ownership', { text: 'old' });
-      root.render(<Input conversationId="ownership" onSubmit={() => result} />);
-    });
-    await act(async () => {
-      getTextarea().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
-    });
-    const file = new File(['new bytes'], 'new.txt');
-    act(() =>
-      updateConversationDraft('ownership', {
-        text: 'follow-up',
-        pendingInput: { id: 'new-input', text: 'new', files: [file] },
-      })
-    );
-    await act(async () => {
-      if (outcome === 'success') {
-        resolve();
-      } else {
-        reject(new Error('old failure'));
-      }
-    });
-    expect(getConversationDraft('ownership')).toMatchObject({
-      text: 'follow-up',
-      pendingInput: { id: 'new-input', text: 'new', files: [file] },
-    });
-    expect(getConversationDraft('ownership').error).toBeUndefined();
-  });
-
   it('offers mouse submission while a response is active', async () => {
     const onSubmit = vi.fn();
     act(() => {
@@ -209,7 +153,7 @@ describe('conversation draft lifecycle', () => {
     expect(getConversationDraft('a').files).toEqual([file]);
   });
 
-  it('restores a rejected send without overwriting a follow-up draft', async () => {
+  it('puts a rejected send back in the box ahead of a follow-up draft, with no alert', async () => {
     let reject!: (cause: Error) => void;
     const pending = new Promise<void>((_, fail) => {
       reject = fail;
@@ -227,13 +171,12 @@ describe('conversation draft lifecycle', () => {
     await act(async () => {
       reject(new Error('queue_full'));
     });
-    expect(getTextarea().value).toBe('follow-up');
-    expect(getConversationDraft('a').pendingInput).toMatchObject({
-      id: expect.any(String),
-      text: 'first',
-      files: [file],
-    });
-    expect(container.querySelector('[role="alert"]')?.textContent).toContain('queue_full');
+    expect(getTextarea().value).toBe('first\n\nfollow-up');
+    expect(getConversationDraft('a').files).toEqual([file]);
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    // Nothing blocks the next send.
+    const send = container.querySelector<HTMLButtonElement>('button[type="submit"], button[aria-label="Send"]');
+    expect(send?.disabled ?? false).toBe(false);
   });
 
   it('does not submit via Enter while disconnected', () => {

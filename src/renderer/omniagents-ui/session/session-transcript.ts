@@ -54,9 +54,6 @@ export function wireSessionTranscript(session: ConversationSession, client: RPCC
     }),
 
     session.on('run_started', (p: any) => {
-      if (p?.session_id === actor.getSnapshot().context.sessionId) {
-        session.noteRunEvent();
-      }
       actor.send({
         type: 'RUN_STARTED',
         run_id: String(p?.run_id ?? ''),
@@ -77,9 +74,6 @@ export function wireSessionTranscript(session: ConversationSession, client: RPCC
     }),
 
     session.on('run_end', (p: any) => {
-      if (p?.session_id === actor.getSnapshot().context.sessionId) {
-        session.noteRunEvent();
-      }
       const threadId = typeof p?.session_id === 'string' ? p.session_id : '';
       actor.send({
         type: 'RUN_END',

@@ -26,7 +26,7 @@ it('retries a transient database-open failure without reloading the app', async 
   expect(await storage.readOne('retry')).toEqual({ text: 'retained' });
 });
 
-it('reads only the changed conversation when fetching a broadcast update', async () => {
+it('reads one conversation without walking the whole store', async () => {
   const storage = new DraftStorage(new IDBFactory());
   await storage.write('A', { files: [new Blob(['A bytes'])] });
   await storage.write('B', { text: 'B' });
@@ -36,7 +36,7 @@ it('reads only the changed conversation when fetching a broadcast update', async
   expect(cursor).not.toHaveBeenCalled();
 });
 
-it('does not let another conversation mask a failed checkpoint or block a healthy one', async () => {
+it('keeps the in-memory draft and stays silent when a write fails', async () => {
   vi.stubGlobal('indexedDB', new IDBFactory());
   vi.resetModules();
   const drafts = await import('./conversation-drafts');
@@ -48,17 +48,21 @@ it('does not let another conversation mask a failed checkpoint or block a health
     }
     return original.call(this, value, key);
   });
-  drafts.updateConversationDraft('A', { text: 'must persist' });
+  const file = new File(['retained bytes'], 'retained.txt', { type: 'text/plain' });
+  drafts.updateConversationDraft('A', { text: 'keep me', files: [file] });
   drafts.updateConversationDraft('B', { text: 'small' });
-  await drafts.flushConversationDrafts('B');
-  await expect(drafts.flushConversationDrafts('A')).rejects.toThrow('recovery state could not be saved');
-  await expect(drafts.flushConversationDrafts()).rejects.toThrow();
+  await expect(drafts.flushConversationDrafts('A')).resolves.toBeUndefined();
+  await expect(drafts.flushConversationDrafts()).resolves.toBeUndefined();
+  expect(drafts.getConversationDraft('A')).toMatchObject({ text: 'keep me', files: [file] });
   const rows = new Map(await new DraftStorage(indexedDB).read());
   expect(rows.has('A')).toBe(false);
   expect(rows.has('B')).toBe(true);
   put.mockRestore();
-  drafts.updateConversationDraft('A', { text: 'retry save' });
-  await expect(drafts.flushConversationDrafts('A')).resolves.toBeUndefined();
+  drafts.updateConversationDraft('A', { text: 'can save now' });
+  await drafts.flushConversationDrafts('A');
+  const saved = new Map(await new DraftStorage<any>(indexedDB).read()).get('A');
+  expect(saved.text).toBe('can save now');
+  expect(await saved.files[0].text()).toBe('retained bytes');
 });
 
 it('waits for restored model and approval choices before preparing the session', async () => {
@@ -100,67 +104,7 @@ it('waits for restored model and approval choices before preparing the session',
   await drafts.flushConversationDrafts();
 });
 
-it('merges stale-window edits without erasing another window’s pending submission', async () => {
-  vi.stubGlobal('indexedDB', new IDBFactory());
-  vi.resetModules();
-  const first = await import('./conversation-drafts');
-  await first.draftsReady;
-  first.updateConversationDraft('shared', { text: 'original', files: [] });
-  await first.flushConversationDrafts('shared');
-  vi.resetModules();
-  const second = await import('./conversation-drafts');
-  await second.draftsReady;
-  first.updateConversationDraft('shared', {
-    text: '',
-    pendingInput: { text: 'original', files: [] },
-    pendingSubmission: { id: 'accepted', signature: 'original', queued: false },
-  });
-  await first.flushConversationDrafts('shared');
-  second.updateConversationDraft('shared', { text: 'follow-up in another window' });
-  await second.flushConversationDrafts('shared');
-  vi.resetModules();
-  const restarted = await import('./conversation-drafts');
-  await restarted.draftsReady;
-  expect(restarted.getConversationDraft('shared')).toMatchObject({
-    text: 'follow-up in another window',
-    pendingSubmission: { id: 'accepted' },
-    pendingInput: { text: 'original' },
-  });
-});
-
-it('ignores stale completion inside the transaction even without a broadcast', async () => {
-  vi.stubGlobal('indexedDB', new IDBFactory());
-  vi.resetModules();
-  const first = await import('./conversation-drafts');
-  await first.draftsReady;
-  first.updateConversationDraft('shared', {
-    pendingInput: { id: 'old-input', text: 'old', files: [] },
-    pendingSubmission: { id: 'old', signature: 'old', queued: false },
-  });
-  await first.flushConversationDrafts('shared');
-  vi.resetModules();
-  const second = await import('./conversation-drafts');
-  await second.draftsReady;
-  second.updateConversationDraft('shared', {
-    text: 'follow-up',
-    pendingInput: { id: 'new-input', text: 'new', files: [] },
-    pendingSubmission: { id: 'new', signature: 'new', queued: false },
-  });
-  await second.flushConversationDrafts('shared');
-  first.updateConversationDraft(
-    'shared',
-    { pendingInput: undefined, pendingSubmission: undefined },
-    { submissionId: 'old' }
-  );
-  await expect(first.flushConversationDrafts('shared')).resolves.toBeUndefined();
-  expect(await new DraftStorage(indexedDB).readOne('shared')).toMatchObject({
-    text: 'follow-up',
-    pendingInput: { id: 'new-input', text: 'new' },
-    pendingSubmission: { id: 'new' },
-  });
-});
-
-it('preserves both independently edited drafts durably', async () => {
+it('last write wins between two module instances, without side channels', async () => {
   vi.stubGlobal('indexedDB', new IDBFactory());
   vi.resetModules();
   const a = await import('./conversation-drafts');
@@ -168,90 +112,33 @@ it('preserves both independently edited drafts durably', async () => {
   vi.resetModules();
   const b = await import('./conversation-drafts');
   await b.draftsReady;
-  a.updateConversationDraft('conflict', { text: 'A draft', files: [new File(['A bytes'], 'A.txt')] });
-  await a.flushConversationDrafts('conflict');
-  b.updateConversationDraft('conflict', { text: 'B draft' });
-  await b.flushConversationDrafts('conflict');
-  const saved: any = await new DraftStorage(indexedDB).readOne('conflict');
+  a.updateConversationDraft('shared', { text: 'A draft', files: [new File(['A bytes'], 'A.txt')] });
+  await a.flushConversationDrafts('shared');
+  b.updateConversationDraft('shared', { text: 'B draft' });
+  await b.flushConversationDrafts('shared');
+  const saved: any = await new DraftStorage(indexedDB).readOne('shared');
   expect(saved.text).toBe('B draft');
-  expect(saved.files).toEqual([]);
-  expect(await saved.otherDrafts[0].files[0].text()).toBe('A bytes');
-  expect(saved.otherDrafts).toEqual([expect.objectContaining({ text: 'A draft' })]);
-  b.restoreOtherConversationDraft('conflict', saved.otherDrafts[0].id);
-  await b.flushConversationDrafts('conflict');
-  const restored: any = await new DraftStorage(indexedDB).readOne('conflict');
-  expect(restored.text).toBe('A draft');
-  expect(restored.otherDrafts).toEqual([expect.objectContaining({ text: 'B draft' })]);
+  expect(saved).not.toHaveProperty('otherDrafts');
+  // A field the other instance never touched survives the merge.
+  expect(await saved.files[0].text()).toBe('A bytes');
 });
 
-it('rejects competing recovery claims from stale windows atomically', async () => {
+it('folds a row written by an earlier build back into the text box', async () => {
   vi.stubGlobal('indexedDB', new IDBFactory());
   vi.resetModules();
-  const first = await import('./conversation-drafts');
-  await first.draftsReady;
-  vi.resetModules();
-  const second = await import('./conversation-drafts');
-  await second.draftsReady;
-  first.updateConversationDraft('race', { pendingInput: { text: 'first', files: [] } });
-  second.updateConversationDraft('race', { pendingInput: { text: 'second', files: [] } });
-  const results = await Promise.allSettled([
-    first.flushConversationDrafts('race'),
-    second.flushConversationDrafts('race'),
-  ]);
-  expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
-  expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1);
-  const saved = new Map(await new DraftStorage<any>(indexedDB).read()).get('race');
-  expect(saved.pendingInput.text).toBe('first');
-  expect(saved.otherDrafts).toEqual([expect.objectContaining({ text: 'second' })]);
-  expect(second.getConversationDraft('race').pendingInput?.text).toBe('first');
-});
-
-it('restores the same interrupted submission identity after a module restart', async () => {
-  vi.stubGlobal('indexedDB', new IDBFactory());
-  vi.resetModules();
-  const first = await import('./conversation-drafts');
-  await first.draftsReady;
-  first.updateConversationDraft('A', {
-    text: '',
+  await new DraftStorage<any>(indexedDB).write('legacy', {
+    text: 'typed after',
     files: [],
-    model: 'chosen',
-    pendingInput: { text: 'original', files: [] },
-    pendingSubmission: {
-      id: 'same-key',
-      signature: 'original',
-      queued: false,
-      stagedContext: [{ source: 'selection', text: 'saved code' }],
-    },
+    pendingInput: { id: 'old', text: 'interrupted send', files: [] },
+    error: 'The previous send was interrupted.',
+    otherDrafts: [{ id: 'x', text: 'other window', files: [] }],
   });
-  await first.flushConversationDrafts();
-  vi.resetModules();
-  const second = await import('./conversation-drafts');
-  await second.draftsReady;
-  expect(second.getConversationDraft('A')).toMatchObject({
-    text: 'original',
-    model: 'chosen',
-    pendingSubmission: { id: 'same-key', stagedContext: [{ source: 'selection', text: 'saved code' }] },
-  });
-  expect(second.getConversationDraft('A').pendingInput).toBeUndefined();
-});
-
-it('keeps drafts and refuses a durable send checkpoint when storage is full', async () => {
-  vi.stubGlobal('indexedDB', new IDBFactory());
-  vi.resetModules();
   const drafts = await import('./conversation-drafts');
   await drafts.draftsReady;
-  const put = vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(() => {
-    throw new Error('Quota exceeded');
-  });
-  const file = new File(['retained bytes'], 'retained.txt', { type: 'text/plain' });
-  drafts.updateConversationDraft('A', { text: 'keep me', files: [file] });
-  await expect(drafts.flushConversationDrafts()).rejects.toThrow('recovery state could not be saved');
-  expect(drafts.getConversationDraft('A').text).toBe('keep me');
-  put.mockRestore();
-  drafts.updateConversationDraft('A', { text: 'can save now' });
-  await expect(drafts.flushConversationDrafts()).resolves.toBeUndefined();
-  const saved = new Map(await new DraftStorage<any>(indexedDB).read()).get('A');
-  expect(await saved.files[0].text()).toBe('retained bytes');
+  const draft: any = drafts.getConversationDraft('legacy');
+  expect(draft.text).toBe('interrupted send\n\ntyped after');
+  expect(draft.pendingInput).toBeUndefined();
+  expect(draft.error).toBeUndefined();
 });
 
 it('restores draft text, model choices and attachment bytes in a new storage instance', async () => {

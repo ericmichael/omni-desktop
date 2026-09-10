@@ -233,6 +233,36 @@ describe('useAutoLaunch sandbox profile override switching', () => {
     expect(output?.textContent).toBe('provisioning failed');
   });
 
+  it('starts the process again on retry after a rejected start', async () => {
+    start.mockRejectedValueOnce(new Error('provisioning failed'));
+    let value!: ReturnType<typeof useAutoLaunch>;
+
+    function RetryHarness(props: HookProps) {
+      value = useAutoLaunch(props);
+      return <output data-phase={value.phase} />;
+    }
+
+    await act(async () => {
+      root.render(<RetryHarness processId="code-tab-1" workspaceDir="/workspace/project" />);
+      await flushEffects();
+      await flushEffects();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(value.phase).toBe('error');
+    expect(start).toHaveBeenCalledTimes(1);
+
+    // RETRY used to leave `hasLaunched` set, so `ready` bounced straight to
+    // idle and nothing was ever started again.
+    await act(async () => {
+      value.retry();
+      await flushEffects();
+      await flushEffects();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(start).toHaveBeenCalledTimes(2);
+    expect(value.phase).toBe('starting');
+  });
+
   it('does not switch sandboxes when the profile override changes before launch', async () => {
     await renderHook({
       processId: 'code-tab-1',

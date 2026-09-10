@@ -85,9 +85,10 @@ for (const scenario of ['questions', 'active-close', 'approvals']) {
         };
       });
       await approveA.click();
-      await expect(a.getByRole('alert')).toContainText('Decision not confirmed');
+      // A failed decision leaves the card actionable with no message.
       await expect(approveA).toBeEnabled();
       await expect(approveB).toBeEnabled();
+      await expect(a.getByRole('alert')).toHaveCount(0);
       await attachProofPng(
         testInfo,
         'approval error stays in A while B remains pending',

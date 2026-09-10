@@ -19,7 +19,6 @@ import {
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
-import { Alert, AlertDescription } from '@/renderer/ds/ui/alert';
 import { Button } from '@/renderer/ds/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/renderer/ds/ui/collapsible';
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '@/renderer/ds/ui/input-group';
@@ -1295,7 +1294,6 @@ export function ApprovalCard({
   const [expanded, setExpanded] = useState(false);
   const toggleExpanded = useCallback(() => setExpanded((v) => !v), []);
   const isMcp = item.kind === 'mcp';
-  const [decisionError, setDecisionError] = useState<string | null>(null);
   const [deciding, setDeciding] = useState(false);
   const decisionPending = useRef(false);
   const decide = async (value: 'yes' | 'always' | 'no') => {
@@ -1304,13 +1302,12 @@ export function ApprovalCard({
     }
     decisionPending.current = true;
     setDeciding(true);
-    setDecisionError(null);
     try {
       await onDecision(item.request_id, value, item.kind);
-    } catch (error) {
-      setDecisionError(
-        `Decision not confirmed. Please retry. ${error instanceof Error ? error.message : String(error)}`
-      );
+    } catch {
+      // The decision did not reach the server (usually a dropped socket).
+      // The card stays pending with its buttons live; the server re-sends
+      // the request on reconnect if it is still waiting.
     } finally {
       decisionPending.current = false;
       setDeciding(false);
@@ -1384,11 +1381,6 @@ export function ApprovalCard({
           <div className="text-xs text-muted-foreground">No parameters</div>
         )}
       </div>
-      {decisionError && (
-        <Alert variant="destructive" className="mt-3">
-          <AlertDescription>{decisionError}</AlertDescription>
-        </Alert>
-      )}
       <div className="mt-3 flex gap-2 justify-end">
         <Button
           variant="outline"

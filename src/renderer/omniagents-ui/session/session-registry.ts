@@ -109,7 +109,7 @@ export class SessionRegistry {
       this.client.onResyncRequired((id) => {
         const session = this.sessions.get(id);
         if (session) {
-          void session.load({ force: true, authoritativeResync: true }).catch(() => {});
+          void session.load({ force: true }).catch(() => {});
         }
       })
     );

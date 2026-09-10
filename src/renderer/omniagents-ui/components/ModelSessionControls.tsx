@@ -122,16 +122,10 @@ export function ModelSessionControls({
     if (!connected) {
       return;
     }
+    // Only the newest read applies: an effect that has since been cleaned up
+    // (reconnect, session change) drops its late response.
     let current = true;
-    // A remote change invalidates only that selection, not the catalog or
-    // other settings. Otherwise a push during first load drops all options.
-    const freshModels = state.guardRead(['models']);
-    const freshModel = state.guardRead(['activeModel']);
-    const freshReasoning = state.guardRead(['reasoningEffort']);
-    const freshApprovals = state.guardRead(['approvalsReviewer']);
-    const freshWorkflow = state.guardRead(['workflowReviewer']);
     setLoading(true);
-    const latest = state.guardRead(['modelLoading']);
     setError(null);
     const draft = getConversationDraft(sessionId);
     void (
@@ -149,35 +143,25 @@ export function ModelSessionControls({
         : catalog.listModels({ sessionId })
     )
       .then((result) => {
-        if ((!current && !session) || !latest()) {
+        if (!current) {
           return;
         }
-        if (freshModels()) {
-          setModels(
-            result.models.filter((model) => !model.hidden && model.availability.available && model.entitlement.entitled)
-          );
-        }
-        if (freshModel()) {
-          setActiveModel(result.session?.active_model ?? result.default_model);
-        }
-        if (freshReasoning()) {
-          setReasoningEffort(result.session?.reasoning_effort ?? null);
-        }
-        if (freshApprovals()) {
-          setApprovalsReviewer(result.session?.approvals_reviewer === 'auto' ? 'auto' : 'user');
-        }
-        if (freshWorkflow()) {
-          const sessionWorkflowReviewer = result.session?.workflow_reviewer;
-          setWorkflowReviewer(isWorkflowReviewer(sessionWorkflowReviewer) ? sessionWorkflowReviewer : 'guardian');
-        }
+        setModels(
+          result.models.filter((model) => !model.hidden && model.availability.available && model.entitlement.entitled)
+        );
+        setActiveModel(result.session?.active_model ?? result.default_model);
+        setReasoningEffort(result.session?.reasoning_effort ?? null);
+        setApprovalsReviewer(result.session?.approvals_reviewer === 'auto' ? 'auto' : 'user');
+        const sessionWorkflowReviewer = result.session?.workflow_reviewer;
+        setWorkflowReviewer(isWorkflowReviewer(sessionWorkflowReviewer) ? sessionWorkflowReviewer : 'guardian');
       })
       .catch((cause: unknown) => {
-        if ((current || session) && latest()) {
+        if (current) {
           setError(cause instanceof Error ? cause.message : String(cause));
         }
       })
       .finally(() => {
-        if ((current || session) && latest()) {
+        if (current) {
           setLoading(false);
         }
       });
@@ -195,17 +179,16 @@ export function ModelSessionControls({
       return;
     }
     let current = true;
-    const fresh = state.guardRead(['networkEnabled']);
     void onGetSandboxNetwork()
       .then((state) => {
-        if ((current || session) && fresh()) {
+        if (current) {
           setNetworkEnabled(state.ok && state.supported ? (state.enabled ?? true) : null);
         }
       })
       .catch(() => {
         // Older runtimes reject the unknown function; host environments
         // have no lifecycle controller. Both mean: no pill.
-        if ((current || session) && fresh()) {
+        if (current) {
           setNetworkEnabled(null);
         }
       });
@@ -231,20 +214,14 @@ export function ModelSessionControls({
     }
     setMutating(true);
     setError(null);
-    const freshModel = state.guardRead(['activeModel']);
-    const freshReasoning = state.guardRead(['reasoningEffort']);
     try {
       const result = await catalog.setSessionModel(sessionId, model);
       if (!result.ok || !result.model) {
         setError(reasonMessage(result.reasons, 'Omniagents refused the model change.'));
         return;
       }
-      if (freshModel()) {
-        setActiveModel(result.model);
-      }
-      if (freshReasoning()) {
-        setReasoningEffort(result.reasoning_effort ?? null);
-      }
+      setActiveModel(result.model);
+      setReasoningEffort(result.reasoning_effort ?? null);
     } catch (cause: unknown) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -263,18 +240,14 @@ export function ModelSessionControls({
     }
     setMutating(true);
     setError(null);
-    const freshModel = state.guardRead(['activeModel']);
-    const freshReasoning = state.guardRead(['reasoningEffort']);
     try {
       const result = await catalog.setSessionReasoning(sessionId, effort);
       if (!result.ok || !result.reasoning_effort) {
         setError(reasonMessage(result.reasons, 'Omniagents refused the reasoning change.'));
         return;
       }
-      if (freshReasoning()) {
-        setReasoningEffort(result.reasoning_effort);
-      }
-      if (result.model && freshModel()) {
+      setReasoningEffort(result.reasoning_effort);
+      if (result.model) {
         setActiveModel(result.model);
       }
     } catch (cause: unknown) {
@@ -291,12 +264,9 @@ export function ModelSessionControls({
     }
     setMutating(true);
     setError(null);
-    const fresh = state.guardRead(['approvalsReviewer']);
     try {
       await onSetApprovalsReviewer(reviewer);
-      if (fresh()) {
-        setApprovalsReviewer(reviewer);
-      }
+      setApprovalsReviewer(reviewer);
     } catch (cause: unknown) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -310,12 +280,9 @@ export function ModelSessionControls({
     }
     setMutating(true);
     setError(null);
-    const fresh = state.guardRead(['workflowReviewer']);
     try {
       await onSetWorkflowReviewer(value);
-      if (fresh()) {
-        setWorkflowReviewer(value);
-      }
+      setWorkflowReviewer(value);
     } catch (cause: unknown) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {

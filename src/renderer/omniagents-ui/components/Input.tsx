@@ -19,7 +19,6 @@ import React, { useCallback, useId, useMemo, useRef, useState } from 'react';
 
 import { uuidv4 } from '@/lib/uuid';
 import { configuredVoiceMode } from '@/lib/voice-mode';
-import { Alert, AlertDescription } from '@/renderer/ds/ui/alert';
 import { Button } from '@/renderer/ds/ui/button';
 import {
   DropdownMenu,
@@ -31,12 +30,12 @@ import {
 import { Spinner } from '@/renderer/ds/ui/spinner';
 import { Toggle } from '@/renderer/ds/ui/toggle';
 import { getProfileIcon, isUnsandboxedProfile } from '@/renderer/features/SandboxProfile/profile-icons';
+import { toast } from '@/renderer/features/Toast/state';
 import {
   conversationDrafts,
   draftStorageState,
   flushConversationDrafts,
   getConversationDraft,
-  restoreOtherConversationDraft,
   updateConversationDraft,
 } from '@/renderer/omniagents-ui/conversation-drafts';
 import { persistedStoreApi } from '@/renderer/services/store';
@@ -125,7 +124,7 @@ export function Input({
   const storageState = useStore(draftStorageState);
   const disabled = externallyDisabled || storageState === 'loading';
   const drafts = useStore(conversationDrafts);
-  const { text, files, error, pendingInput } = drafts[draftId] ?? getConversationDraft(draftId);
+  const { text, files } = drafts[draftId] ?? getConversationDraft(draftId);
   const setText = useCallback((text: string) => updateConversationDraft(draftId, { text }), [draftId]);
   const setFiles = useCallback(
     (value: File[] | ((files: File[]) => File[])) => {
@@ -167,8 +166,8 @@ export function Input({
   );
 
   const canSend = useMemo(
-    () => !disabled && !submitting && !pendingInput && (text.trim().length > 0 || files.length > 0),
-    [disabled, submitting, pendingInput, text, files]
+    () => !disabled && !submitting && (text.trim().length > 0 || files.length > 0),
+    [disabled, submitting, text, files]
   );
   const hostedVoiceLive = hostedVoiceSupported && Boolean(voiceLive);
   // An empty composer has no send to offer; hand it to voice instead.
@@ -197,34 +196,25 @@ export function Input({
 
   const handleSubmit = useCallback(() => {
     const t = text.trim();
-    if (disabled || sending.current || pendingInput || (!t && files.length === 0)) {
+    if (disabled || sending.current || (!t && files.length === 0)) {
       return;
     }
     sending.current = true;
     setSubmitting(true);
     const inputId = uuidv4();
-    updateConversationDraft(draftId, {
-      text: '',
-      files: [],
-      error: undefined,
-      pendingInput: { id: inputId, text: t, files },
-    });
+    updateConversationDraft(draftId, { text: '', files: [] });
     void Promise.resolve()
       .then(() => flushConversationDrafts(draftId))
       .then(() => onSubmit(t, files, inputId))
-      .then(() => updateConversationDraft(draftId, { pendingInput: undefined }, { inputId }))
       .catch((cause: unknown) => {
+        // The message did not go out: put it back in the box, ahead of
+        // anything typed since, and say so once.
         const current = getConversationDraft(draftId);
-        updateConversationDraft(
-          draftId,
-          {
-            ...(current.text || current.files.length
-              ? { pendingInput: { id: inputId, text: t, files } }
-              : { text: t, files, pendingInput: undefined }),
-            error: cause instanceof Error ? cause.message : 'Message was not sent. Please retry.',
-          },
-          { inputId }
-        );
+        updateConversationDraft(draftId, {
+          text: [t, current.text].filter(Boolean).join('\n\n'),
+          files: [...files, ...current.files],
+        });
+        toast.error('Message not sent', cause instanceof Error ? cause.message : undefined);
       })
       .finally(() => {
         sending.current = false;
@@ -233,30 +223,7 @@ export function Input({
     setHistory((h) => (h.length && h[h.length - 1] === t ? h : [...h, t]));
     setHistoryIndex(0);
     setHistoryDraft('');
-  }, [text, files, onSubmit, disabled, draftId, pendingInput]);
-
-  const retryPrevious = useCallback(async () => {
-    if (!pendingInput || disabled || sending.current) {
-      return;
-    }
-    sending.current = true;
-    setSubmitting(true);
-    try {
-      await onSubmit(pendingInput.text, pendingInput.files, pendingInput.id);
-      updateConversationDraft(draftId, { pendingInput: undefined, error: undefined }, { inputId: pendingInput.id });
-    } catch (cause) {
-      updateConversationDraft(
-        draftId,
-        {
-          error: cause instanceof Error ? cause.message : 'Could not confirm the previous send.',
-        },
-        { inputId: pendingInput.id }
-      );
-    } finally {
-      sending.current = false;
-      setSubmitting(false);
-    }
-  }, [pendingInput, disabled, onSubmit, draftId]);
+  }, [text, files, onSubmit, disabled, draftId]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -423,54 +390,6 @@ export function Input({
             className="max-h-1/2"
             disabled={disabled}
           />
-          {getConversationDraft(draftId).otherDrafts?.map((copy) => (
-            <Alert key={copy.id}>
-              <AlertDescription>
-                <span>Other draft: {copy.text || copy.files.map((file) => file.name).join(', ')}</span>
-                {!!copy.text && !!copy.files.length && (
-                  <span>Attachments: {copy.files.map((file) => file.name).join(', ')}</span>
-                )}
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  disabled={
-                    disabled || submitting || !!pendingInput || !!getConversationDraft(draftId).pendingSubmission
-                  }
-                  onClick={() => restoreOtherConversationDraft(draftId, copy.id)}
-                >
-                  Restore other draft
-                </Button>
-              </AlertDescription>
-            </Alert>
-          ))}
-          {(error || storageState === 'unavailable' || (pendingInput && !submitting)) && (
-            <Alert variant={error ? 'destructive' : 'default'}>
-              <AlertDescription>
-                {error}
-                {storageState === 'unavailable' && (
-                  <span>Saved drafts could not be loaded. Local storage may be unavailable.</span>
-                )}
-                {pendingInput && !submitting && (
-                  <>
-                    <span>
-                      Previous message: {pendingInput.text || pendingInput.files.map((file) => file.name).join(', ')}
-                    </span>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      disabled={disabled}
-                      onClick={() => void retryPrevious()}
-                    >
-                      Retry previous message
-                    </Button>
-                  </>
-                )}
-              </AlertDescription>
-            </Alert>
-          )}
-
           <PromptInputActions className="flex items-center justify-between gap-1 sm:gap-2 pt-2 px-2">
             <div className="flex items-center gap-1 min-w-0 pr-1">
               <label

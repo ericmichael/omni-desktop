@@ -35,28 +35,29 @@ for (const dispatched of [false, true]) {
     await expect(restored.getByRole('textbox', { name: 'How can I help you today?' })).toBeEditable({
       timeout: 90_000,
     });
+    // The queued message survives the crash and is listed plainly: no
+    // "uncertain" wording, and cancel is always available.
+    await expect(restored.getByText('Up next', { exact: true })).toBeVisible({ timeout: 90_000 });
+    await expect(restored.getByRole('button', { name: 'Cancel queued message' })).toBeEnabled();
+    await expect(restored.getByRole('alert')).toHaveCount(0);
+    await expect(restored.getByText(/Dispatch outcome unknown|Waiting for the previous runtime/)).toHaveCount(0);
     if (dispatched) {
-      await expect(restored.getByText(/Dispatch outcome unknown/)).toBeVisible({ timeout: 90_000 });
-      await expect(restored.getByRole('button', { name: 'Cancel queued message' })).toBeDisabled();
       await expect(restored.getByRole('button', { name: 'Approve Once', exact: true })).toHaveCount(0);
       await expect(restored.getByRole('button', { name: 'Stop', exact: true })).toHaveCount(0);
     } else {
-      await expect(restored.getByText(/Waiting for the previous runtime/)).toBeVisible({ timeout: 90_000 });
       await expect(restored.getByRole('log').getByText(queued, { exact: true })).toHaveCount(0);
-      await expect(restored.getByRole('button', { name: 'Cancel queued message' })).toBeEnabled();
-      await expect(restored.getByText('Up next', { exact: true })).toBeVisible();
     }
     const other = page.locator(`[data-deck-column]:not([data-deck-column="${columnId}"])`);
     await expect(other).toHaveCount(1);
     await expect(other.getByText(queued, { exact: true })).toHaveCount(0);
-    await expect(other.getByText(/Dispatch outcome unknown/)).toHaveCount(0);
+    await expect(other.getByText('Up next', { exact: true })).toHaveCount(0);
     await attachProofPng(info, 'durable queue after process death', await app.captureScreenshot());
     await page.reload();
+    await expect(restored.getByText('Up next', { exact: true })).toBeVisible({ timeout: 90_000 });
+    await expect(restored.getByRole('alert')).toHaveCount(0);
     if (dispatched) {
-      await expect(restored.getByText(/Dispatch outcome unknown/)).toBeVisible({ timeout: 90_000 });
       await expect(restored.getByRole('log').getByText(queued, { exact: true })).toHaveCount(1);
     } else {
-      await expect(restored.getByText(/Waiting for the previous runtime/)).toBeVisible({ timeout: 90_000 });
       await expect(restored.getByRole('log').getByText(queued, { exact: true })).toHaveCount(0);
       await restored.getByRole('button', { name: 'Cancel queued message' }).click();
       await expect(restored.getByText('Up next', { exact: true })).toHaveCount(0);

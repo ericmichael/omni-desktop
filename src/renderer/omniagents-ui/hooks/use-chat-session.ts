@@ -25,7 +25,7 @@ export function useChatSession(client: RPCClient, id: string) {
   const snapshot = useSelector(actor, (s) => s);
   const actions = useMemo(
     () => ({
-      loadSession: (requestedId = id, options: { authoritativeResync?: boolean; force?: boolean } = {}) => {
+      loadSession: (requestedId = id, options: { force?: boolean } = {}) => {
         if (requestedId !== id) {
           return Promise.reject(new Error('Session controllers cannot change identity; select another controller'));
         }

@@ -39,119 +39,32 @@ async function dropAcceptedReply(page: Page, matchAnswer = false) {
   }, matchAnswer);
 }
 
-for (const scenario of ['lost-reply', 'snapshot-failure', 'stale-window']) {
-  const failRecoverySnapshot = scenario === 'snapshot-failure';
-  const staleWindow = scenario === 'stale-window';
-  test(`reconciles an accepted send after its RPC reply is lost${failRecoverySnapshot ? ' and recovery history fails' : staleWindow ? ' while a stale window edits its draft' : ''}`, async ({
-    app,
-    mode,
-  }, testInfo) => {
-    test.skip(
-      staleWindow && mode !== 'server-local',
-      'Two browser tabs share one origin/profile; Electron uses its own window fixture.'
-    );
-    test.setTimeout(360_000);
-    const page = app.page;
-    const composer = page.getByRole('textbox', { name: 'How can I help you today?' });
-    await expect(composer).toBeVisible({ timeout: 90_000 });
-    await dropAcceptedReply(page);
-    await page.getByRole('button', { name: 'Workstation', exact: true }).click();
-    await page.getByRole('menuitemradio', { name: /^My computer/ }).click();
-    await composer.fill('Respond with exactly HOST_FIRST_MESSAGE_READY and nothing else.');
-    await composer.press('Enter');
-    await expect(page.getByText('HOST_FIRST_MESSAGE_READY', { exact: true }).last()).toBeVisible({ timeout: 240_000 });
-    let second: Page | undefined;
-    if (staleWindow) {
-      second = await page.context().newPage();
-      // Suspend draft broadcasts to reproduce a stale/suspended renderer.
-      await second.addInitScript(() => Object.defineProperty(window, 'BroadcastChannel', { value: undefined }));
-      await second.goto(page.url());
-      await second
-        .getByRole('list', { name: 'Recents' })
-        .getByRole('button', { name: /^Respond with exactly HOST_FIRST_MESSAGE_READY/ })
-        .first()
-        .click({ timeout: 90_000 });
-      await second.getByRole('radio', { name: 'Focus', exact: true }).click();
-      await expect(second.getByRole('textbox', { name: 'How can I help you today?' })).toBeEditable();
-    }
-    await composer.fill('LOST_RESPONSE_PROMPT');
-    await composer.press('Enter');
-    await expect
-      .poll(() => page.evaluate(() => (window as unknown as { lostReplyDropped?: boolean }).lostReplyDropped))
-      .toBe(true);
-    await expect(composer).toHaveValue('LOST_RESPONSE_PROMPT');
-    if (second) {
-      await second.getByRole('textbox', { name: 'How can I help you today?' }).fill('Follow-up from stale window');
-      await expect
-        .poll(() =>
-          second!.evaluate(
-            () =>
-              new Promise<boolean>((resolve, reject) => {
-                const open = indexedDB.open('omni-conversation-drafts-v1', 1);
-                open.onerror = () => reject(open.error);
-                open.onsuccess = () => {
-                  const db = open.result;
-                  const tx = db.transaction('drafts', 'readonly');
-                  const rows = tx.objectStore('drafts').getAll();
-                  rows.onsuccess = () =>
-                    resolve(
-                      rows.result.some(
-                        (draft) => draft.text === 'Follow-up from stale window' && Boolean(draft.pendingSubmission?.id)
-                      )
-                    );
-                  tx.oncomplete = () => db.close();
-                };
-              })
-          )
-        )
-        .toBe(true);
-      await attachProofPng(testInfo, 'stale window keeps pending submission', await second.screenshot());
-      await second.close();
-    }
-    await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeEnabled({ timeout: 90_000 });
-    if (failRecoverySnapshot) {
-      await page.evaluate(() => {
-        const send = WebSocket.prototype.send;
-        let receiptQueried = false;
-        WebSocket.prototype.send = function (data) {
-          let frame;
-          try {
-            frame = JSON.parse(String(data));
-          } catch {}
-          if (frame?.method === 'queue_status' && frame.params?.submission_id) {
-            receiptQueried = true;
-          }
-          if (receiptQueried && frame?.method === 'queue_status' && frame.params?.include_snapshot) {
-            WebSocket.prototype.send = send;
-            queueMicrotask(() =>
-              this.onmessage?.call(
-                this,
-                new MessageEvent('message', {
-                  data: JSON.stringify({
-                    jsonrpc: '2.0',
-                    id: frame.id,
-                    error: { code: -32603, message: 'Injected recovery snapshot failure' },
-                  }),
-                })
-              )
-            );
-            return;
-          }
-          send.call(this, data);
-        };
-      });
-      await page.getByRole('button', { name: 'Send', exact: true }).click();
-      await expect(page.getByText('Injected recovery snapshot failure', { exact: true })).toBeVisible();
-      await expect(composer).toHaveValue('LOST_RESPONSE_PROMPT');
-      await page.getByRole('button', { name: 'Retry', exact: true }).click();
-      await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeEnabled();
-    }
-    await page.getByRole('button', { name: 'Send', exact: true }).click();
-    await expect(composer).toHaveValue('');
-    await expect(page.getByRole('log').getByText('LOST_RESPONSE_PROMPT', { exact: true })).toHaveCount(1);
-    await attachProofPng(testInfo, 'lost reply reconciled without duplicate prompt', await app.captureScreenshot());
+test('reconciles an accepted send after its RPC reply is lost', async ({ app }, testInfo) => {
+  test.setTimeout(360_000);
+  const page = app.page;
+  const composer = page.getByRole('textbox', { name: 'How can I help you today?' });
+  await expect(composer).toBeVisible({ timeout: 90_000 });
+  await dropAcceptedReply(page);
+  await page.getByRole('button', { name: 'Workstation', exact: true }).click();
+  await page.getByRole('menuitemradio', { name: /^My computer/ }).click();
+  await composer.fill('Respond with exactly HOST_FIRST_MESSAGE_READY and nothing else.');
+  await composer.press('Enter');
+  await expect(page.getByText('HOST_FIRST_MESSAGE_READY', { exact: true }).last()).toBeVisible({ timeout: 240_000 });
+  await composer.fill('LOST_RESPONSE_PROMPT');
+  await composer.press('Enter');
+  await expect
+    .poll(() => page.evaluate(() => (window as unknown as { lostReplyDropped?: boolean }).lostReplyDropped))
+    .toBe(true);
+  // Once the socket is back the client asks the server once for that
+  // submission's receipt. It completed, so the send counts as delivered:
+  // nothing returns to the composer and the prompt appears exactly once.
+  await expect(page.getByRole('log').getByText('LOST_RESPONSE_PROMPT', { exact: true })).toHaveCount(1, {
+    timeout: 90_000,
   });
-}
+  await expect(composer).toHaveValue('');
+  await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeEnabled({ timeout: 90_000 });
+  await attachProofPng(testInfo, 'lost reply reconciled without duplicate prompt', await app.captureScreenshot());
+});
 
 test('delivers an attachment when replying to an agent question', async ({ app }, testInfo) => {
   test.setTimeout(360_000);

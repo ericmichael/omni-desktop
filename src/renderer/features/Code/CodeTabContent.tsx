@@ -21,6 +21,7 @@ import {
 import { openSettingsTab } from '@/renderer/features/SettingsModal/settings-nav';
 import { buildClientToolHandler } from '@/renderer/features/Tickets/client-tool-handler';
 import { $pendingPlan, resolvePlanApproval } from '@/renderer/features/Tickets/plan-approval-bridge';
+import { useAutoRetry } from '@/renderer/hooks/use-auto-retry';
 import { useSessionWorkspaceDir } from '@/renderer/hooks/use-session-workspace-dir';
 import type { ClientToolCallHandler } from '@/renderer/omniagents-ui/App';
 import { ChatShell, type PendingMessage } from '@/renderer/omniagents-ui/ChatShell';
@@ -419,6 +420,20 @@ export const CodeTabContent = memo(
       ...(tab.snapshotRef ? { snapshotRef: tab.snapshotRef } : {}),
     });
 
+    // A launch failure is retried quietly on a capped backoff; the column
+    // keeps its launching look and only a long, continuous failure shows
+    // the error surface (which keeps retrying behind it).
+    // A sandbox that fails to start usually fails the same way again
+    // (docker missing, image gone), so give it a couple of quiet retries and
+    // then ask, rather than the full minute a dropped connection gets.
+    const launchRetry = useAutoRetry({
+      failing: phase === 'error',
+      healthy: phase === 'running' || phase === 'idle',
+      retry,
+      giveUpAfterMs: 10_000,
+    });
+    const launchFailed = phase === 'error' && launchRetry.exhausted;
+
     const allStatuses = useStore($codeTabStatuses);
     const sandboxStatus = allStatuses[tab.id];
 
@@ -611,9 +626,9 @@ export const CodeTabContent = memo(
                   ) : undefined
                 }
                 greeting={greeting}
-                phase={phase === 'error' ? 'error' : phase === 'idle' && !tab.activatedAt ? 'idle' : 'loading'}
-                error={phase === 'error' ? (allLaunchErrors[tab.id] ?? undefined) : undefined}
-                onRetry={phase === 'error' ? retry : undefined}
+                phase={launchFailed ? 'error' : phase === 'idle' && !tab.activatedAt ? 'idle' : 'loading'}
+                error={launchFailed ? (allLaunchErrors[tab.id] ?? undefined) : undefined}
+                onRetry={launchFailed ? retry : undefined}
                 onSubmit={handlePrelaunchSubmit}
                 pendingMessages={pendingMessages}
                 suggestions={!tab.activatedAt ? CHAT_SUGGESTIONS : undefined}
@@ -625,7 +640,7 @@ export const CodeTabContent = memo(
                 workspaceReady={Boolean(store.workspaceDir)}
                 onOpenWorkspaceSettings={() => openSettingsTab('Workspace')}
               />
-            ) : phase === 'error' ? (
+            ) : launchFailed ? (
               <CodeErrorView tabId={tab.id} retry={retry} />
             ) : (
               /* idle / checking / installing / ready / starting / connecting —

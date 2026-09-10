@@ -1315,6 +1315,16 @@ export class RPCClient {
     >;
   }
 
+  /** The typeable subset of server functions (`server_call("slash.list")`); [] on older servers. */
+  async listSlashCommands(): Promise<unknown[]> {
+    try {
+      const result = (await this.serverCall('slash.list', {})) as { commands?: unknown };
+      return Array.isArray(result?.commands) ? result.commands : [];
+    } catch {
+      return [];
+    }
+  }
+
   async serverCall(
     func: string,
     args?: Record<string, unknown>,

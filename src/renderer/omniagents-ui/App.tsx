@@ -20,6 +20,8 @@ import {
 import { Button } from '@/renderer/ds/ui/button';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/renderer/ds/ui/resizable';
 import { Spinner } from '@/renderer/ds/ui/spinner';
+import { toast } from '@/renderer/features/Toast/state';
+import { useAutoRetry } from '@/renderer/hooks/use-auto-retry';
 import { resetConversation } from '@/renderer/omniagents-ui/session/reset-conversation';
 import { clearColumnActivity, publishColumnActivity } from '@/renderer/services/column-activity';
 import { forwardRoutineEvent, registerRoutineActor } from '@/renderer/services/routine-bridge';
@@ -374,6 +376,17 @@ function SessionView({
     wsRealtimeUrl: readOnly ? undefined : uiConfig.wsRealtimeUrl,
     token: uiConfig.token,
   });
+  // A dropped runtime or a server restart is recovered quietly: the
+  // transcript stays on screen, the composer waits, and the boot machine is
+  // retried on a capped backoff. Only a long, continuous failure earns the
+  // full-column card — and retries keep running behind it.
+  const bootFailed =
+    bootState.phase === 'connectionError' || bootState.phase === 'bootstrapError' || bootState.phase === 'sessionError';
+  const bootRetry = useAutoRetry({ failing: bootFailed, healthy: bootState.ready, retry: bootState.retry });
+  // A permanent transport failure (protocol mismatch, bad credentials) will
+  // not fix itself in a minute; show the card at once, retries keep going.
+  const transportPermanent = useSelector(client.actor, (s) => Boolean(s.context.permanent));
+  const bootCardDue = bootRetry.exhausted || (bootFailed && transportPermanent);
   const conversationReady = conversationIsReady({
     connected,
     bootReady: bootState.ready,
@@ -467,15 +480,12 @@ function SessionView({
   // once bootstrap is done. Otherwise, show chat as soon as boot is
   // ready.
   useEffect(() => {
-    if (
-      bootState.phase === 'connectionError' ||
-      bootState.phase === 'bootstrapError' ||
-      bootState.phase === 'sessionError'
-    ) {
+    if (bootCardDue) {
       setUI('error');
       return;
     }
-    if (!bootState.ready) {
+    if (bootFailed || !bootState.ready) {
+      // Within the quiet retry window the current view stays as it is.
       return;
     }
     if (resumeRequested) {
@@ -484,7 +494,7 @@ function SessionView({
     } else {
       setUI('chat');
     }
-  }, [bootState.phase, bootState.ready, refreshSessions, sessionIdProp, uiConfig.searchParams]);
+  }, [bootFailed, bootCardDue, bootState.ready, refreshSessions, sessionIdProp, uiConfig.searchParams]);
 
   // View/host notifications only. Session data and client-request replies
   // are owned by the controller even when no view is mounted.
@@ -1201,10 +1211,21 @@ function SessionView({
       const draft = getConversationDraft(session.id);
       updateConversationDraft(session.id, {
         text: [initial, draft.text].filter(Boolean).join('\n\n'),
-        error: cause instanceof Error ? cause.message : 'Message was not sent. Please retry.',
       });
+      toast.error('Message not sent', cause instanceof Error ? cause.message : undefined);
     });
   }, [session, conversationReady, ui, items.length, handleSubmit, initialMessage]);
+
+  // A failed hydration is retried on its own, as soon as the connection is
+  // back and then on a short backoff. The composer stays disabled meanwhile;
+  // there is nothing for the user to click.
+  useEffect(() => {
+    if (machine.phase !== 'initError' || !connected || !bootState.ready) {
+      return;
+    }
+    const timer = setTimeout(() => void loadSession(sessionId).catch(() => {}), 1500);
+    return () => clearTimeout(timer);
+  }, [machine.phase, connected, bootState.ready, sessionId, loadSession]);
 
   // Flush messages queued from ChatShell before the backend was ready
   const pendingFlushedRef = useRef(false);
@@ -1248,8 +1269,8 @@ function SessionView({
             updateConversationDraft(id, {
               text: [...remaining.map((message) => message.text), draft.text].filter(Boolean).join('\n\n'),
               files: [...remaining.flatMap((message) => message.files ?? []), ...draft.files],
-              error: cause instanceof Error ? cause.message : 'Message was not sent. Please retry.',
             });
+            toast.error('Message not sent', cause instanceof Error ? cause.message : undefined);
           }
           break;
         }
@@ -1480,6 +1501,14 @@ function SessionView({
             <Button type="button" onClick={bootState.retry}>
               Try again
             </Button>
+            <p
+              role="status"
+              aria-live="polite"
+              className="flex items-center justify-center gap-1.5 text-xs text-muted-foreground"
+            >
+              <Spinner className="size-3" aria-hidden="true" />
+              Still retrying automatically…
+            </p>
           </div>
         </div>
       </div>
@@ -1549,11 +1578,12 @@ function SessionView({
                       onSubmitMessage={(text) => {
                         void handleSubmit(text).catch((cause: unknown) => {
                           if (sessionId) {
+                            const draft = getConversationDraft(sessionId);
                             updateConversationDraft(sessionId, {
-                              text,
-                              error: cause instanceof Error ? cause.message : 'Message was not sent',
+                              text: [text, draft.text].filter(Boolean).join('\n\n'),
                             });
                           }
+                          toast.error('Message not sent', cause instanceof Error ? cause.message : undefined);
                         });
                       }}
                       onStageContext={stageContext}
@@ -1561,7 +1591,7 @@ function SessionView({
                     />
                   </ArtifactPortalProvider>
                   <AnimatePresence>
-                    {!connected && (
+                    {!connected && !bootRetry.retrying && (
                       <motion.div
                         className="absolute bottom-2 left-0 right-0 flex justify-center pointer-events-none z-10"
                         initial={{ opacity: 0 }}
@@ -1675,16 +1705,14 @@ function SessionView({
                         />
                       ) : null}
                     </PillStrip>
-                    {machine.phase === 'initError' && (
-                      <div role="alert" className="px-3 py-2 text-sm">
-                        Couldn’t load this conversation. Your draft has been kept.
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          onClick={() => void loadSession(sessionId).catch(() => {})}
-                        >
-                          Retry
-                        </Button>
+                    {bootRetry.retrying && (
+                      <div
+                        role="status"
+                        aria-live="polite"
+                        className="flex items-center gap-1.5 px-3 py-1 text-xs text-muted-foreground"
+                      >
+                        <Spinner className="size-3" aria-hidden="true" />
+                        <span>{ui === 'connecting' ? 'Connecting…' : 'Reconnecting…'}</span>
                       </div>
                     )}
                     <ConversationComposer

@@ -193,7 +193,10 @@ export const autoLaunchMachine = setup({
 
     error: {
       on: {
-        RETRY: { target: 'checking', actions: 'clearError' },
+        // A retry must reach `starting` again. `hasLaunched` is still set
+        // when the failure came from the start itself; leaving it set would
+        // let `ready`'s guard park the machine in idle with nothing running.
+        RETRY: { target: 'checking', actions: ['clearError', 'clearLaunched'] },
         RELAUNCH: { target: 'ready', actions: ['clearError', 'clearLaunched'] },
         RESET: { target: 'idle', actions: ['clearError', 'clearLaunched'] },
       },

@@ -64,39 +64,6 @@ describe('ModelSessionControls', () => {
     expect(container.textContent).toContain('Model One');
     expect(container.textContent).not.toContain('Loading models');
   });
-  it('loads catalog options and untouched fields when a remote selection arrives during the read', async () => {
-    registry = new SessionRegistry(fakeSessionClient().client);
-    const session = registry.get('A');
-    const response = deferred<any>();
-    const transport = { request: vi.fn(() => response.promise) } as unknown as ModelCatalogRpcTransport;
-    await act(async () => root.render(<ModelSessionControls sessionId="A" session={session} transport={transport} />));
-    await act(async () => {
-      session.panels.set('activeModel', 'model-2');
-      response.resolve({
-        models: [model('model-1', 'Model One'), model('model-2', 'Model Two')],
-        default_model: 'model-1',
-        voice_default_model: null,
-        errors: [],
-        reasons: [],
-        session: {
-          session_id: 'A',
-          active_model: 'model-1',
-          reasoning_effort: 'high',
-          approvals_reviewer: 'auto',
-          workflow_reviewer: 'off',
-        },
-      });
-    });
-    expect(session.panels.state.get()).toMatchObject({
-      activeModel: 'model-2',
-      reasoningEffort: 'high',
-      approvalsReviewer: 'auto',
-      workflowReviewer: 'off',
-      modelLoading: false,
-    });
-    expect(session.panels.state.get().models).toHaveLength(2);
-    expect(container.textContent).toContain('Model Two');
-  });
   it('does not surface an old catalog failure after a newer reconnect read succeeds', async () => {
     registry = new SessionRegistry(fakeSessionClient().client);
     const session = registry.get('A');
@@ -124,24 +91,22 @@ describe('ModelSessionControls', () => {
     expect(session.panels.state.get().modelLoading).toBe(false);
     expect(container.textContent).toContain('Model Two');
   });
-  it('keeps session-owned selections across view unmounts and rejects a stale catalog read', async () => {
+  it('keeps session-owned selections across view unmounts', async () => {
     registry = new SessionRegistry(fakeSessionClient().client);
     const session = registry.get('A');
     const response = deferred<any>();
     const transport = { request: vi.fn(() => response.promise) } as unknown as ModelCatalogRpcTransport;
     await act(async () => root.render(<ModelSessionControls sessionId="A" session={session} transport={transport} />));
-    await act(async () => {
-      session.panels.set('models', [model('model-1', 'Model One'), model('model-2', 'Model Two')]);
-      session.panels.set('activeModel', 'model-2');
+    await act(async () =>
       response.resolve({
-        models: [model('model-1', 'Model One')],
+        models: [model('model-1', 'Model One'), model('model-2', 'Model Two')],
         default_model: 'model-1',
         voice_default_model: null,
         errors: [],
         reasons: [],
-        session: { session_id: 'A', active_model: 'model-1', reasoning_effort: 'low' },
-      });
-    });
+        session: { session_id: 'A', active_model: 'model-2', reasoning_effort: 'low' },
+      })
+    );
     expect(container.textContent).toContain('Model Two');
     await act(async () => root.render(null));
     await act(async () =>

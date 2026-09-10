@@ -230,6 +230,25 @@ describe('autoLaunchMachine', () => {
     expect(snap.context.error).toBeNull();
   });
 
+  it('relaunches on RETRY after a failed start instead of parking in idle', () => {
+    const actor = createTestActor();
+    actor.send({ type: 'LAUNCH' });
+    actor.send({ type: 'RUNTIME_READY' });
+    actor.send({ type: 'CONFIG_OK' });
+    expect(actor.getSnapshot().context.hasLaunched).toBe(true);
+    actor.send({ type: 'SANDBOX_ERROR', error: 'provisioning failed' });
+    expect(actor.getSnapshot().value).toBe('error');
+
+    actor.send({ type: 'RETRY' });
+    expect(actor.getSnapshot().value).toBe('checking');
+    expect(actor.getSnapshot().context.hasLaunched).toBe(false);
+    actor.send({ type: 'RUNTIME_READY' });
+    expect(actor.getSnapshot().value).toBe('ready');
+    actor.send({ type: 'CONFIG_OK' });
+    expect(actor.getSnapshot().value).toBe('starting');
+    actor.stop();
+  });
+
   it('transitions error → ready on RELAUNCH (clears hasLaunched)', () => {
     const errorSnap = next(startingSnap(), { type: 'SANDBOX_ERROR', error: 'fail' });
     expect(errorSnap.context.hasLaunched).toBe(true);

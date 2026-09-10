@@ -82,8 +82,43 @@ export function fakeSessionClient() {
       }
       throw new Error(`Unexpected request: ${method}`);
     }),
-    listQueue: vi.fn(async (): Promise<any> => ({ items: [] })),
+    listQueue: vi.fn(async (_id?: string): Promise<any> => ({ items: [] })),
+    // Composed from the mocks above so a test can shape history, run state
+    // and queue contents through `request`/`listQueue` alone.
+    getSessionSnapshot: vi.fn(async (id: string): Promise<any> => {
+      const [history, status, queue] = await Promise.all([
+        fake.request('list_items', { thread_id: id }),
+        fake.request('queue_status', { session_id: id }),
+        fake.listQueue(id),
+      ]);
+      return {
+        session_id: id,
+        run_active: Boolean(status?.run_active),
+        active_run_id: status?.active_run_id,
+        snapshot: {
+          stream_id: 'fake-stream',
+          last_seq: 0,
+          items: history?.items ?? [],
+          queue: queue?.items ?? [],
+          pending_requests: [],
+          state_events: [],
+        },
+      };
+    }),
     listServerFunctions: vi.fn(async () => [{ name: 'recap' }, { name: 'help' }]),
+    listSlashCommands: vi.fn(async () => [
+      { name: 'help', function: 'help', description: 'List commands', usage: '', args: { kind: 'none' }, order: 0 },
+      { name: 'recap', function: 'recap', description: 'Recap', usage: '', args: { kind: 'none' }, order: 21 },
+      {
+        name: 'goal',
+        function: 'goal',
+        description: 'Goal',
+        usage: '<goal text>',
+        args: { kind: 'text', field: 'goal' },
+        during_run: false,
+        order: 30,
+      },
+    ]),
     serverCall: vi.fn(
       async (_name: string, _args?: any, _id?: string, _target?: any): Promise<any> => ({ snapshot: null })
     ),

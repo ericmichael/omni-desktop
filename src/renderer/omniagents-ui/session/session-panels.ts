@@ -36,8 +36,8 @@ export type SessionPanels = {
   dismissedTaskIds: Set<string>;
 };
 
-/** Both live events and mutations advance the revision. A read may only
- * publish if nothing newer has touched its field since the read started. */
+/** Session-owned panel state. Every write is a plain set; a read applies
+ * whatever the server answered last. */
 export class SessionPanelStore {
   private disposed = false;
   readonly state = atom<SessionPanels>({
@@ -65,21 +65,6 @@ export class SessionPanelStore {
     dismissedJobIds: new Set(),
     dismissedTaskIds: new Set(),
   });
-  private revisions = new Map<keyof SessionPanels, number>();
-  private reads = new Map<keyof SessionPanels, number>();
-  guardRead(keys: Array<keyof SessionPanels>) {
-    const revisions = keys.map((key) => this.revisions.get(key) ?? 0);
-    const reads = keys.map((key) => {
-      const read = (this.reads.get(key) ?? 0) + 1;
-      this.reads.set(key, read);
-      return read;
-    });
-    return () =>
-      !this.disposed &&
-      keys.every(
-        (key, index) => (this.revisions.get(key) ?? 0) === revisions[index] && this.reads.get(key) === reads[index]
-      );
-  }
   set = <K extends keyof SessionPanels>(
     key: K,
     update: SessionPanels[K] | ((previous: SessionPanels[K]) => SessionPanels[K])
@@ -89,17 +74,10 @@ export class SessionPanelStore {
     }
     const previous = this.state.get();
     const value = typeof update === 'function' ? update(previous[key]) : update;
-    this.revisions.set(key, (this.revisions.get(key) ?? 0) + 1);
     this.state.set({ ...previous, [key]: value });
   };
   async refresh<K extends keyof SessionPanels>(key: K, read: () => Promise<SessionPanels[K]>) {
-    const revision = this.revisions.get(key) ?? 0;
-    const request = (this.reads.get(key) ?? 0) + 1;
-    this.reads.set(key, request);
-    const value = await read();
-    if (request === this.reads.get(key) && revision === (this.revisions.get(key) ?? 0)) {
-      this.set(key, value);
-    }
+    this.set(key, await read());
   }
   dispose() {
     this.disposed = true;

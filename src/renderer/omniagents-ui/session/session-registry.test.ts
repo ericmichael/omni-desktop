@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { getConversationDraft, updateConversationDraft } from '@/renderer/omniagents-ui/conversation-drafts';
+import { ConnectionClosedError } from '@/shared/lifecycle';
 
 import * as encoding from './encode-message';
 import { SessionRegistry } from './session-registry';
@@ -16,89 +16,6 @@ function setup() {
 afterEach(() => registries.splice(0).forEach((registry) => registry.dispose()));
 
 describe('session ownership', () => {
-  it('uses a fresh operation after definitive failure without stealing the composer identity', async () => {
-    const { fake, a } = setup();
-    await a.load();
-    const request = fake.request.getMockImplementation()!;
-    fake.request.mockImplementation((method, params) =>
-      method === 'queue_status' && params.submission_id
-        ? Promise.resolve({ submission: { status: 'failed' } })
-        : request(method, params)
-    );
-    updateConversationDraft('A', { pendingInput: { id: 'failed-input', text: 'retry', files: [] } });
-    await a.send('retry', [], { inputId: 'failed-input' });
-    const id = (fake.startRun.mock.calls as unknown[][])[0]?.[5];
-    expect(id).toEqual(expect.any(String));
-    expect(id).not.toBe('failed-input');
-  });
-  it('does not add optimistic UI when another window already completed the input', async () => {
-    const { fake, a } = setup();
-    await a.load();
-    const request = fake.request.getMockImplementation()!;
-    fake.request.mockImplementation((method, params) =>
-      method === 'queue_status' && params.submission_id === 'completed-input'
-        ? Promise.resolve({ submission: { status: 'completed', result: { run_id: 'accepted' } } })
-        : request(method, params)
-    );
-    await expect(a.send('already accepted', [], { inputId: 'completed-input' })).resolves.toEqual({
-      runId: 'accepted',
-    });
-    expect(fake.startRun).not.toHaveBeenCalled();
-    expect(fake.enqueueMessage).not.toHaveBeenCalled();
-    expect(a.actor.getSnapshot().matches({ ready: 'idle' })).toBe(true);
-    expect(a.actor.getSnapshot().context.items).toEqual([]);
-  });
-  it('does not borrow another composer attempt for an independent programmatic send', async () => {
-    const { fake, a } = setup();
-    await a.load();
-    updateConversationDraft('A', { pendingInput: { id: 'composer-owned', text: 'typed message', files: [] } });
-    await expect(a.send('independent message')).rejects.toThrow('Another message is pending');
-    expect(fake.startRun).not.toHaveBeenCalled();
-    expect(getConversationDraft('A').pendingInput?.id).toBe('composer-owned');
-    updateConversationDraft('A', { pendingInput: undefined });
-  });
-  it('keeps one submission identity when another window retries during attachment encoding', async () => {
-    const { fake, a } = setup();
-    await a.load();
-    const other = fakeSessionClient();
-    const registry = new SessionRegistry(other.client);
-    registries.push(registry);
-    const b = registry.get('A');
-    await b.load();
-    updateConversationDraft('A', { pendingInput: { id: 'shared-input', text: 'same prompt', files: [] } });
-    const encoded = deferred<{ content: undefined; attachments: [] }>();
-    const read = vi.spyOn(encoding, 'encodeMessage').mockReturnValueOnce(encoded.promise);
-    const original = a.send('same prompt', undefined, { inputId: 'shared-input' });
-    await vi.waitFor(() => expect(read).toHaveBeenCalledOnce());
-    await b.send('same prompt', undefined, { inputId: 'shared-input' });
-    encoded.resolve({ content: undefined, attachments: [] });
-    try {
-      await original;
-      expect((fake.startRun.mock.calls as unknown[][])[0]?.[5]).toBe(
-        (other.fake.startRun.mock.calls as unknown[][])[0]?.[5]
-      );
-    } finally {
-      read.mockRestore();
-    }
-  });
-  it('rejects a queued local send when its environment changes before admission', async () => {
-    const { fake, a } = setup();
-    await a.load();
-    const target = { workspaceId: 'workspace', environmentId: 'host', environmentGeneration: 1 };
-    await a.refreshPanels(target);
-    const reply = deferred<{ run_id: string }>();
-    fake.startRun.mockReturnValueOnce(reply.promise);
-    const first = a.send('already dispatched', [], { executionTarget: target });
-    await vi.waitFor(() => expect(fake.startRun).toHaveBeenCalledOnce());
-    const second = a.send('waiting locally', [], { executionTarget: target });
-    const rejected = expect(second).rejects.toThrow('environment changed');
-    await a.refreshPanels({ ...target, environmentGeneration: 2 });
-    reply.resolve({ run_id: 'first' });
-    await first;
-    await rejected;
-    expect(fake.startRun).toHaveBeenCalledOnce();
-    expect(fake.enqueueMessage).not.toHaveBeenCalled();
-  });
   it('retries hydration when reconnect occurs before an older hydration settles', async () => {
     const { fake, a } = setup();
     const oldHistory = deferred<any>();
@@ -122,21 +39,15 @@ describe('session ownership', () => {
     );
     expect(a.actor.getSnapshot().matches('ready')).toBe(true);
   });
-  it.each(['disposed', 'environment changed'])('does not dispatch an upload after its owner is %s', async (change) => {
+  it('does not dispatch an upload after its owner is disposed', async () => {
     const { fake, a } = setup();
     await a.load();
-    const target = { workspaceId: 'workspace', environmentId: 'host', environmentGeneration: 1 };
-    await a.refreshPanels(target);
     const encoded = deferred<{ content: undefined; attachments: [] }>();
     const read = vi.spyOn(encoding, 'encodeMessage').mockReturnValueOnce(encoded.promise);
-    const sending = a.send('delayed upload', [], { executionTarget: target });
-    const rejected = expect(sending).rejects.toThrow(/connecting|environment/i);
+    const sending = a.send('delayed upload', []);
+    const rejected = expect(sending).rejects.toThrow(/connecting/i);
     await vi.waitFor(() => expect(read).toHaveBeenCalled());
-    if (change === 'disposed') {
-      a.dispose();
-    } else {
-      await a.refreshPanels({ ...target, environmentGeneration: 2 });
-    }
+    a.dispose();
     encoded.resolve({ content: undefined, attachments: [] });
     try {
       await rejected;
@@ -146,29 +57,9 @@ describe('session ownership', () => {
       read.mockRestore();
     }
   });
-  it('does not let an older send acknowledgment retire a newer submission', async () => {
-    const { fake, a } = setup();
-    await a.load();
-    const reply = deferred<{ run_id: string }>();
-    fake.startRun.mockReturnValueOnce(reply.promise);
-    const sending = a.send('older message');
-    await vi.waitFor(() => expect(fake.startRun).toHaveBeenCalledOnce());
-    updateConversationDraft('A', {
-      pendingSubmission: { id: 'newer-send', signature: 'newer', queued: false },
-      pendingInput: { text: 'newer message', files: [] },
-    });
-    reply.resolve({ run_id: 'older-run' });
-    await sending;
-    expect(getConversationDraft('A')).toMatchObject({
-      pendingSubmission: { id: 'newer-send' },
-      pendingInput: { text: 'newer message' },
-    });
-    updateConversationDraft('A', { pendingSubmission: undefined, pendingInput: undefined });
-  });
-  it('applies remote session settings only to their owner and fences older reads', async () => {
+  it('applies remote session settings only to their owner', async () => {
     const { fake, a, b } = setup();
     await Promise.all([a.load(), b.load()]);
-    const fresh = a.panels.guardRead(['activeModel']);
     fake.emit('client_request', {
       session_id: 'A',
       request_id: 'settings',
@@ -186,7 +77,6 @@ describe('session ownership', () => {
       approvalsReviewer: 'user',
       workflowReviewer: 'guardian',
     });
-    expect(fresh()).toBe(false);
     await vi.waitFor(() =>
       expect(fake.clientResponse).toHaveBeenCalledWith('settings', true, { ack: true }, undefined)
     );
@@ -251,24 +141,6 @@ describe('session ownership', () => {
     fake.emit(`${kind}_approval_resolved`, { session_id: 'B', ...params });
     expect(b.actor.getSnapshot().context.items.some((item) => item.type === 'approval')).toBe(false);
   });
-  it('never turns a question reply with a lost acknowledgement into a fresh run', async () => {
-    const { fake, a } = setup();
-    await a.load();
-    fake.emit('client_request', {
-      session_id: 'A',
-      request_id: 'original-question',
-      function: 'escalate',
-      args: { message: 'Question' },
-    });
-    fake.clientResponse.mockRejectedValueOnce(new Error('connection lost'));
-    await expect(a.send('my answer')).rejects.toThrow('connection lost');
-    fake.emit('client_request_resolved', { session_id: 'A', request_id: 'original-question' });
-    await a.send('my answer');
-    expect(fake.clientResponse).toHaveBeenCalledTimes(2);
-    expect(fake.clientResponse.mock.calls[1]).toEqual(fake.clientResponse.mock.calls[0]);
-    expect(fake.startRun).not.toHaveBeenCalled();
-    expect(fake.enqueueMessage).not.toHaveBeenCalled();
-  });
   it('adopts a snapshot watermark and applies only newer buffered events once', async () => {
     const { fake, a } = setup();
     const snapshot = deferred<any>();
@@ -297,31 +169,47 @@ describe('session ownership', () => {
     expect(fake.completeSessionResync).toHaveBeenCalledWith('A', 'epoch', 5);
   });
 
-  it('reconciles a lost accepted reply without starting or queuing a second run', async () => {
+  it('treats a lost reply as sent when the receipt says the submission completed', async () => {
     const { fake, a } = setup();
     await a.load();
-    fake.startRun.mockRejectedValueOnce(new Error('connection lost'));
-    await expect(a.send('only once')).rejects.toThrow('connection lost');
-    fake.request.mockImplementation(async (method, params) =>
-      method === 'queue_status'
-        ? { run_active: false, submission: { status: 'completed', result: { run_id: 'accepted' } } }
-        : historyPage(params.thread_id, 'only once')
+    fake.startRun.mockRejectedValueOnce(new ConnectionClosedError('socket closed'));
+    const request = fake.request.getMockImplementation()!;
+    fake.request.mockImplementation((method, params) =>
+      method === 'queue_status' && params.submission_id
+        ? Promise.resolve({ submission: { status: 'completed', result: { run_id: 'accepted' } } })
+        : request(method, params)
     );
-    await expect(a.send('only once')).resolves.toEqual({ runId: 'accepted' });
+    await expect(a.send('only once', [], { inputId: 'lost-reply' })).resolves.toEqual({ runId: 'accepted' });
     expect(fake.startRun).toHaveBeenCalledTimes(1);
     expect(fake.enqueueMessage).not.toHaveBeenCalled();
+    expect(fake.request.mock.calls.filter(([, params]) => params?.submission_id)).toEqual([
+      ['queue_status', { session_id: 'A', submission_id: 'lost-reply' }],
+    ]);
     expect(a.actor.getSnapshot().matches({ ready: 'idle' })).toBe(true);
   });
 
-  it('reuses the original submission id and path when a response is lost', async () => {
+  it('reports a lost reply as a failed send when the server holds no completed receipt', async () => {
     const { fake, a } = setup();
     await a.load();
-    fake.startRun.mockRejectedValueOnce(new Error('connection lost'));
-    await expect(a.send('retry')).rejects.toThrow();
-    await a.send('retry');
-    expect(fake.startRun.mock.calls[0]).toEqual(fake.startRun.mock.calls[1]);
+    fake.startRun.mockRejectedValueOnce(new ConnectionClosedError('socket closed'));
+    await expect(a.send('retry', [], { inputId: 'first' })).rejects.toThrow('socket closed');
+    expect(fake.request.mock.calls.filter(([, params]) => params?.submission_id)).toHaveLength(1);
+    // A resend is a new submission; the server's receipt still covers the old id.
+    await a.send('retry', [], { inputId: 'second' });
+    expect(fake.startRun).toHaveBeenCalledTimes(2);
+    expect((fake.startRun.mock.calls as unknown[][])[1]?.[5]).toBe('second');
     expect(fake.enqueueMessage).not.toHaveBeenCalled();
   });
+
+  it('does not consult the receipt for a failure that is not a transport error', async () => {
+    const { fake, a } = setup();
+    await a.load();
+    fake.startRun.mockRejectedValueOnce(new Error('refused by policy'));
+    await expect(a.send('refused')).rejects.toThrow('refused by policy');
+    expect(fake.request.mock.calls.filter(([, params]) => params?.submission_id)).toHaveLength(0);
+    expect(fake.startRun).toHaveBeenCalledTimes(1);
+  });
+
   it('loads queued work before allowing an idle session to choose its send path', async () => {
     const { fake, a } = setup();
     fake.listQueue.mockResolvedValueOnce({ items: [{ id: 'pending', content: 'already queued' }] });
@@ -331,34 +219,12 @@ describe('session ownership', () => {
     expect(fake.enqueueMessage).toHaveBeenCalledTimes(1);
   });
 
-  it('keeps the input available for composer restoration when queue admission is refused', async () => {
+  it('reports a refused queue admission as a failed send', async () => {
     const { fake, a } = setup();
     fake.listQueue.mockResolvedValueOnce({ items: [{ id: 'pending', content: 'already queued' }] });
     await a.load();
-    updateConversationDraft('A', { pendingInput: { id: 'refused-input', text: 'next', files: [] } });
     fake.enqueueMessage.mockResolvedValueOnce({ ok: false, reason: 'queue full' });
     await expect(a.send('next', undefined, { inputId: 'refused-input' })).rejects.toThrow('queue full');
-    expect(getConversationDraft('A').pendingInput).toMatchObject({ id: 'refused-input', text: 'next' });
-    expect(getConversationDraft('A').pendingSubmission).toBeUndefined();
-    updateConversationDraft('A', { pendingInput: undefined });
-  });
-
-  it('re-reads a run snapshot when a newer run event arrives during hydration', async () => {
-    const { fake, a } = setup();
-    const firstStatus = deferred<any>();
-    const request = fake.request.getMockImplementation()!;
-    let statusReads = 0;
-    fake.request.mockImplementation((method, params) =>
-      method === 'queue_status' && ++statusReads === 1 ? firstStatus.promise : request(method, params)
-    );
-    const load = a.load();
-    await vi.waitFor(() => expect(statusReads).toBe(1));
-    fake.emit('run_end', { session_id: 'A', run_id: 'finished' });
-    firstStatus.resolve({ run_active: true, active_run_id: 'finished' });
-    await load;
-    expect(statusReads).toBe(2);
-    expect(a.actor.getSnapshot().matches({ ready: 'idle' })).toBe(true);
-    expect(a.actor.getSnapshot().context.runId).toBeUndefined();
   });
 
   it('refreshes all registered sessions on reconnect without any mounted views', async () => {
@@ -408,7 +274,7 @@ describe('session ownership', () => {
     const command = a.send('/help');
     await vi.waitFor(() => expect(fake.serverCall).toHaveBeenCalledWith('help', {}, 'A', undefined));
     fake.emit('message_output', { session_id: 'B', content: 'B response' });
-    reply.resolve({ result: 'A command result' });
+    reply.resolve({ message: 'A command result' });
     await command;
     expect(a.actor.getSnapshot().context.items).toEqual([
       expect.objectContaining({ content: expect.stringContaining('A command result') }),
@@ -416,17 +282,16 @@ describe('session ownership', () => {
     expect(b.actor.getSnapshot().context.items).toEqual([expect.objectContaining({ content: 'B response' })]);
   });
 
-  it('keeps a late recap in its owner, and does not overwrite a newer recap event', async () => {
+  it('keeps a late recap in its owner', async () => {
     const { fake, a, b } = setup();
     await a.load();
     const reply = deferred<any>();
     fake.serverCall.mockImplementationOnce(() => reply.promise);
     const command = a.send('/recap');
     await vi.waitFor(() => expect(fake.serverCall).toHaveBeenCalled());
-    fake.emit('client_request', { session_id: 'A', function: 'ui.recap', args: { text: 'newer recap' } });
-    reply.resolve({ text: 'old recap' });
+    reply.resolve({ text: 'command recap' });
     await command;
-    expect(a.panels.state.get().recap?.text).toBe('newer recap');
+    expect(a.panels.state.get().recap?.text).toBe('command recap');
     expect(b.panels.state.get().recap).toBeNull();
   });
 
@@ -493,17 +358,6 @@ describe('session ownership', () => {
     expect(observed).not.toContainEqual({ ready: 'idle' });
   });
 
-  it('does not replace a live queue update with a delayed snapshot', async () => {
-    const { fake, a } = setup();
-    const read = deferred<any>();
-    fake.listQueue.mockImplementationOnce(() => read.promise);
-    const refresh = a.refreshPanels();
-    fake.emit('queue_changed', { session_id: 'A', items: [{ id: 'new' }] });
-    read.resolve({ items: [{ id: 'old' }] });
-    await refresh;
-    expect(a.panels.state.get().queuedMessages).toEqual([{ id: 'new' }]);
-  });
-
   it('serializes sends from two views of a session; the second queues', async () => {
     const { fake, a } = setup();
     await a.load();
@@ -536,8 +390,10 @@ describe('session ownership', () => {
       method === 'list_items' ? historyPage(params.thread_id, 'recovered A') : { run_active: false }
     );
     fake.resync('A');
-    await vi.waitFor(() => expect(fake.completeSessionResync).toHaveBeenCalledWith('A'));
-    expect(a.actor.getSnapshot().context.items).toEqual([expect.objectContaining({ content: 'recovered A' })]);
+    await vi.waitFor(() =>
+      expect(a.actor.getSnapshot().context.items).toEqual([expect.objectContaining({ content: 'recovered A' })])
+    );
+    expect(fake.completeSessionResync).toHaveBeenLastCalledWith('A', 'fake-stream', 0);
     expect(b.actor.getSnapshot().context.items).toEqual([expect.objectContaining({ content: 'keep B' })]);
   });
 
