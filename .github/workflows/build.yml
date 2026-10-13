@@ -426,6 +426,9 @@ jobs:
         env:
           OMNI_CI_AUTOINSTALL: '1'
           ELECTRON_ENABLE_LOGGING: '1'
+          # The runner has Git for Windows; students usually don't. Exercise
+          # the PortableGit provisioning path the way a student machine would.
+          OMNI_CI_FORCE_PORTABLE_GIT: '1'
         run: |
           $app = 'C:\OmniTest\Omni Code.exe'
           $stdout = 'C:\OmniTest\ci-stdout.log'
@@ -473,6 +476,19 @@ jobs:
       - name: Verify runtime version and serve boot
         shell: pwsh
         run: node src-checkout/scripts/ci/verify-runtime.mjs (Join-Path $env:USERPROFILE '.omni\.venv')
+
+      - name: Agent tools work in native host mode (provisioned Git Bash, no system Git on PATH)
+        shell: pwsh
+        env:
+          PYTHONUTF8: '1'
+        run: |
+          $bash = Join-Path $env:USERPROFILE '.omni\git\bin\bash.exe'
+          if (-not (Test-Path $bash)) { throw "Provisioned Git Bash missing: $bash" }
+          $venv = Join-Path $env:USERPROFILE '.omni\.venv'
+          # A student-like PATH: no Git for Windows, no Unix tools.
+          $env:PATH = "$venv\Scripts;C:\Windows\System32;C:\Windows;C:\Windows\System32\WindowsPowerShell\v1.0"
+          $env:OMNIAGENTS_BASH = $bash
+          & "$venv\Scripts\python.exe" src-checkout\scripts\ci\probe-windows-host.py --strict
 
       - name: Upload diagnostics on failure
         if: failure()

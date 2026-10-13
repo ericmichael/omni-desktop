@@ -16,6 +16,7 @@ import { getActiveProduct } from '@/lib/product';
 import { DEFAULT_ENV } from '@/lib/pty-utils';
 import { withResultAsync } from '@/lib/result';
 import { SimpleLogger } from '@/lib/simple-logger';
+import { ensureGitBash, PORTABLE_GIT } from '@/main/git-bash';
 import { refreshProductRuntimeInfo } from '@/main/product-runtime';
 import {
   getOmniLogsDir,
@@ -724,15 +725,17 @@ export class OmniInstallManager {
 
       const diskSpace = await this.checkDiskSpace(getOmniRuntimeDir());
       if (diskSpace !== null) {
-        const MIN_FREE_BYTES = 1024 * 1024 * 1024; // 1 GB
+        // 1 GB for Python + the venv; Windows also provisions Git Bash.
+        const MIN_FREE_BYTES = 1024 * 1024 * 1024 + (process.platform === 'win32' ? PORTABLE_GIT.extractedBytes : 0);
+        const minMB = Math.floor(MIN_FREE_BYTES / (1024 * 1024));
         const freeMB = Math.floor(diskSpace.freeBytes / (1024 * 1024));
         this.log.info(c.gray(`Free disk space in runtime dir: ${freeMB} MB\r\n`));
         if (diskSpace.freeBytes < MIN_FREE_BYTES) {
-          this.log.error(c.red(`Insufficient disk space: ${freeMB} MB free, need at least 1024 MB\r\n`));
+          this.log.error(c.red(`Insufficient disk space: ${freeMB} MB free, need at least ${minMB} MB\r\n`));
           this.updateStatus({
             type: 'error',
             error: {
-              message: `Insufficient disk space in ${getOmniRuntimeDir()}: ${freeMB} MB free, need at least 1024 MB`,
+              message: `Insufficient disk space in ${getOmniRuntimeDir()}: ${freeMB} MB free, need at least ${minMB} MB`,
               context: { freeBytes: diskSpace.freeBytes },
             },
           });
@@ -863,6 +866,29 @@ export class OmniInstallManager {
       if (omniagentsResult === 'canceled') {
         this.log.warn(c.yellow('Installation canceled\r\n'));
         this.updateStatus({ type: 'canceled' });
+        return;
+      }
+
+      // Native Windows host mode runs agent shell commands through Git Bash.
+      try {
+        const gitBash = await ensureGitBash(
+          {
+            info: (message) => this.log.info(c.cyan(message)),
+            warn: (message) => this.log.warn(c.yellow(message)),
+          },
+          () => this.isCancellationRequested
+        );
+        if (gitBash === 'canceled') {
+          this.log.warn(c.yellow('Installation canceled\r\n'));
+          this.updateStatus({ type: 'canceled' });
+          return;
+        }
+      } catch (error) {
+        this.log.error(c.red(`${(error as Error).message}\r\n`));
+        this.updateStatus({
+          type: 'error',
+          error: { message: (error as Error).message, context: serializeError(error as Error) },
+        });
         return;
       }
 

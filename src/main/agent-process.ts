@@ -15,6 +15,7 @@ import { DEFAULT_ENV } from '@/lib/pty-utils';
 import { SimpleLogger } from '@/lib/simple-logger';
 import { wsAuthOptions } from '@/lib/ws-auth';
 import { AgentHostControlClient } from '@/main/agent-host-control-client';
+import { getGitBashEnv } from '@/main/git-bash';
 import { initializeMainRpcConnection } from '@/main/omniagents-rpc-handshake';
 import type { IComputeClient } from '@/main/platform-client';
 import { assertServeProtocolSupported } from '@/main/product-runtime';
@@ -1293,6 +1294,8 @@ export class AgentProcess {
       ...process.env,
       ...DEFAULT_ENV,
       ...shellEnvSync(),
+      // Windows: the provisioned Git Bash that runs the agent's shell commands.
+      ...(await getGitBashEnv()),
       ...extra,
       // Per-launch git tokens for private remotes. Last so a token env name can
       // never be shadowed by ambient/extra env.
