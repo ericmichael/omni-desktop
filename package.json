@@ -1,7 +1,7 @@
 {
   "name": "omni-code-launcher",
   "productName": "Omni Code",
-  "version": "1.8.4",
+  "version": "1.8.5",
   "description": "Omni Code",
   "main": "out/main/index.js",
   "engines": {
