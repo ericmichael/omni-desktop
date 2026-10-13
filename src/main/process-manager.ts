@@ -708,10 +708,13 @@ export class ProcessManager {
         ['rev-parse', '--path-format=absolute', '--absolute-git-dir', '--git-common-dir'],
         { cwd: workspaceDir, timeout: 3000, encoding: 'utf-8' }
       );
+      // git prints forward-slash paths even on Windows; normalize to the
+      // platform form every other source path uses.
       const [gitDir, gitCommonDir] = output
         .split(/\r?\n/)
         .map((value) => value.trim())
-        .filter(Boolean);
+        .filter(Boolean)
+        .map((value) => path.resolve(value));
       return {
         ...(gitDir ? { gitDir } : {}),
         ...(gitCommonDir ? { gitCommonDir } : {}),

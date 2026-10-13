@@ -130,7 +130,7 @@ vi.mock('node:child_process', async () => {
 // ---------------------------------------------------------------------------
 
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -705,7 +705,8 @@ describe('ProcessManager', () => {
     });
 
     it('publishes external Git metadata for a synthesized local worktree source', async () => {
-      const primary = mkdtempSync(path.join(tmpdir(), 'omni-synth-primary-'));
+      // Real long path: Windows tmpdir() can be an 8.3 short name that git expands.
+      const primary = realpathSync.native(mkdtempSync(path.join(tmpdir(), 'omni-synth-primary-')));
       const checkout = `${primary}-checkout`;
       const cp = (await vi.importActual('node:child_process')) as typeof import('node:child_process');
       cp.execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: primary });

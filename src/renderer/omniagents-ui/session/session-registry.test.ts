@@ -106,7 +106,8 @@ describe('session ownership', () => {
       expect(fake.retainedListenerCount()).toBe(0);
     }
     expect(fake.unregisterSession).toHaveBeenCalledTimes(3000);
-  });
+    // 1000 full lifecycles run ~5s on Windows CI runners; the default 5s is too tight.
+  }, 30_000);
   it('does not deliver a late client-tool result after disposal or disturb another tile', async () => {
     const { fake, a, b } = setup();
     await Promise.all([a.load(), b.load()]);

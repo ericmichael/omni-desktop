@@ -6,6 +6,7 @@
  * Mocks CommandRunner, electron, shell-env, and fs so no real processes
  * spawn, no network calls occur, and no files are touched.
  */
+import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // ---------------------------------------------------------------------------
@@ -242,6 +243,9 @@ function makeMgr() {
 // Tests
 // ---------------------------------------------------------------------------
 
+// Sibling checkouts resolve exactly as the manager does (platform separators).
+const sibling = (name: string) => path.resolve('/workspace/launcher', '..', name);
+
 describe('OmniInstallManager', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -254,8 +258,8 @@ describe('OmniInstallManager', () => {
   describe('status lifecycle', () => {
     it('keeps runtime consumers blocked until the editable omniagents overlay finishes', async () => {
       const { mgr } = makeMgr();
-      hoisted.fsFiles.set('/workspace/omni-code/pyproject.toml', '');
-      hoisted.fsFiles.set('/workspace/omniagents/pyproject.toml', '');
+      hoisted.fsFiles.set(path.join(sibling('omni-code'), 'pyproject.toml'), '');
+      hoisted.fsFiles.set(path.join(sibling('omniagents'), 'pyproject.toml'), '');
       let finishOverlay!: () => void;
       hoisted.commandRunnerGates[4] = new Promise<void>((resolve) => {
         finishOverlay = resolve;
@@ -318,17 +322,17 @@ describe('OmniInstallManager', () => {
 
     it('uses sibling editable products for an unpackaged development workspace', async () => {
       const { mgr } = makeMgr();
-      hoisted.fsFiles.set('/workspace/omni-code/pyproject.toml', '');
-      hoisted.fsFiles.set('/workspace/omniagents/pyproject.toml', '');
+      hoisted.fsFiles.set(path.join(sibling('omni-code'), 'pyproject.toml'), '');
+      hoisted.fsFiles.set(path.join(sibling('omniagents'), 'pyproject.toml'), '');
 
       await mgr.startInstall();
 
       const pipCalls = hoisted.commandRunnerCalls.filter(({ args }) => args[0] === 'pip' && args[1] === 'install');
       expect(pipCalls).toHaveLength(2);
-      expect(pipCalls[0]!.args).toContain('/workspace/omni-code');
-      expect(pipCalls[1]!.args).toContain('/workspace/omniagents[all]');
-      expect(pipCalls[0]!.env?.OMNI_CODE_EDITABLE_PATH).toBe('/workspace/omni-code');
-      expect(pipCalls[0]!.env?.OMNIAGENTS_EDITABLE_PATH).toBe('/workspace/omniagents');
+      expect(pipCalls[0]!.args).toContain(sibling('omni-code'));
+      expect(pipCalls[1]!.args).toContain(`${sibling('omniagents')}[all]`);
+      expect(pipCalls[0]!.env?.OMNI_CODE_EDITABLE_PATH).toBe(sibling('omni-code'));
+      expect(pipCalls[0]!.env?.OMNIAGENTS_EDITABLE_PATH).toBe(sibling('omniagents'));
     });
 
     it('transitions to error when uv executable is missing', async () => {

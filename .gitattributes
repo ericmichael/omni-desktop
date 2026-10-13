@@ -1,1 +1,3 @@
-src/generated/omniagents-gui-v1/** -text
+# Generated protocol artifacts are byte-pinned to omniagents commits; never
+# convert line endings on checkout.
+src/generated/** -text

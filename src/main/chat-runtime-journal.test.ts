@@ -59,7 +59,10 @@ it('recovers the exact workspace through a new journal instance and never stops 
 it('persists private credentials with restricted permissions before recovery and retains them on failure', async () => {
   const f = fixture();
   const file = path.join(f.dir, readdirSync(f.dir)[0]!);
-  expect(statSync(file).mode & 0o777).toBe(0o600);
+  // Windows has no POSIX mode bits; there the per-user profile ACL protects it.
+  if (process.platform !== 'win32') {
+    expect(statSync(file).mode & 0o777).toBe(0o600);
+  }
   expect(JSON.parse(readFileSync(file, 'utf8'))[0].controlToken).toBe('test-only-secret');
   mocks.call.mockRejectedValueOnce(new Error('offline'));
   await expect(f.journal.retire('tab-a')).rejects.toThrow('offline');
