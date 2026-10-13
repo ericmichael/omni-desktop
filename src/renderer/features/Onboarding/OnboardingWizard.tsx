@@ -240,7 +240,7 @@ export const OnboardingWizard = memo(() => {
       : resolveModelChoices(localKind, liveModels);
 
   return (
-    <div className="flex h-full items-center justify-center bg-background">
+    <div className="flex h-full min-w-0 flex-1 items-center justify-center bg-background">
       <Card className="w-full max-w-lg p-8 flex flex-col gap-6 overflow-hidden">
         <div className="flex flex-col gap-2">
           <div className="flex items-center gap-2.5">
