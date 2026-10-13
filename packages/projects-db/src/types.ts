@@ -142,6 +142,7 @@ export type ResidentRow = {
   role: string;
   persona_text: string;
   profile_name: string | null;
+  approvals_reviewer?: 'auto' | 'user';
   project_ids: string; // JSON string[]
   /** Local hour (0-23) of the daily morning beat; NULL = beat disabled. */
   morning_hour: number | null;
@@ -156,6 +157,19 @@ export type ResidentMemoryRow = {
   /** Upsert key — `remember(key, …)` replaces, `forget(key)` retracts. */
   key: string;
   text: string;
+  at: string;
+};
+
+/** One version of a bot's protocol — how it operates, in its own words.
+ *  Append-only; the highest version is current. */
+export type ResidentProtocolRow = {
+  agent_id: string;
+  version: number;
+  body: string;
+  /** Who wrote it: 'seed' | 'user' | a bot id (its own, or Omni's at hire). */
+  author: string;
+  /** Why, in a line — the change log the About tab shows. */
+  note: string | null;
   at: string;
 };
 

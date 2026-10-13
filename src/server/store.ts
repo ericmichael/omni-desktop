@@ -8,6 +8,8 @@ import type { StoreData } from '@/shared/types';
 const STORE_PATH = join(homedir(), '.config', 'Omni Code', 'config.json');
 
 export const DEFAULTS: StoreData = {
+  userGoals: [],
+  userIdeas: [],
   defaultProfileName: 'host',
   residentAgents: [],
   residentMemories: {},

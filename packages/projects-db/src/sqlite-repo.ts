@@ -26,6 +26,7 @@ import type {
   ResidentAlarmRow,
   ResidentChannelRow,
   ResidentMemoryRow,
+  ResidentProtocolRow,
   ResidentMessageRow,
   ResidentRow,
   TaskRow,
@@ -224,6 +225,12 @@ export class SqliteProjectsRepo implements IProjectsRepo {
   }
   async deleteResidentMemory(agentId: string, key: string): Promise<void> {
     this.sync.deleteResidentMemory(agentId, key);
+  }
+  async listResidentProtocols(agentId: string): Promise<ResidentProtocolRow[]> {
+    return this.sync.listResidentProtocols(agentId);
+  }
+  async addResidentProtocol(row: ResidentProtocolRow): Promise<void> {
+    this.sync.addResidentProtocol(row);
   }
   async setResidentMemories(agentId: string, rows: ResidentMemoryRow[]): Promise<void> {
     this.sync.setResidentMemories(agentId, rows);

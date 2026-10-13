@@ -405,6 +405,25 @@ describe('WsHandler - tenant isolation', () => {
     expect(resB.result).toBe('handler-1');
   });
 
+  it('a live socket displaced by a reattach is closed with 4409, and the newcomer keeps the session', async () => {
+    let onConnectCalls = 0;
+    onConnectImpl = (session) => {
+      onConnectCalls++;
+      session.handle('whoami', () => 'shared-handler');
+    };
+    const ws1 = await connectClient('dup', 'tenant-A');
+    const displaced = new Promise<{ code: number; reason: string }>((resolve) =>
+      ws1.once('close', (code, reason) => resolve({ code, reason: reason.toString() }))
+    );
+    const ws2 = await connectClient('dup', 'tenant-A');
+    // Terminal for the displaced side — 1000 made it reconnect and displace
+    // ws2 straight back, and the two looped for as long as both were open.
+    expect(await displaced).toEqual({ code: 4409, reason: 'Session reattached by another client' });
+    const res = await invoke(ws2, 1, 'whoami');
+    expect(res.result).toBe('shared-handler');
+    expect(onConnectCalls).toBe(1);
+  });
+
   it('same tenant + sessionId still reattaches (cross-device sync preserved)', async () => {
     let onConnectCalls = 0;
     onConnectImpl = (session) => {

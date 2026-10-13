@@ -14,6 +14,7 @@ import type {
   ResidentAlarmRow,
   ResidentChannelRow,
   ResidentMemoryRow,
+  ResidentProtocolRow,
   ResidentMessageRow,
   ResidentRow,
   TaskRow,
@@ -790,7 +791,8 @@ export class ProjectsRepo {
       row.morning_hour,
       row.enabled,
       row.superuser,
-      row.created_at
+      row.created_at,
+      row.approvals_reviewer ?? 'auto'
     );
     this.bumpChangeSeq();
   }
@@ -814,6 +816,17 @@ export class ProjectsRepo {
 
   deleteResidentMemory(agentId: string, key: string): void {
     this.stmts.deleteResidentMemory.run(agentId, key);
+    this.bumpChangeSeq();
+  }
+
+  // ---- Resident protocols ----
+
+  listResidentProtocols(agentId: string): ResidentProtocolRow[] {
+    return this.stmts.listResidentProtocols.all(agentId) as ResidentProtocolRow[];
+  }
+
+  addResidentProtocol(row: ResidentProtocolRow): void {
+    this.stmts.addResidentProtocol.run(row.agent_id, row.version, row.body, row.author, row.note, row.at);
     this.bumpChangeSeq();
   }
 
@@ -1123,17 +1136,22 @@ function prepareStatements(db: DatabaseSync) {
     // Resident agents
     listResidents: db.prepare('SELECT * FROM resident_agents ORDER BY created_at'),
     upsertResident: db.prepare(`
-      INSERT INTO resident_agents (id, name, role, persona_text, profile_name, project_ids, morning_hour, enabled, superuser, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO resident_agents (id, name, role, persona_text, profile_name, project_ids, morning_hour, enabled, superuser, created_at, approvals_reviewer)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         name = excluded.name, role = excluded.role, persona_text = excluded.persona_text,
         profile_name = excluded.profile_name, project_ids = excluded.project_ids,
-        morning_hour = excluded.morning_hour, enabled = excluded.enabled, superuser = excluded.superuser
+        morning_hour = excluded.morning_hour, enabled = excluded.enabled, superuser = excluded.superuser, approvals_reviewer = excluded.approvals_reviewer
     `),
     deleteResident: db.prepare('DELETE FROM resident_agents WHERE id = ?'),
 
     // Resident memories
     listResidentMemories: db.prepare('SELECT * FROM resident_memories WHERE agent_id = ? ORDER BY at'),
+    listResidentProtocols: db.prepare('SELECT * FROM resident_protocols WHERE agent_id = ? ORDER BY version DESC'),
+    addResidentProtocol: db.prepare(`
+      INSERT INTO resident_protocols (agent_id, version, body, author, note, at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `),
     upsertResidentMemory: db.prepare(`
       INSERT INTO resident_memories (agent_id, key, text, at)
       VALUES (?, ?, ?, ?)

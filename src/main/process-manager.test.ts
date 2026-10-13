@@ -28,6 +28,7 @@ const hoisted = vi.hoisted(() => ({
     callManagementAdmin: ReturnType<typeof vi.fn>;
     resizePty: ReturnType<typeof vi.fn>;
     configureConsumer: ReturnType<typeof vi.fn>;
+    bindSession: ReturnType<typeof vi.fn>;
     stopConsumerEnvironment: ReturnType<typeof vi.fn>;
     discardConsumerSnapshot: ReturnType<typeof vi.fn>;
     pause: ReturnType<typeof vi.fn>;
@@ -73,6 +74,7 @@ vi.mock('@/main/agent-process', () => ({
     usesLocalAgentHostConfig = vi.fn(() => this.mode === 'serve');
     callManagementAdmin = vi.fn(async (method: string) => ({ ok: true, method }));
     resizePty = vi.fn();
+    bindSession = vi.fn(async () => {});
     configureConsumer = vi.fn(async (_threadId: string, workspaceId: string, _arg: unknown) => {
       await hoisted.configureConsumerGate;
       if (hoisted.configureConsumerFailure) {
@@ -205,6 +207,35 @@ describe('ProcessManager', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it('binds daily sessions to the current runtime without materializing again', async () => {
+    const { pm } = makePm();
+    await pm.start('agent:a', { workspaceDir: '/tmp/resident', snapshotRef: 'resident-a' });
+    const host = hoisted.agentProcessInstances[0]!;
+    host.getStatus.mockReturnValue({ type: 'running', timestamp: 0, data: {} } as any);
+    await pm.bindSession('agent:a', 'resident-a-2026-09-12');
+    await pm.bindSession('agent:a', 'resident-a-2026-09-13');
+    expect(host.configureConsumer).toHaveBeenCalledTimes(1);
+    expect(host.bindSession).toHaveBeenLastCalledWith(
+      'agent:a',
+      'resident-a-2026-09-13',
+      expect.objectContaining({ environmentGeneration: 3 })
+    );
+    await pm.stop('agent:a');
+    await expect(pm.bindSession('agent:a', 'resident-a-2026-09-13')).rejects.toThrow('not ready');
+    await pm.start('agent:a', { workspaceDir: '/tmp/resident', snapshotRef: 'resident-a' });
+    const restarted = hoisted.agentProcessInstances.at(-1)!;
+    restarted.getStatus.mockReturnValue({ type: 'running', timestamp: 0, data: {} } as any);
+    await pm.bindSession('agent:a', 'resident-a-2026-09-13');
+    expect(restarted.bindSession).toHaveBeenCalledWith(
+      'agent:a',
+      'resident-a-2026-09-13',
+      expect.objectContaining({ environmentGeneration: 3 })
+    );
+    expect(restarted.bindSession.mock.calls[0]![2].workspaceId).not.toBe(
+      host.bindSession.mock.calls[0]![2].workspaceId
+    );
   });
 
   describe('mode resolution', () => {

@@ -107,6 +107,9 @@ type PendingReverse = {
   cancel: () => void;
 };
 
+/** A newer socket took over this session id; the displaced side must not dial back. */
+export const WS_CLOSE_SESSION_DISPLACED = 4409;
+
 export class WsHandler {
   private globalHandlers = new Map<string, CtxHandler>();
   /** Active WebSocket → session ID mapping (for message routing) */
@@ -340,10 +343,24 @@ export class WsHandler {
     if (existingSession) {
       clearTimeout(existingSession.expiry);
       existingSession.expiry = undefined;
-      // Reattach: close stale WS if any, then bind the new one
+      // Reattach: displace the previous socket, then bind the new one.
+      //
+      // 4409, not 1000. A client that loses its socket on a normal close
+      // reconnects at once — and with the same id, so it displaces the
+      // newcomer, which reconnects and displaces it back, ten times a
+      // second for as long as both stay open (a Flutter client hard-coded
+      // one id per install and did exactly this). 44xx is the range every
+      // client here treats as terminal: the displaced side stops, the
+      // newest socket keeps the session. A socket that is already closed
+      // — the common reconnect case — is unaffected.
       if (existingSession.ws) {
         this.wsSessions.delete(existingSession.ws);
-        existingSession.ws.close(1000, 'Session reattached');
+        if (existingSession.ws.readyState === 1 /* OPEN */) {
+          console.warn(
+            `[ws-handler] Session ${existingSession.sessionId} displaced a live socket (tenant ${tenantId})`
+          );
+        }
+        existingSession.ws.close(WS_CLOSE_SESSION_DISPLACED, 'Session reattached by another client');
       }
       existingSession.ws = ws;
       existingSession.ready = ready;

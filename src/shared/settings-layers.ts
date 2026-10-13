@@ -41,6 +41,10 @@ export interface KeyClass {
 type StoreKey = keyof StoreData;
 
 export const SETTINGS_LAYERS: Partial<Record<StoreKey, KeyClass>> = {
+  userGoals: { layer: 'user', scope: 'team' },
+  userIdeas: { layer: 'user', scope: 'team' },
+  primaryAgentId: { layer: 'user', scope: 'team' },
+  userProfile: { layer: 'user', scope: 'global' },
   // ---- team base (admin-gated), merged with user overlay ----
   modelsConfig: { layer: 'team', merge: 'providers' },
   mcpConfig: { layer: 'team', merge: 'union' },

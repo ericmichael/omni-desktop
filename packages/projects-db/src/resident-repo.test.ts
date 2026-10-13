@@ -62,6 +62,13 @@ afterAll(() => {
 });
 
 describe('resident roster', () => {
+  it('defaults to Guardian and persists a human-review override', () => {
+    repo.upsertResident(agentRow('reviewer'));
+    expect(repo.listResidents()[0]?.approvals_reviewer).toBe('auto');
+    repo.upsertResident(agentRow('reviewer', { approvals_reviewer: 'user' }));
+    expect(repo.listResidents()[0]?.approvals_reviewer).toBe('user');
+  });
+
   it('round-trips rows, including the null morning hour and enabled flag', () => {
     repo.upsertResident(agentRow('sable'));
     repo.upsertResident(agentRow('quill', { morning_hour: null, enabled: 0, project_ids: '["proj_a"]' }));

@@ -935,11 +935,61 @@ export class AgentProcess {
     return runtime;
   };
 
+  /** Bind an additional conversation to this consumer's current environment.
+   * Daily resident threads share the workspace; they do not provision new sandboxes. */
+  bindSession = async (consumerId: string, sessionId: string, runtime?: AgentHostConsumerRuntime): Promise<void> => {
+    if (this.mode === 'compute') {
+      const status = this.getStatus();
+      if (status.type !== 'running') {
+        throw new Error('Resident execution environment is not ready');
+      }
+      const data = status.data;
+      if (
+        !data.wsUrl ||
+        !data.workspaceId ||
+        !data.environmentId ||
+        !Number.isSafeInteger(data.environmentGeneration) ||
+        !data.authToken
+      ) {
+        throw new Error('Remote resident execution environment is unavailable');
+      }
+      // Binding is owner-scoped. Remote consumers use their ordinary credential;
+      // workspace registration and other admin operations remain unavailable.
+      const control =
+        this.agentHostControlClient ??
+        (this.agentHostControlClient = new AgentHostControlClient(data.wsUrl, data.authToken));
+      await this.bindConsumer(
+        control,
+        sessionId,
+        {
+          workspaceId: data.workspaceId,
+          environmentId: data.environmentId,
+          environmentGeneration: data.environmentGeneration!,
+        },
+        { consumerId }
+      );
+      return;
+    }
+    const registration = this.consumerRegistrations.get(consumerId);
+    const control = this.agentHostControlClient;
+    if (!control || !registration || !runtime) {
+      throw new Error('AgentHost consumer binding is unavailable');
+    }
+    if (
+      registration.runtime.environmentId !== runtime.environmentId ||
+      registration.runtime.environmentGeneration !== runtime.environmentGeneration ||
+      registration.workspaceId !== runtime.workspaceId
+    ) {
+      throw new Error('AgentHost consumer environment changed before session binding');
+    }
+    await this.bindConsumer(control, sessionId, runtime, { consumerId });
+  };
+
   private bindConsumer = async (
     control: AgentHostControlClient,
     threadId: string,
-    runtime: AgentHostConsumerRuntime,
-    context: { consumerId: string; profileName: string }
+    runtime: ExecutionTarget,
+    context: { consumerId: string; profileName?: string }
   ): Promise<void> => {
     await control.call(
       'agent_host_bind_thread',

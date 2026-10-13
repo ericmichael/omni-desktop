@@ -737,4 +737,29 @@ ALTER TABLE tickets ENABLE ROW LEVEL SECURITY;
 ALTER TABLE tickets ADD COLUMN last_plan_snapshot TEXT;
 `,
   },
+  {
+    version: 21,
+    sql: `ALTER TABLE resident_agents ADD COLUMN approvals_reviewer TEXT NOT NULL DEFAULT 'auto' CHECK (approvals_reviewer IN ('auto', 'user'));`,
+  },
+  {
+    version: 22,
+    sql: `
+-- Bot protocols (mirrors SQLite v22): append-only versions per bot.
+CREATE TABLE resident_protocols (
+  tenant_id TEXT NOT NULL,
+  agent_id  TEXT NOT NULL,
+  version   INTEGER NOT NULL,
+  body      TEXT NOT NULL,
+  author    TEXT NOT NULL,
+  note      TEXT,
+  at        TEXT NOT NULL,
+  PRIMARY KEY (tenant_id, agent_id, version),
+  FOREIGN KEY (tenant_id, agent_id) REFERENCES resident_agents(tenant_id, id) ON DELETE CASCADE
+);
+CREATE INDEX idx_resident_protocols_tenant ON resident_protocols(tenant_id);
+${rls('resident_protocols')}
+CREATE TRIGGER resident_protocols_notify AFTER INSERT OR UPDATE OR DELETE ON resident_protocols
+  FOR EACH ROW EXECUTE FUNCTION omni_notify_change();
+`,
+  },
 ];

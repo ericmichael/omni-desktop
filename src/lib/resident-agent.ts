@@ -304,7 +304,8 @@ export type ResidentEvent = {
     | 'assignment'
     | 'column_done'
     | 'pr_event'
-    | 'automation';
+    | 'automation'
+    | 'idea_decision';
   /** Participant id that caused the event, when there is one. */
   from?: string;
   /** Display name of `from`, when one is known (named humans, bridged
@@ -324,6 +325,7 @@ export type ResidentEvent = {
 };
 
 const WAKE_NOW_KINDS: ReadonlySet<ResidentEvent['kind']> = new Set([
+  'idea_decision', // the user reviewed this resident's proposal
   'dm', // direct message to this agent (user or another agent)
   'mention', // named in a channel
   'channel_user', // the user spoke on a channel — a human is deliberately talking
@@ -379,9 +381,11 @@ export const dayKey = (ts: number): string => {
   return `${d.getFullYear()}-${m}-${day}`;
 };
 
-/** One session per agent per calendar day — continuity across days lives in
- *  durable memory, not transcript (the plan's no-infinite-compaction call). */
-export const daySessionId = (agentId: string, key: string): string => `resident-${agentId}-${key}`;
+/** One session per bot, for good. It used to be one per calendar day, with
+ *  nightly reflection as the only carry-over — and every morning the user
+ *  re-explained where they were. The runtime compacts a long transcript on
+ *  its own; reflection is for learning (memory, protocol), not housekeeping. */
+export const residentSessionId = (agentId: string): string => `resident-${agentId}`;
 
 /** Whether a serve session id belongs to a resident agent — the stable serve
  *  session (`resident-<id>`) or a day session (`resident-<id>-YYYY-MM-DD`).
@@ -641,6 +645,8 @@ const eventLine = (e: ResidentEvent): string => {
       }`;
     case 'channel_post':
       return `${who} posted on ${ch}${id}: "${e.text ?? ''}"`;
+    case 'idea_decision':
+      return e.detail ?? 'the user reviewed one of your ideas — check list_user_ideas';
     case 'wake':
       return e.detail ?? 'the user woke you from the roster panel';
     case 'day_start':
@@ -754,6 +760,8 @@ export type ReflectionInput = {
   episodic: string[];
   /** Snapshot of long-held memories, shown with their keys. */
   durable: Array<Pick<ResidentMemoryEntry, 'key' | 'text'>>;
+  /** The bot's current protocol body, '' when it has none yet. */
+  protocol: string;
 };
 
 /**
@@ -766,19 +774,23 @@ export const renderReflectPrompt = (r: ReflectionInput): string => {
   const episodic =
     r.episodic.length > 0 ? r.episodic.map((e) => `- ${e}`).join('\n') : '- (a quiet day — little was recorded)';
   const durable = r.durable.length > 0 ? r.durable.map((m) => `- [${m.key}] ${m.text}`).join('\n') : '(none yet)';
+  const protocol = r.protocol.trim() ? r.protocol.trim() : '(none yet — write your first)';
   return (
-    `The working day (${r.day}) is over. Before it is archived, reflect on it.\n\n` +
+    `The working day (${r.day}) is over. Reflect on it before carrying on.\n\n` +
     `## TODAY'S RECORD\n${episodic}\n\n` +
     `## LONG-HELD MEMORIES\n${durable}\n\n` +
+    `## YOUR PROTOCOL\n${protocol}\n\n` +
     `Run back through the day and keep ONLY what is truly worth carrying ` +
-    `forward. The test: will tomorrow-you act differently because of it? ` +
-    `Commitments made, decisions and their rationale, what failed and WHY, ` +
-    `preferences the user expressed, exact names and numbers.\n\n` +
-    `Curate with your memory tools, now, in this turn:\n` +
-    `- \`remember(key, text)\` — save a fact; re-using a key refines that entry in place.\n` +
-    `- \`forget(key)\` — retract an entry proven wrong or gone stale.\n` +
-    `Most days need one to three saves; a quiet day may need none. Your final ` +
-    `reply is private notes-to-self — only the tool calls change anything.`
+    `forward. The test: will tomorrow-you act differently because of it?\n\n` +
+    `Two places to put it, and they are different:\n` +
+    `- **Memory** is facts: commitments made, decisions and their rationale, ` +
+    `preferences the user expressed, exact names and numbers. ` +
+    `\`remember(key, text)\` saves one (re-using a key refines it); \`forget(key)\` retracts one.\n` +
+    `- **Protocol** is procedure: a way of working that succeeded today and should be the default, ` +
+    `a failure and the check that would have caught it, a brief that produced good work from a worker or swarm. ` +
+    `\`update_protocol(body, note)\` replaces the whole manual — revise it, do not append a diary.\n\n` +
+    `Most days need one to three saves and at most one protocol revision; a quiet day may need none. ` +
+    `Your final reply is private notes-to-self — only the tool calls change anything.`
   );
 };
 

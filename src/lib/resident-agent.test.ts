@@ -4,7 +4,7 @@ import {
   advanceThread,
   channelAudienceIds,
   dayKey,
-  daySessionId,
+  residentSessionId,
   dmChannelId,
   dmParticipants,
   humanHandle,
@@ -43,6 +43,7 @@ describe('event classification', () => {
     expect(isWakeNow({ kind: 'mention', from: 'user', text: '@scout look' })).toBe(true);
     expect(isWakeNow({ kind: 'channel_user', from: 'user', text: 'morning all' })).toBe(true);
     expect(isWakeNow({ kind: 'wake' })).toBe(true);
+    expect(isWakeNow({ kind: 'idea_decision', detail: 'Read get_user_idea' })).toBe(true);
     expect(isWakeNow({ kind: 'day_start' })).toBe(true);
   });
 
@@ -254,7 +255,7 @@ describe('sessions & days', () => {
   it('one session per agent per local day', () => {
     const ts = new Date(2026, 6, 22, 9, 30).getTime();
     expect(dayKey(ts)).toBe('2026-07-22');
-    expect(daySessionId('scout', dayKey(ts))).toBe('resident-scout-2026-07-22');
+    expect(residentSessionId('scout')).toBe('resident-scout');
   });
 });
 
@@ -408,6 +409,7 @@ describe('reflect prompt', () => {
       day: '2026-07-22',
       agentName: 'Scout',
       episodic: ['event dm from user'],
+      protocol: '',
       durable: [{ key: 'deploy-window', text: 'ships on Fridays' }],
     });
     expect(prompt).toContain('[deploy-window] ships on Fridays');

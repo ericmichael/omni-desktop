@@ -1,3 +1,24 @@
+import {
+  applyUserIdeaCommand,
+  USER_IDEA_TOOLS,
+  USER_IDEA_TOOL_NAMES,
+  USER_IDEAS_CONTEXT,
+  type UserIdeaCommand,
+  type UserIdea,
+} from '@/shared/user-ideas';
+import {
+  applyUserGoalCommand,
+  userGoalsContext,
+  USER_GOAL_TOOLS,
+  USER_GOAL_TOOL_NAMES,
+  type UserGoalCommand,
+  type UserGoalActor,
+  type UserGoal,
+} from '@/shared/user-goals';
+import { OMNI_AGENT, OMNI_AGENT_ID, OMNI_PROTOCOL } from '@/shared/omni-agent';
+import { ROSTER_TOOL_NAMES, ROSTER_TOOLS } from '@/shared/roster-tools';
+import { PROTOCOL_MAX_CHARS, PROTOCOL_TOOL_NAMES, PROTOCOL_TOOLS, protocolContext } from '@/shared/protocol';
+import { EMPTY_USER_PROFILE, normalizeUserProfile, userProfileContext, type UserProfile } from '@/shared/user-profile';
 /**
  * Resident agents — main-process manager (docs/resident-agents-plan.md).
  *
@@ -23,12 +44,13 @@
  * approval is declined with an explanation and surfaced to the UI).
  */
 
+import { resolveProfile } from '@/main/profile-resolver';
 import { randomUUID } from 'node:crypto';
 import { rmSync } from 'node:fs';
 import path from 'node:path';
 
 import type Store from 'electron-store';
-import { fromIso, type IProjectsRepo, residentId, toIso } from 'omni-projects-db';
+import { fromIso, type IProjectsRepo, residentId, type ResidentProtocolRow, toIso } from 'omni-projects-db';
 import { WebSocket as WsWebSocket } from 'ws';
 
 import type { JsonRpcError, RpcMethodMap } from '@/generated/omniagents-gui-v2/gui-v2';
@@ -38,7 +60,7 @@ import {
   channelIdFromName,
   chatChannelFromDef,
   dayKey,
-  daySessionId,
+  residentSessionId,
   DEFAULT_TEAM_HANDBOOK,
   type DigestRow,
   dmChannelId,
@@ -174,11 +196,12 @@ const WORKSPACE_TOOL_TIMEOUT_MS = 120_000;
 type RunEndInfo = { finalText: string; endReason?: string };
 type ResidentRpcEndpoint = { wsUrl: string; authToken?: string };
 
-class ResidentWatcher {
+export class ResidentWatcher {
   private ws: WsWebSocket | null = null;
   private nextId = 1;
   private pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
   private attached = new Set<string>();
+  private approvalRequests = new Set<string>();
   private closed = false;
   /** session_id of the run currently streaming (from run_started). */
   private activeRunSession: string | null = null;
@@ -195,9 +218,13 @@ class ResidentWatcher {
       /** Fulfill a speech tool call; the returned object is the tool result
        *  the running agent sees (corrective `Error: …` messages included). */
       onSpeechTool: (tool: string, args: Record<string, unknown>) => Record<string, unknown>;
+      onUserGoalTool?: (tool: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>;
+      /** Fulfill a roster tool call (create_bot / update_bot); superusers only. */
+      onRosterTool?: (tool: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>;
       /** Fulfill a workspace-superuser tool call (async — round-trips to the
        *  renderer). Resolves with the tool result; never rejects. */
       onWorkspaceTool: (tool: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>;
+      onApprovalsChanged: (count: number) => void;
       onClosed: () => void;
     }
   ) {}
@@ -211,7 +238,12 @@ class ResidentWatcher {
         try {
           await initializeMainRpcConnection({
             name: 'omni-desktop-resident-watcher',
-            capabilities: { client_functions: true, approvals: true, replay: true },
+            capabilities: {
+              client_functions: true,
+              approvals: true,
+              replay: true,
+              experimental_operations: ['set_session_approvals'],
+            },
             request: (method, params) => this.call(method, params),
             notify: (method, params) =>
               new Promise<void>((resolveSend, rejectSend) => {
@@ -294,6 +326,8 @@ class ResidentWatcher {
       };
       this.activeRunSession = null;
       this.activeRunText = [];
+      this.approvalRequests.clear();
+      this.callbacks.onApprovalsChanged(0);
       if (session) {
         const waiter = this.runWaiters.get(session);
         if (waiter) {
@@ -317,7 +351,31 @@ class ResidentWatcher {
       const call = (params.args ?? {}) as Record<string, unknown>;
       const toolName = typeof call.tool === 'string' ? call.tool : '';
       const toolArgs = (call.arguments ?? {}) as Record<string, unknown>;
-      if (SPEECH_TOOL_NAMES.includes(toolName)) {
+      if (USER_GOAL_TOOL_NAMES.includes(toolName) || USER_IDEA_TOOL_NAMES.includes(toolName)) {
+        void Promise.resolve()
+          .then(() => {
+            if (!this.callbacks.onUserGoalTool) throw new Error('User goals unavailable');
+            return this.callbacks.onUserGoalTool(toolName, toolArgs);
+          })
+          .then(
+            (result) => this.call('client_response', { request_id: requestId, ok: true, result }),
+            (error) =>
+              this.call('client_response', { request_id: requestId, ok: false, error: { message: String(error) } })
+          )
+          .catch(() => {});
+      } else if (ROSTER_TOOL_NAMES.includes(toolName) || PROTOCOL_TOOL_NAMES.includes(toolName)) {
+        void Promise.resolve()
+          .then(() => {
+            if (!this.callbacks.onRosterTool) throw new Error('Roster tools unavailable');
+            return this.callbacks.onRosterTool(toolName, toolArgs);
+          })
+          .then(
+            (result) => this.call('client_response', { request_id: requestId, ok: true, result }),
+            (error) =>
+              this.call('client_response', { request_id: requestId, ok: false, error: { message: String(error) } })
+          )
+          .catch(() => {});
+      } else if (SPEECH_TOOL_NAMES.includes(toolName)) {
         const res = this.callbacks.onSpeechTool(toolName, toolArgs);
         void this.call('client_response', { request_id: requestId, ok: true, result: res }).catch(() => {});
       } else if (WORKSPACE_TOOL_NAMES.has(toolName)) {
@@ -328,26 +386,16 @@ class ResidentWatcher {
           .then((res) => this.call('client_response', { request_id: requestId, ok: true, result: res }))
           .catch(() => {});
       }
-    } else if (method === 'tool_approval_requested') {
-      // Residents are working agents (autopilot semantics): approvals are
-      // auto-granted, same as a ticket autopilot run. The human gate is the
-      // PR / design review, not per-tool prompts.
-      const callId = typeof params.call_id === 'string' ? params.call_id : '';
-      if (callId) {
-        void this.call('tool_approval_response', {
-          call_id: callId,
-          decision: 'approve',
-          always_approve: true,
-        }).catch(() => {});
-      }
-    } else if (method === 'mcp_approval_requested') {
-      const requestId = typeof params.request_id === 'string' ? params.request_id : '';
-      if (requestId) {
-        void this.call('mcp_approval_response', {
-          request_id: requestId,
-          decision: 'approve',
-        }).catch(() => {});
-      }
+    } else if (method === 'tool_approval_requested' || method === 'mcp_approval_requested') {
+      const key = method === 'tool_approval_requested' ? `tool:${params.call_id}` : `mcp:${params.request_id}`;
+      this.approvalRequests.add(key);
+      this.callbacks.onApprovalsChanged(this.approvalRequests.size);
+      // The server already applied Guardian/sandbox policy. A request that
+      // reaches a client requires a human; never answer it on their behalf.
+    } else if (method === 'tool_approval_resolved' || method === 'mcp_approval_resolved') {
+      const key = method === 'tool_approval_resolved' ? `tool:${params.call_id}` : `mcp:${params.request_id}`;
+      this.approvalRequests.delete(key);
+      this.callbacks.onApprovalsChanged(this.approvalRequests.size);
     }
   }
 
@@ -378,10 +426,18 @@ class ResidentWatcher {
    *  (`variables.client_tools` is connection-scoped — re-declared on
    *  every watcher connect) and the identity `additional_instructions`
    *  the instruction template renders into the system prompt. */
-  async ensureSession(sessionId: string, variables: Record<string, unknown>): Promise<void> {
-    if (this.attached.has(sessionId)) {
-      return;
+  async ensureSession(
+    sessionId: string,
+    variables: Record<string, unknown>,
+    reviewer: 'auto' | 'user' = 'auto'
+  ): Promise<void> {
+    // Session overrides live in runtime memory. Reapply the durable resident
+    // policy before every entry point, even for an already attached session.
+    const policy = await this.call('set_session_approvals', { session_id: sessionId, reviewer });
+    if (!policy || typeof policy !== 'object' || !(policy as { ok?: boolean }).ok) {
+      throw new Error('Could not apply the resident approval policy');
     }
+    if (this.attached.has(sessionId)) return;
     await this.call('server_call', {
       function: 'session.ensure',
       args: {
@@ -390,7 +446,17 @@ class ResidentWatcher {
       },
       session_id: sessionId,
     });
+    await this.call('get_session_history', { session_id: sessionId });
     this.attached.add(sessionId);
+  }
+
+  async setReviewer(reviewer: 'auto' | 'user'): Promise<void> {
+    for (const sessionId of this.attached) {
+      const result = await this.call('set_session_approvals', { session_id: sessionId, reviewer });
+      if (!result || typeof result !== 'object' || !(result as { ok?: boolean }).ok) {
+        throw new Error('Could not apply the resident approval policy');
+      }
+    }
   }
 
   /** Re-send session variables to every attached session — identity
@@ -449,6 +515,7 @@ type AgentRuntime = {
   speechCount: number;
   state: ResidentAgentRuntime['state'];
   thinking: boolean;
+  pendingApprovalCount: number;
   lastWakeupAt: number | null;
   lastReason: string | null;
   /** Day key of the session pings currently target. */
@@ -497,7 +564,9 @@ export class ResidentAgentManager {
     alarms: Record<string, ResidentAlarm[]>;
     /** Shared team handbook body (handbook-first: rides every identity render). */
     handbook: string;
-  } = { agents: [], memories: {}, log: [], channelDefs: [], alarms: {}, handbook: '' };
+    /** Each bot's current protocol (highest version), by bot id. */
+    protocols: Record<string, ResidentProtocolRow>;
+  } = { agents: [], memories: {}, log: [], channelDefs: [], alarms: {}, handbook: '', protocols: {} };
 
   /** Monotonic id authorities, seeded from the DB at hydrate. */
   private nextMessageId = 1;
@@ -505,6 +574,8 @@ export class ResidentAgentManager {
 
   /** Serialized write-through persistence chain (the ProjectManager idiom). */
   private persistChain: Promise<void> = Promise.resolve();
+  private residentWrites = new Map<string, Promise<void>>();
+  private configurationChains = new Map<string, Promise<unknown>>();
 
   /** Resolves once the store→db migration + cache hydration completes.
    *  IPC handlers await this; never rejects (a failed hydrate logs and
@@ -570,13 +641,12 @@ export class ResidentAgentManager {
   });
 
   /** Serialize a durable write; broadcast the fresh snapshot once it lands. */
-  private enqueuePersist(task: () => Promise<void>): void {
-    this.persistChain = this.persistChain
-      .then(task)
-      .then(() => this.notifyStoreChanged())
-      .catch((err) => {
-        console.error('[resident] persist failed:', (err as Error).message);
-      });
+  private enqueuePersist(task: () => Promise<void>): Promise<void> {
+    const write = this.persistChain.then(task).then(() => this.notifyStoreChanged());
+    this.persistChain = write.catch((err) => {
+      console.error('[resident] persist failed:', (err as Error).message);
+    });
+    return write;
   }
 
   /** One-shot store→db migration, then cache hydration from the repo. */
@@ -589,6 +659,16 @@ export class ResidentAgentManager {
       this.repo.listResidentAlarms(),
     ]);
     this.data.agents = agentRows.map(rowToResidentAgent);
+    await this.seedOmni();
+    const protocols: Record<string, ResidentProtocolRow> = {};
+    for (const agent of this.data.agents) {
+      const [latest] = await this.repo.listResidentProtocols(agent.id);
+      if (latest) protocols[agent.id] = latest;
+    }
+    this.data.protocols = protocols;
+    if (!this.data.protocols[OMNI_AGENT_ID]) {
+      await this.setProtocol(OMNI_AGENT_ID, OMNI_PROTOCOL, 'seed', 'First protocol', { quiet: true });
+    }
     this.data.channelDefs = defRows.map(rowToResidentChannelDef);
     this.data.log = messageRows.map(rowToResidentMessage);
     const memories: Record<string, ResidentMemoryEntry[]> = {};
@@ -874,7 +954,35 @@ export class ResidentAgentManager {
     }
   }
 
+  /** Every workspace has Omni. Seeded once, under its fixed id, into new and
+   *  existing rosters alike; after that the row is the source of truth, so a
+   *  rename or a new persona sticks. */
+  private async seedOmni(): Promise<void> {
+    if (this.roster().some((a) => a.id === OMNI_AGENT_ID)) {
+      return;
+    }
+    const agent: ResidentAgent = {
+      id: OMNI_AGENT_ID,
+      ...OMNI_AGENT,
+      profileName: 'host',
+      approvalsReviewer: 'auto',
+      morningHour: null,
+      enabled: true,
+      // The chief of staff holds the workspace tools.
+      superuser: true,
+      createdAt: this.now(),
+    };
+    this.data.agents = [...this.roster(), agent];
+    await this.repo.upsertResident(residentAgentToRow(agent));
+    // First morning beat is tomorrow, as for any new bot.
+    this.store.set('residentMorningBeats', {
+      ...(this.store.get('residentMorningBeats') ?? {}),
+      [agent.id]: dayKey(this.now()),
+    });
+  }
+
   create = (input: ResidentAgentInput): ResidentAgent => {
+    this.validateReviewer(input.approvalsReviewer);
     const name = input.name.trim();
     this.assertHandleFree(name);
     const agent: ResidentAgent = {
@@ -884,9 +992,9 @@ export class ResidentAgentManager {
       name: name || 'Agent',
       role: input.role.trim(),
       personaText: input.personaText,
-      // Default to a container: an autonomous wakeup-driven process should
-      // not inherit `host` (no isolation) unless the user picks it.
-      profileName: input.profileName ?? 'devbox',
+      // New residents work on the host, with Guardian routing applied before every run.
+      profileName: input.profileName ?? 'host',
+      approvalsReviewer: input.approvalsReviewer ?? 'auto',
       ...(input.projectIds?.length ? { projectIds: [...new Set(input.projectIds)] } : {}),
       // Proactivity is opt-in: no morning beat unless the user picks an
       // hour. Agents work when engagement creates activity, not on a clock
@@ -911,7 +1019,8 @@ export class ResidentAgentManager {
     return agent;
   };
 
-  update = (agentId: string, patch: ResidentAgentUpdate): ResidentAgent => {
+  update = (agentId: string, patch: ResidentAgentUpdate, reconfigure = true): ResidentAgent => {
+    this.validateReviewer(patch.approvalsReviewer);
     const roster = this.roster();
     const idx = roster.findIndex((a) => a.id === agentId);
     const existing = roster[idx];
@@ -936,6 +1045,7 @@ export class ResidentAgentManager {
       ...(patch.role !== undefined ? { role: patch.role } : {}),
       ...(patch.personaText !== undefined ? { personaText: patch.personaText } : {}),
       ...(patch.profileName !== undefined ? { profileName: patch.profileName } : {}),
+      ...(patch.approvalsReviewer !== undefined ? { approvalsReviewer: patch.approvalsReviewer } : {}),
       ...(patch.morningHour !== undefined ? { morningHour: patch.morningHour } : {}),
       ...(patch.enabled !== undefined ? { enabled: patch.enabled } : {}),
     };
@@ -958,7 +1068,10 @@ export class ResidentAgentManager {
     const next = [...roster];
     next[idx] = updated;
     this.data.agents = next;
-    this.enqueuePersist(() => this.repo.upsertResident(residentAgentToRow(updated)));
+    this.residentWrites.set(
+      agentId,
+      this.enqueuePersist(() => this.repo.upsertResident(residentAgentToRow(updated)))
+    );
     this.refreshIdentity(agentId);
     // A different project scope or sandbox means different mounts/backend;
     // park so the next wakeup materializes a fresh environment.
@@ -970,7 +1083,7 @@ export class ResidentAgentManager {
     const reconfigured =
       (patch.projectIds !== undefined && !sameScope(patch.projectIds, existing.projectIds)) ||
       (patch.profileName !== undefined && patch.profileName !== existing.profileName);
-    if (patch.enabled === false || reconfigured) {
+    if (reconfigure && (patch.enabled === false || reconfigured)) {
       this.enqueueChain(agentId, () => this.park(agentId, { skipReflection: true }));
     }
     this.emitRosterChanged();
@@ -978,7 +1091,101 @@ export class ResidentAgentManager {
     return updated;
   };
 
+  /** Apply explicit execution settings only when they are usable. A failed
+   * switch restores the saved selection and attempts to reopen the old runtime. */
+  configureExecution = (agentId: string, patch: ResidentAgentUpdate): Promise<ResidentAgent> => {
+    const previous = this.configurationChains.get(agentId) ?? Promise.resolve();
+    const result = previous.catch(() => {}).then(() => this.configureExecutionNow(agentId, patch));
+    this.configurationChains.set(agentId, result);
+    return result;
+  };
+
+  private configureExecutionNow = async (agentId: string, patch: ResidentAgentUpdate): Promise<ResidentAgent> => {
+    this.validateReviewer(patch.approvalsReviewer);
+    const previous = this.agent(agentId);
+    if (!previous) throw new Error(`Unknown resident agent: ${agentId}`);
+    const profileChanged = patch.profileName !== undefined && patch.profileName !== previous.profileName;
+    if (!profileChanged) {
+      await this.runtime(agentId).watcher?.setReviewer(patch.approvalsReviewer ?? previous.approvalsReviewer ?? 'auto');
+      const updated = this.update(agentId, patch);
+      try {
+        await this.residentWrites.get(agentId);
+        return updated;
+      } catch (error) {
+        this.data.agents = this.data.agents.map((a) => (a.id === agentId ? previous : a));
+        this.emitRosterChanged();
+        await this.runtime(agentId).watcher?.setReviewer(previous.approvalsReviewer ?? 'auto');
+        throw error;
+      }
+    }
+    const profileName = patch.profileName!;
+    this.processManager.validateProfileSelection(profileName);
+    if (
+      !profileName.startsWith('local:') &&
+      profileName !== 'platform' &&
+      resolveProfile(profileName).kind === 'missing'
+    ) {
+      throw new Error(`Execution environment "${profileName}" is unavailable`);
+    }
+    if (this.runtime(agentId).thinking) {
+      throw new Error('Finish the current run or resolve its pending approval before switching environments');
+    }
+    return this.chained(agentId, async () => {
+      const rt = this.runtime(agentId);
+      if (rt.thinking) throw new Error('The agent started working; wait for the run to finish before switching');
+      const original = this.agent(agentId)!;
+      const attach = async () => {
+        const endpoint = await this.ensureRunning(agentId);
+        const sessionId = residentSessionId(agentId);
+        const watcher = await this.ensureWatcher(agentId, endpoint);
+        await this.processManager.bindSession(residentProcessId(agentId), sessionId);
+        await watcher.ensureSession(
+          sessionId,
+          this.sessionVariables(agentId),
+          this.agent(agentId)?.approvalsReviewer ?? 'auto'
+        );
+        rt.day ??= dayKey(this.now());
+        rt.state = 'idle';
+        this.armParkTimer(agentId);
+        this.broadcastStatus();
+      };
+      // stop() detaches a durable Docker workspace; it does not export it
+      // into host repositories or discard its files.
+      await this.park(agentId, { skipReflection: true, strict: true });
+      const updated = this.update(agentId, patch, false);
+      try {
+        await this.residentWrites.get(agentId);
+        await attach();
+        return updated;
+      } catch (error) {
+        // Restore the exact prior configuration, including inherited settings.
+        this.data.agents = this.data.agents.map((a) => (a.id === agentId ? original : a));
+        this.enqueuePersist(() => this.repo.upsertResident(residentAgentToRow(original)));
+        this.emitRosterChanged();
+        try {
+          await this.park(agentId, { skipReflection: true, strict: true });
+          await attach();
+        } catch (recoveryError) {
+          this.attention(agentId, `Could not restore the previous environment: ${(recoveryError as Error).message}`);
+        }
+        await this.persistChain;
+        throw new Error(
+          `Could not switch environments: ${(error as Error).message}. The previous selection was restored.`
+        );
+      }
+    });
+  };
+
+  private validateReviewer(reviewer: unknown): void {
+    if (reviewer !== undefined && reviewer !== 'auto' && reviewer !== 'user') {
+      throw new Error('Choose Guardian review or human approval');
+    }
+  }
+
   delete = (agentId: string): void => {
+    if (agentId === OMNI_AGENT_ID) {
+      throw new Error('Omni is part of the workspace and cannot be deleted');
+    }
     // Park on the chain, then drop the runtime entry from within the same
     // task. Deleting it synchronously here would make the queued park
     // lazily re-create a fresh runtime — a zombie map entry whose
@@ -1306,13 +1513,14 @@ export class ResidentAgentManager {
           clearTimeout(running.parkTimer);
           running.parkTimer = null;
         }
-        return Promise.resolve({
-          sessionId: daySessionId(agentId, running.day),
+        const sessionId = residentSessionId(agentId);
+        return this.processManager.bindSession(residentProcessId(agentId), sessionId).then(() => ({
+          sessionId,
           connection: {
             baseUrl: status.data.uiUrl,
             ...(status.data.authToken ? { authToken: status.data.authToken } : {}),
           },
-        });
+        }));
       }
     }
     return this.chained(agentId, async () => {
@@ -1328,9 +1536,14 @@ export class ResidentAgentManager {
       const endpoint = await this.ensureRunning(agentId);
       const key = dayKey(this.now());
       rt.day = rt.day ?? key;
-      const sessionId = daySessionId(agentId, key);
+      const sessionId = residentSessionId(agentId);
       const watcher = await this.ensureWatcher(agentId, endpoint);
-      await watcher.ensureSession(sessionId, this.sessionVariables(agentId));
+      await this.processManager.bindSession(residentProcessId(agentId), sessionId);
+      await watcher.ensureSession(
+        sessionId,
+        this.sessionVariables(agentId),
+        this.agent(agentId)?.approvalsReviewer ?? 'auto'
+      );
       if (rt.state === 'starting' || rt.state === 'parked') {
         rt.state = 'idle';
       }
@@ -1355,6 +1568,8 @@ export class ResidentAgentManager {
       const rt = this.runtime(agent.id);
       out[agent.id] = {
         state: rt.state,
+        pendingApprovalCount: rt.pendingApprovalCount,
+        activeProfileName: this.processManager.getExecutionProfile?.(residentProcessId(agent.id)),
         lastWakeupAt: rt.lastWakeupAt,
         lastReason: rt.lastReason,
         day: rt.day,
@@ -1517,9 +1732,14 @@ export class ResidentAgentManager {
       const nowMs = this.now();
       const key = dayKey(nowMs);
       rt.day = key;
-      const sessionId = daySessionId(agentId, key);
+      const sessionId = residentSessionId(agentId);
       const watcher = await this.ensureWatcher(agentId, endpoint);
-      await watcher.ensureSession(sessionId, this.sessionVariables(agentId));
+      await this.processManager.bindSession(residentProcessId(agentId), sessionId);
+      await watcher.ensureSession(
+        sessionId,
+        this.sessionVariables(agentId),
+        this.agent(agentId)?.approvalsReviewer ?? 'auto'
+      );
 
       events = rt.pending;
       const urge = rt.pendingUrge;
@@ -1919,15 +2139,23 @@ export class ResidentAgentManager {
     try {
       const endpoint = await this.ensureRunning(agentId);
       const watcher = await this.ensureWatcher(agentId, endpoint);
-      const sessionId = daySessionId(agentId, oldDay);
-      await watcher.ensureSession(sessionId, this.sessionVariables(agentId));
-      // Memory writes happen through the remember/forget client tools
-      // DURING this run — the run end only gates the day rollover.
+      // The same session the day's work happened in: reflection is a run,
+      // not a reset. Nothing is archived; the transcript carries on.
+      const sessionId = residentSessionId(agentId);
+      await this.processManager.bindSession(residentProcessId(agentId), sessionId);
+      await watcher.ensureSession(
+        sessionId,
+        this.sessionVariables(agentId),
+        this.agent(agentId)?.approvalsReviewer ?? 'auto'
+      );
+      // Memory and protocol writes happen through the client tools DURING
+      // this run — the run end only marks the day reflected.
       const prompt = renderReflectPrompt({
         day: oldDay,
         agentName: agent.name,
         episodic: rt.episodic,
         durable: this.memoriesOf(agentId).map((m) => ({ key: m.key, text: m.text })),
+        protocol: this.getProtocol(agentId)?.body ?? '',
       });
       const runEnd = watcher.waitForRunEnd(sessionId, REFLECT_TIMEOUT_MS);
       await watcher.call('enqueue_message', {
@@ -1964,12 +2192,16 @@ export class ResidentAgentManager {
    *  the stored set rather than merging. */
   private sessionVariables(agentId: string): Record<string, unknown> {
     return {
+      capability_profile: 'resident',
       client_tools: [
         ...speechClientTools(this.memberChannelsOf(agentId)),
+        ...USER_GOAL_TOOLS,
+        ...USER_IDEA_TOOLS,
+        ...PROTOCOL_TOOLS,
         // Superuser agents additionally hold the workspace/column tools,
         // fulfilled by the renderer (forwardWorkspaceTool). Toggling the
         // flag lands on the next variables refresh (update() does one).
-        ...(this.agent(agentId)?.superuser ? RESIDENT_SUPERUSER_TOOLS : []),
+        ...(this.agent(agentId)?.superuser ? [...RESIDENT_SUPERUSER_TOOLS, ...ROSTER_TOOLS] : []),
       ],
       additional_instructions: this.identityInstructions(agentId),
     };
@@ -2059,13 +2291,297 @@ export class ResidentAgentManager {
       .map((id) => allProjects.find((p) => p.id === id))
       .filter((p): p is NonNullable<typeof p> => Boolean(p))
       .map((p) => ({ label: p.label, mountNames: p.sources.map((s) => s.mountName) }));
-    return renderIdentityInstructions(
-      agent,
-      this.memoriesOf(agentId),
-      this.roster(),
-      scoped.length > 0 ? { projects: scoped, homeMount: HOME_MOUNT } : undefined,
-      this.data.handbook
+    return (
+      protocolContext(this.getProtocol(agentId)) +
+      userProfileContext(this.getUserProfile()) +
+      userGoalsContext(this.listUserGoals()) +
+      USER_IDEAS_CONTEXT +
+      '\n\n' +
+      renderIdentityInstructions(
+        agent,
+        this.memoriesOf(agentId),
+        this.roster(),
+        scoped.length > 0 ? { projects: scoped, homeMount: HOME_MOUNT } : undefined,
+        this.data.handbook
+      )
     );
+  }
+
+  listUserGoals = (): UserGoal[] => structuredClone(this.store.get('userGoals') ?? []);
+
+  userGoalCommand = async (command: UserGoalCommand, actor: UserGoalActor = { kind: 'user' }): Promise<UserGoal> => {
+    const store = this.store as ResidentStore & {
+      userGoalCommand?: (command: UserGoalCommand, actor: UserGoalActor, id: string, now: number) => Promise<UserGoal>;
+    };
+    const id = randomUUID();
+    let goal: UserGoal;
+    if (store.userGoalCommand) {
+      goal = await store.userGoalCommand(command, actor, id, this.now());
+    } else {
+      const result = applyUserGoalCommand(this.listUserGoals(), command, actor, id, this.now());
+      this.store.set('userGoals', result.goals);
+      goal = result.goal;
+    }
+    this.notifyStoreChanged();
+    for (const [agentId, rt] of this.runtimes) if (rt.watcher) this.refreshIdentity(agentId);
+    return goal;
+  };
+
+  // ------------------------------------------------------------- protocols
+
+  /** The bot's current protocol, or null when it has not written one. */
+  getProtocol = (agentId: string): ResidentProtocolRow | null => this.data.protocols[agentId] ?? null;
+
+  /** Every version, newest first, with bodies — the About tab's history. */
+  listProtocolVersions = (agentId: string): Promise<ResidentProtocolRow[]> => {
+    if (!this.agent(agentId)) throw new Error(`Unknown resident agent: ${agentId}`);
+    return this.repo.listResidentProtocols(agentId);
+  };
+
+  /** Append a version. Bots call this through `update_protocol`, the user
+   *  from the About tab, Omni at hire. Reaches a running session at once. */
+  setProtocol = async (
+    agentId: string,
+    body: string,
+    author: string,
+    note: string | null,
+    opts: { quiet?: boolean } = {}
+  ): Promise<ResidentProtocolRow> => {
+    if (!this.agent(agentId)) throw new Error(`Unknown resident agent: ${agentId}`);
+    const text = body.trim();
+    if (!text) throw new Error('A protocol cannot be empty; say how you work');
+    if (text.length > PROTOCOL_MAX_CHARS) throw new Error(`Keep the protocol under ${PROTOCOL_MAX_CHARS} characters`);
+    const current = this.data.protocols[agentId];
+    const row: ResidentProtocolRow = {
+      agent_id: agentId,
+      version: (current?.version ?? 0) + 1,
+      body: text,
+      author,
+      note: note?.trim() || null,
+      at: new Date(this.now()).toISOString(),
+    };
+    await this.repo.addResidentProtocol(row);
+    this.data.protocols[agentId] = row;
+    if (!opts.quiet) {
+      this.refreshIdentity(agentId);
+      this.notifyStoreChanged();
+    }
+    return row;
+  };
+
+  /** read_protocol / update_protocol — every bot has them, for itself. */
+  async handleProtocolTool(
+    agentId: string,
+    tool: string,
+    args: Record<string, unknown>
+  ): Promise<Record<string, unknown>> {
+    if (!this.agent(agentId)) throw new Error('Unknown resident');
+    if (tool === 'read_protocol') {
+      const p = this.getProtocol(agentId);
+      return p ? { version: p.version, author: p.author, at: p.at, body: p.body } : { version: 0, body: '' };
+    }
+    if (tool !== 'update_protocol') throw new Error('Unknown protocol tool');
+    const body = typeof args.body === 'string' ? args.body : '';
+    const note = typeof args.note === 'string' ? args.note : null;
+    const row = await this.setProtocol(agentId, body, agentId, note);
+    this.episodic(
+      this.runtime(agentId),
+      `I revised my protocol to v${row.version}${note ? `: "${note.slice(0, 100)}"` : ''}`
+    );
+    return { version: row.version, at: row.at };
+  }
+
+  getUserProfile = (): UserProfile => this.store.get('userProfile') ?? EMPTY_USER_PROFILE;
+
+  /** Roles and a note about the user. Lands in every bot's instructions, and
+   *  in live sessions at once, the way a goal change does. */
+  setUserProfile = (input: unknown): UserProfile => {
+    const profile = normalizeUserProfile(input, this.now());
+    this.store.set('userProfile', profile);
+    this.notifyStoreChanged();
+    for (const [agentId, rt] of this.runtimes) {
+      if (rt.watcher) {
+        this.refreshIdentity(agentId);
+      }
+    }
+    return profile;
+  };
+
+  /** The pinned bot, or Omni when none is: the rail's disc is never empty. */
+  getPrimaryAgent = (): string | null =>
+    this.store.get('primaryAgentId') ?? (this.agent(OMNI_AGENT_ID) ? OMNI_AGENT_ID : null);
+
+  /** Pin the resident the rail's disc opens, or clear it. Stored per user so
+   *  it follows them across devices — a browser-local copy did not. */
+  setPrimaryAgent = (agentId: string | null): string | null => {
+    if (agentId !== null && (typeof agentId !== 'string' || !this.agent(agentId))) {
+      throw new Error('Choose a resident from the roster');
+    }
+    this.store.set('primaryAgentId', agentId);
+    this.notifyStoreChanged();
+    return agentId;
+  };
+
+  listUserIdeas = (): UserIdea[] => structuredClone(this.store.get('userIdeas') ?? []);
+
+  userIdeaCommand = async (command: UserIdeaCommand, actor: UserGoalActor = { kind: 'user' }): Promise<UserIdea> => {
+    const store = this.store as ResidentStore & {
+      userIdeaCommand?: (
+        command: UserIdeaCommand,
+        actor: UserGoalActor,
+        id: string,
+        now: number
+      ) => Promise<{ idea: UserIdea; decisionChanged?: boolean }>;
+    };
+    const id = randomUUID();
+    let result: { idea: UserIdea; decisionChanged?: boolean };
+    if (store.userIdeaCommand) result = await store.userIdeaCommand(command, actor, id, this.now());
+    else {
+      const mutation = applyUserIdeaCommand(this.listUserIdeas(), this.listUserGoals(), command, actor, id, this.now());
+      this.store.set('userIdeas', mutation.ideas);
+      result = mutation;
+    }
+    this.notifyStoreChanged();
+    const { idea, decisionChanged } = result;
+    // The transition is computed inside the store transaction, so retries and
+    // concurrent decisions cannot emit a second wakeup for the same decision.
+    if (decisionChanged) {
+      this.dispatchEvent(idea.agentId, {
+        kind: 'idea_decision',
+        from: USER_PARTICIPANT,
+        detail:
+          `The user ${idea.status} idea ${JSON.stringify(idea.id)}. Read it with get_user_idea, including its feedback and existing progress. ` +
+          (idea.status === 'approved'
+            ? 'You may advance the approved plan within its authorization scope. Existing tool approval rules still apply; record progress with record_user_idea_progress.'
+            : 'Do not execute this dismissed plan. Take the feedback into account; no acknowledgment message is required.'),
+      });
+    }
+    return idea;
+  };
+
+  private async handleUserIdeaTool(
+    agentId: string,
+    tool: string,
+    args: Record<string, unknown>
+  ): Promise<Record<string, unknown>> {
+    if (tool === 'list_user_ideas')
+      return {
+        ideas: this.listUserIdeas().map(({ id, goalId, agentId, title, status }) => ({
+          id,
+          goalId,
+          agentId,
+          title,
+          status,
+        })),
+      };
+    if (tool === 'get_user_idea') {
+      const idea = this.listUserIdeas().find((i) => i.id === args.id);
+      if (!idea) throw new Error('Idea not found');
+      return { idea };
+    }
+    const command: UserIdeaCommand =
+      tool === 'propose_user_idea'
+        ? {
+            kind: 'propose',
+            goalId: args.goalId as string,
+            title: args.title as string,
+            plan: args.plan as string,
+            authorization: args.authorization as string,
+          }
+        : {
+            kind: 'progress',
+            id: args.id as string,
+            note: args.note as string,
+            reference: args.reference as string | undefined,
+          };
+    return { idea: await this.userIdeaCommand(command, { kind: 'agent', agentId }) };
+  }
+
+  /** create_bot / update_bot. The caller must be a superuser; a created bot
+   *  starts paused so the user's enabling it is the approval. */
+  async handleRosterTool(
+    agentId: string,
+    tool: string,
+    args: Record<string, unknown>
+  ): Promise<Record<string, unknown>> {
+    const caller = this.agent(agentId);
+    if (!caller) throw new Error('Unknown resident');
+    if (!caller.superuser) throw new Error('Only a workspace superuser can change the roster');
+    const str = (k: string): string | undefined => (typeof args[k] === 'string' ? (args[k] as string) : undefined);
+    const projectIds = Array.isArray(args.projectIds)
+      ? (args.projectIds as unknown[]).filter((p): p is string => typeof p === 'string')
+      : undefined;
+    const morningHour =
+      args.morningHour === null || args.morningHour === undefined
+        ? (args.morningHour as null | undefined)
+        : Number.isInteger(args.morningHour) && (args.morningHour as number) >= 0 && (args.morningHour as number) <= 23
+          ? (args.morningHour as number)
+          : (() => {
+              throw new Error('morningHour must be an hour, 0-23');
+            })();
+    if (tool === 'create_bot') {
+      const name = str('name')?.trim();
+      const role = str('role')?.trim();
+      const personaText = str('personaText')?.trim();
+      if (!name || !role || !personaText) throw new Error('name, role and personaText are required');
+      const created = this.create({
+        name,
+        role,
+        personaText,
+        ...(projectIds ? { projectIds } : {}),
+        ...(morningHour !== undefined ? { morningHour } : {}),
+      });
+      // Paused until the user says otherwise — that is the approval.
+      const bot = this.update(created.id, { enabled: false }, false);
+      const protocol = str('protocol')?.trim();
+      if (protocol) {
+        // The bot's row is written on the persist chain; the protocol row
+        // references it.
+        await this.persistChain;
+        await this.setProtocol(bot.id, protocol, agentId, `Drafted at hire by ${caller.name}`);
+      }
+      return {
+        bot: { id: bot.id, name: bot.name, role: bot.role, enabled: false },
+        note: `${bot.name} is on the roster, paused. Tell the user; they enable ${bot.name} from the roster.`,
+      };
+    }
+    if (tool !== 'update_bot') throw new Error('Unknown roster tool');
+    const id = str('id');
+    if (!id || !this.agent(id)) throw new Error('Unknown bot');
+    if (id === OMNI_AGENT_ID) throw new Error('Omni is not yours to change');
+    if (id === agentId) throw new Error('A bot does not rewrite itself; ask the user');
+    const patch: ResidentAgentUpdate = {
+      ...(str('name') !== undefined ? { name: str('name')! } : {}),
+      ...(str('role') !== undefined ? { role: str('role')! } : {}),
+      ...(str('personaText') !== undefined ? { personaText: str('personaText')! } : {}),
+      ...(projectIds ? { projectIds } : {}),
+      ...(morningHour !== undefined ? { morningHour } : {}),
+    };
+    if (Object.keys(patch).length === 0) throw new Error('Nothing to change');
+    const bot = this.update(id, patch);
+    return { bot: { id: bot.id, name: bot.name, role: bot.role, enabled: bot.enabled } };
+  }
+
+  private async handleUserGoalTool(
+    agentId: string,
+    tool: string,
+    args: Record<string, unknown>
+  ): Promise<Record<string, unknown>> {
+    if (!this.agent(agentId)) throw new Error('Unknown resident');
+    if (USER_IDEA_TOOL_NAMES.includes(tool)) return this.handleUserIdeaTool(agentId, tool, args);
+    if (tool === 'list_user_goals') {
+      return { goals: this.listUserGoals().map(({ id, title, completedAt }) => ({ id, title, completedAt })) };
+    }
+    const goal = this.listUserGoals().find((g) => g.id === args.id);
+    if (!goal) throw new Error('User goal not found');
+    if (tool === 'get_user_goal') return { goal };
+    if (tool !== 'record_user_goal_progress') throw new Error('Unknown user goal tool');
+    return {
+      goal: await this.userGoalCommand(
+        { kind: 'progress', id: goal.id, note: args.note as string, reference: args.reference as string | undefined },
+        { kind: 'agent', agentId }
+      ),
+    };
   }
 
   // ---------------------------------------------------------------- handbook
@@ -2178,9 +2694,19 @@ export class ResidentAgentManager {
         }
         this.broadcastStatus();
       },
+      onApprovalsChanged: (count) => {
+        rt.pendingApprovalCount = count;
+        this.broadcastStatus();
+      },
       onSpeechTool: (tool, toolArgs) => this.handleSpeechTool(agentId, tool, toolArgs),
+      onUserGoalTool: (tool, args) => this.handleUserGoalTool(agentId, tool, args),
+      onRosterTool: (tool, args) =>
+        PROTOCOL_TOOL_NAMES.includes(tool)
+          ? this.handleProtocolTool(agentId, tool, args)
+          : this.handleRosterTool(agentId, tool, args),
       onWorkspaceTool: (tool, toolArgs) => this.forwardWorkspaceTool(agentId, tool, toolArgs),
       onRunEnd: () => {
+        rt.pendingApprovalCount = 0;
         rt.thinking = false;
         if (rt.state === 'thinking') {
           rt.state = 'idle';
@@ -2191,6 +2717,7 @@ export class ResidentAgentManager {
         this.broadcastStatus();
       },
       onClosed: () => {
+        rt.pendingApprovalCount = 0;
         if (rt.watcher === watcher) {
           rt.watcher = null;
         }
@@ -2216,7 +2743,7 @@ export class ResidentAgentManager {
     // channel with the day session, so the eventual run_end reaches us.
     try {
       const runState = (await watcher.call('get_run_state', {
-        session_id: daySessionId(agentId, dayKey(this.now())),
+        session_id: residentSessionId(agentId),
       })) as { active_run_id?: string | null };
       if (runState?.active_run_id) {
         rt.thinking = true;
@@ -2253,7 +2780,7 @@ export class ResidentAgentManager {
     rt.parkTimer.unref?.();
   }
 
-  private async park(agentId: string, opts?: { skipReflection?: boolean }): Promise<void> {
+  private async park(agentId: string, opts?: { skipReflection?: boolean; strict?: boolean }): Promise<void> {
     const rt = this.runtime(agentId);
     if (!opts?.skipReflection) {
       // Reflect before a park that crosses the day boundary, so a parked
@@ -2269,7 +2796,11 @@ export class ResidentAgentManager {
     const pid = residentProcessId(agentId);
     const status = this.processManager.getStatus(pid);
     if (status.type !== 'uninitialized' && status.type !== 'exited') {
-      await this.processManager.stop(pid).catch(() => {});
+      try {
+        await this.processManager.stop(pid);
+      } catch (error) {
+        if (opts?.strict) throw error;
+      }
     }
     rt.thinking = false;
     rt.state = 'parked';
@@ -2287,6 +2818,7 @@ export class ResidentAgentManager {
         speechCount: 0,
         state: 'parked',
         thinking: false,
+        pendingApprovalCount: 0,
         lastWakeupAt: null,
         lastReason: null,
         day: null,
@@ -2494,8 +3026,23 @@ export function registerResidentHandlers(
     });
     channels.push(ch);
   };
+  h('user_ideas:list', (m) => m.listUserIdeas());
+  h('user_ideas:command', (m, command) => m.userIdeaCommand(command));
+  h('resident:get-protocol', (m, agentId) => m.getProtocol(agentId));
+  h('resident:list-protocol-versions', (m, agentId) => m.listProtocolVersions(agentId));
+  h('resident:set-protocol', (m, agentId, body, note) => m.setProtocol(agentId, body, 'user', note ?? null));
+  h('user_profile:get', (m) => m.getUserProfile());
+  h('user_profile:set', (m, profile) => m.setUserProfile(profile));
+  h('user_primary_agent:get', (m) => m.getPrimaryAgent());
+  h('user_primary_agent:set', (m, agentId) => m.setPrimaryAgent(agentId));
+  h('user_goals:list', (m) => m.listUserGoals());
+  h('user_goals:command', (m, command) => m.userGoalCommand(command));
   h('resident:create', (m, input) => m.create(input));
-  h('resident:update', (m, agentId, patch) => m.update(agentId, patch));
+  h('resident:update', (m, agentId, patch) =>
+    patch.profileName !== undefined || patch.approvalsReviewer !== undefined
+      ? m.configureExecution(agentId, patch)
+      : m.update(agentId, patch)
+  );
   h('resident:delete', (m, agentId) => m.delete(agentId));
   // Messaging (post/channels/wake/presence) lives on the chat-v1 binding —
   // registerChatHandlers in src/main/chat-service.ts. This namespace keeps

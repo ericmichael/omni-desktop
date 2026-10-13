@@ -536,4 +536,25 @@ ALTER TABLE tickets DROP COLUMN resolution;
 ALTER TABLE tickets ADD COLUMN last_plan_snapshot TEXT;
 `,
   },
+  {
+    version: 21,
+    sql: `ALTER TABLE resident_agents ADD COLUMN approvals_reviewer TEXT NOT NULL DEFAULT 'auto' CHECK (approvals_reviewer IN ('auto', 'user'));`,
+  },
+  {
+    version: 22,
+    sql: `
+-- A bot's protocol: how it operates, written and revised by the bot itself
+-- (and by the user, and by Omni at hire). Append-only versions so a bad
+-- revision can be seen and rolled back; the highest version is current.
+CREATE TABLE resident_protocols (
+  agent_id TEXT NOT NULL REFERENCES resident_agents(id) ON DELETE CASCADE,
+  version  INTEGER NOT NULL,
+  body     TEXT NOT NULL,
+  author   TEXT NOT NULL,
+  note     TEXT,
+  at       TEXT NOT NULL,
+  PRIMARY KEY (agent_id, version)
+);
+`,
+  },
 ];

@@ -35,6 +35,7 @@ import type {
   ResidentAlarmRow,
   ResidentChannelRow,
   ResidentMemoryRow,
+  ResidentProtocolRow,
   ResidentMessageRow,
   ResidentRow,
   TaskRow,
@@ -164,6 +165,10 @@ export interface IProjectsRepo {
   deleteResidentMemory(agentId: string, key: string): Promise<void>;
   /** Replace an agent's full memory list (UI edits). */
   setResidentMemories(agentId: string, rows: ResidentMemoryRow[]): Promise<void>;
+
+  // ---- Resident protocols (append-only versions; highest is current) ----
+  listResidentProtocols(agentId: string): Promise<ResidentProtocolRow[]>;
+  addResidentProtocol(row: ResidentProtocolRow): Promise<void>;
 
   // ---- Resident channels + message log ----
   listResidentChannels(): Promise<ResidentChannelRow[]>;

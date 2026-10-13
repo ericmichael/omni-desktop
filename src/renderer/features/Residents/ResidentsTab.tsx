@@ -2530,7 +2530,7 @@ function NewAgentForm({
   const [projectIds, setProjectIds] = useState<string[]>([]);
   // Container by default — a headless wakeup-driven agent should not
   // silently inherit `host`.
-  const [profileName, setProfileName] = useState('devbox');
+  const [profileName, setProfileName] = useState('host');
   const [templateId, setTemplateId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);

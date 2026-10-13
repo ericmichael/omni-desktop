@@ -1,3 +1,5 @@
+import { applyUserIdeaCommand, type UserIdeaCommand } from '@/shared/user-ideas';
+import { applyUserGoalCommand, type UserGoalCommand, type UserGoalActor } from '@/shared/user-goals';
 /**
  * Settings store for teams mode: presents the same get/set/delete/clear/store/
  * onDidAnyChange surface as {@link ServerStore} for a single (team, principal),
@@ -180,6 +182,29 @@ export class CompositeSettingsStore {
       }
     );
     return operation;
+  }
+
+  async userIdeaCommand(command: UserIdeaCommand, actor: UserGoalActor, id: string, now: number) {
+    return this.enqueue('user', (view) => {
+      const { ideas, idea, decisionChanged } = applyUserIdeaCommand(
+        view.get('userIdeas') ?? [],
+        view.get('userGoals') ?? [],
+        command,
+        actor,
+        id,
+        now
+      );
+      view.writeUser('userIdeas', ideas);
+      return { idea, decisionChanged };
+    });
+  }
+
+  async userGoalCommand(command: UserGoalCommand, actor: UserGoalActor, id: string, now: number) {
+    return this.enqueue('user', (view) => {
+      const { goals, goal } = applyUserGoalCommand(view.get('userGoals') ?? [], command, actor, id, now);
+      view.writeUser('userGoals', goals);
+      return goal;
+    });
   }
 
   async chatCommand(command: ChatCommand, context: Partial<StoreData> = {}): Promise<ChatCommandResult> {

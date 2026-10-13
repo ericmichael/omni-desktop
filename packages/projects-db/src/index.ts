@@ -43,6 +43,7 @@ export type {
   ResidentAlarmRow,
   ResidentChannelRow,
   ResidentMemoryRow,
+  ResidentProtocolRow,
   ResidentMessageRow,
   ResidentRow,
   TaskRow,

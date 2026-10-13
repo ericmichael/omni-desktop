@@ -26,6 +26,7 @@ import type {
   ResidentAlarmRow,
   ResidentChannelRow,
   ResidentMemoryRow,
+  ResidentProtocolRow,
   ResidentMessageRow,
   ResidentRow,
   TaskRow,
@@ -737,12 +738,12 @@ export class PgProjectsRepo implements IProjectsRepo {
   async upsertResident(row: ResidentRow): Promise<void> {
     await this.tx((c) =>
       c.query(
-        `INSERT INTO resident_agents (tenant_id, id, name, role, persona_text, profile_name, project_ids, morning_hour, enabled, superuser, created_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+        `INSERT INTO resident_agents (tenant_id, id, name, role, persona_text, profile_name, project_ids, morning_hour, enabled, superuser, created_at, approvals_reviewer)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
          ON CONFLICT (tenant_id, id) DO UPDATE SET
            name = EXCLUDED.name, role = EXCLUDED.role, persona_text = EXCLUDED.persona_text,
            profile_name = EXCLUDED.profile_name, project_ids = EXCLUDED.project_ids,
-           morning_hour = EXCLUDED.morning_hour, enabled = EXCLUDED.enabled, superuser = EXCLUDED.superuser`,
+           morning_hour = EXCLUDED.morning_hour, enabled = EXCLUDED.enabled, superuser = EXCLUDED.superuser, approvals_reviewer = EXCLUDED.approvals_reviewer`,
         [
           this.tenantId,
           row.id,
@@ -755,6 +756,7 @@ export class PgProjectsRepo implements IProjectsRepo {
           row.enabled,
           row.superuser,
           row.created_at,
+          row.approvals_reviewer ?? 'auto',
         ]
       )
     );
@@ -794,6 +796,25 @@ export class PgProjectsRepo implements IProjectsRepo {
         await this.upsertResidentMemoryIn(c, { ...row, agent_id: agentId });
       }
     });
+  }
+
+  // ---- Resident protocols ----
+
+  listResidentProtocols(agentId: string): Promise<ResidentProtocolRow[]> {
+    return this.rows<ResidentProtocolRow>(
+      'SELECT agent_id, version, body, author, note, at FROM resident_protocols WHERE agent_id = $1 ORDER BY version DESC',
+      [agentId]
+    );
+  }
+
+  async addResidentProtocol(row: ResidentProtocolRow): Promise<void> {
+    await this.tx((c) =>
+      c.query(
+        `INSERT INTO resident_protocols (tenant_id, agent_id, version, body, author, note, at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+        [this.tenantId, row.agent_id, row.version, row.body, row.author, row.note, row.at]
+      )
+    );
   }
 
   // ---- Resident channels + message log ----

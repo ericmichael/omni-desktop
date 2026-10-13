@@ -288,6 +288,17 @@ export class ProcessManager {
     return pick;
   }
 
+  getExecutionProfile(processId: string): string | undefined {
+    const opts = this.lastStartArgs.get(processId);
+    return opts ? this.resolveProfileName(opts.projectId, opts.profileNameOverride) : undefined;
+  }
+
+  validateProfileSelection(profileName: string): void {
+    if (!profileName || this.resolveProfileName(undefined, profileName) !== profileName) {
+      throw new Error('This execution environment is not available in this workspace');
+    }
+  }
+
   private resolveMode(profileName: string): AgentProcessMode {
     // `compute` mode = delegate to an `IComputeClient` (the omni-platform
     // delegation path). Everything else — including `local:<machineId>`
@@ -1575,6 +1586,18 @@ export class ProcessManager {
     }
     return result;
   };
+
+  /** Bind a conversation in the lifecycle lane so stop/rebuild cannot retire
+   * its environment between selecting the target and issuing the bind. */
+  bindSession = (processId: string, sessionId: string): Promise<void> =>
+    this.mutateConsumer(processId, async () => {
+      const proc = this.processes.get(processId);
+      const runtime = this.consumerRuntimes.get(processId);
+      if (!proc || proc.getStatus().type !== 'running' || (!runtime && proc.mode !== 'compute')) {
+        throw new Error('Resident execution environment is not ready');
+      }
+      await proc.bindSession(processId, sessionId, runtime);
+    });
 
   switchSandbox = async (processId: string, profileName: string): Promise<SandboxSwitchResult> => {
     try {

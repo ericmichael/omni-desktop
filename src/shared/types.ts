@@ -196,11 +196,11 @@ export type ResidentAgent = {
   role: string;
   /** Persona markdown — who the agent is, voice, doctrine. User-editable. */
   personaText: string;
-  /** Sandbox profile override. Resolution: this > assigned project's
-   *  profile > the user's default. New agents default to `devbox` — an
-   *  autonomous wakeup-driven process should land in a container unless
-   *  the user deliberately chooses otherwise. */
+  /** Explicit resident execution profile. New residents use host with Guardian review.
+   * Legacy residents without an override retain the existing profile resolution. */
   profileName?: string;
+  /** Durable approval routing. auto delegates to Guardian; user waits for a human. */
+  approvalsReviewer?: 'auto' | 'user';
   /**
    * Projects this agent is responsible for. Every scoped project's
    * declared sources mount into the agent's sandbox (union, mount-name
@@ -308,6 +308,9 @@ export type ResidentChannelMessage = {
 /** Live runtime view of one resident agent, broadcast on `resident:status`. */
 export type ResidentAgentRuntime = {
   state: 'parked' | 'starting' | 'idle' | 'thinking' | 'reflecting';
+  /** Outstanding requests requiring a human decision. */
+  pendingApprovalCount?: number;
+  activeProfileName?: string;
   /** Wall-clock ms of the last delivered wakeup (null = never this boot). */
   lastWakeupAt: number | null;
   /** Primary event kind of the last wakeup. */
@@ -346,6 +349,7 @@ export type ResidentAgentInput = {
   role: string;
   personaText: string;
   profileName?: string;
+  approvalsReviewer?: 'auto' | 'user';
   /** Project scope — see `ResidentAgent.projectIds`. */
   projectIds?: string[];
   /** Hour (0–23) of the daily morning beat; `null`/omitted = no morning
@@ -493,6 +497,14 @@ export type ChatEvent = {
 // #endregion chat-v1
 
 export type StoreData = {
+  userGoals?: import('./user-goals').UserGoal[];
+  userIdeas?: import('./user-ideas').UserIdea[];
+  /** The resident the nav rail's disc opens. Per user, per team — it used to
+   *  live in each browser's localStorage, so every origin and device had its
+   *  own answer. Null when none is pinned. */
+  primaryAgentId?: string | null;
+  /** Who the user is — roles and a note — handed to every bot as context. */
+  userProfile?: import('./user-profile').UserProfile;
   workspaceDir?: string;
   // Resident durable data lives in projects-db (docs/residents-in-projects-db-plan.md).
   // roster/memories/alarms are read-only SNAPSHOT MIRRORS assembled from the
@@ -1021,6 +1033,10 @@ const winSizePropsSchema = {
  * JSON schema for the store data.
  */
 export const schema: Schema<StoreData> = {
+  userIdeas: { type: 'array', default: [], items: { type: 'object' } },
+  userGoals: { type: 'array', default: [], items: { type: 'object' } },
+  primaryAgentId: { type: ['string', 'null'], default: null },
+  userProfile: { type: 'object' },
   workspaceDir: {
     type: 'string',
   },
@@ -4311,7 +4327,44 @@ export type SandboxImageStatus = {
 /**
  * Intersection of all the events that the renderer can invoke and main process can handle.
  */
-export type IpcEvents = MainProcessIpcEvents &
+type UserGoalsIpcEvents = Namespaced<
+  'user_goals',
+  {
+    list: () => import('./user-goals').UserGoal[];
+    command: (command: import('./user-goals').UserGoalCommand) => import('./user-goals').UserGoal;
+  }
+>;
+
+type UserProfileIpcEvents = Namespaced<
+  'user_profile',
+  {
+    get: () => import('./user-profile').UserProfile;
+    set: (profile: { roles: string[]; roleNote?: string }) => import('./user-profile').UserProfile;
+  }
+>;
+
+type UserPrimaryAgentIpcEvents = Namespaced<
+  'user_primary_agent',
+  {
+    get: () => string | null;
+    /** Pins `agentId` (a roster id) or clears with null. Returns what is now pinned. */
+    set: (agentId: string | null) => string | null;
+  }
+>;
+
+type UserIdeasIpcEvents = Namespaced<
+  'user_ideas',
+  {
+    list: () => import('./user-ideas').UserIdea[];
+    command: (command: import('./user-ideas').UserIdeaCommand) => import('./user-ideas').UserIdea;
+  }
+>;
+
+export type IpcEvents = UserProfileIpcEvents &
+  UserPrimaryAgentIpcEvents &
+  UserIdeasIpcEvents &
+  UserGoalsIpcEvents &
+  MainProcessIpcEvents &
   OmniInstallProcessIpcEvents &
   VoiceIpcEvents &
   AgentProcessIpcEvents &
