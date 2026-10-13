@@ -9,6 +9,10 @@ import { AnsiSequenceBuffer } from '@/lib/ansi-sequence-buffer';
 export const DEFAULT_ENV: Record<string, string> = {
   FORCE_COLOR: '1',
   PYTHONUNBUFFERED: '1',
+  // Python UTF-8 mode: open()/read_text() default to UTF-8 instead of the
+  // Windows ANSI code page (cp1252), which garbled or crashed on any prompt,
+  // config, or project file containing non-ASCII text. No-op elsewhere.
+  PYTHONUTF8: '1',
   ...(process.env.NODE_ENV === 'development' ? { OMNIAGENTS_DEBUG: '1' } : {}),
 };
 
