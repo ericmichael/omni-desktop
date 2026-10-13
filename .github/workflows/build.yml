@@ -454,6 +454,23 @@ jobs:
           }
           Write-Host "venv OK at $venv"
 
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            scripts/ci
+            src/lib/product.ts
+          sparse-checkout-cone-mode: false
+          path: src-checkout
+
+      - name: setup nodejs
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Verify runtime version and serve boot
+        shell: pwsh
+        run: node src-checkout/scripts/ci/verify-runtime.mjs (Join-Path $env:USERPROFILE '.omni\.venv')
+
       - name: Upload diagnostics on failure
         if: failure()
         uses: actions/upload-artifact@v4
@@ -465,9 +482,66 @@ jobs:
             C:\Users\runneradmin\AppData\Roaming\Omni Code\logs
           if-no-files-found: ignore
 
+  smoke-macos:
+    # Packaged, unsigned macOS (arm64) build end to end: mount the DMG, run the
+    # app with OMNI_CI_AUTOINSTALL=1 (see src/main/index.ts) so it installs the
+    # pinned runtime and exits, then verify that runtime boots `omni serve`.
+    needs: build-macos
+    runs-on: macos-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            scripts/ci
+            src/lib/product.ts
+          sparse-checkout-cone-mode: false
+
+      - name: setup nodejs
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Download macOS artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-artifacts-unsigned
+          path: artifacts
+
+      - name: Mount DMG and copy app
+        run: |
+          dmg=$(ls artifacts/*.dmg | grep -v latest | head -1)
+          test -n "$dmg" || { ls -la artifacts; echo "No .dmg found"; exit 1; }
+          echo "Mounting $dmg"
+          hdiutil attach "$dmg" -nobrowse -readonly -mountpoint /Volumes/omni-smoke
+          cp -R "/Volumes/omni-smoke/Omni Code.app" "$RUNNER_TEMP/"
+          hdiutil detach /Volumes/omni-smoke
+
+      - name: Run auto-install flow
+        timeout-minutes: 15
+        env:
+          OMNI_CI_AUTOINSTALL: '1'
+          ELECTRON_ENABLE_LOGGING: '1'
+        run: |
+          set -o pipefail
+          "$RUNNER_TEMP/Omni Code.app/Contents/MacOS/Omni Code" 2>&1 | tee "$RUNNER_TEMP/ci-app.log"
+
+      - name: Verify runtime version and serve boot
+        run: node scripts/ci/verify-runtime.mjs "$HOME/Library/Application Support/Omni Code/omni/.venv"
+
+      - name: Upload diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-macos-diagnostics
+          path: |
+            ${{ runner.temp }}/ci-app.log
+            ~/Library/Application Support/Omni Code/logs
+          if-no-files-found: ignore
+
   publish-release:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [build-linux, build-macos, build-macos-x64, build-windows, smoke-windows]
+    needs: [build-linux, build-macos, build-macos-x64, build-windows, smoke-windows, smoke-macos]
     runs-on: ubuntu-latest
     permissions:
       contents: write
