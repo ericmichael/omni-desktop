@@ -192,6 +192,12 @@ jobs:
           path: assets/bin
           key: ${{ runner.os }}-uv-${{ steps.uv-hash.outputs.hash }}
 
+      # download_uv.ts needs ts-node and its npm deps; postinstall (native
+      # rebuilds, sandbox binary) is irrelevant here.
+      - name: Install deps for uv download
+        if: steps.cache-uv.outputs.cache-hit != 'true'
+        run: npm ci --ignore-scripts
+
       - name: Download uv
         if: steps.cache-uv.outputs.cache-hit != 'true'
         run: npm run download win
