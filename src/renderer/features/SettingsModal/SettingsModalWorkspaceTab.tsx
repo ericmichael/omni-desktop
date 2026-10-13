@@ -9,7 +9,7 @@ import { Field, FieldLabel } from '@/renderer/ds/ui/field';
 import { NativeSelect as Select } from '@/renderer/ds/ui/native-select';
 import { $launcherVersion } from '@/renderer/features/Banner/state';
 import { $omniInstallProcessStatus, $omniRuntimeInfo, omniInstallApi } from '@/renderer/features/Omni/state';
-import { $sandboxProfiles } from '@/renderer/features/Sandboxes/state';
+import { $sandboxProfiles, $substrateStatus } from '@/renderer/features/Sandboxes/state';
 import { getAvailableProfileNames, getProfileMenuLabel } from '@/renderer/features/SandboxProfile/profile-list';
 import { RemoteBackendCard } from '@/renderer/features/SettingsModal/RemoteBackendCard';
 import {
@@ -67,9 +67,10 @@ export const SettingsModalWorkspaceTab = memo(() => {
   // Subscribing keeps the options current as discovery lands (and triggers
   // the atom's fetch-on-first-subscribe).
   const discovered = useStore($sandboxProfiles);
+  const substrate = useStore($substrateStatus);
   const availableProfiles = useMemo<string[]>(
-    () => getAvailableProfileNames({ isEnterprise, available: store.availableSandboxProfiles, discovered }),
-    [isEnterprise, store.availableSandboxProfiles, discovered]
+    () => getAvailableProfileNames({ isEnterprise, available: store.availableSandboxProfiles, discovered, substrate }),
+    [isEnterprise, store.availableSandboxProfiles, discovered, substrate]
   );
 
   const onChangeProfile = useCallback((e: ChangeEvent<HTMLSelectElement>) => {

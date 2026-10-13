@@ -16,6 +16,7 @@ import { parse as parseYaml } from 'yaml';
 
 import { HOST_PROFILE_NAME } from '@/main/profile-resolver';
 import type { IIpcListener } from '@/shared/ipc-listener';
+import { HIDDEN_SANDBOX_PROFILES } from '@/shared/sandbox-profiles';
 import type { ProfileSummary } from '@/shared/types';
 
 export type ProfileCatalogDeps = {
@@ -138,7 +139,9 @@ export const listProfiles = (deps: ProfileCatalogDeps, event?: unknown): Profile
   const userNames = ymlNames(deps.userDir);
   const bundledSet = new Set(bundledNames);
 
-  const names = [...new Set([...bundledNames, ...userNames])].filter((n) => n !== HOST_PROFILE_NAME).sort();
+  const names = [...new Set([...bundledNames, ...userNames])]
+    .filter((n) => n !== HOST_PROFILE_NAME && !HIDDEN_SANDBOX_PROFILES.has(n))
+    .sort();
   const summaries: ProfileSummary[] = [hostSummary()];
   for (const name of names) {
     const isUser = userNames.includes(name);

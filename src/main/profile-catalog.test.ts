@@ -127,6 +127,12 @@ describe('listProfiles', () => {
     expect(withHost.map((p) => p.name)).toEqual(['host', 'devbox']);
   });
 
+  it('never lists hidden profiles (wasmbox), bundled or user-created', () => {
+    writeBundled('devbox', DEVBOX_YAML);
+    writeBundled('wasmbox', 'client:\n  type: wasm\n');
+    expect(listProfiles(deps).map((p) => p.name)).toEqual(['host', 'devbox']);
+  });
+
   it('ignores an empty availableSandboxProfiles list', () => {
     writeBundled('devbox', DEVBOX_YAML);
     const profiles = listProfiles({ ...deps, getAvailableProfileNames: () => [] });

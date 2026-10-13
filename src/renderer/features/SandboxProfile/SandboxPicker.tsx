@@ -26,7 +26,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/renderer/ds/ui/dropdown-menu';
-import { $sandboxProfiles } from '@/renderer/features/Sandboxes/state';
+import { $sandboxProfiles, $substrateStatus } from '@/renderer/features/Sandboxes/state';
 import { $machines } from '@/renderer/services/machines';
 
 import { getProfileIcon, isUnsandboxedProfile } from './profile-icons';
@@ -59,7 +59,8 @@ export const SandboxPicker = memo(({ value, onChange, context, disabled, compact
   // Subscribe so the menu re-renders as discovery lands (and triggers the
   // atom's fetch-on-first-subscribe).
   const discovered = useStore($sandboxProfiles);
-  const names = getAvailableProfileNames({ ...context, machines, discovered });
+  const substrate = useStore($substrateStatus);
+  const names = getAvailableProfileNames({ ...context, machines, discovered, substrate });
 
   // Two groups: cloud (everything that isn't `local:*`) and "My computers".
   // We keep ordering inside each group as supplied by `getAvailableProfileNames`.

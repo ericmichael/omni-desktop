@@ -11,7 +11,7 @@ import { cn } from '@/renderer/ds/cn';
 import { Button } from '@/renderer/ds/ui/button';
 import { Spinner } from '@/renderer/ds/ui/spinner';
 import { SessionStatusBanner } from '@/renderer/features/Banner/SessionStatusBanner';
-import { $sandboxProfiles } from '@/renderer/features/Sandboxes/state';
+import { $sandboxProfiles, $substrateStatus } from '@/renderer/features/Sandboxes/state';
 import {
   getAvailableProfileNames,
   getProfileDescription,
@@ -341,18 +341,20 @@ export const CodeTabContent = memo(
     // Subscribe to the discovered catalog so the picker re-renders when the
     // boot-time `sandbox:list-profiles` fetch lands (bundled + user YAMLs).
     const discoveredProfiles = useStore($sandboxProfiles);
+    const substrate = useStore($substrateStatus);
     const sandboxOptions = useMemo(
       () =>
         getAvailableProfileNames({
           isEnterprise,
           available: store.availableSandboxProfiles,
           discovered: discoveredProfiles,
+          substrate,
         }).map((name) => ({
           value: name,
           label: getProfileTitle(name, machines),
           description: getProfileDescription(name) ?? undefined,
         })),
-      [isEnterprise, store.availableSandboxProfiles, discoveredProfiles, machines]
+      [isEnterprise, store.availableSandboxProfiles, discoveredProfiles, substrate, machines]
     );
 
     // Attach-project chip for projectless chats, rendered in the composer chip

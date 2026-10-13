@@ -10,9 +10,10 @@
  * regresses to an empty menu.
  */
 
-import { $sandboxProfiles } from '@/renderer/features/Sandboxes/state';
+import { $sandboxProfiles, $substrateStatus } from '@/renderer/features/Sandboxes/state';
 import { $machines } from '@/renderer/services/machines';
-import type { MachineSummary, ProfileSummary } from '@/shared/types';
+import { HIDDEN_SANDBOX_PROFILES } from '@/shared/sandbox-profiles';
+import type { MachineSummary, ProfileSummary, SandboxSubstrateStatus } from '@/shared/types';
 
 const OPEN_SOURCE_PROFILES = ['host', 'devbox'] as const;
 const ENTERPRISE_EXTRA_PROFILES = ['platform'] as const;
@@ -67,6 +68,31 @@ export type ProfileListContext = {
    * discovery lands.
    */
   discovered?: ProfileSummary[];
+  /**
+   * Backend substrate probe (`sandbox:substrate-status`). Docker-backed
+   * profiles are hidden when Docker is missing. Defaults to a non-reactive
+   * `$substrateStatus` read; pass `useStore($substrateStatus)` to re-render
+   * when the probe lands. Null (not probed yet) hides nothing.
+   */
+  substrate?: SandboxSubstrateStatus | null;
+};
+
+/**
+ * Whether *name*'s runtime requirements are met on the backend. Docker
+ * profiles need Docker installed ("daemon-down" stays offered: starting
+ * Docker fixes it, and the launch error says so). Unknown probe results and
+ * client types never hide a profile.
+ */
+const meetsRequirements = (
+  name: string,
+  discovered: ProfileSummary[],
+  substrate: SandboxSubstrateStatus | null | undefined
+): boolean => {
+  const clientType = discovered.find((p) => p.name === name)?.clientType ?? (name === 'devbox' ? 'docker' : undefined);
+  if (clientType === 'docker') {
+    return substrate?.docker !== 'missing';
+  }
+  return true;
 };
 
 /**
@@ -96,22 +122,26 @@ const profileSafetyRank = (name: string): number => {
 };
 
 export const getAvailableProfileNames = (ctx: ProfileListContext): string[] => {
+  const discovered = ctx.discovered ?? $sandboxProfiles.get();
+  const substrate = ctx.substrate === undefined ? $substrateStatus.get() : ctx.substrate;
+  const offered = (names: string[]): string[] =>
+    names
+      .filter((name) => !HIDDEN_SANDBOX_PROFILES.has(name) && meetsRequirements(name, discovered, substrate))
+      .sort((a, b) => profileSafetyRank(a) - profileSafetyRank(b));
   // Deployment restriction stays authoritative for MEMBERSHIP — it can carry
   // names discovery can't know (cloud appends `local:<machineId>`
   // computer-as-sandbox entries). Presentation order is ours: safest first.
   // Array.prototype.sort is stable, so same-rank entries keep their
   // discovered/declared relative order.
   if (ctx.available && ctx.available.length > 0) {
-    return [...ctx.available].sort((a, b) => profileSafetyRank(a) - profileSafetyRank(b));
+    return offered([...ctx.available]);
   }
-  const discovered = ctx.discovered ?? $sandboxProfiles.get();
   if (discovered.length > 0) {
-    return discovered.map((p) => p.name).sort((a, b) => profileSafetyRank(a) - profileSafetyRank(b));
+    return offered(discovered.map((p) => p.name));
   }
-  const fallback = ctx.isEnterprise
-    ? [...OPEN_SOURCE_PROFILES, ...ENTERPRISE_EXTRA_PROFILES]
-    : [...OPEN_SOURCE_PROFILES];
-  return fallback.sort((a, b) => profileSafetyRank(a) - profileSafetyRank(b));
+  return offered(
+    ctx.isEnterprise ? [...OPEN_SOURCE_PROFILES, ...ENTERPRISE_EXTRA_PROFILES] : [...OPEN_SOURCE_PROFILES]
+  );
 };
 
 const titleCase = (s: string): string => (s.length === 0 ? s : s[0]!.toUpperCase() + s.slice(1));

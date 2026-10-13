@@ -90,3 +90,11 @@ onMount($sandboxProfiles, () => {
     await refreshSandboxProfiles();
   });
 });
+
+// Same idiom: the pickers hide Docker profiles when Docker is missing, so the
+// probe runs the first time any picker subscribes.
+onMount($substrateStatus, () => {
+  task(async () => {
+    await refreshSandboxSubstrate();
+  });
+});
