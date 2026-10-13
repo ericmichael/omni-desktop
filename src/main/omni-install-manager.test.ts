@@ -335,6 +335,22 @@ describe('OmniInstallManager', () => {
       expect(pipCalls[0]!.env?.OMNIAGENTS_EDITABLE_PATH).toBe(sibling('omniagents'));
     });
 
+    it('never compiles dependencies for a released install', async () => {
+      const { mgr } = makeMgr();
+      await mgr.startInstall();
+      const pip = hoisted.commandRunnerCalls.find(({ args }) => args[0] === 'pip' && args[1] === 'install');
+      expect(pip!.args).toContain('--no-build');
+    });
+
+    it('still builds an editable development checkout', async () => {
+      const { mgr } = makeMgr();
+      hoisted.fsFiles.set(path.join(sibling('omni-code'), 'pyproject.toml'), '');
+      await mgr.startInstall();
+      const pip = hoisted.commandRunnerCalls.find(({ args }) => args[0] === 'pip' && args[1] === 'install');
+      expect(pip!.args).toContain('--editable');
+      expect(pip!.args).not.toContain('--no-build');
+    });
+
     it('transitions to error when uv executable is missing', async () => {
       const { mgr, statusChanges } = makeMgr();
       hoisted.uvExists = false;

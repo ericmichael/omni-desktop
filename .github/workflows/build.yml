@@ -502,12 +502,25 @@ jobs:
           if-no-files-found: ignore
 
   smoke-macos:
-    # Packaged, unsigned macOS (arm64) build end to end: mount the DMG, run the
-    # app with OMNI_CI_AUTOINSTALL=1 (see src/main/index.ts) so it installs the
-    # pinned runtime and exits, then verify that runtime boots `omni serve`.
-    needs: build-macos
-    runs-on: macos-latest
+    # Packaged, unsigned macOS build end to end, on BOTH architectures: mount
+    # the DMG, run the app with OMNI_CI_AUTOINSTALL=1 (see src/main/index.ts)
+    # so it installs the pinned runtime and exits, then verify that runtime
+    # boots `omni serve`. Intel matters on its own: dependency wheels differ
+    # by arch (an Intel-only source build once broke student installs).
+    name: smoke-macos (${{ matrix.arch }})
+    needs: [build-macos, build-macos-x64]
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-latest
+            artifact: macos-artifacts-unsigned
+          - arch: x64
+            runner: macos-15-intel
+            artifact: macos-x64-artifacts-unsigned
     steps:
       - uses: actions/checkout@v4
         with:
@@ -524,7 +537,7 @@ jobs:
       - name: Download macOS artifacts
         uses: actions/download-artifact@v4
         with:
-          name: macos-artifacts-unsigned
+          name: ${{ matrix.artifact }}
           path: artifacts
 
       - name: Mount DMG and copy app
@@ -556,7 +569,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: smoke-macos-diagnostics
+          name: smoke-macos-${{ matrix.arch }}-diagnostics
           path: |
             ${{ runner.temp }}/ci-app.log
             ~/Library/Application Support/Omni Code/logs

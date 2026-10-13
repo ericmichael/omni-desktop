@@ -537,6 +537,13 @@ export class OmniInstallManager {
       // stale package listing and fail with "no version of X==Y".
       '--refresh',
       ...(repair ? ['--force-reinstall'] : []),
+      // Released installs never compile: students' machines have no
+      // compiler toolchain, so a dependency's newest version shipping only a
+      // source build for that machine (e.g. cbor2 6.x on Intel Macs) failed
+      // the whole install. --no-build makes uv pick the newest version with
+      // a wheel for this exact OS/arch instead. Editable dev installs build
+      // the local checkout, so they keep building.
+      ...(editablePath ? [] : ['--no-build']),
       ...target,
     ];
 
