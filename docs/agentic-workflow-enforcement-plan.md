@@ -8,7 +8,7 @@ step DAG, guided by skills, and the harness holds it to that process the way the
 kanban board held it to columns. Enforcement is two-tier: **mechanical** (dependency
 edges block starting a step) and **semantic** (a guardian-style one-shot reviewer
 judges whether a step's exit criteria are actually met before a `completed` status
-lands). Project pipelines are *not* changed in this plan; collapsing them to
+lands). Project pipelines are _not_ changed in this plan; collapsing them to
 backlog/doing/done is a deferred follow-on gated on the plan layer proving out.
 
 Why this layer and not workflow templates at the ticket/pipeline level: the DAG
@@ -150,7 +150,7 @@ Sibling of `guardian.py`, same skeleton, different policy and posture:
   rationale is the steering signal.
 - **Circuit breaker:** own per-`(session, run)` counter (same
   `_breaker_state`-style session attribute, distinct key from the guardian's).
-  After **2** consecutive rejections on the *same step*, the third
+  After **2** consecutive rejections on the _same step_, the third
   `completed` attempt is accepted with
   `review = {"outcome": "unverified", "reviewer": "guardian", "rationale": "accepted after repeated disagreement: <last rationale>"}`
   and, when the session has an approval-capable client, an ordinary approval
@@ -218,11 +218,11 @@ instructions (`agents/omni/instructions.md`, tasks section) to state:
 - For multi-step work, build the plan as a dependency graph: edges via
   `addBlockedBy`, and `exitCriteria` on every step whose completion is
   externally checkable. State criteria as evidence, not intent ("`npm run
-  test:no-watch` passes", not "code is tested").
+test:no-watch` passes", not "code is tested").
 - Keep the existing ≥3-non-trivial-steps threshold; small tasks get no plan and
   therefore no review friction.
 - Skills that define task-type workflows (bugfix, feature, release, …) specify
-  the step graph *and* per-step exit criteria; the criteria are what the
+  the step graph _and_ per-step exit criteria; the criteria are what the
   reviewer later checks, closing the skill → plan → enforcement loop.
 
 No new skill infrastructure — this is instruction text plus a convention for
@@ -330,10 +330,12 @@ New error payloads (existing `_error` envelope):
 Reviewer output (strict, `plan_review.py`):
 
 ```json
-{"criteria_met": "satisfied | unsatisfied | indeterminate",
- "evidence": "shown | asserted | absent",
- "outcome": "accept | reject",
- "rationale": "one or two sentences naming the decisive factor"}
+{
+  "criteria_met": "satisfied | unsatisfied | indeterminate",
+  "evidence": "shown | asserted | absent",
+  "outcome": "accept | reject",
+  "rationale": "one or two sentences naming the decisive factor"
+}
 ```
 
 Config keys: `workflow.completion_reviewer`, `workflow.guardian_model` (both

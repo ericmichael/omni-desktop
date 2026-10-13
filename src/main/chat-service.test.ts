@@ -15,6 +15,7 @@ import { dmChannelId } from '@/lib/resident-agent';
 import { ChatService, posterFromEvent } from '@/main/chat-service';
 import type { ProcessManager } from '@/main/process-manager';
 import { ResidentAgentManager } from '@/main/resident-agent-manager';
+import { OMNI_AGENT_ID } from '@/shared/omni-agent';
 import type { ChatEvent, StoreData } from '@/shared/types';
 
 const now = 1_753_250_000_000;
@@ -240,9 +241,11 @@ describe('channels + roster', () => {
   it('projects the roster for addressing only', () => {
     manager.create({ name: 'Scout Rider', role: 'engineer', personaText: 'secret persona' });
     const { agents } = service.listRoster();
-    expect(agents).toHaveLength(1);
-    expect(agents[0]).toMatchObject({ handle: 'scout-rider', name: 'Scout Rider', role: 'engineer', enabled: true });
-    expect('personaText' in agents[0]!).toBe(false);
+    // The built-in Omni resident is always seeded alongside hired agents.
+    expect(agents.map((a) => a.id)).toContain(OMNI_AGENT_ID);
+    const scout = agents.find((a) => a.handle === 'scout-rider');
+    expect(scout).toMatchObject({ name: 'Scout Rider', role: 'engineer', enabled: true });
+    expect(agents.every((a) => !('personaText' in a))).toBe(true);
   });
 
   it('new agents default to NO morning beat — proactivity is opt-in (quiet-start)', () => {

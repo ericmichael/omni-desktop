@@ -1,5 +1,6 @@
-import { WebSocketServer } from 'ws';
 import { describe, expect, it, vi } from 'vitest';
+import { WebSocketServer } from 'ws';
+
 import { ResidentWatcher } from '@/main/resident-agent-manager';
 
 const setup = () => {
@@ -25,12 +26,16 @@ describe('resident approval enforcement', () => {
     const server = new WebSocketServer({ port: 0, host: '127.0.0.1' });
     await new Promise<void>((resolve) => server.once('listening', resolve));
     const address = server.address();
-    if (typeof address === 'string' || address === null) throw new Error('Missing port');
+    if (typeof address === 'string' || address === null) {
+      throw new Error('Missing port');
+    }
     let granted = false;
     server.on('connection', (socket) =>
       socket.on('message', (raw) => {
         const request = JSON.parse(String(raw));
-        if (request.id === undefined) return;
+        if (request.id === undefined) {
+          return;
+        }
         let result: unknown = [];
         if (request.method === 'initialize') {
           granted = request.params.capabilities.experimental_operations.includes('set_session_approvals');

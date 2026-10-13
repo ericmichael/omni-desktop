@@ -27,8 +27,8 @@ cyan/azure family (#5ac8fa); display face = Space Grotesk; text scaling = a Sett
   (`#5ac8fa` / `#45b4e9` / `#7dd3fb`).
 - Built-in backdrop (static CSS gradients, no asset):
   `radial-gradient(1200px 800px at 80% -10%, rgba(90,200,250,0.16), transparent 60%),
- radial-gradient(1000px 700px at -10% 110%, rgba(94,92,230,0.12), transparent 55%),
- linear-gradient(160deg, #0b1016 0%, #0d1117 45%, #0a0c10 100%)`.
+radial-gradient(1000px 700px at -10% 110%, rgba(94,92,230,0.12), transparent 55%),
+linear-gradient(160deg, #0b1016 0%, #0d1117 45%, #0a0c10 100%)`.
 - Export `isGlassTheme(theme)` and `getThemeBackdrop(theme): string | null`.
 - Other themes unchanged (utrgv branded header, vscode/teams flat). Auras/VoiceGlow keep their
   literal colors — the omni brand now matches them by construction.

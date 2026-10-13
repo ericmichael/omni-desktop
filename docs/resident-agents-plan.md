@@ -36,9 +36,9 @@ channel, and ritual layers on top of it.
 
 - **The wakeup pipeline is already framework-side.** omniagents
   `core/autonomy/wakeup.py`: `service.enqueue_notification(role=
-  "assistant")` → `_notification_flusher` batches → `start_run(
-  prompt_role="assistant")` — the agent resumes from full history and
-  reads the wakeup as *noticing*, not as being addressed by a fake user.
+"assistant")` → `_notification_flusher` batches → `start_run(
+prompt_role="assistant")` — the agent resumes from full history and
+  reads the wakeup as _noticing_, not as being addressed by a fake user.
   The launcher already uses this path for background-job completions.
   `schedule_wakeup` (self-scheduled recurring wakeups) and the
   idle-trigger scheduler also already exist.
@@ -52,13 +52,13 @@ channel, and ritual layers on top of it.
   an idle resident agent can be fully stopped and later rehydrated warm.
 - **Verified delegation already exists as tickets.** `TicketMachine`
   enforces phases; `omni-projects` MCP tools give agents ticket CRUD. No
-  new escrow mechanism is needed — a ticket *is* the game's commission:
+  new escrow mechanism is needed — a ticket _is_ the game's commission:
   posted, claimed, and completion-verified outside the model's beliefs.
 - **Scheduled rituals are Routines.** The morning sweep and nightly
   reflection are scheduled wakeups, a shape the launcher already runs.
 - **Per-agent identity on MCP calls** aligns with the existing
   mcp-tool-identity / phase-10 identity plans (`get_current_principal`):
-  a resident agent acts *as itself*, so its tickets, comments, and inbox
+  a resident agent acts _as itself_, so its tickets, comments, and inbox
   items are attributable.
 
 ## Architecture decisions (the calls made)
@@ -70,7 +70,7 @@ channel, and ritual layers on top of it.
   plus a durable-memory list (below). Store schema bump + migration.
 - **Persona is prior, memory is posterior.** The persona file is shipped
   identity — role, voice, doctrine, specialization. Durable memories are
-  earned facts that may *override* persona (Weirbrook: "priors, not
+  earned facts that may _override_ persona (Weirbrook: "priors, not
   rules"). Persona text is user-editable in the UI.
 - **Persona + durable memories travel as session variables** into
   `omni serve`; the omni-code instruction template renders them (one
@@ -118,7 +118,7 @@ channel, and ritual layers on top of it.
   wakeup only) durable memories. Everything else is pull-based — the
   agent reads live state through its existing tools. This is the 68%
   lesson; it is the plan's load-bearing cost decision, and with model
-  tiering excluded it is the *only* cost mechanism, so it is
+  tiering excluded it is the _only_ cost mechanism, so it is
   non-negotiable.
 - **Nothing is owed per turn.** The wakeup rendering ends with the
   no-obligation contract (ported from `harness_preamble.md`): act if the
@@ -139,7 +139,7 @@ channel, and ritual layers on top of it.
   the ping stops urging a reply ("a closer needs no answer"), rounds 5–6
   stretch the delivery gap, past 6 the thread goes pen-pal — rows still
   land in digests but wake nobody until a long silence resets it. Only a
-  *human's* message always wakes immediately. This ships in v1: it is
+  _human's_ message always wakes immediately. This ships in v1: it is
   the fix for the first pathology any multi-agent channel hits.
 - **A global concurrency gate on simultaneous agent runs** (default 4,
   configurable) — the dawn-brownout fix. Queued wakeups keep the agent
@@ -156,7 +156,7 @@ channel, and ritual layers on top of it.
   else). Ticket comments remain the per-ticket thread and flow into
   digests for the ticket's assignee.
 - **All agent↔agent traffic is human-readable and surfaced in the UI.**
-  The chat log *is* the observability instrument — the audit surface is
+  The chat log _is_ the observability instrument — the audit surface is
   the product surface. No hidden agent-to-agent function calls for
   coordination; if agents coordinate, it happens in a channel the user
   can read.
@@ -239,7 +239,7 @@ product.
 
 - **Model tiering / cognitive LOD** — explicitly deferred. Every agent
   runs the user's configured model. If attention-based economics return
-  later, they control *wakeup frequency and event immediacy only*, never
+  later, they control _wakeup frequency and event immediacy only_, never
   model choice — and the ping architecture is where v1's cost control
   lives instead.
 - A `keep_memories` terminal tool (framework change; fenced-block parse
@@ -362,7 +362,7 @@ product.
   absent = open to all, `#team` always all-hands, the user implicitly in
   everything): only members are woken by posts, see the channel in
   digests, or may post to it — a mention in a channel you're not in does
-  NOT wake you, and `post_channel`'s corrective error lists *your*
+  NOT wake you, and `post_channel`'s corrective error lists _your_
   channels. Cursors advance past non-member rows so a later join never
   replays history. Member management = clickable agent chips atop each
   channel's feed. Wake semantics

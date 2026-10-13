@@ -81,17 +81,15 @@ Session state: `always_allow_mcp_tools` (existing tuple set) now also receives g
 ## Test Plan
 
 omniagents (unit, `test_bridge.py` / new `test_mcp_identity.py` / `test_approval.py`-adjacent):
+
 1. Identity map: two fake servers, overlapping original tool names → map pairs every public name to the right tuple; group-length mismatch falls back to `(server, public_name)` without raising.
-2. Predicate: MCP-origin tool + tuple in `always_allow_mcp_tools` → no interruption; same original name from a *different* server → still prompts (the collision regression test).
+2. Predicate: MCP-origin tool + tuple in `always_allow_mcp_tools` → no interruption; same original name from a _different_ server → still prompts (the collision regression test).
 3. Always on MCP tool: `tool_approval_response(always_approve=True)` lands the tuple in `always_allow_mcp_tools`, not the flat set.
 4. Parallel batch: MCP flavor of `test_always_approve_covers_parallel_interruptions` — 4 same-tool MCP interruptions, one prompt.
 5. Events: `tool_called`/`tool_result` for an MCP-origin item carry `server_label`/`tool_label`; function tools carry neither.
 6. mcp_ui: a rich MCP result recorded under the original name is still popped and attached when the stream carries the prefixed name.
 
-launcher (vitest):
-7. Machine stores `server_label`/`tool_label` from TOOL_CALLED/TOOL_RESULT and approval events.
-8. `categorize('mcp_omni-projects__list_tickets', label='list_tickets')` → reads bucket.
-9. `buildSessionVariables` interactive mode emits the `safe_mcp_tools` tuples and no longer inlines omni-projects names into `safe_tool_names`.
+launcher (vitest): 7. Machine stores `server_label`/`tool_label` from TOOL_CALLED/TOOL_RESULT and approval events. 8. `categorize('mcp_omni-projects__list_tickets', label='list_tickets')` → reads bucket. 9. `buildSessionVariables` interactive mode emits the `safe_mcp_tools` tuples and no longer inlines omni-projects names into `safe_tool_names`.
 
 Manual acceptance: launch a project column, call `list_tickets` (auto-approved via config), call `delete_project` (prompts; "Always" then covers a second `delete_project` but not a hypothetical same-named tool on another server); cards show `list_tickets — omni-projects`, not the `mcp_…` wire name.
 
@@ -103,7 +101,7 @@ Single lockstep release (per repo convention, no compat shims): omniagents (1–
 
 - SDK prefix format `mcp_<server>__<tool>` is adopted as-is (deterministic, collision-safe, already tested upstream) rather than a custom `server__tool` scheme.
 - Responses-API tool namespacing is rejected for provider portability (Azure/litellm).
-- Grant keys prefer `(server, original_name)`; the zip fallback `(server, public_name)` is accepted for unpairable edge cases because key *stability* is the requirement, prettiness is not.
+- Grant keys prefer `(server, original_name)`; the zip fallback `(server, public_name)` is accepted for unpairable edge cases because key _stability_ is the requirement, prettiness is not.
 - `always_allow_mcp_tools` stays session-scoped (matches current function-tool "Always" semantics); persistence is out of scope.
 - Old transcripts/history render with raw wire names (no labels) — accepted, display-only.
 - Upstreaming an `mcp_tool_name` field on `ToolOrigin` to openai-agents would delete the order-correlation code; worth filing, but the plan does not depend on it.

@@ -17,8 +17,8 @@ import {
   parseSlashArgs,
   parseSlashLine,
   type SlashCommand,
-  unknownCommandMessage,
   slashResultMessage,
+  unknownCommandMessage,
 } from '@/renderer/omniagents-ui/rpc/slash';
 import { ConnectionClosedError, RpcTimeoutError } from '@/shared/lifecycle';
 import { type ChatSessionEvent, chatSessionMachine } from '@/shared/machines/chat-session.machine';

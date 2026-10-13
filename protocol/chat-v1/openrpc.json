@@ -25,16 +25,10 @@
                   "type": "string"
                 },
                 "name": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
+                  "type": ["string", "null"]
                 }
               },
-              "required": [
-                "id",
-                "name"
-              ]
+              "required": ["id", "name"]
             },
             "capabilities": {
               "type": "array",
@@ -43,11 +37,7 @@
               }
             }
           },
-          "required": [
-            "protocol",
-            "self",
-            "capabilities"
-          ]
+          "required": ["protocol", "self", "capabilities"]
         }
       }
     },
@@ -67,9 +57,7 @@
               }
             }
           },
-          "required": [
-            "channels"
-          ]
+          "required": ["channels"]
         }
       }
     },
@@ -124,10 +112,7 @@
               "type": "boolean"
             }
           },
-          "required": [
-            "messages",
-            "hasMore"
-          ]
+          "required": ["messages", "hasMore"]
         }
       }
     },
@@ -173,11 +158,7 @@
                 "type": "string"
               }
             },
-            "required": [
-              "network",
-              "id",
-              "displayName"
-            ]
+            "required": ["network", "id", "displayName"]
           },
           "description": "Bridge scope only: post as a bridged external user (stamped ext:<network>:<id>)."
         }
@@ -191,9 +172,7 @@
               "$ref": "#/components/schemas/Message"
             }
           },
-          "required": [
-            "message"
-          ]
+          "required": ["message"]
         }
       }
     },
@@ -283,10 +262,7 @@
           "name": "members",
           "required": true,
           "schema": {
-            "type": [
-              "array",
-              "null"
-            ],
+            "type": ["array", "null"],
             "items": {
               "type": "string"
             }
@@ -316,9 +292,7 @@
               }
             }
           },
-          "required": [
-            "agents"
-          ]
+          "required": ["agents"]
         }
       }
     },
@@ -338,9 +312,7 @@
               }
             }
           },
-          "required": [
-            "presence"
-          ]
+          "required": ["presence"]
         }
       }
     },
@@ -393,15 +365,10 @@
                   "type": "string"
                 }
               },
-              "required": [
-                "baseUrl"
-              ]
+              "required": ["baseUrl"]
             }
           },
-          "required": [
-            "sessionId",
-            "connection"
-          ]
+          "required": ["sessionId", "connection"]
         }
       }
     },
@@ -543,12 +510,7 @@
           },
           "kind": {
             "type": "string",
-            "enum": [
-              "team",
-              "named",
-              "dm",
-              "system"
-            ]
+            "enum": ["team", "named", "dm", "system"]
           },
           "description": {
             "type": "string"
@@ -572,10 +534,7 @@
             "type": "integer"
           }
         },
-        "required": [
-          "id",
-          "kind"
-        ]
+        "required": ["id", "kind"]
       },
       "ChannelResult": {
         "type": "object",
@@ -584,9 +543,7 @@
             "$ref": "#/components/schemas/Channel"
           }
         },
-        "required": [
-          "channel"
-        ]
+        "required": ["channel"]
       },
       "Message": {
         "type": "object",
@@ -618,13 +575,7 @@
             "description": "Thread ROOT id, pre-normalized on write (threads are one level deep)."
           }
         },
-        "required": [
-          "id",
-          "channel",
-          "from",
-          "text",
-          "at"
-        ]
+        "required": ["id", "channel", "from", "text", "at"]
       },
       "RosterAgent": {
         "type": "object",
@@ -649,44 +600,23 @@
             "type": "boolean"
           }
         },
-        "required": [
-          "id",
-          "handle",
-          "name",
-          "role",
-          "enabled"
-        ]
+        "required": ["id", "handle", "name", "role", "enabled"]
       },
       "Presence": {
         "type": "object",
         "properties": {
           "state": {
             "type": "string",
-            "enum": [
-              "parked",
-              "starting",
-              "idle",
-              "thinking",
-              "reflecting"
-            ]
+            "enum": ["parked", "starting", "idle", "thinking", "reflecting"]
           },
           "lastWakeupAt": {
-            "type": [
-              "integer",
-              "null"
-            ]
+            "type": ["integer", "null"]
           },
           "lastReason": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "day": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "pendingCount": {
             "type": "integer"

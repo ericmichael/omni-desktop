@@ -1,5 +1,3 @@
-import { applyUserIdeaCommand, type UserIdeaCommand } from '@/shared/user-ideas';
-import { applyUserGoalCommand, type UserGoalCommand, type UserGoalActor } from '@/shared/user-goals';
 /**
  * Settings store for teams mode: presents the same get/set/delete/clear/store/
  * onDidAnyChange surface as {@link ServerStore} for a single (team, principal),
@@ -28,6 +26,8 @@ import { DEFAULTS } from '@/server/store';
 import { applyChatCommand, type ChatCommand, type ChatCommandResult } from '@/shared/chat-commands';
 import { classify } from '@/shared/settings-layers';
 import type { McpConfig, ModelsConfig, StoreData } from '@/shared/types';
+import { applyUserGoalCommand, type UserGoalActor, type UserGoalCommand } from '@/shared/user-goals';
+import { applyUserIdeaCommand, type UserIdeaCommand } from '@/shared/user-ideas';
 
 type ChangeCallback = (data: StoreData | undefined) => void;
 type AnyRec = Record<string, unknown>;

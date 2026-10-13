@@ -145,11 +145,17 @@ export function normalizeSlashCommand(row: unknown): SlashCommand | null {
  * 'Done.' A client never puts JSON into the conversation.
  */
 export function slashResultMessage(result: unknown): string {
-  if (typeof result === "string") return result.trim() || 'Done.';
-  if (result && typeof result === "object") {
+  if (typeof result === 'string') {
+    return result.trim() || 'Done.';
+  }
+  if (result && typeof result === 'object') {
     const r = result as { message?: unknown; text?: unknown };
-    if (typeof r.message === "string" && r.message.trim()) return r.message;
-    if (typeof r.text === "string" && r.text.trim()) return r.text;
+    if (typeof r.message === 'string' && r.message.trim()) {
+      return r.message;
+    }
+    if (typeof r.text === 'string' && r.text.trim()) {
+      return r.text;
+    }
   }
   return 'Done.';
 }

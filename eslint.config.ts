@@ -272,6 +272,15 @@ export default [
   },
 
   {
+    files: ['scripts/seed/content/**/*'],
+    rules: {
+      // Seed content is standalone sample apps written into user projects;
+      // they have no shadcn or launcher navigation to route through.
+      'no-restricted-syntax': 'off',
+    },
+  },
+
+  {
     files: ['src/renderer/ds/ui/field.tsx'],
     rules: {
       // This file is registry-owned and pinned byte-for-byte to shadcn. Keep

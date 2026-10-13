@@ -27,7 +27,7 @@ Confirmed defects this plan fixes:
 - `input_audio_transcription_completed` → `RealtimeTranscriptEvent(role="user", item_id, transcript)` (full utterance, as today, now with item_id).
 - Map raw `turn_started` / `turn_ended` model events → the existing `RealtimeTurnStartedEvent` / `RealtimeTurnEndedEvent` (defined, never produced today).
 
-`RealtimeSession.stream_events()` accumulates assistant deltas per `item_id`; on `turn_ended` (and on `stop()` for a mid-turn teardown) it flushes each accumulated item as a final `RealtimeTranscriptEvent(role="assistant", item_id, transcript=<full text>)` yielded to the client *and* persists it (A2). The delta accumulator is cleared per flush.
+`RealtimeSession.stream_events()` accumulates assistant deltas per `item_id`; on `turn_ended` (and on `stop()` for a mid-turn teardown) it flushes each accumulated item as a final `RealtimeTranscriptEvent(role="assistant", item_id, transcript=<full text>)` yielded to the client _and_ persists it (A2). The delta accumulator is cleared per flush.
 
 Wire contract after this change (client keys bubbles by `item_id`):
 
@@ -47,9 +47,9 @@ New module-level helper in `realtime_session.py` (used by `RealtimeSession`, whi
 - **User turn**: on `input_audio_transcription_completed`, append `{"role": "user", "content": <transcript>}`.
 - **Assistant turn**: on flush (A1), append `{"role": "assistant", "content": [{"type": "output_text", "text": <transcript>, "annotations": []}], "type": "message"}` — the explicit output-parts form (`service.py:3609` pattern; bare strings get coerced to `input_text` and break `responses.compact`).
 - Write path: `agent_service._session_manager.get_or_create(session_id, user_id=owner)` → `ensure_conversation_thread(sess)` best-effort → `sess.append_message(msg)` → explicit recorder item, mirroring `send_user_message` (`service.py:3595-3620` region). Fallback when `agent_service` is None (embedded use): `history_db.append_message(session_id, msg, project_slug=..., agent_slug=...)`.
-- Empty/whitespace transcripts are skipped. Tool calls are *not* persisted (assumption below).
+- Empty/whitespace transcripts are skipped. Tool calls are _not_ persisted (assumption below).
 
-Consequence: `get_session_history` returns voice turns after the dock closes, and the next *text* run sees the voice conversation in `sess.history` — voice→text continuity comes free.
+Consequence: `get_session_history` returns voice turns after the dock closes, and the next _text_ run sees the voice conversation in `sess.history` — voice→text continuity comes free.
 
 ### A3. Text→voice context injection
 

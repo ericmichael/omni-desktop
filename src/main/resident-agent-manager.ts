@@ -1,50 +1,3 @@
-import {
-  applyUserIdeaCommand,
-  USER_IDEA_TOOLS,
-  USER_IDEA_TOOL_NAMES,
-  USER_IDEAS_CONTEXT,
-  type UserIdeaCommand,
-  type UserIdea,
-} from '@/shared/user-ideas';
-import {
-  applyUserGoalCommand,
-  userGoalsContext,
-  USER_GOAL_TOOLS,
-  USER_GOAL_TOOL_NAMES,
-  type UserGoalCommand,
-  type UserGoalActor,
-  type UserGoal,
-} from '@/shared/user-goals';
-import { OMNI_AGENT, OMNI_AGENT_ID, OMNI_PROTOCOL } from '@/shared/omni-agent';
-import { ROSTER_TOOL_NAMES, ROSTER_TOOLS } from '@/shared/roster-tools';
-import { PROTOCOL_MAX_CHARS, PROTOCOL_TOOL_NAMES, PROTOCOL_TOOLS, protocolContext } from '@/shared/protocol';
-import { EMPTY_USER_PROFILE, normalizeUserProfile, userProfileContext, type UserProfile } from '@/shared/user-profile';
-/**
- * Resident agents — main-process manager (docs/resident-agents-plan.md).
- *
- * Owns the roster's runtime: per-agent event queues, WAKE_NOW delivery
- * with digest ride-alongs, the DM round budget, the run-concurrency
- * gate, park/unpark on the normal AgentProcess lifecycle, and the
- * nightly reflection ritual. All pure logic lives in
- * `src/lib/resident-agent.ts`; this file is the I/O shell.
- *
- * Durable data (roster, memories, channels, message log, alarms) lives in
- * projects-db (docs/residents-in-projects-db-plan.md), mirrored here in a
- * write-through in-memory cache (the ProjectManager idiom): reads are
- * synchronous against the cache, every mutation updates the cache first and
- * persists through a serialized chain. The manager is the id authority for
- * message/alarm rows (threading needs ids synchronously). Runtime state
- * (cursors, budgets, morning-beat bookkeeping) stays out of the DB.
- *
- * Wire contract per agent: one persistent WebSocket to its `omni serve`
- * (the "watcher") used for `session.ensure`, `enqueue_message`
- * (assistant-role wakeups — the same pipeline omniagents' notification
- * flusher uses), run lifecycle events, and auto-declining approval
- * requests (headless runs get the safe tool set; anything needing
- * approval is declined with an explanation and surfaced to the UI).
- */
-
-import { resolveProfile } from '@/main/profile-resolver';
 import { randomUUID } from 'node:crypto';
 import { rmSync } from 'node:fs';
 import path from 'node:path';
@@ -60,7 +13,6 @@ import {
   channelIdFromName,
   chatChannelFromDef,
   dayKey,
-  residentSessionId,
   DEFAULT_TEAM_HANDBOOK,
   type DigestRow,
   dmChannelId,
@@ -81,6 +33,7 @@ import {
   type ResidentEvent,
   residentHandle,
   residentProcessId,
+  residentSessionId,
   SPEECH_TOOL_NAMES,
   speechClientTools,
   SYSTEM_CHANNEL,
@@ -105,9 +58,37 @@ import {
 } from '@/main/db-store-bridge';
 import { initializeMainRpcConnection } from '@/main/omniagents-rpc-handshake';
 import type { ProcessManager } from '@/main/process-manager';
+/**
+ * Resident agents — main-process manager (docs/resident-agents-plan.md).
+ *
+ * Owns the roster's runtime: per-agent event queues, WAKE_NOW delivery
+ * with digest ride-alongs, the DM round budget, the run-concurrency
+ * gate, park/unpark on the normal AgentProcess lifecycle, and the
+ * nightly reflection ritual. All pure logic lives in
+ * `src/lib/resident-agent.ts`; this file is the I/O shell.
+ *
+ * Durable data (roster, memories, channels, message log, alarms) lives in
+ * projects-db (docs/residents-in-projects-db-plan.md), mirrored here in a
+ * write-through in-memory cache (the ProjectManager idiom): reads are
+ * synchronous against the cache, every mutation updates the cache first and
+ * persists through a serialized chain. The manager is the id authority for
+ * message/alarm rows (threading needs ids synchronously). Runtime state
+ * (cursors, budgets, morning-beat bookkeeping) stays out of the DB.
+ *
+ * Wire contract per agent: one persistent WebSocket to its `omni serve`
+ * (the "watcher") used for `session.ensure`, `enqueue_message`
+ * (assistant-role wakeups — the same pipeline omniagents' notification
+ * flusher uses), run lifecycle events, and auto-declining approval
+ * requests (headless runs get the safe tool set; anything needing
+ * approval is declined with an explanation and surfaced to the UI).
+ */
+import { resolveProfile } from '@/main/profile-resolver';
 import { getDefaultWorkspaceDir } from '@/main/util';
 import type { IIpcListener } from '@/shared/ipc-listener';
+import { OMNI_AGENT, OMNI_AGENT_ID, OMNI_PROTOCOL } from '@/shared/omni-agent';
 import { OmniagentsRpcError } from '@/shared/omniagents-rpc';
+import { PROTOCOL_MAX_CHARS, PROTOCOL_TOOL_NAMES, PROTOCOL_TOOLS, protocolContext } from '@/shared/protocol';
+import { ROSTER_TOOL_NAMES, ROSTER_TOOLS } from '@/shared/roster-tools';
 import type {
   AgentRuntimeConnection,
   ChatChannel,
@@ -125,6 +106,24 @@ import type {
   ResidentMemoryEntry,
   StoreData,
 } from '@/shared/types';
+import {
+  applyUserGoalCommand,
+  USER_GOAL_TOOL_NAMES,
+  USER_GOAL_TOOLS,
+  type UserGoal,
+  type UserGoalActor,
+  type UserGoalCommand,
+  userGoalsContext,
+} from '@/shared/user-goals';
+import {
+  applyUserIdeaCommand,
+  USER_IDEA_TOOL_NAMES,
+  USER_IDEA_TOOLS,
+  USER_IDEAS_CONTEXT,
+  type UserIdea,
+  type UserIdeaCommand,
+} from '@/shared/user-ideas';
+import { EMPTY_USER_PROFILE, normalizeUserProfile, type UserProfile, userProfileContext } from '@/shared/user-profile';
 
 /** Mount name the agent's private home rides under when a project is assigned. */
 const HOME_MOUNT = 'home';
@@ -354,7 +353,9 @@ export class ResidentWatcher {
       if (USER_GOAL_TOOL_NAMES.includes(toolName) || USER_IDEA_TOOL_NAMES.includes(toolName)) {
         void Promise.resolve()
           .then(() => {
-            if (!this.callbacks.onUserGoalTool) throw new Error('User goals unavailable');
+            if (!this.callbacks.onUserGoalTool) {
+              throw new Error('User goals unavailable');
+            }
             return this.callbacks.onUserGoalTool(toolName, toolArgs);
           })
           .then(
@@ -366,7 +367,9 @@ export class ResidentWatcher {
       } else if (ROSTER_TOOL_NAMES.includes(toolName) || PROTOCOL_TOOL_NAMES.includes(toolName)) {
         void Promise.resolve()
           .then(() => {
-            if (!this.callbacks.onRosterTool) throw new Error('Roster tools unavailable');
+            if (!this.callbacks.onRosterTool) {
+              throw new Error('Roster tools unavailable');
+            }
             return this.callbacks.onRosterTool(toolName, toolArgs);
           })
           .then(
@@ -437,7 +440,9 @@ export class ResidentWatcher {
     if (!policy || typeof policy !== 'object' || !(policy as { ok?: boolean }).ok) {
       throw new Error('Could not apply the resident approval policy');
     }
-    if (this.attached.has(sessionId)) return;
+    if (this.attached.has(sessionId)) {
+      return;
+    }
     await this.call('server_call', {
       function: 'session.ensure',
       args: {
@@ -663,7 +668,9 @@ export class ResidentAgentManager {
     const protocols: Record<string, ResidentProtocolRow> = {};
     for (const agent of this.data.agents) {
       const [latest] = await this.repo.listResidentProtocols(agent.id);
-      if (latest) protocols[agent.id] = latest;
+      if (latest) {
+        protocols[agent.id] = latest;
+      }
     }
     this.data.protocols = protocols;
     if (!this.data.protocols[OMNI_AGENT_ID]) {
@@ -1103,7 +1110,9 @@ export class ResidentAgentManager {
   private configureExecutionNow = async (agentId: string, patch: ResidentAgentUpdate): Promise<ResidentAgent> => {
     this.validateReviewer(patch.approvalsReviewer);
     const previous = this.agent(agentId);
-    if (!previous) throw new Error(`Unknown resident agent: ${agentId}`);
+    if (!previous) {
+      throw new Error(`Unknown resident agent: ${agentId}`);
+    }
     const profileChanged = patch.profileName !== undefined && patch.profileName !== previous.profileName;
     if (!profileChanged) {
       await this.runtime(agentId).watcher?.setReviewer(patch.approvalsReviewer ?? previous.approvalsReviewer ?? 'auto');
@@ -1132,7 +1141,9 @@ export class ResidentAgentManager {
     }
     return this.chained(agentId, async () => {
       const rt = this.runtime(agentId);
-      if (rt.thinking) throw new Error('The agent started working; wait for the run to finish before switching');
+      if (rt.thinking) {
+        throw new Error('The agent started working; wait for the run to finish before switching');
+      }
       const original = this.agent(agentId)!;
       const attach = async () => {
         const endpoint = await this.ensureRunning(agentId);
@@ -2291,20 +2302,18 @@ export class ResidentAgentManager {
       .map((id) => allProjects.find((p) => p.id === id))
       .filter((p): p is NonNullable<typeof p> => Boolean(p))
       .map((p) => ({ label: p.label, mountNames: p.sources.map((s) => s.mountName) }));
-    return (
+    return `${
       protocolContext(this.getProtocol(agentId)) +
       userProfileContext(this.getUserProfile()) +
       userGoalsContext(this.listUserGoals()) +
-      USER_IDEAS_CONTEXT +
-      '\n\n' +
-      renderIdentityInstructions(
-        agent,
-        this.memoriesOf(agentId),
-        this.roster(),
-        scoped.length > 0 ? { projects: scoped, homeMount: HOME_MOUNT } : undefined,
-        this.data.handbook
-      )
-    );
+      USER_IDEAS_CONTEXT
+    }\n\n${renderIdentityInstructions(
+      agent,
+      this.memoriesOf(agentId),
+      this.roster(),
+      scoped.length > 0 ? { projects: scoped, homeMount: HOME_MOUNT } : undefined,
+      this.data.handbook
+    )}`;
   }
 
   listUserGoals = (): UserGoal[] => structuredClone(this.store.get('userGoals') ?? []);
@@ -2323,7 +2332,11 @@ export class ResidentAgentManager {
       goal = result.goal;
     }
     this.notifyStoreChanged();
-    for (const [agentId, rt] of this.runtimes) if (rt.watcher) this.refreshIdentity(agentId);
+    for (const [agentId, rt] of this.runtimes) {
+      if (rt.watcher) {
+        this.refreshIdentity(agentId);
+      }
+    }
     return goal;
   };
 
@@ -2334,7 +2347,9 @@ export class ResidentAgentManager {
 
   /** Every version, newest first, with bodies — the About tab's history. */
   listProtocolVersions = (agentId: string): Promise<ResidentProtocolRow[]> => {
-    if (!this.agent(agentId)) throw new Error(`Unknown resident agent: ${agentId}`);
+    if (!this.agent(agentId)) {
+      throw new Error(`Unknown resident agent: ${agentId}`);
+    }
     return this.repo.listResidentProtocols(agentId);
   };
 
@@ -2347,10 +2362,16 @@ export class ResidentAgentManager {
     note: string | null,
     opts: { quiet?: boolean } = {}
   ): Promise<ResidentProtocolRow> => {
-    if (!this.agent(agentId)) throw new Error(`Unknown resident agent: ${agentId}`);
+    if (!this.agent(agentId)) {
+      throw new Error(`Unknown resident agent: ${agentId}`);
+    }
     const text = body.trim();
-    if (!text) throw new Error('A protocol cannot be empty; say how you work');
-    if (text.length > PROTOCOL_MAX_CHARS) throw new Error(`Keep the protocol under ${PROTOCOL_MAX_CHARS} characters`);
+    if (!text) {
+      throw new Error('A protocol cannot be empty; say how you work');
+    }
+    if (text.length > PROTOCOL_MAX_CHARS) {
+      throw new Error(`Keep the protocol under ${PROTOCOL_MAX_CHARS} characters`);
+    }
     const current = this.data.protocols[agentId];
     const row: ResidentProtocolRow = {
       agent_id: agentId,
@@ -2375,12 +2396,16 @@ export class ResidentAgentManager {
     tool: string,
     args: Record<string, unknown>
   ): Promise<Record<string, unknown>> {
-    if (!this.agent(agentId)) throw new Error('Unknown resident');
+    if (!this.agent(agentId)) {
+      throw new Error('Unknown resident');
+    }
     if (tool === 'read_protocol') {
       const p = this.getProtocol(agentId);
       return p ? { version: p.version, author: p.author, at: p.at, body: p.body } : { version: 0, body: '' };
     }
-    if (tool !== 'update_protocol') throw new Error('Unknown protocol tool');
+    if (tool !== 'update_protocol') {
+      throw new Error('Unknown protocol tool');
+    }
     const body = typeof args.body === 'string' ? args.body : '';
     const note = typeof args.note === 'string' ? args.note : null;
     const row = await this.setProtocol(agentId, body, agentId, note);
@@ -2435,8 +2460,9 @@ export class ResidentAgentManager {
     };
     const id = randomUUID();
     let result: { idea: UserIdea; decisionChanged?: boolean };
-    if (store.userIdeaCommand) result = await store.userIdeaCommand(command, actor, id, this.now());
-    else {
+    if (store.userIdeaCommand) {
+      result = await store.userIdeaCommand(command, actor, id, this.now());
+    } else {
       const mutation = applyUserIdeaCommand(this.listUserIdeas(), this.listUserGoals(), command, actor, id, this.now());
       this.store.set('userIdeas', mutation.ideas);
       result = mutation;
@@ -2449,11 +2475,11 @@ export class ResidentAgentManager {
       this.dispatchEvent(idea.agentId, {
         kind: 'idea_decision',
         from: USER_PARTICIPANT,
-        detail:
-          `The user ${idea.status} idea ${JSON.stringify(idea.id)}. Read it with get_user_idea, including its feedback and existing progress. ` +
-          (idea.status === 'approved'
+        detail: `The user ${idea.status} idea ${JSON.stringify(idea.id)}. Read it with get_user_idea, including its feedback and existing progress. ${
+          idea.status === 'approved'
             ? 'You may advance the approved plan within its authorization scope. Existing tool approval rules still apply; record progress with record_user_idea_progress.'
-            : 'Do not execute this dismissed plan. Take the feedback into account; no acknowledgment message is required.'),
+            : 'Do not execute this dismissed plan. Take the feedback into account; no acknowledgment message is required.'
+        }`,
       });
     }
     return idea;
@@ -2464,7 +2490,7 @@ export class ResidentAgentManager {
     tool: string,
     args: Record<string, unknown>
   ): Promise<Record<string, unknown>> {
-    if (tool === 'list_user_ideas')
+    if (tool === 'list_user_ideas') {
       return {
         ideas: this.listUserIdeas().map(({ id, goalId, agentId, title, status }) => ({
           id,
@@ -2474,9 +2500,12 @@ export class ResidentAgentManager {
           status,
         })),
       };
+    }
     if (tool === 'get_user_idea') {
       const idea = this.listUserIdeas().find((i) => i.id === args.id);
-      if (!idea) throw new Error('Idea not found');
+      if (!idea) {
+        throw new Error('Idea not found');
+      }
       return { idea };
     }
     const command: UserIdeaCommand =
@@ -2505,8 +2534,12 @@ export class ResidentAgentManager {
     args: Record<string, unknown>
   ): Promise<Record<string, unknown>> {
     const caller = this.agent(agentId);
-    if (!caller) throw new Error('Unknown resident');
-    if (!caller.superuser) throw new Error('Only a workspace superuser can change the roster');
+    if (!caller) {
+      throw new Error('Unknown resident');
+    }
+    if (!caller.superuser) {
+      throw new Error('Only a workspace superuser can change the roster');
+    }
     const str = (k: string): string | undefined => (typeof args[k] === 'string' ? (args[k] as string) : undefined);
     const projectIds = Array.isArray(args.projectIds)
       ? (args.projectIds as unknown[]).filter((p): p is string => typeof p === 'string')
@@ -2523,7 +2556,9 @@ export class ResidentAgentManager {
       const name = str('name')?.trim();
       const role = str('role')?.trim();
       const personaText = str('personaText')?.trim();
-      if (!name || !role || !personaText) throw new Error('name, role and personaText are required');
+      if (!name || !role || !personaText) {
+        throw new Error('name, role and personaText are required');
+      }
       const created = this.create({
         name,
         role,
@@ -2545,11 +2580,19 @@ export class ResidentAgentManager {
         note: `${bot.name} is on the roster, paused. Tell the user; they enable ${bot.name} from the roster.`,
       };
     }
-    if (tool !== 'update_bot') throw new Error('Unknown roster tool');
+    if (tool !== 'update_bot') {
+      throw new Error('Unknown roster tool');
+    }
     const id = str('id');
-    if (!id || !this.agent(id)) throw new Error('Unknown bot');
-    if (id === OMNI_AGENT_ID) throw new Error('Omni is not yours to change');
-    if (id === agentId) throw new Error('A bot does not rewrite itself; ask the user');
+    if (!id || !this.agent(id)) {
+      throw new Error('Unknown bot');
+    }
+    if (id === OMNI_AGENT_ID) {
+      throw new Error('Omni is not yours to change');
+    }
+    if (id === agentId) {
+      throw new Error('A bot does not rewrite itself; ask the user');
+    }
     const patch: ResidentAgentUpdate = {
       ...(str('name') !== undefined ? { name: str('name')! } : {}),
       ...(str('role') !== undefined ? { role: str('role')! } : {}),
@@ -2557,7 +2600,9 @@ export class ResidentAgentManager {
       ...(projectIds ? { projectIds } : {}),
       ...(morningHour !== undefined ? { morningHour } : {}),
     };
-    if (Object.keys(patch).length === 0) throw new Error('Nothing to change');
+    if (Object.keys(patch).length === 0) {
+      throw new Error('Nothing to change');
+    }
     const bot = this.update(id, patch);
     return { bot: { id: bot.id, name: bot.name, role: bot.role, enabled: bot.enabled } };
   }
@@ -2567,15 +2612,25 @@ export class ResidentAgentManager {
     tool: string,
     args: Record<string, unknown>
   ): Promise<Record<string, unknown>> {
-    if (!this.agent(agentId)) throw new Error('Unknown resident');
-    if (USER_IDEA_TOOL_NAMES.includes(tool)) return this.handleUserIdeaTool(agentId, tool, args);
+    if (!this.agent(agentId)) {
+      throw new Error('Unknown resident');
+    }
+    if (USER_IDEA_TOOL_NAMES.includes(tool)) {
+      return this.handleUserIdeaTool(agentId, tool, args);
+    }
     if (tool === 'list_user_goals') {
       return { goals: this.listUserGoals().map(({ id, title, completedAt }) => ({ id, title, completedAt })) };
     }
     const goal = this.listUserGoals().find((g) => g.id === args.id);
-    if (!goal) throw new Error('User goal not found');
-    if (tool === 'get_user_goal') return { goal };
-    if (tool !== 'record_user_goal_progress') throw new Error('Unknown user goal tool');
+    if (!goal) {
+      throw new Error('User goal not found');
+    }
+    if (tool === 'get_user_goal') {
+      return { goal };
+    }
+    if (tool !== 'record_user_goal_progress') {
+      throw new Error('Unknown user goal tool');
+    }
     return {
       goal: await this.userGoalCommand(
         { kind: 'progress', id: goal.id, note: args.note as string, reference: args.reference as string | undefined },
@@ -2799,7 +2854,9 @@ export class ResidentAgentManager {
       try {
         await this.processManager.stop(pid);
       } catch (error) {
-        if (opts?.strict) throw error;
+        if (opts?.strict) {
+          throw error;
+        }
       }
     }
     rt.thinking = false;

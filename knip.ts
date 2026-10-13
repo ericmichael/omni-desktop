@@ -28,7 +28,6 @@ const config = {
   ignoreDependencies: [
     // Optional/runtime provider packages and UI dependencies kept for feature-gated code paths.
     '@azure/storage-blob',
-    '@excalidraw/excalidraw',
     '@fastify/http-proxy',
     '@radix-ui/react-collapsible',
     '@radix-ui/react-dropdown-menu',
@@ -55,6 +54,10 @@ const config = {
   ],
   ignore: [
     'forge.*.ts',
+    // Spawned by path from chat-cleanup-crash.test.ts.
+    'src/main/__fixtures__/cleanup-crash-worker.ts',
+    // Checked-in protocol artifact; scripts/sync-omniagents-gui-v1 verifies it.
+    'src/generated/omniagents-gui-v1/gui-v1.ts',
     'electron-builder.config.ts',
     'src/main/constants.ts',
     'src/main/repo-provider-handlers.ts',

@@ -6,11 +6,11 @@ launcher.
 
 ## Layout
 
-| File                         | Purpose                                                                    |
-| ---------------------------- | -------------------------------------------------------------------------- |
-| `Dockerfile`                 | Image definition (postgres, redis, code-server, VNC stack, runtimes)       |
-| `entrypoint.sh`              | UID/GID remap, infra startup, gitconfig persistence                        |
-| `start-vnc.sh`               | Spawns Xvfb + XFCE + x11vnc + noVNC. Invoked by `omni serve` as a service. |
+| File            | Purpose                                                                    |
+| --------------- | -------------------------------------------------------------------------- |
+| `Dockerfile`    | Image definition (postgres, redis, code-server, VNC stack, runtimes)       |
+| `entrypoint.sh` | UID/GID remap, infra startup, gitconfig persistence                        |
+| `start-vnc.sh`  | Spawns Xvfb + XFCE + x11vnc + noVNC. Invoked by `omni serve` as a service. |
 
 ## Building
 

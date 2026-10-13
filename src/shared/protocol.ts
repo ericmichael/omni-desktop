@@ -1,5 +1,6 @@
-import type { ClientToolDef } from '@/lib/resident-agent';
 import type { ResidentProtocolRow } from 'omni-projects-db';
+
+import type { ClientToolDef } from '@/lib/resident-agent';
 
 /**
  * A bot's protocol: how it operates, in its own words — how it splits work,
@@ -53,9 +54,9 @@ export function protocolContext(protocol: ResidentProtocolRow | null): string {
   }
   return (
     `## How you operate (your protocol, v${protocol.version})\n` +
-    'Yours to keep current with `update_protocol` — after a swarm that worked, a failure with a cause, ' +
-    'a brief that produced good work. It binds you the way the handbook does.\n' +
-    SKILLS_LINE +
-    `\n${protocol.body.trim()}\n\n`
+    `Yours to keep current with \`update_protocol\` — after a swarm that worked, a failure with a cause, ` +
+    `a brief that produced good work. It binds you the way the handbook does.\n${
+      SKILLS_LINE
+    }\n${protocol.body.trim()}\n\n`
   );
 }

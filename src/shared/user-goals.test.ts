@@ -1,9 +1,11 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
 import { describe, expect, it } from 'vitest';
+
 import { ServerStore } from '@/server/store';
-import { applyUserGoalCommand, userGoalsContext, USER_GOAL_TOOLS, type UserGoalCommand } from '@/shared/user-goals';
+import { applyUserGoalCommand, USER_GOAL_TOOLS, type UserGoalCommand, userGoalsContext } from '@/shared/user-goals';
 
 const user = { kind: 'user' } as const;
 const agent = { kind: 'agent', agentId: 'researcher' } as const;

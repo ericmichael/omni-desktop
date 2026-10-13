@@ -19,8 +19,9 @@ export type UserIdeaCommand =
   | { kind: 'progress'; id: string; note: string; reference?: string };
 
 function text(value: unknown, label: string, limit: number, empty = false): string {
-  if (typeof value !== 'string' || (!empty && !value.trim()) || value.length > limit)
+  if (typeof value !== 'string' || (!empty && !value.trim()) || value.length > limit) {
     throw new Error(`${label} must be ${empty ? '' : 'nonempty '}text of at most ${limit} characters`);
+  }
   return value.trim();
 }
 
@@ -33,13 +34,20 @@ export function applyUserIdeaCommand(
   id: string,
   now: number
 ): { ideas: UserIdea[]; idea: UserIdea; decisionChanged?: boolean } {
-  if (!command || typeof command !== 'object') throw new Error('Invalid idea command');
+  if (!command || typeof command !== 'object') {
+    throw new Error('Invalid idea command');
+  }
   const ideas = structuredClone(current);
   if (command.kind === 'propose') {
-    if (actor.kind !== 'agent') throw new Error('Proposals require a resident identity');
-    if (!goals.some((g) => g.id === command.goalId && g.completedAt === null))
+    if (actor.kind !== 'agent') {
+      throw new Error('Proposals require a resident identity');
+    }
+    if (!goals.some((g) => g.id === command.goalId && g.completedAt === null)) {
       throw new Error('Open user goal not found');
-    if (ideas.length >= 1000) throw new Error('Idea limit reached');
+    }
+    if (ideas.length >= 1000) {
+      throw new Error('Idea limit reached');
+    }
     const idea: UserIdea = {
       id,
       goalId: command.goalId,
@@ -57,20 +65,34 @@ export function applyUserIdeaCommand(
     return { ideas, idea };
   }
   const idea = ideas.find((i) => i.id === command.id);
-  if (!idea) throw new Error('Idea not found');
+  if (!idea) {
+    throw new Error('Idea not found');
+  }
   if (command.kind === 'decide') {
-    if (actor.kind !== 'user') throw new Error('Only the user can approve or dismiss ideas');
-    if (!['approved', 'dismissed'].includes(command.status)) throw new Error('Invalid decision');
+    if (actor.kind !== 'user') {
+      throw new Error('Only the user can approve or dismiss ideas');
+    }
+    if (!['approved', 'dismissed'].includes(command.status)) {
+      throw new Error('Invalid decision');
+    }
     if (idea.status !== 'pending') {
-      if (idea.status === command.status) return { ideas, idea };
+      if (idea.status === command.status) {
+        return { ideas, idea };
+      }
       throw new Error('Idea already decided');
     }
     idea.status = command.status;
     idea.feedback = text(command.feedback ?? '', 'Feedback', 4000, true);
   } else if (command.kind === 'progress') {
-    if (actor.kind !== 'agent') throw new Error('Progress requires a resident identity');
-    if (idea.status !== 'approved') throw new Error('Only approved ideas accept progress');
-    if (idea.progress.length >= 1000) throw new Error('Progress limit reached');
+    if (actor.kind !== 'agent') {
+      throw new Error('Progress requires a resident identity');
+    }
+    if (idea.status !== 'approved') {
+      throw new Error('Only approved ideas accept progress');
+    }
+    if (idea.progress.length >= 1000) {
+      throw new Error('Progress limit reached');
+    }
     idea.progress.push({
       id,
       agentId: actor.agentId,
@@ -78,7 +100,9 @@ export function applyUserIdeaCommand(
       createdAt: now,
       ...(command.reference ? { reference: text(command.reference, 'Reference', 2000) } : {}),
     });
-  } else throw new Error('Unknown idea command');
+  } else {
+    throw new Error('Unknown idea command');
+  }
   idea.updatedAt = now;
   return { ideas, idea, decisionChanged: command.kind === 'decide' };
 }

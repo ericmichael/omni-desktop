@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { applyUserIdeaCommand, USER_IDEA_TOOLS } from './user-ideas';
+
 import { applyUserGoalCommand } from './user-goals';
+import { applyUserIdeaCommand, USER_IDEA_TOOLS } from './user-ideas';
 
 const user = { kind: 'user' } as const;
 const agent = { kind: 'agent', agentId: 'quill' } as const;
