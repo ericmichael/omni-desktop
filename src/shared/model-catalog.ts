@@ -27,10 +27,17 @@ export const DEFAULT_MAX_OUTPUT_TOKENS = 128000;
 export const CATALOG: Record<'openai' | 'anthropic', CatalogModel[]> = {
   openai: [
     {
-      id: 'gpt-5.5',
-      label: 'GPT-5.5',
+      id: 'gpt-6-luna',
+      label: 'GPT-6 Luna',
       blurb: 'Best for everyday use',
       recommended: true,
+      maxInput: 272000,
+      maxOutput: 128000,
+    },
+    {
+      id: 'gpt-5.5',
+      label: 'GPT-5.5',
+      blurb: 'Previous generation',
       maxInput: 272000,
       maxOutput: 128000,
     },
@@ -128,7 +135,14 @@ export function resolveModelChoices(
         verified: true,
       }));
     }
-    return matched.map((m) => ({ ...m, verified: true }));
+    // When the account can't see the recommended model, the first available
+    // curated one (catalog order = preference) inherits the recommendation.
+    const hasRecommended = matched.some((m) => m.recommended);
+    return matched.map((m, i) => ({
+      ...m,
+      ...(!hasRecommended && i === 0 ? { recommended: true } : {}),
+      verified: true,
+    }));
   }
 
   return liveIds.map((id, i) => ({

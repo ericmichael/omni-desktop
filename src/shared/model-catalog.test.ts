@@ -31,6 +31,12 @@ describe('resolveModelChoices', () => {
     expect(choices[1]?.recommended).toBeUndefined();
   });
 
+  it('recommends gpt-6-luna for OpenAI when the key can see it', () => {
+    const choices = resolveModelChoices('openai', ['gpt-5.5', 'gpt-6-luna', 'gpt-5.1-mini']);
+    expect(choices[0]).toMatchObject({ id: 'gpt-6-luna', recommended: true });
+    expect(choices.filter((c) => c.recommended)).toHaveLength(1);
+  });
+
   it('every curated entry is recommended exactly once per provider', () => {
     for (const models of Object.values(CATALOG)) {
       expect(models.filter((m) => m.recommended)).toHaveLength(1);

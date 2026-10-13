@@ -120,7 +120,10 @@ export function buildCodexConfig(
   const codexNames = (runtime?.models ?? [])
     .filter((m) => m.provider === 'openai-oauth' || m.name.startsWith('codex/'))
     .map((m) => m.name);
-  const preferred = codexNames.find((n) => n.endsWith('/gpt-5.5')) ?? codexNames[0];
+  const preferred =
+    codexNames.find((n) => n.endsWith('/gpt-6-luna')) ??
+    codexNames.find((n) => n.endsWith('/gpt-5.5')) ??
+    codexNames[0];
 
   const hasOtherProviders = Object.keys(current.providers).some((name) => name !== 'codex');
   const existingCodex = current.providers.codex;

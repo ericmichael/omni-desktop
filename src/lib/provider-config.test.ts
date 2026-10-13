@@ -104,6 +104,18 @@ describe('buildCodexConfig', () => {
     expect(config.default).toBe('codex/gpt-5.5');
   });
 
+  it('prefers gpt-6-luna when the ChatGPT account offers it', () => {
+    const { madeDefault } = buildCodexConfig(empty(), {
+      models: [
+        { name: 'codex/gpt-5.5', provider: 'openai-oauth' },
+        { name: 'codex/gpt-6-luna', provider: 'openai-oauth' },
+      ],
+      default: null,
+      voice_default: null,
+    });
+    expect(madeDefault).toBe('codex/gpt-6-luna');
+  });
+
   it('seeds realtime voice models, which Codex discovery never returns', () => {
     const { config } = buildCodexConfig(empty(), {
       models: [{ name: 'codex/gpt-5.5', provider: 'openai-oauth' }],
