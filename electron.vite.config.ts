@@ -69,9 +69,14 @@ export default defineConfig({
         inject: {
           data: {
             // Dev loads the renderer from the Vite HMR server (http + ws), so
-            // script-src must allow it. Prod is locked down to 'self' only.
+            // script-src must allow it. Prod is otherwise locked to 'self'.
+            // 'wasm-unsafe-eval' permits WebAssembly compilation only (not
+            // string eval): the ContextEditor's code blocks highlight with
+            // Shiki's Oniguruma WASM engine.
             cspScriptSrc:
-              process.env.NODE_ENV === 'development' ? "'self' 'unsafe-inline' http://localhost:5173" : "'self'",
+              process.env.NODE_ENV === 'development'
+                ? "'self' 'unsafe-inline' 'wasm-unsafe-eval' http://localhost:5173"
+                : "'self' 'wasm-unsafe-eval'",
           },
         },
       }),

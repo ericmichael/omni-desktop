@@ -443,6 +443,9 @@ jobs:
           if ($proc.ExitCode -ne 0) {
             throw "App exited with code $($proc.ExitCode)"
           }
+          if (Select-String -Path $stdout, $stderr -Pattern 'Content Security Policy' -Quiet -ErrorAction SilentlyContinue) {
+            throw 'Packaged renderer hit a Content Security Policy violation'
+          }
 
       - name: Verify venv on disk
         shell: pwsh
@@ -525,6 +528,10 @@ jobs:
         run: |
           set -o pipefail
           "$RUNNER_TEMP/Omni Code.app/Contents/MacOS/Omni Code" 2>&1 | tee "$RUNNER_TEMP/ci-app.log"
+          if grep -q "Content Security Policy" "$RUNNER_TEMP/ci-app.log"; then
+            echo "::error::Packaged renderer hit a Content Security Policy violation"
+            exit 1
+          fi
 
       - name: Verify runtime version and serve boot
         run: node scripts/ci/verify-runtime.mjs "$HOME/Library/Application Support/Omni Code/omni/.venv"

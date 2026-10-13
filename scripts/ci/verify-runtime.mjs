@@ -95,8 +95,24 @@ const ready = await new Promise((resolve, reject) => {
   throw err;
 });
 
+// The ready line carries the address before uvicorn binds; like the
+// launcher's waitForReady, poll until the server accepts connections.
+const probe = async () => {
+  const deadline = Date.now() + 60_000;
+  for (;;) {
+    try {
+      return await fetch(ready.ui_url, { signal: AbortSignal.timeout(10_000) });
+    } catch (err) {
+      if (Date.now() > deadline) {
+        throw err;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+  }
+};
+
 try {
-  const response = await fetch(ready.ui_url, { signal: AbortSignal.timeout(30_000) });
+  const response = await probe();
   console.log(`omni serve ready at ${ready.ui_url} (HTTP ${response.status})`);
   if (response.status >= 500) {
     throw new Error(`omni serve answered HTTP ${response.status}`);
