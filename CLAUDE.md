@@ -123,6 +123,19 @@ Electron registers a privileged `artifact:` scheme before `app.ready` (`src/main
 - **Imports**: sorted by `eslint-plugin-simple-import-sort`; `react/jsx-curly-brace-presence` forbids unnecessary braces; `react/jsx-no-bind` allows `.bind` but not arrows in JSX attributes (check the rule — `allowBind: true`)
 - **Circular deps**: `dpdm` runs on `main/index.ts`, `renderer/index.ts`, `preload/index.ts` with `--exit-code circular:1` — circular imports will fail lint
 
+## Branches and releases
+
+Work happens on `dev` in all three repos (launcher, `../omniagents`, `../omni-code`); commit and push there. `main` holds released code only: every push to the launcher's `main` builds, smoke-tests and publishes the GitHub release for `package.json`'s version, and `make publish` in the Python repos refuses to run anywhere but a clean `main` that is in sync with `origin/main`. Tests run on `dev` pushes; to build and smoke-test installers from `dev` without publishing, dispatch `build.yml` on `dev` (`gh workflow run build.yml --ref dev`).
+
+Release train, in dependency order:
+
+1. **omniagents**: `git switch main && git merge dev`, `make bump-patch`, `git push --follow-tags`, `make publish`.
+2. **omni-code**: bump the `omniagents[all]==` pin in `pyproject.toml` on `dev`, merge into `main`, `make bump-patch`, `git push --follow-tags`, `make publish`.
+3. **launcher**: on `dev`, set `pinnedVersion` in `src/lib/product.ts` (and `product.test.ts`) and bump `package.json`'s version; merge into `main` and push. CI publishes the release.
+4. In each repo, merge `main` back into `dev` so the bump commits flow both ways.
+
+Hotfix for a released bug: branch from `main`, fix, release as above, then merge `main` into `dev`.
+
 ## Build / packaging notes
 
 - `electron-builder.config.ts` disables dangerous Electron fuses (`runAsNode: false`, `enableNodeCliInspectArguments: false`, ASAR integrity, etc.) — don't re-enable without a strong reason
