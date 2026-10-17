@@ -169,6 +169,22 @@ PY
 - Playwright reports and traces live under `artifacts/playwright-report/` and `artifacts/playwright-results/`. Visual proof reports live under `artifacts/playwright-proof-report/` and `artifacts/playwright-proof-results/`.
 - Before moving any ticket to the `Review` column, generate visual proof artifacts for the user-facing behavior changed by the ticket. The user expects to inspect the Playwright proof report first to gain confidence that the app works from the user's perspective before reviewing the agent's work. In the ticket handoff, cite the exact proof command run and the proof report/results paths.
 
+## Acceptance Proof Requirements
+
+- Do not call launcher UI, agent, chat, Routine, autopilot, or background-run work complete unless proof verifies the final user outcome, not just an intermediate UI state.
+- A toast, status badge, lifecycle state, opened tab, created column, visible banner, or selected navigation tab is not sufficient proof by itself.
+- For any feature that launches an agent or run, use real model credentials when available: map `SANDBOX_OPENAI_BASE_URL` to `OPENAI_BASE_URL` and `SANDBOX_OPENAI_API_KEY` to `OPENAI_API_KEY`, keep `store.envVars` empty, and seed `modelsConfig` as described above.
+- Agent/run proof must include at least one final-output artifact: visible assistant transcript text in the UI, persisted session history containing the expected assistant message, or screenshot/video evidence that clearly shows the expected assistant output.
+- If a real model/runtime proof cannot be completed, explicitly mark the result as blocked or partial and do not merge without explicit human approval.
+- E2E coverage must include negative assertions for known bad intermediate states. For example, a Routine session proof should fail if the Code deck shows the project picker instead of the Routine session.
+- For Routines specifically, `Run now` proof must verify: the Routine session opens in Spaces, no project picker is shown, the run starts, the assistant response is visible or present in session history, and approval requests are visible/interactable when applicable.
+
+## PR Proof Checklist
+
+- Before opening or merging a PR, include the exact user flow tested end-to-end, the expected final user-visible outcome, and the screenshot/video/trace or session-history evidence path.
+- For agent/model features, include transcript or persisted session-history evidence of assistant output; completion toasts or run-status records are not enough.
+- If any required proof item is impossible in the current environment, say so clearly in the PR body and treat the PR as not mergeable unless the human explicitly approves the limitation.
+
 ## Debugging Workflow
 
 - Start with the narrowest proof: dependency install, app launch, CDP availability, then one user-visible assertion.
